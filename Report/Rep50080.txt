@@ -1,0 +1,371 @@
+OBJECT Report 50080 Report 58 :D‚lai doss. encours
+{
+  OBJECT-PROPERTIES
+  {
+    Date=15/10/13;
+    Time=18:21:00;
+    Modified=Yes;
+    Version List=IMH6.01.08;
+  }
+  PROPERTIES
+  {
+    CaptionML=FRA=Report 58 : Calcul du d‚lai des dossiers en cours;
+    ProcessingOnly=Yes;
+    OnInitReport=BEGIN
+                   ProviderSetup.GET;
+                 END;
+
+    OnPreReport=BEGIN
+                  Filters := Provider.GETFILTERS + ' ' + "Service Intervention Line".GETFILTERS;
+                END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50000;
+        OnPreDataItem=BEGIN
+                        TotalCpt := COUNT;
+                        Window.OPEN(Text010);
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           CurrCpt += 1;
+                           IF CurrCpt >= 10 THEN BEGIN
+                             Cpt += CurrCpt;
+                             Window.UPDATE(1,ROUND(Cpt / TotalCpt * 9999,1));
+                             CurrCpt := 0;
+                           END;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         Window.CLOSE;
+
+                         ExportToExcel;
+                       END;
+
+        ReqFilterFields=No.,IMH Territory Code,Area Code;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table50075;
+        DataItemTableView=SORTING(Provider No.,Claim,Assigned Date,Service Header Claims No.);
+        OnPreDataItem=BEGIN
+
+                        SETFILTER("Assigned Date",'<>%1',0D);
+                        SETFILTER("Intervention Status",'<>%1&<>%2',"Intervention Status"::Closed,"Intervention Status"::Cancel);
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lLevel@1100281000 : Option;
+                         BEGIN
+                           AssignmentTime := WORKDATE - "Assigned Date";
+                           lLevel := 0;
+                           IF NOT Specialization.GET("Main Speciality") THEN
+                             Specialization.INIT;
+
+                           IF (ProviderSetup."Level 1" <> 0) AND (AssignmentTime > (ProviderSetup."Level 1" + Specialization."Average Time Objective")) THEN
+                             lLevel := Level::Level1;
+
+                           IF (ProviderSetup."Level 2" <> 0) AND (AssignmentTime > (ProviderSetup."Level 2" + Specialization."Average Time Objective")) THEN
+                             lLevel := Level::Level2;
+
+                           IF (ProviderSetup."Level 3" <> 0) AND (AssignmentTime > (ProviderSetup."Level 3" + Specialization."Average Time Objective")) THEN
+                             lLevel := Level::Level3;
+
+                           IF (Level <> 0) AND (Level <> lLevel) THEN
+                             CurrReport.SKIP;
+
+                           IF lLevel > 0 THEN BEGIN
+                             TempServIntervLine := "Service Intervention Line";
+                             TempServIntervLine."Mission Status" := AssignmentTime;
+                             TempServIntervLine.Comments := SELECTSTR(lLevel + 1,Text027);
+                             TempServIntervLine.INSERT;
+
+                             TempProvider."No." := "Provider No.";
+                             IF TempProvider.INSERT THEN;
+                           END;
+                         END;
+
+        ReqFilterFields=Main Speciality;
+        DataItemLink=Provider No.=FIELD(No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=5940;
+      Height=1100;
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 1100281004;TextBox;3630 ;220  ;1700 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Level;
+                                                              FRA=Palier];
+                                                   OptionCaptionML=[ENU=" ,Level1,Level2,Level3";
+                                                                    FRA=" ,Palier1,Palier2,Palier3"];
+                                                   OptionString=[ ,Level1,Level2,Level3];
+                                                   SourceExpr=Level }
+      { 1100281005;Label  ;220  ;220  ;3300 ;440  ;ParentControl=1100281004 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 1100281000;;Container;
+                  ContainerType=ContentArea }
+
+      { 1100281001;1;Group  ;
+                  CaptionML=[ENU=Options;
+                             FRA=Options];
+                  GroupType=Group }
+
+      { 1100281002;2;Field  ;
+                  CaptionML=[ENU=Level;
+                             FRA=Palier];
+                  OptionCaptionML=[ENU=" ,Level1,Level2,Level3";
+                                   FRA=" ,Palier1,Palier2,Palier3"];
+                  SourceExpr=Level }
+
+    }
+  }
+  CODE
+  {
+    VAR
+      ProviderSetup@1100281003 : Record 50011;
+      TempProvider@1100281039 : TEMPORARY Record 50000;
+      TempServIntervLine@1100281038 : TEMPORARY Record 50075;
+      ExcelBuffer@1100281016 : TEMPORARY Record 370;
+      Specialization@1100281022 : Record 50005;
+      Window@1100281018 : Dialog;
+      Text000@1100281012 : TextConst 'ENU=Excel not found.;FRA=Programme Excel non trouv‚.';
+      Text001@1100281007 : TextConst 'FRA=Veuillez saisir le statut processus d‚part.';
+      Text002@1100281008 : TextConst 'FRA=Veuillez saisir le statut processus arriv‚e.';
+      Text003@1100281015 : TextConst 'FRA=Veuillez saisir la date de d‚but.';
+      Text004@1100281014 : TextConst 'FRA=Veuillez saisir la date de fin.';
+      Text010@1100281001 : TextConst 'FRA=Avancement\@1@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@';
+      Text011@1100281005 : TextConst 'ENU=Status Change Delay To Excel;FRA=D‚lai de changement de statut';
+      Filters@1100281021 : Text[1024];
+      MainSpecialityFilter@1100281035 : Text[200];
+      RegionFilter@1100281036 : Text[200];
+      ProviderFilter@1100281006 : Text[200];
+      AssignmentTime@1100281037 : Integer;
+      Level@1100281013 : ' ,Level1,Level2,Level3';
+      ExcelTemplatePath@1100281024 : Text[250];
+      ExcelSheetName@1100281025 : Text[50];
+      StartRowNo@1100281023 : Integer;
+      StartColNo@1100281020 : Integer;
+      Text020@1100281026 : TextConst 'FRA=Sp‚cialit‚';
+      Text022@1100281019 : TextConst 'ENU=Filters :;FRA=Filtres :';
+      Text023@1100281030 : TextConst 'FRA=Prestataire';
+      Text024@1100281031 : TextConst 'FRA=Palier';
+      Text025@1100281032 : TextConst 'FRA=Date du report';
+      RowNo@1100281034 : Integer;
+      ColNo@1100281033 : Integer;
+      Text027@1100281000 : TextConst 'ENU=Level1,Level2,Level3;FRA=" ,Palier1,Palier2,Palier3"';
+      Text030@1100281004 : TextConst 'ENU=Provider No.;FRA=Nø prestataire';
+      Text031@1100281002 : TextConst 'ENU=Provider;FRA=Prestataire';
+      Text032@1100281017 : TextConst 'ENU=Intervention No.;FRA=Nø intervention';
+      Text033@1100281040 : TextConst 'ENU=Moisture %;FRA=Taux d''humidit‚';
+      Text034@1100281041 : TextConst 'ENU=Assigned Date;FRA=Date d''assignation';
+      Text035@1100281042 : TextConst 'ENU=Delay;FRA=D‚lai';
+      Text036@1100281043 : TextConst 'ENU=Level;FRA=Palier';
+      Text037@1100281044 : TextConst 'ENU=Contact;FRA=B‚n‚ficiaire';
+      Text038@1100281045 : TextConst 'ENU=City;FRA=Ville';
+      TotalCpt@1100281011 : Integer;
+      Cpt@1100281010 : Integer;
+      CurrCpt@1100281009 : Integer;
+
+    PROCEDURE InitValues@1100281005();
+    VAR
+      lReportSetup@1100281000 : Record 50115;
+      lFound@1100281001 : Boolean;
+      lReportID@1100281002 : Integer;
+    BEGIN
+      lReportID := 50080;
+      lFound := lReportSetup.GET(lReportSetup."Object Type"::Report,lReportID,USERID);
+      IF NOT lFound THEN
+        lFound := lReportSetup.GET(lReportSetup."Object Type"::Report,lReportID,'');
+
+      IF lFound THEN BEGIN
+        ExcelTemplatePath := lReportSetup."Excel Template Path";
+        ExcelSheetName := lReportSetup."Excel Template Tabs";
+        StartRowNo := lReportSetup."First Line";
+        StartColNo := lReportSetup."First Column";
+      END ELSE BEGIN
+        ExcelTemplatePath := '';
+        ExcelSheetName  := 'Page1';
+      END;
+
+      IF StartRowNo <= 0 THEN
+        StartRowNo := 8;
+
+      IF StartColNo <= 0 THEN
+        StartColNo := 1;
+    END;
+
+    PROCEDURE ExportToExcel@1100281001();
+    VAR
+      lDate@1100281006 : Record 2000000007;
+      lValue@1100281002 : Decimal;
+      lCpt@1100281000 : Integer;
+      lEntryNo@1100281008 : Integer;
+      lFromCellID@1100281010 : Text[20];
+      lToCellID@1100281012 : Text[20];
+      lFirstRowNo@1100281013 : Integer;
+      lWeekNo@1100281011 : Integer;
+      lDayNo@1100281016 : Integer;
+      lEndWeekNo@1100281017 : Integer;
+      lEndDayNo@1100281018 : Integer;
+      lPrevWeekNo@1100281014 : Integer;
+      lLen@1100281015 : Integer;
+      lCellID@1100281019 : Text[10];
+    BEGIN
+      InitValues;
+
+      RowNo := 2;
+      InsertRow(RowNo,1,Text022,'','');
+      InsertRow(RowNo + 1,1,Text024,'','');
+      InsertRow(RowNo + 2,1,Text025,'','');
+
+      InsertRow(RowNo,2,Filters,'','');
+      InsertRow(RowNo + 1,2,SELECTSTR(Level + 1,Text027),'','');
+      InsertRow(RowNo + 2,2,FORMAT(TODAY),'','');
+
+      RowNo := StartRowNo;
+      ColNo := StartColNo;
+
+      InsertRow(RowNo,ColNo,Text030,'','');
+      InsertRow(RowNo,ColNo + 1,Text031,'','');
+      InsertRow(RowNo,ColNo + 2,Text032,'','');
+      InsertRow(RowNo,ColNo + 3,Text033,'','');
+      InsertRow(RowNo,ColNo + 4,Text034,'','');
+      InsertRow(RowNo,ColNo + 5,Text035,'','');
+      InsertRow(RowNo,ColNo + 6,Text036,'','');
+      InsertRow(RowNo,ColNo + 7,Text037,'','');
+      InsertRow(RowNo,ColNo + 8,Text038,'','');
+
+      TempProvider.RESET;
+      IF TempProvider.FINDSET THEN BEGIN
+        REPEAT
+          TempServIntervLine.SETCURRENTKEY("Provider No.","Mission Status");
+          TempServIntervLine.SETRANGE("Provider No.",TempProvider."No.");
+          IF TempServIntervLine.FINDSET THEN BEGIN
+            REPEAT
+              RowNo := RowNo + 1;
+
+              InsertRow(RowNo,ColNo,TempServIntervLine."Provider No.",'','');
+              InsertRow(RowNo,ColNo + 1,TempServIntervLine."Provider Name",'','');
+              InsertRow(RowNo,ColNo + 2,
+                TempServIntervLine."Service Header No." + '-' + FORMAT(TempServIntervLine."Intervention No."),'','');
+              InsertRow(RowNo,ColNo + 3,FORMAT(TempServIntervLine."Moisture %"),'','');
+              InsertRow(RowNo,ColNo + 4,FORMAT(TempServIntervLine."Assigned Date"),'','');
+              InsertRow(RowNo,ColNo + 5,FORMAT(TempServIntervLine."Mission Status"),'','');  //D‚lai
+              InsertRow(RowNo,ColNo + 6,TempServIntervLine.Comments,'','');  //Palier
+              InsertRow(RowNo,ColNo + 7,TempServIntervLine."Contact Name",'','');
+              InsertRow(RowNo,ColNo + 8,TempServIntervLine.City,'','');
+            UNTIL TempServIntervLine.NEXT = 0;
+          END;
+        UNTIL TempProvider.NEXT = 0;
+      END;
+
+      ViewExcel;
+    END;
+
+    PROCEDURE InsertRow@1100281004(RowNo@1000000000 : Integer;ColumnNo@1000000001 : Integer;CellValue@1000000002 : Text[250];CellFormula@1100281000 : Text[250];NbFormat@1000000003 : Text[30]);
+    BEGIN
+      ExcelBuffer.INIT;
+      ExcelBuffer.VALIDATE("Row No.",RowNo);
+      ExcelBuffer.VALIDATE("Column No.",ColumnNo);
+      ExcelBuffer."Cell Value as Text" := CellValue;
+      ExcelBuffer.NumberFormat := NbFormat;
+      ExcelBuffer.Formula := CellFormula; //'';
+      ExcelBuffer.INSERT;
+    END;
+
+    PROCEDURE GetCurrCellID@1100281000() : Text[20];
+    BEGIN
+      EXIT(ExcelBuffer.xlColID + ExcelBuffer.xlRowID);
+    END;
+
+    PROCEDURE ViewExcel@1000000002();
+    BEGIN
+
+      IF ExcelTemplatePath <> '' THEN
+        ExcelBuffer.OpenBook(ExcelTemplatePath,ExcelSheetName)
+      ELSE
+        ExcelBuffer.CreateBook;
+
+      ExcelBuffer.CreateSheet(ExcelSheetName,ExcelSheetName,'','');
+      ExcelBuffer.GiveUserControl;
+      CLEAR(ExcelBuffer);
+    END;
+
+    PROCEDURE CreateExcelBuffer@1000000004();
+    BEGIN
+      ExcelBuffer.DELETEALL;
+      CLEAR(ExcelBuffer);
+    END;
+
+    PROCEDURE LookupStatusList@1100281003(VAR StatusNo@1100281002 : Integer);
+    VAR
+      lProcessStatus@1100281001 : Record 50042;
+      lProcessStatusList@1100281000 : Form 50133;
+    BEGIN
+      ProviderSetup.TESTFIELD("Provider Process Code");
+      lProcessStatus.SETRANGE("Process Code",ProviderSetup."Provider Process Code");
+      lProcessStatusList.SETTABLEVIEW(lProcessStatus);
+      lProcessStatusList.LOOKUPMODE(TRUE);
+      IF lProcessStatusList.RUNMODAL = ACTION::LookupOK THEN BEGIN
+        lProcessStatusList.GETRECORD(lProcessStatus);
+        StatusNo := lProcessStatus."Status No.";
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 14/10/13 @a ISAT.ST @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR / R‚gion */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

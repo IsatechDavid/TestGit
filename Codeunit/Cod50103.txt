@@ -1,0 +1,260 @@
+OBJECT Codeunit 50103 EXT Out. FLG DONNEE OM
+{
+  OBJECT-PROPERTIES
+  {
+    Date=11/01/11;
+    Time=14:07:20;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            lEAISentMQBuffer := Rec;
+            Code(lEAISentMQBuffer);
+            lEAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+            Rec := lEAISentMQBuffer;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIXmlDocMgt@1100281001 : Codeunit 8016713;
+      EXTOutFunctions@1100281000 : Codeunit 50101;
+
+    LOCAL PROCEDURE Code@1008844003(VAR pEAISentMQBuffer@1008844001 : Record 8016720);
+    VAR
+      lEAIDocEntryMgt@1108844009 : Codeunit 8016707;
+      lXMLDocument@1008844005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewChild@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIAct@1108844004 : Record 8016706;
+      lRecID@1108844003 : RecordID;
+      lRecRef@1108844002 : RecordRef;
+      lInStream@1100281000 : InStream;
+      lNameSpace@1108844001 : Text[30];
+      lInterventionLine@1100281001 : Record 50075;
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      lNameSpace := '';
+
+      lEAIAct.GET(pEAISentMQBuffer."EAI Act Type Code",pEAISentMQBuffer."EAI Act Code");
+
+      //On r‚cup‚re la facture vente enregistr‚e
+      lRecID := pEAISentMQBuffer.RecordId;
+      lRecRef := lRecID.GETRECORD;
+      lRecRef.SETTABLE(lInterventionLine);
+      lInterventionLine.SETRECFILTER;
+      lInterventionLine.LOCKTABLE;
+      lInterventionLine.FINDFIRST;
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'FLG-DONNEE-OM', lXMLNewChild);
+
+      WriteXMLService(lXMLNewChild, lNameSpace, lInterventionLine);
+
+      WriteXMLInterventionLine(lXMLNewChild, lNameSpace, lInterventionLine);
+
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXMLDocument.save(lInStream);
+
+      //Enregistrement dans la table "‚riture document EDI"
+      lEAIDocEntryMgt.AddEntryFromSentBuffer(
+         DATABASE::"Service Intervention Line",0,
+         lInterventionLine."Service Header No.",'',lInterventionLine."Line No.", pEAISentMQBuffer);
+    END;
+
+    PROCEDURE WriteXMLService@1100281000(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pInterventionLine@1100281006 : Record 50075);
+    VAR
+      lXMLServiceNode@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lContact@1100281001 : Record 5050;
+      lServiceHeaderAdd@1100281004 : Record 50068;
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        AddElement(pXMLParNode,'Service','',pNameSpace,lXMLServiceNode);
+        //Nø service dans GSH
+        AddElement(lXMLServiceNode,'referenceServiceGSH',pInterventionLine."Service Header No.",pNameSpace,lXMLNewNode);
+        //TODO  --- R‚f‚rence du service dans l'extranet ---
+        AddElement(lXMLServiceNode,'referenceServiceExtranet','',pNameSpace,lXMLNewNode);
+        //Date d'ouverture du service
+        AddElement(lXMLServiceNode,'dateOuverture',FORMAT(pInterventionLine."Assigned Date"),pNameSpace,lXMLNewNode);
+        //Code grand compte
+        AddElement(lXMLServiceNode,'codeGrandCompte',pInterventionLine."Corporate No.",pNameSpace,lXMLNewNode);
+        //Code r‚gion grand compte
+        AddElement(lXMLServiceNode,'codeR‚gionGrandCompte',pInterventionLine."Corporate Region Code",pNameSpace,lXMLNewNode);
+        //Code soci‚taire
+        AddElement(lXMLServiceNode,'codeSoci‚taire',pInterventionLine."Member No.",pNameSpace,lXMLNewNode);
+        //Nø contact du soci‚taire
+        AddElement(lXMLServiceNode,'numContactSoci‚taire','1',pNameSpace,lXMLNewNode);
+
+        //TODO --- Nø de contact privil‚gi‚ ---
+        AddElement(lXMLServiceNode,'numContactPribilegi‚','',pNameSpace,lXMLNewNode);
+
+        //Ligne 1 de l'adresse du lieu de mise en Üuvre
+        AddElement(lXMLServiceNode,'ligne1AdresseMEO',pInterventionLine.Address,pNameSpace,lXMLNewNode);
+        //Ligne 2 de l'adresse du lieu de mise en Üuvre
+        AddElement(lXMLServiceNode,'ligne2AdresseMEO',pInterventionLine."Address 2",pNameSpace,lXMLNewNode);
+        //Ligne 3 de l'adresse du lieu de mise en Üuvre
+        AddElement(lXMLServiceNode,'ligne3AdresseMEO',pInterventionLine.County,pNameSpace,lXMLNewNode);
+        //codePostalMEO
+        AddElement(lXMLServiceNode,'codePostalMEO',pInterventionLine."Post Code",pNameSpace,lXMLNewNode);
+        //villeMEO
+        AddElement(lXMLServiceNode,'villeMEO',pInterventionLine.City,pNameSpace,lXMLNewNode);
+        //codePaysMEO
+        AddElement(lXMLServiceNode,'codePaysMEO',pInterventionLine."Country/Region Code",pNameSpace,lXMLNewNode);
+        //TODO -- Code de la r‚gion de mise en Üuvre (en fait correspond au d‚partement) ---
+        AddElement(lXMLServiceNode,'codeRegionMEO','',pNameSpace,lXMLNewNode);
+        //Code de la qualification du service
+        AddElement(lXMLServiceNode,'codeQualification',pInterventionLine."Service Order Type",pNameSpace,lXMLNewNode);
+        //Liste des contacts du service
+        //B‚n‚ficiaire
+        lContact.GET(pInterventionLine."Contact No.");
+        EXTOutFunctions.WriteXMLBeneficiaryContact(lXMLServiceNode, pNameSpace, lContact);
+        //Contacts annexes
+        lServiceHeaderAdd.SETRANGE("Service Header No.", pInterventionLine."Service Header No.");
+        IF lServiceHeaderAdd.FINDFIRST THEN
+          REPEAT
+            EXTOutFunctions.WriteXMLRelatedContact(lXMLServiceNode, pNameSpace, lServiceHeaderAdd);
+          UNTIL lServiceHeaderAdd.NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE WriteXMLInterventionLine@1100281001(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pInterventionLine@1100281003 : Record 50075);
+    VAR
+      lXMLInterventionNode@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLServiceCodeNode@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lIntervQuote@1100281007 : Record 50076;
+      lProcessStatusHistory@1100281001 : Record 50047;
+      lService@1100281006 : Record 50066;
+      lDocAttachment@1100281010 : Record 50021;
+      lAdvCommentLine@1100281008 : Record 50056;
+      lServiceCode@1100281011 : Record 50040;
+      lBigText@1100281009 : BigText;
+      lStrLength@1100281013 : Integer;
+      lText@1100281014 : Text[1024];
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise Intervention
+        AddElement(pXMLParNode,'Intervention','',pNameSpace,lXMLInterventionNode);
+        //Nø de service dans GSH
+        AddElement(lXMLInterventionNode,'referenceInterventionGSH',FORMAT(pInterventionLine."Intervention No."),pNameSpace,lXMLNewNode);
+        //TODO --- Nø du service dans l'extranet ---
+        AddElement(lXMLInterventionNode,'referenceInterventionExtranet','',pNameSpace,lXMLNewNode);
+        //Code d‚finissant le statut d'une intervention : ECO : En cours, CLS : Clos, REO : R‚ouvert, ANN : Annul‚
+        CASE pInterventionLine."Intervention Status" OF
+          pInterventionLine."Intervention Status"::InProgress :
+            AddElement(lXMLInterventionNode,'codeStatutIntervention','ECO',pNameSpace,lXMLNewNode);
+          pInterventionLine."Intervention Status"::Closed :
+            AddElement(lXMLInterventionNode,'codeStatutIntervention','CLO',pNameSpace,lXMLNewNode);
+          pInterventionLine."Intervention Status"::Cancel :
+            AddElement(lXMLInterventionNode,'codeStatutIntervention','ANN',pNameSpace,lXMLNewNode);
+        END;
+        //Date de modification du statut
+        lProcessStatusHistory.SETRANGE("Source Table ID", DATABASE::"Service Intervention Line");
+        lProcessStatusHistory.SETRANGE("Source Key Code 1", pInterventionLine."Service Header No.");
+        lProcessStatusHistory.SETRANGE("Source Key Integer 1", pInterventionLine."Line No.");
+        IF lProcessStatusHistory.FINDLAST THEN
+          AddElement(lXMLInterventionNode,'dateStatutIntervention',
+                  FORMAT(lProcessStatusHistory."Change Date"),pNameSpace,lXMLNewNode)
+        ELSE
+          AddElement(lXMLInterventionNode,'dateStatutIntervention','',pNameSpace,lXMLNewNode);
+
+        //Code d‚finissant l'avancement du processus intervention
+        AddElement(lXMLInterventionNode,'codeEtapeIntervention',FORMAT(pInterventionLine."Process Status No."),pNameSpace,lXMLNewNode);
+        IF pInterventionLine.Urgent THEN
+          AddElement(lXMLInterventionNode,'indicateurUrgence','1',pNameSpace,lXMLNewNode)
+        ELSE
+          AddElement(lXMLInterventionNode,'indicateurUrgence','0',pNameSpace,lXMLNewNode);
+
+        AddElement(lXMLInterventionNode,'dateCreationIntervention',
+            FORMAT(DT2DATE(pInterventionLine."Creation Date")),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'dateArriveeLieuMEO'
+            ,FORMAT(pInterventionLine."Arrival Date") + ' ' + FORMAT(pInterventionLine."Arrival Time"),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'datePrevisitePrevisionnelle',
+            FORMAT(pInterventionLine."Expected Previsit Date"),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'datePrevisiteReelle',FORMAT(pInterventionLine."Previsit Date"),pNameSpace,lXMLNewNode);
+        IF pInterventionLine."Non-Urgent Chase" THEN
+          AddElement(lXMLInterventionNode,'indicateurPoursuiteNonUrgence','1',pNameSpace,lXMLNewNode)
+        ELSE
+          AddElement(lXMLInterventionNode,'indicateurPoursuiteNonUrgence','0',pNameSpace,lXMLNewNode);
+
+        //Premier devis
+        lIntervQuote.SETRANGE("Service Header No.", pInterventionLine."Service Header No.");
+        lIntervQuote.SETRANGE("Intervention Line No.", pInterventionLine."Line No.");
+        IF lIntervQuote.FINDFIRST THEN BEGIN
+          AddElement(lXMLInterventionNode,'dateReceptionPremierDevis',FORMAT(lIntervQuote."Receive Date"),pNameSpace,lXMLNewNode);
+          AddElement(lXMLInterventionNode,'dateAcceptationPremierDevis',
+              FORMAT(DT2DATE(lIntervQuote."Acceptance Date")),pNameSpace,lXMLNewNode);
+        END ELSE BEGIN
+          AddElement(lXMLInterventionNode,'dateReceptionPremierDevis','',pNameSpace,lXMLNewNode);
+          AddElement(lXMLInterventionNode,'dateAcceptationPremierDevis','',pNameSpace,lXMLNewNode);
+        END;
+        AddElement(lXMLInterventionNode,'dateDebutTravauxPrevisionnelle',
+            FORMAT(pInterventionLine."Expected Work Start Date"),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'dateFinTravauxPrevisionnelle',
+            FORMAT(pInterventionLine."Expected Work End Date"),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'dateDebutTravauxReelle',
+            FORMAT(pInterventionLine."Work Start Date"),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'dateFinTravauxReelle',
+            FORMAT(pInterventionLine."Work End Date"),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'tauxHumidite',FORMAT(pInterventionLine."Moisture %"),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'dateProchainRDV',FORMAT(pInterventionLine."Next Appointment Date"),pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'codeIntervenant',pInterventionLine."Provider No.",pNameSpace,lXMLNewNode);
+        AddElement(lXMLInterventionNode,'raisonSocialeIntervenant',pInterventionLine."Provider Name",pNameSpace,lXMLNewNode);
+        lService.GET(pInterventionLine."Service No.");
+        AddElement(lXMLInterventionNode,'DetailCauseIntervention',lService."Service Cause",pNameSpace,lXMLNewNode);
+        lAdvCommentLine.SETRANGE("Source Table ID", DATABASE::Service);
+        lAdvCommentLine.SETRANGE("Source No.", lService."Service No.");
+        IF lAdvCommentLine.FINDFIRST THEN BEGIN
+          REPEAT
+            lStrLength += STRLEN(lAdvCommentLine.Comment) + 1;
+            IF lStrLength <= 2500 THEN
+              lBigText.ADDTEXT(lAdvCommentLine.Comment + ' ');
+          UNTIL (lAdvCommentLine.NEXT = 0) OR (lStrLength >= 2500);
+
+          AddBigTextElement(lXMLInterventionNode,'DetailCause',lBigText,pNameSpace,lXMLNewNode);
+        END ELSE
+          AddElement(lXMLInterventionNode,'DetailCause','',pNameSpace,lXMLNewNode);
+        //Liste <CorpsMetier>
+        lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+        lServiceCode.SETRANGE("Service No.", pInterventionLine."Service No.");
+        lServiceCode.SETRANGE("Service Header No.", pInterventionLine."Service Header No.");
+        lServiceCode.SETRANGE("Intervention Line No.", pInterventionLine."Line No.");
+        lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+        IF lServiceCode.FINDFIRST THEN
+          REPEAT
+            AddElement(lXMLInterventionNode,'CorpsMetier','',pNameSpace,lXMLServiceCodeNode);
+            AddElement(lXMLServiceCodeNode,'codeMoyen',
+                EXTOutFunctions.GetCorrespondingCode(DATABASE::"Service Code", lServiceCode."Building Trade No."),
+                pNameSpace,lXMLNewNode);
+          UNTIL lServiceCode.NEXT = 0;
+
+        //Liste <Document>
+        lDocAttachment.SETCURRENTKEY("Service No.","Service Document No.",
+              "Service Intervention Line No.","Intervention Quote Line No.");
+        lDocAttachment.SETRANGE("Service No.", pInterventionLine."Service No.");
+        lDocAttachment.SETRANGE("Service Document No.", pInterventionLine."Service Header No.");
+        lDocAttachment.SETRANGE("Service Intervention Line No.", pInterventionLine."Line No.");
+        IF lDocAttachment.FINDFIRST THEN
+          REPEAT
+            EXTOutFunctions.WriteXMLDocAttach(lXMLInterventionNode, pNameSpace, lDocAttachment);
+          UNTIL lDocAttachment.NEXT = 0;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IHM01 @d 06/01/11 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Creation */
+    }
+    END.
+  }
+}

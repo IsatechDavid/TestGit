@@ -1,0 +1,400 @@
+OBJECT Codeunit 50140 ANSAAP Look Through File
+{
+  OBJECT-PROPERTIES
+  {
+    Date=02/01/13;
+    Time=15:05:58;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+          BEGIN
+            Code;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100281000 : TextConst 'FRA=Aucun CodeUnit de g‚n‚ration pour l''act %1, de type %2.';
+      Error002@1100481001 : TextConst 'FRA=Le fichier "%1" est mal format‚.';
+      EAISetup@1100281001 : Record 8016700;
+      ToolsMgt@1100281012 : Codeunit 8016602;
+      Window@1100281002 : Dialog;
+      Text001@1100281003 : TextConst 'ENU=Import file #1####################\ANSAAP #2#######;FRA=Importation fichier #1############################';
+      Text002@1100281004 : TextConst 'ENU=Import file #1####################\ANSRAP #2#######;FRA=Importation fichier #1############################';
+      Text003@1100281005 : TextConst 'ENU=%1 lines ANSAAP imported;FRA=%1 lignes ANSAAP import‚';
+      Text004@1100281006 : TextConst 'ENU=%1 lines ANSRAP imported;FRA=%1 lignes ANSRAP import‚';
+      Text005@1100281010 : TextConst 'ENU=%1 - Start %2 - %3;FRA=%1 - D‚but %2 - %3';
+      Text006@1100281009 : TextConst 'ENU=ANSAAP;FRA=ANSAAP';
+      Text007@1100281008 : TextConst 'ENU=ANSRAP;FRA=ANSRAP';
+      Text009@1100281007 : TextConst 'ENU=%1 - End %2 - %3;FRA=%1 - Fin %2 - %3';
+      TaskHandler@1100281011 : Codeunit 8016715;
+
+    LOCAL PROCEDURE Code@1100281011();
+    VAR
+      lExchangeType@1100281001 : Record 8016717;
+      lFileRecord@1100281002 : Record 2000000022;
+      lBenefeciaryImport@1100281000 : Codeunit 50170;
+      lCurrentFile@1100281003 : File;
+      lOutStr@1100281006 : OutStream;
+      lInStr@1100281007 : InStream;
+      lXMLDocIn@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lFileName@1100481004 : Text[1024];
+      lFileNameError@1100481002 : Text[1024];
+      lFileNameHisto@1100481003 : Text[1024];
+      lFileCompleted@1100281005 : Boolean;
+    BEGIN
+      EAISetup.GET;
+      EAISetup.TESTFIELD("ANSAAP EAI Exchange Type Code");
+
+      SELECTLATESTVERSION;
+
+      lExchangeType.GET(lExchangeType.Type::Inbound,EAISetup."ANSAAP EAI Exchange Type Code");
+      lExchangeType.TESTFIELD("Bus Type",lExchangeType."Bus Type"::File);
+      WITH lFileRecord DO BEGIN
+        CLEAR(lFileRecord);
+        RESET;
+        SETRANGE(Path,lExchangeType."Ingoing Queue Label");
+        lFileName := '@ansaap*';
+        IF lExchangeType."Ingoing File Extension" <> '' THEN
+          lFileName := lFileName + '.' + lExchangeType."Ingoing File Extension";
+        SETFILTER(Name, lFileName);
+        SETRANGE("Is a file",TRUE);
+        IF FINDSET THEN BEGIN
+          IF GUIALLOWED THEN BEGIN
+            Window.OPEN(Text001);
+          END;
+          REPEAT
+            IF CheckFileName(Name) THEN BEGIN
+              lFileName := Path + '\' + Name;
+
+              IF GUIALLOWED THEN BEGIN
+                Window.UPDATE(1,Name);
+              END;
+              IF NOT GUIALLOWED THEN BEGIN
+                MESSAGE(Text005,Name,CURRENTDATETIME,Text006);
+              END;
+
+              CLEAR(lBenefeciaryImport);
+              CLEARLASTERROR; //IMH06.ST
+              lBenefeciaryImport.SetParameters(lFileName,1);
+              lFileCompleted := TRUE; //IMH05.ST
+              IF NOT lBenefeciaryImport.RUN THEN BEGIN
+      //<<IMH06.ST
+                IF GETLASTERRORTEXT <> '' THEN
+                  TaskHandler.AddErrorLog(COPYSTR(GETLASTERRORTEXT, 1, 1024));
+      //>>IMH06.ST
+                IF lExchangeType."Error Folder" <> '' THEN BEGIN
+                  lFileNameError := lExchangeType."Error Folder" + '\' + Name;
+                  IF FILE.EXISTS(lFileNameError) THEN
+                    FILE.ERASE(lFileNameError);
+                  FILE.COPY(lFileName,lFileNameError);
+                END;
+              END ELSE BEGIN
+                IF lBenefeciaryImport.IsFileCompleted THEN BEGIN //IMH05.ST
+                  IF lExchangeType."Histo Folder" <> '' THEN BEGIN
+                    lFileNameHisto := lExchangeType."Histo Folder" + '\' + Name;
+                    IF FILE.EXISTS(lFileNameHisto) THEN
+                      FILE.ERASE(lFileNameHisto);
+                    FILE.COPY(lFileName,lFileNameHisto);
+                  END;
+      //<<IMH05.ST
+                END
+                ELSE
+                  lFileCompleted := FALSE;
+      //>>IMH05.ST
+              END;
+              IF lFileCompleted THEN //IMH05.ST
+                FILE.ERASE(lFileName);
+              COMMIT;
+
+              IF NOT GUIALLOWED THEN BEGIN
+                MESSAGE(Text009,Name,CURRENTDATETIME,Text006);
+              END;
+      //<<IMH05.ST
+              IF TaskHandler.IsStoppingTime THEN BEGIN
+                TaskHandler.AddExpiredMsg('');
+                EXIT;
+              END;
+      //>>IMH05.ST
+            END;
+          UNTIL (NEXT = 0);
+          IF GUIALLOWED THEN BEGIN
+            Window.CLOSE;
+          END;
+        END;
+        lFileName := '@ansrap*';
+        IF lExchangeType."Ingoing File Extension" <> '' THEN
+          lFileName := lFileName + '.' + lExchangeType."Ingoing File Extension";
+        SETFILTER(Name,lFileName);
+        SETRANGE("Is a file",TRUE);
+        IF FINDSET THEN BEGIN
+          IF GUIALLOWED THEN BEGIN
+            Window.OPEN(Text001);
+          END;
+          REPEAT
+            IF CheckFileName(Name) THEN BEGIN
+              lFileName := Path + '\' + Name;
+              IF GUIALLOWED THEN BEGIN
+                Window.UPDATE(1,Name);
+              END;
+
+              IF NOT GUIALLOWED THEN BEGIN
+                MESSAGE(Text005,Name,CURRENTDATETIME,Text007);
+              END;
+
+              CLEAR(lBenefeciaryImport);
+              lBenefeciaryImport.SetParameters(lFileName,2);
+              CLEARLASTERROR; //IMH06.ST
+              lFileCompleted := TRUE; //IMH05.ST
+              IF NOT lBenefeciaryImport.RUN THEN BEGIN
+      //<<IMH06.ST
+                IF GETLASTERRORTEXT <> '' THEN
+                  TaskHandler.AddErrorLog(COPYSTR(GETLASTERRORTEXT, 1, 1024));
+      //>>IMH06.ST
+                IF lExchangeType."Error Folder" <> '' THEN BEGIN
+                  lFileNameError := lExchangeType."Error Folder" + '\' + Name;
+                  IF FILE.EXISTS(lFileNameError) THEN
+                    FILE.ERASE(lFileNameError);
+                  FILE.COPY(lFileName,lFileNameError);
+                END;
+              END ELSE BEGIN
+                IF lBenefeciaryImport.IsFileCompleted THEN BEGIN //IMH05.ST
+                  IF lExchangeType."Histo Folder" <> '' THEN BEGIN
+                    lFileNameHisto := lExchangeType."Histo Folder" + '\' + Name;
+                    IF FILE.EXISTS(lFileNameHisto) THEN
+                      FILE.ERASE(lFileNameHisto);
+                    FILE.COPY(lFileName,lFileNameHisto);
+                  END;
+      //<<IMH05.ST
+                END
+                ELSE
+                  lFileCompleted := FALSE;
+      //>>IMH05.ST
+              END;
+              IF lFileCompleted THEN //IMH05.ST
+                FILE.ERASE(lFileName);
+              COMMIT;
+
+              IF NOT GUIALLOWED THEN BEGIN
+                MESSAGE(Text009,Name,CURRENTDATETIME,Text007);
+              END;
+      //<<IMH05.ST
+              IF TaskHandler.IsStoppingTime THEN BEGIN
+                TaskHandler.AddExpiredMsg('');
+                EXIT;
+              END;
+      //>>IMH05.ST
+            END;
+          UNTIL (NEXT = 0);
+          IF GUIALLOWED THEN BEGIN
+            Window.CLOSE;
+          END;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE _ImportANSAAP@1100281003(pFileName@1100281000 : Text[1024]);
+    VAR
+      lANSAAP@1100281005 : Record 50118;
+      lCurrentFile@1100281020 : File;
+      lLastEntryNo@1100281004 : Integer;
+      lReadLine@1100281002 : Text[538];
+      lDummyText@1100281001 : Text[40];
+      ltest@1100281003 : Integer;
+    BEGIN
+      EXIT;
+      {
+      lCurrentFile.WRITEMODE(TRUE);
+      lCurrentFile.TEXTMODE(TRUE);
+      IF NOT lCurrentFile.OPEN(pFileName) THEN BEGIN
+        EXIT;
+      END;
+
+      lANSAAP.RESET;
+      lANSAAP.LOCKTABLE;
+      IF lANSAAP.FINDLAST THEN BEGIN
+        lLastEntryNo := lANSAAP."Entry No.";
+      END;
+
+      WITH lANSAAP DO BEGIN
+        WHILE lCurrentFile.READ(lReadLine) > 0 DO BEGIN
+          lLastEntryNo += 1;
+          lReadLine := ToolsMgt.ReplaceControlCaracter(lReadLine);
+          lReadLine := ToolsMgt.FormatImport(lReadLine);
+          INIT;
+          "Entry No." := lLastEntryNo;
+          Site := COPYSTR(lReadLine,1,1);
+          "Customer No." := COPYSTR(lReadLine,2,3);
+          "Contact No." := COPYSTR(lReadLine,5,20);
+          "Warranty No." := COPYSTR(lReadLine,25,20);
+          "Person Code" := COPYSTR(lReadLine,45,1);
+          "Person ID" := COPYSTR(lReadLine,46,3);
+          "Corporation ID" := COPYSTR(lReadLine,49,3);
+          Name := DELCHR(ToolsMgt.FormatImport(COPYSTR(lReadLine,52,38)),'<>');
+          FullName := DELCHR(ToolsMgt.FormatImport(COPYSTR(lReadLine,90,38)),'<>');
+          "Address 1" := DELCHR(COPYSTR(lReadLine,128,38),'<>');
+          "Address 2" := DELCHR(COPYSTR(lReadLine,166,38),'<>');
+          "Address 3" := DELCHR(COPYSTR(lReadLine,204,38),'<>');
+          "Post Code" := COPYSTR(lReadLine,242,7);
+          City := DELCHR(COPYSTR(lReadLine,249,38),'<>');
+          Country := COPYSTR(lReadLine,287,3);
+          County := COPYSTR(lReadLine,290,2);
+          "Customer County" := DELCHR(COPYSTR(lReadLine,292,5),'<>');
+          "Phone No. 1" := DELCHR(COPYSTR(lReadLine,297,25),'<>');
+          "Phone No. 2" := DELCHR(COPYSTR(lReadLine,322,25),'<>');
+          "Fax No." := DELCHR(COPYSTR(lReadLine,347,25),'<>');
+          "E-Mail 1" := DELCHR(COPYSTR(lReadLine,372,40),'<>');
+          "E-Mail 2" := DELCHR(COPYSTR(lReadLine,412,40),'<>');
+          Sexe := COPYSTR(lReadLine,452,1);
+          IF EVALUATE("Birth Date",DELCHR(COPYSTR(lReadLine,453,8),'=',' ')) THEN;
+          IF EVALUATE("Radiation Date",DELCHR(COPYSTR(lReadLine,461,8),'=',' ')) THEN;
+          "Structure Code" := DELCHR(COPYSTR(lReadLine,469,5),'<>');
+          IF ("Structure Code" = '00001') AND ("Customer No." IN ['MB','MC','MCS']) THEN BEGIN
+            Filler := COPYSTR(lReadLine,474,37);
+          END;
+          Particularity := DELCHR(COPYSTR(lReadLine,511,10),'<>');
+          IF EVALUATE("Movement Date",DELCHR(COPYSTR(lReadLine,521,8),'=',' ')) THEN;
+          Regimental := COPYSTR(lReadLine,529,10);
+          "Origin File Name" := pFileName;
+          INSERT;
+        END;
+      END;
+
+      lCurrentFile.CLOSE;
+      }
+    END;
+
+    LOCAL PROCEDURE _ImportANSRAP@1100281002(pFileName@1100281026 : Text[1024]);
+    VAR
+      lANSRAP@1100281005 : Record 50119;
+      lCurrentFile@1100281027 : File;
+      lDummyText@1100281000 : Text[40];
+      lReadLine@1100281001 : Text[387];
+      lLastEntryNo@1100281002 : Integer;
+    BEGIN
+      EXIT;
+      {
+      lCurrentFile.WRITEMODE(TRUE);
+      lCurrentFile.TEXTMODE(TRUE);
+      IF NOT lCurrentFile.OPEN(pFileName) THEN BEGIN
+        EXIT;
+      END;
+
+      lANSRAP.RESET;
+      lANSRAP.LOCKTABLE;
+      IF lANSRAP.FINDLAST THEN BEGIN
+        lLastEntryNo := lANSRAP."Entry No.";
+      END;
+
+      WITH lANSRAP DO BEGIN
+        WHILE lCurrentFile.READ(lReadLine) > 0 DO BEGIN
+          lLastEntryNo += 1;
+          lReadLine := ToolsMgt.ReplaceControlCaracter(lReadLine);
+          lReadLine := ToolsMgt.FormatImport(lReadLine);
+          INIT;
+          "Entry No." := lLastEntryNo;
+          Site := COPYSTR(lReadLine,1,1);
+          "Customer No." := COPYSTR(lReadLine,2,3);
+          "Contact No." := COPYSTR(lReadLine,5,20);
+          "Warranty No." := COPYSTR(lReadLine,25,20);
+          "Contract Code" := COPYSTR(lReadLine,45,3);
+          "Residence Type" := COPYSTR(lReadLine,48,1);
+          "Address 1" := DELCHR(COPYSTR(lReadLine,49,38),'<>');
+          "Address 2" := DELCHR(COPYSTR(lReadLine,87,38),'<>');
+          "Address 3" := DELCHR(COPYSTR(lReadLine,125,38),'<>');
+          "Post Code" := COPYSTR(lReadLine,163,7);
+          City := DELCHR(COPYSTR(lReadLine,170,38),'<>');
+          Country := COPYSTR(lReadLine,208,3);
+          County := COPYSTR(lReadLine,211,2);
+          "Phone No. 1" := DELCHR(COPYSTR(lReadLine,213,25),'<>');
+          Protection := COPYSTR(lReadLine,238,1);
+          IF EVALUATE("Contract Start Date",DELCHR(COPYSTR(lReadLine,239,8),'=',' ')) THEN;
+          IF EVALUATE("Contract End Date",DELCHR(COPYSTR(lReadLine,247,8),'=',' ')) THEN;
+          "Structure Code" := DELCHR(COPYSTR(lReadLine,255,5),'<>');
+          IF ("Structure Code" = '00001') AND ("Customer No." IN ['MB','MC','MCS']) THEN BEGIN
+            Filler := COPYSTR(lReadLine,260,100); // pas de DELCHR sur le filler
+          END;
+          Particularity := COPYSTR(lReadLine,360,10);
+          IF EVALUATE("Movement Date",DELCHR(COPYSTR(lReadLine,270,8),'=',' ')) THEN;
+          Regimental := COPYSTR(lReadLine,378,10);
+          "Origin File Name" := pFileName;
+
+          INSERT;
+        END;
+      END;
+
+      lCurrentFile.CLOSE;
+      }
+    END;
+
+    LOCAL PROCEDURE _KeyGroupsEnable@1100281000(pKeyCode@1100281001 : Text[10]) rValue : Integer;
+    VAR
+      lDatabaseKeyGroups@1100281000 : Record 2000000203;
+    BEGIN
+      rValue := 0;
+
+      IF NOT lDatabaseKeyGroups.GET(pKeyCode) THEN BEGIN
+        EXIT;
+      END;
+
+      CASE lDatabaseKeyGroups."Last Change" OF
+        lDatabaseKeyGroups."Last Change"::" " : rValue := 1;
+        lDatabaseKeyGroups."Last Change"::Enabled : rValue := 1;
+        lDatabaseKeyGroups."Last Change"::Disabled : rValue := 2;
+      END;
+    END;
+
+    PROCEDURE CheckFileName@1100281001(pFileName@1100281000 : Text[250]) rValue : Boolean;
+    VAR
+      lText@1100281001 : Text[250];
+      lDummyDate@1100281002 : Date;
+      lDummyTime@1100281003 : Time;
+      lDummyInteger@1100281004 : Integer;
+    BEGIN
+      // V‚rifie si le nom de fichier est bien norm‚
+      rValue := FALSE;
+
+      lText := UPPERCASE(COPYSTR(pFileName,1,6));
+      IF (lText <> 'ANSAAP') AND (lText <> 'ANSRAP') THEN BEGIN
+        EXIT;
+      END;
+      //<<IMH07
+      //Date en format "AAAAMMJJ"
+      //lText := UPPERCASE(COPYSTR(pFileName,8,8));
+      lText := UPPERCASE(COPYSTR(pFileName,8,4));
+      lText := UPPERCASE(COPYSTR(pFileName,12,2)) + lText;
+      lText := UPPERCASE(COPYSTR(pFileName,14,2)) + lText;
+      //>>IMH07
+      IF NOT EVALUATE(lDummyDate,lText) THEN BEGIN
+        EXIT;
+      END;
+      lText := UPPERCASE(COPYSTR(pFileName,17,4));
+      IF NOT (lText IN ['1800','0600','1200']) THEN BEGIN
+        EXIT;
+      END;
+      lText := UPPERCASE(COPYSTR(pFileName,22,3));
+      IF NOT EVALUATE(lDummyInteger,lText) THEN BEGIN
+        EXIT;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH07 @d 02/01/13 @a iSAT.ZW @v IMH6.01.133 @s Correctif */
+      /** @r IMH06 @d 04/06/12 @a iSAT.ST @v IMH6.01.133 @s Processus … tƒches : gestion d'erreur */
+      /** @r IMH05 @d 06/02/12 @a ISAT.ST @v IMH6.01.133 @s Processus … tƒches : expirations */
+      /** @r IMH04 @d 28/07/11 @a ISAT.ST @v IMH6.01.133 @s Suppression des blancs d‚but/fin */
+      /** @r IMH03 @d 12/07/11 @a ISAT.PC @v IMH6.01.133 @s Correctif */
+      /** @r IMH02 @d 30/06/11 @a ISAT.PC @v IMH6.01.133 @s Correctif */
+      /** @r IMH01 @d 20/06/11 @a ISAT.EBA @v IMH6.01.133 @s Interface fichier soci‚taire */
+    }
+    END.
+  }
+}

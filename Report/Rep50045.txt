@@ -1,0 +1,204 @@
+OBJECT Report 50045 Assign Service Team
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/02/14;
+    Time=15:35:23;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 50048=rimd;
+    CaptionML=[ENU=Assign Service Team;
+               FRA=Affectation corbeille service];
+    ProcessingOnly=Yes;
+    OnInitReport=BEGIN
+                   TransferLines := TRUE;
+                 END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table5900;
+        DataItemTableView=WHERE(Document Type=CONST(Invoice));
+        OnPreDataItem=BEGIN
+                        IF NOT GUIALLOWED THEN
+                          HideDialog := TRUE;
+                        IF NOT HideDialog THEN
+                          Window.OPEN(Text001);
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lDefaultTeamCode@1100281000 : Code[10];
+                           lOldTeamCode@1000000000 : Code[10];
+                         BEGIN
+                           CurrCount += 1;
+                           lDefaultTeamCode := GetDefaultTeamCodeByServOrder("Service Header");
+                           IF lDefaultTeamCode <> "Default Team Code" THEN BEGIN
+                             lOldTeamCode := "Default Team Code";
+                             "Default Team Code" := lDefaultTeamCode;
+                             MODIFY;
+                             //<<IMH04
+                             //IF TransferLines THEN
+                               //ChangeTrayLines("Service No.", "No.", lOldTeamCode, lDefaultTeamCode);
+                             //>>IMH04
+                             UpdateRec += 1;
+                           END;
+                           //<<IMH04
+                           IF TransferLines THEN
+                             ChangeTrayLines("Service No.", "Service Header", lOldTeamCode, lDefaultTeamCode);
+                           //>>IMH04
+
+                           Increment += 1;
+                           IF Increment >= 10 THEN BEGIN
+                             Window.UPDATE(1, CurrCount);
+                             Window.UPDATE(2, UpdateRec);
+                             Increment := 0;
+                             COMMIT;
+                           END;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         IF NOT HideDialog THEN
+                           Window.CLOSE;
+                       END;
+
+        ReqFilterFields=Service Order Type,Corporate No.,Campaign No.,Post Code,No.;
+      }
+      SECTIONS
+      {
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+      { 1000000001;CheckBox;3630;1100 ;440  ;440  ;InPage=-1;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Change tray lines;
+                                                              FRA=Changement des lignes corbeilles];
+                                                   SourceExpr=TransferLines }
+      { 1000000002;Label  ;220  ;1100 ;3300 ;440  ;ParentControl=1000000001 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+      CaptionML=[ENU=Options;
+                 FRA=Options];
+    }
+    CONTROLS
+    {
+      { 1000000002;0;Container;
+                  ContainerType=ContentArea }
+
+      { 1000000001;1;Group  ;
+                  CaptionML=[ENU=Options;
+                             FRA=Options] }
+
+      { 1000000000;2;Field  ;
+                  CaptionML=[ENU=Transfer tray lines;
+                             FRA=Transfert des lignes corbeilles];
+                  SourceExpr=TransferLines }
+
+    }
+  }
+  CODE
+  {
+    VAR
+      Window@1100281000 : Dialog;
+      Text001@1100281001 : TextConst 'ENU=Assign service teams\Processed Service Header #1#######\Updated Service Header   #2#######;FRA=Assignation des corbeilles de service\Lignes produit trait‚es  #1#######\Lignes produit corrig‚es #2#######';
+      OldTrayLine@1000000001 : Record 50048;
+      NewTrayLine@1000000002 : Record 50048;
+      UpdateRec@1100281002 : Integer;
+      CurrCount@1100281003 : Integer;
+      Increment@1100281004 : Integer;
+      HideDialog@1100281005 : Boolean;
+      TransferLines@1000000000 : Boolean;
+
+    LOCAL PROCEDURE ChangeTrayLines@1000000000(pServNo@1000000003 : Code[20];pServHeader@1000000000 : Record 5900;pFromTeamCode@1000000001 : Code[10];pToTeamCode@1000000002 : Code[10]);
+    VAR
+      lModify@1000000004 : Boolean;
+      lToTeamCode@1100281000 : Code[10];
+    BEGIN
+      //<<IMH04
+      //IF (pFromTeamCode = '') OR (pFromTeamCode = pToTeamCode) OR (pToTeamCode = '') THEN
+      IF pFromTeamCode = '' THEN
+      //>>IMH04
+        EXIT;
+      WITH OldTrayLine DO BEGIN
+        RESET;
+        SETCURRENTKEY("Service No.", "Service Header No.");
+        SETRANGE("Service No.", pServNo);
+        SETRANGE("Service Header No.", pServHeader."No.");
+        IF NOT FINDSET THEN
+          EXIT;
+        REPEAT
+          //<<IMH04
+          lToTeamCode := pServHeader.GetTeamByServiceTask(pServHeader, OldTrayLine."Task Code");
+          IF (pFromTeamCode <> lToTeamCode) AND (lToTeamCode <> '') THEN BEGIN
+          //>>IMH04
+            IF "Team Code" = pFromTeamCode THEN BEGIN
+              CALCFIELDS("Lock Exists");
+              IF NOT "Lock Exists" THEN BEGIN
+                NewTrayLine := OldTrayLine;
+                NewTrayLine."Entry No." := 0;
+                //<<IMH04
+                //NewTrayLine.VALIDATE("Team Code", pToTeamCode);
+                NewTrayLine.VALIDATE("Team Code", lToTeamCode);
+                //>>IMH04
+                NewTrayLine."Entry No." := NewTrayLine.GetNextEntryNo;
+                NewTrayLine.INSERT(FALSE);
+                OldTrayLine.DELETE(FALSE);
+              END;
+            END
+            ELSE BEGIN
+              lModify := FALSE;
+              IF "Respond To Team" = pFromTeamCode THEN BEGIN
+                //<<IMH04
+                //"Respond To Team" := pToTeamCode;
+                "Respond To Team" := lToTeamCode;
+                //>>IMH04
+                lModify := TRUE;
+              END;
+              IF "Subst. Source Team Code" = pFromTeamCode THEN BEGIN
+                //<<IMH04
+                //"Subst. Source Team Code" := pToTeamCode;
+                "Subst. Source Team Code" := lToTeamCode;
+                //>>IMH04
+                lModify := TRUE;
+              END;
+              IF lModify THEN BEGIN
+                MODIFY;
+              END;
+            END;
+          END;
+        UNTIL NEXT=0;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 24/02/14 @a ISAT.ZW @v IMH6.01.4985 @s R‚organisation DPS @c Gestion de code corbeille service par d‚faut */
+      /** @r IMH03 @d 16/02/2012 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles @c Ajout permission 50048=rimd */
+      /** @r IMH02 @d 12/01/2012 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Ajout ChangeTrayLines */
+      /** @r IMH01 @d 31/01/2011 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Cr‚ation objet */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

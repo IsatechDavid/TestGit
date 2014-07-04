@@ -1,0 +1,1194 @@
+OBJECT Table 50054 Document Queue
+{
+  OBJECT-PROPERTIES
+  {
+    Date=12/06/14;
+    Time=14:43:36;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.P010;
+  }
+  PROPERTIES
+  {
+    OnInsert=VAR
+               lContactSearchMgt@1100281001 : Codeunit 50097;
+               lDocumentQueue@1100281000 : Record 50054;
+               lDocumentQueueHistory@1000000000 : Record 50109;
+               lContactNo@1100281002 : Code[20];
+               lEntryNo@1000000001 : Integer;
+             BEGIN
+               //<<IMH13
+               lDocumentQueue.LOCKTABLE;
+               lDocumentQueue.SETRANGE("Flow Code", "Flow Code");
+               lDocumentQueue.SETRANGE("Queue Type", "Queue Type");
+               IF lDocumentQueue.FINDLAST THEN
+                 lEntryNo := lDocumentQueue."Entry No." + 1
+               ELSE
+                 lEntryNo := 1;
+
+               lDocumentQueueHistory.LOCKTABLE;
+               lDocumentQueueHistory.SETRANGE("Flow Code", "Flow Code");
+               lDocumentQueueHistory.SETRANGE("Queue Type", "Queue Type");
+               IF lDocumentQueueHistory.FINDLAST THEN
+                 IF lEntryNo < lDocumentQueueHistory."Entry No." + 1 THEN
+                   lEntryNo := lDocumentQueueHistory."Entry No." + 1;
+               "Entry No." := lEntryNo;
+               //>>IMH13
+
+               DocumentFlow.GET("Flow Code");
+               //<<IMH13
+               //"Entry No." := DocumentFlow."Last Document Flow No." + 1;
+               //DocumentFlow."Last Document Flow No." := "Entry No.";
+               //>>IMH13
+
+               "Queue Type Int" := "Queue Type";
+
+               //CASE "Queue Type" OF
+               //  "Queue Type"::Receipt : "Queue Type Int" := 0;
+               //  "Queue Type"::Emission : "Queue Type Int" := 1;
+               //END;
+
+               IF "Contact No." = '' THEN BEGIN
+                 CASE "Flow Nature" OF
+                   "Flow Nature"::Outlook :
+                     lContactSearchMgt.GetContactByEmail("Source No.", FALSE, lContactNo);
+                   "Flow Nature"::SMS, "Flow Nature"::Fax :
+                     lContactSearchMgt.GetContactByPhoneNo("Source No.", FALSE, lContactNo);
+                 END;
+                 IF lContactNo <> '' THEN
+                   VALIDATE("Contact No.", lContactNo);
+               END;
+               TouchRecord(TRUE);
+
+               //<<IMH13
+               //DocumentFlow.GET("Flow Code");
+               //DocumentFlow."Last Document Flow No." := "Entry No.";
+               //DocumentFlow.MODIFY;
+               //>>IMH13
+
+               IF "Document Flow Header No." <> '' THEN BEGIN
+                 "Line No." := 1;
+                 lDocumentQueue.RESET;
+                 lDocumentQueue.SETCURRENTKEY("Document Flow Header No.","Line No.");
+                 lDocumentQueue.SETRANGE("Document Flow Header No.","Document Flow Header No.");
+                 IF lDocumentQueue.FINDLAST THEN
+                   "Line No." += lDocumentQueue."Line No.";
+               END;
+               Checked := DocQueuePost.CheckFlagLine(Rec);
+             END;
+
+    OnModify=VAR
+               lDocumentQueue@1100281000 : Record 50054;
+             BEGIN
+               IF "Document Flow Header No." <> '' THEN BEGIN
+                 IF "Line No." = 0 THEN BEGIN
+                   "Line No." := 1;
+                   lDocumentQueue.RESET;
+                   lDocumentQueue.SETCURRENTKEY("Document Flow Header No.","Line No.");
+                   lDocumentQueue.SETRANGE("Document Flow Header No.","Document Flow Header No.");
+                   IF lDocumentQueue.FINDLAST THEN
+                     "Line No." += lDocumentQueue."Line No.";
+                 END;
+               END;
+
+               "Queue Type Int" := "Queue Type";
+               TouchRecord(FALSE);
+
+               Checked := DocQueuePost.CheckFlagLine(Rec);
+             END;
+
+    OnDelete=VAR
+               lDocQueue@1100281000 : Record 50054;
+             BEGIN
+               DeleteDocAttachment(TRUE);
+             END;
+
+    OnRename=BEGIN
+               TouchRecord(FALSE);
+             END;
+
+    CaptionML=[ENU=Document Queue;
+               FRA=File de document];
+  }
+  FIELDS
+  {
+    { 1   ;   ;Flow Code           ;Code10        ;TableRelation="Document Flow"."Flow Code";
+                                                   OnValidate=VAR
+                                                                lDocFlow@1100281000 : Record 50053;
+                                                              BEGIN
+                                                                IF "Flow Code" <> '' THEN BEGIN
+                                                                  lDocFlow.GET("Flow Code");
+                                                                  "Flow Nature" := lDocFlow."Flow Nature";
+                                                                  "Document Type" := lDocFlow."Default Document Type";
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Flow Code;
+                                                              FRA=Code flux];
+                                                   NotBlank=Yes }
+    { 2   ;   ;Queue Type          ;Option        ;OnValidate=BEGIN
+                                                                "Queue Type Int" := "Queue Type";
+                                                              END;
+
+                                                   CaptionML=[ENU=Queue Type;
+                                                              FRA=Type file de document];
+                                                   OptionCaptionML=[ENU=Receipt,Emission;
+                                                                    FRA=R‚ception,Emission];
+                                                   OptionString=Receipt,Emission }
+    { 3   ;   ;Entry No.           ;Integer       ;CaptionML=[ENU=Entry No.;
+                                                              FRA=Nø s‚quence] }
+    { 5   ;   ;Line No.            ;Integer       ;CaptionML=FRA=Nø Ligne }
+    { 10  ;   ;Flow Nature         ;Option        ;CaptionML=[ENU=Flow Nature;
+                                                              FRA=Nature flux];
+                                                   OptionCaptionML=[ENU=" ,Outlook,Fax,SMS";
+                                                                    FRA=" ,Outlook,Fax,SMS"];
+                                                   OptionString=[ ,Outlook,Fax,SMS] }
+    { 11  ;   ;Source No.          ;Text80        ;OnValidate=VAR
+                                                                lContact@1100281000 : Record 5050;
+                                                                lPhoneList@1100281001 : Record 50055;
+                                                              BEGIN
+                                                                IF "Source No." <> '' THEN BEGIN
+                                                                  CASE "Flow Nature" OF
+                                                                    "Flow Nature"::Outlook: BEGIN
+                                                                      lContact.RESET;
+                                                                      lContact.SETCURRENTKEY("Search E-Mail");
+                                                                      lContact.SETRANGE("Search E-Mail","Source No.");
+                                                                      IF lContact.FINDFIRST THEN
+                                                                        VALIDATE("Contact No.",lContact."No.");
+                                                                    END;
+                                                                    "Flow Nature"::Fax: BEGIN
+                                                                      lPhoneList.SETRANGE("Phone No.", "Source No.");
+                                                                      IF lPhoneList.FINDFIRST THEN
+                                                                        VALIDATE("Contact No.", lPhoneList."Contact No.");
+                                                                    END;
+                                                                  END;
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Source No.;
+                                                              FRA=Nø source] }
+    { 12  ;   ;Date                ;Date          ;CaptionML=[ENU=Date;
+                                                              FRA=Date] }
+    { 14  ;   ;Description         ;Text80        ;CaptionML=[ENU=Description;
+                                                              FRA=D‚signation] }
+    { 15  ;   ;Receive Reference   ;Text80        ;CaptionML=[ENU=Receive Reference;
+                                                              FRA=R‚f‚rence r‚ception] }
+    { 20  ;   ;Document Flow Header No.;Code20    ;TableRelation="Document Flow Header".No.;
+                                                   CaptionML=[ENU=Document Flow Header No.;
+                                                              FRA=Nø en-tˆte flux document] }
+    { 30  ;   ;Contact No.         ;Code20        ;TableRelation=Contact.No.;
+                                                   OnValidate=VAR
+                                                                lContact@1100281000 : Record 5050;
+                                                                lServIntervLine@1100281002 : Record 50075;
+                                                                lpContactList@1100281001 : Page 5052;
+                                                              BEGIN
+                                                                IF "Contact No." <> '' THEN BEGIN
+                                                                  //**eb
+                                                                  IF "Document Type" = "Document Type"::Invoice THEN BEGIN
+                                                                    IF lServIntervLine.GET("Service Header No.","Service Intervention Line No.") THEN
+                                                                      TESTFIELD("Contact No.",lServIntervLine."Provider No.");
+                                                                  END;
+
+                                                                  //**
+                                                                  IF lContact.GET("Contact No.") THEN BEGIN
+                                                                    "Contact No." := lContact."Company No.";
+                                                                    Name := lContact.Name;
+                                                                    "First Name" := lContact."First Name";
+                                                                    "Phone No." := lContact."Phone No.";
+                                                                    "Corporate No." := lContact."Corporate No.";
+                                                                  END ELSE BEGIN
+                                                                    lContact.RESET;
+                                                                    IF ("Document Type" = "Document Type"::Invoice) OR
+                                                                       ("Document Type" = "Document Type"::Quote) OR
+                                                                       ("Document Type" = "Document Type"::Minutes) THEN
+                                                                    BEGIN
+                                                                      lContact.SETCURRENTKEY("Service Contact","Post Code",Name);
+                                                                      lContact.SETRANGE("Service Contact",lContact."Service Contact"::Provider);
+                                                                      IF ("Post Code" <> '') THEN
+                                                                        lContact.SETFILTER("Post Code","Post Code" + '*');
+                                                                      IF ("Contact No." <> '') THEN
+                                                                        lContact.SETFILTER(Name,"Contact No." + '*');
+                                                                      IF  lContact.COUNT = 1 THEN
+                                                                        IF lContact.FINDFIRST THEN
+                                                                        BEGIN
+                                                                          "Contact No." := lContact."Company No.";
+                                                                          Name := lContact.Name;
+                                                                          "First Name" := lContact."First Name";
+                                                                          "Phone No." := lContact."Phone No.";
+                                                                        END;
+                                                                      IF  lContact.COUNT > 1 THEN
+                                                                      BEGIN
+                                                                        CLEAR(lpContactList);
+                                                                        lpContactList.SETRECORD(lContact);
+                                                                        lpContactList.SETTABLEVIEW(lContact);
+                                                                        lpContactList.LOOKUPMODE(TRUE);
+                                                                        IF (lpContactList.RUNMODAL = ACTION::LookupOK) THEN
+                                                                        BEGIN
+                                                                          lpContactList.GETRECORD(lContact);
+                                                                          "Contact No." := lContact."Company No.";
+                                                                          Name := lContact.Name;
+                                                                          "First Name" := lContact."First Name";
+                                                                          "Phone No." := lContact."Phone No.";
+                                                                          "Corporate No." := lContact."Corporate No.";
+                                                                        END;
+                                                                      END;
+                                                                      IF  lContact.COUNT = 0 THEN
+                                                                      BEGIN
+                                                                        "Contact No." := '';
+                                                                        lContact.SETRANGE(Name);
+                                                                        lpContactList.SETRECORD(lContact);
+                                                                        lpContactList.SETTABLEVIEW(lContact);
+                                                                        lpContactList.LOOKUPMODE(TRUE);
+                                                                        IF (lpContactList.RUNMODAL = ACTION::LookupOK) THEN
+                                                                        BEGIN
+                                                                          lpContactList.GETRECORD(lContact);
+                                                                          "Contact No." := lContact."Company No.";
+                                                                          Name := lContact.Name;
+                                                                          "First Name" := lContact."First Name";
+                                                                          "Phone No." := lContact."Phone No.";
+                                                                          "Corporate No." := lContact."Corporate No.";
+                                                                        END;
+                                                                      END;
+
+                                                                    END;
+                                                                  END;
+                                                                END ELSE BEGIN
+                                                                  Name := '';
+                                                                  "First Name" := '';
+                                                                  "Phone No." := '';
+                                                                END;
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              Lcontact@1100281000 : Record 5050;
+                                                              lPageContact@1100281001 : Page 5052;
+                                                              lFormContact@1100281002 : Form 5052;
+                                                            BEGIN
+                                                              IF ISSERVICETIER THEN
+                                                              BEGIN
+                                                                CLEAR(lPageContact);
+                                                                Lcontact.RESET;
+                                                                CASE "Document Type" OF
+                                                                  "Document Type"::Invoice,"Document Type"::Quote,"Document Type"::Minutes:
+                                                                    Lcontact.SETRANGE("Service Contact",Lcontact."Service Contact"::Provider);
+                                                                  "Document Type"::"Service Request" :
+                                                                    Lcontact.SETRANGE("Service Contact",Lcontact."Service Contact"::Beneficiary);
+                                                                END;
+                                                                lPageContact.SETRECORD(Lcontact);
+                                                                lPageContact.SETTABLEVIEW(Lcontact);
+                                                                lPageContact.LOOKUPMODE := TRUE;
+                                                                IF (lPageContact.RUNMODAL = ACTION::LookupOK) THEN
+                                                                BEGIN
+                                                                  lPageContact.GETRECORD(Lcontact);
+                                                                  VALIDATE("Contact No.",Lcontact."No.");
+                                                                END;
+                                                              END;
+
+                                                              IF NOT ISSERVICETIER THEN
+                                                              BEGIN
+                                                                CLEAR(lFormContact);
+                                                                Lcontact.RESET;
+                                                                CASE "Document Type" OF
+                                                                  "Document Type"::Invoice,"Document Type"::Quote,"Document Type"::Minutes:
+                                                                    Lcontact.SETRANGE("Service Contact",Lcontact."Service Contact"::Provider);
+                                                                  "Document Type"::"Service Request" :
+                                                                    Lcontact.SETRANGE("Service Contact",Lcontact."Service Contact"::Beneficiary);
+                                                                END;
+                                                                lFormContact.SETRECORD(Lcontact);
+                                                                lFormContact.SETTABLEVIEW(Lcontact);
+                                                                lFormContact.LOOKUPMODE := TRUE;
+                                                                IF (lFormContact.RUNMODAL = ACTION::LookupOK) THEN
+                                                                BEGIN
+                                                                  lFormContact.GETRECORD(Lcontact);
+                                                                  VALIDATE("Contact No.",Lcontact."No.");
+                                                                  "Contact No." := Lcontact."Company No.";
+                                                                  Name := Lcontact.Name;
+                                                                  "First Name" := Lcontact."First Name";
+                                                                  "Phone No." := Lcontact."Phone No.";
+                                                                  "Corporate No." := Lcontact."Corporate No.";
+                                                                END;
+                                                              END;
+                                                            END;
+
+                                                   ValidateTableRelation=No;
+                                                   CaptionML=[ENU=Contact No.;
+                                                              FRA=Nø contact] }
+    { 31  ;   ;Name                ;Text50        ;CaptionML=[ENU=Name;
+                                                              FRA=Nom];
+                                                   Editable=No }
+    { 32  ;   ;First Name          ;Text30        ;CaptionML=[ENU=First Name;
+                                                              FRA=Pr‚nom];
+                                                   Editable=No }
+    { 33  ;   ;Phone No.           ;Text30        ;ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Phone No.;
+                                                              FRA=Nø t‚l‚phone] }
+    { 34  ;   ;Post Code           ;Code10        ;CaptionML=[ENU=Post Code;
+                                                              FRA=Code postal] }
+    { 40  ;   ;Corporate No.       ;Code20        ;TableRelation=Customer.No. WHERE (Service Contact=CONST(Corporate Customer),
+                                                                                     Service Corporate=CONST(Yes));
+                                                   CaptionML=[ENU=Corporate No.;
+                                                              FRA=Nø grand compte] }
+    { 50  ;   ;Campaign No.        ;Code20        ;TableRelation=Campaign.No.;
+                                                   CaptionML=[ENU=Campaign No.;
+                                                              FRA=Nø campagne] }
+    { 60  ;   ;Origin Entry No.    ;Integer       ;CaptionML=[ENU=Origin Entry No.;
+                                                              FRA=Nø s‚quence origine] }
+    { 65  ;   ;Linked Entry No.    ;Integer       ;CaptionML=[ENU=Linked Entry No.;
+                                                              FRA=Nø s‚quence file de document li‚] }
+    { 110 ;   ;Attachment          ;Integer       ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Document Attachment" WHERE (Referent Table No.=CONST(50054),
+                                                                                                  Key Integer 1=FIELD(Queue Type Int),
+                                                                                                  Key Integer 2=FIELD(Entry No.),
+                                                                                                  Key Code 1=FIELD(Flow Code)));
+                                                   CaptionML=[ENU=Attachment;
+                                                              FRA=Doc. joint];
+                                                   Editable=No }
+    { 111 ;   ;Attachment Type     ;Option        ;CaptionML=[ENU=Attachment Type;
+                                                              FRA=Type doc. joint];
+                                                   OptionCaptionML=[ENU=" ,Mail";
+                                                                    FRA=" ,Mail"];
+                                                   OptionString=[ ,Mail] }
+    { 115 ;   ;Queue Type Int      ;Integer       ;CaptionML=[ENU=Queue Type Int;
+                                                              FRA=Type file de document integer] }
+    { 200 ;   ;Assigned Resource No.;Code20       ;TableRelation=Resource WHERE (Type=CONST(Person));
+                                                   CaptionML=[ENU=Assigned Resource No.;
+                                                              FRA=Nø ressource affect‚e] }
+    { 250 ;   ;Document Date       ;Date          ;OnValidate=BEGIN
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+
+                                                                //**eb
+                                                                IF "Document Type" = "Document Type"::Invoice THEN BEGIN
+                                                                  IF "Document Date" > WORKDATE THEN
+                                                                    ERROR(STRSUBSTNO(Text002,FIELDCAPTION("Document Date")));
+                                                                END;
+                                                                //**
+                                                              END;
+
+                                                   CaptionML=[ENU=Document Date;
+                                                              FRA=Date document] }
+    { 260 ;   ;Vendor Invoice No.  ;Code20        ;OnValidate=BEGIN
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Vendor Invoice No.;
+                                                              FRA=Nø facture fournisseur] }
+    { 270 ;   ;Vendor Quote No.    ;Code20        ;CaptionML=[ENU=Vendor Quote No.;
+                                                              FRA=Nø devis fournisseur] }
+    { 280 ;   ;Document Page Number;Integer       ;CaptionML=[ENU=Document Page Number;
+                                                              FRA=Nombre de page] }
+    { 290 ;   ;Amount              ;Decimal       ;OnValidate=BEGIN
+                                                                CheckVatAmount(0,FALSE);
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Amount;
+                                                              FRA=Montant HT] }
+    { 291 ;   ;Amount VAT          ;Decimal       ;OnValidate=BEGIN
+                                                                CheckVatAmount(1,FALSE);
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Amount VAT;
+                                                              FRA=Montant TVA] }
+    { 292 ;   ;Amount Including VAT;Decimal       ;OnValidate=BEGIN
+                                                                CheckVatAmount(2,FALSE);
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Amount Including VAT;
+                                                              FRA=Montant TTC] }
+    { 293 ;   ;VAT Base Amount     ;Decimal       ;CaptionML=[ENU=VAT Base Amount;
+                                                              FRA=Montant base TVA] }
+    { 294 ;   ;Exempt VAT Base Amount;Decimal     ;CaptionML=[ENU=Exempt VAT Base Amount;
+                                                              FRA=Montant base TVA EXO] }
+    { 295 ;   ;Reduced VAT Base Amount;Decimal    ;CaptionML=[ENU=Reduced VAT Base Amount;
+                                                              FRA=Montant base TVA REDUIT] }
+    { 296 ;   ;Normal VAT Base Amount;Decimal     ;CaptionML=[ENU=Normal VAT Base Amount;
+                                                              FRA=Montant base TVA NORMAL] }
+    { 300 ;   ;Amount obsolescence ;Decimal       ;CaptionML=FRA=Montant v‚tust‚ }
+    { 301 ;   ;Franchise Amount    ;Decimal       ;CaptionML=FRA=Montant franchise }
+    { 1000;   ;Status              ;Option        ;OnValidate=BEGIN
+                                                                CASE Status OF
+                                                                  Status::" " : "Assigned Resource No." := '';
+                                                                  Status::"In Progress" : "Assigned Resource No." := ApplicationMgt.GetUserCode(2);
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Status;
+                                                              FRA=Statut];
+                                                   OptionCaptionML=[ENU=" ,In Progress,Done,Rejected,Posted,Create Service,To Qualify";
+                                                                    FRA=" ,En cours,Trait‚,Rejet‚,Valid‚,Cr‚ation service,A qualifier"];
+                                                   OptionString=[ ,In Progress,Done,Rejected,Posted,Create Service,To Qualify] }
+    { 1050;   ;Document Type       ;Option        ;OnValidate=BEGIN
+                                                                CASE "Document Type" OF
+                                                                  "Document Type"::Invoice,"Document Type"::Quote,"Document Type"::Minutes :
+                                                                     "Service Document Type" := "Service Document Type"::Intervention;
+                                                                END;
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Document Type;
+                                                              FRA=Type document];
+                                                   OptionCaptionML=[ENU=" ,Invoice,Quote,Minutes,Service Request,Provider Document,Claim,DGS To Qualify,DPR To Qualify,DFC To Qualify,Document Follow Up,DQP To Qualify";
+                                                                    FRA=" ,Facture,Devis,PV,Demande service,Document r‚seau,R‚clamation,A qualifier DGS,A qualifier DPR,A qualifier DFC,Suivi dossier,A qualifier DQP"];
+                                                   OptionString=[ ,Invoice,Quote,Minutes,Service Request,Provider Document,Claim,DGS To Qualify,DPR To Qualify,DFC To Qualify,Document Follow Up,DQP To Qualify] }
+    { 1051;   ;Document No.        ;Code20        ;TestTableRelation=No;
+                                                   CaptionML=[ENU=Document No.;
+                                                              FRA=Nø document] }
+    { 1052;   ;Skip Document Create;Boolean       ;CaptionML=[ENU=Skip Document Create;
+                                                              FRA=Ne pas cr‚er document] }
+    { 1120;   ;Service Document Type;Option       ;CaptionML=[ENU=Service Document Type;
+                                                              FRA=Type document service];
+                                                   OptionCaptionML=[ENU=" ,Service,Service Header,Intervention";
+                                                                    FRA=" ,Service,Ligne produit,Intervention"];
+                                                   OptionString=[ ,Service,Service Header,Intervention] }
+    { 1121;   ;Service Document No.;Code20        ;TableRelation=IF (Service Document Type=CONST(Service)) Service."Service No."
+                                                                 ELSE IF (Service Document Type=CONST(Service Header)) "Service Header".No.
+                                                                 ELSE IF (Service Document Type=CONST(Intervention)) "Service Intervention Line"."Service Header No.";
+                                                   OnValidate=VAR
+                                                                lServiceHeader@1100281000 : Record 5900;
+                                                              BEGIN
+                                                                IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, "Service Document No.") THEN BEGIN
+                                                                  "Service Header No." :=  lServiceHeader."No.";
+                                                                  VALIDATE("Service No.", lServiceHeader."Service No.");
+                                                                END;
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Service Document No.;
+                                                              FRA=Nø document service] }
+    { 1122;   ;Service Intervention Line No.;Integer;
+                                                   TableRelation="Service Intervention Line"."Line No." WHERE (Service Header No.=FIELD(Service Document No.));
+                                                   OnValidate=VAR
+                                                                lServInterLine@1100281000 : Record 50075;
+                                                              BEGIN
+                                                                IF lServInterLine.GET("Service Header No.","Service Intervention Line No.") THEN BEGIN
+                                                                  IF "Document Type" <> "Document Type"::Invoice THEN
+                                                                    IF "Contact No." = '' THEN
+                                                                      VALIDATE("Contact No.",lServInterLine."Contact No.");
+                                                                  "Service Intervention No." := lServInterLine."Intervention No.";
+                                                                END;
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Service Intervention Line No.;
+                                                              FRA=Nø ligne intervention service];
+                                                   BlankZero=Yes }
+    { 1123;   ;Service No.         ;Code20        ;OnValidate=VAR
+                                                                lService@1100281000 : Record 50066;
+                                                                lServInterLine@1100281001 : Record 50075;
+                                                                lpServInterLine@1100281002 : Page 50069;
+                                                                lfServInterLine@1100281003 : Form 50069;
+                                                              BEGIN
+                                                                //SearchServiceTypeDocument;
+                                                                IF lService.GET("Service No.") THEN BEGIN
+                                                                  VALIDATE("Corporate No.", lService."Corporate No.");
+                                                                  IF "Document Type" <> "Document Type"::Invoice THEN
+                                                                    IF "Contact No." = '' THEN
+                                                                      VALIDATE("Contact No.", lService."Contact No.");
+                                                                  "IMA Reference No." := lService."IMA Reference No.";   //IMH17
+                                                                END ELSE BEGIN
+                                                                  IF "Document Type" = "Document Type"::Invoice THEN BEGIN
+                                                                    "Service Document No." := '';
+                                                                    "Service Intervention Line No." := 0;
+                                                                    "Service Header No." := '';
+                                                                    "Service Intervention No." := 0;
+                                                                    "Corporate No." := '';
+                                                                  END;
+                                                                END;
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+
+                                                                //**eb
+                                                                IF "Document Type" = "Document Type"::Invoice THEN
+                                                                  VALIDATE("Contact No.",'');
+                                                                //**
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              lServInterLine@1100281000 : Record 50075;
+                                                              lpServInterLine@1100281001 : Page 50069;
+                                                            BEGIN
+                                                              SearchServiceTypeDocument;
+                                                              Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                            END;
+
+                                                   CaptionML=[ENU=Service No.;
+                                                              FRA=Nø service] }
+    { 1124;   ;Service Intervention No.;Integer   ;OnValidate=VAR
+                                                                lServInterLine@1100281000 : Record 50075;
+                                                              BEGIN
+                                                                IF "Service Intervention No." = 0 THEN
+                                                                  "Service Intervention Line No." := 0;
+                                                                lServInterLine.SETRANGE("Service Header No.", "Service Header No.");
+                                                                lServInterLine.SETRANGE("Intervention No.", "Service Intervention No.");
+                                                                IF lServInterLine.FINDFIRST THEN
+                                                                  VALIDATE("Service Intervention Line No.", lServInterLine."Line No.");
+
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+
+                                                                //**eb
+                                                                IF "Document Type" = "Document Type"::Invoice THEN
+                                                                  VALIDATE("Contact No.",'');
+                                                                //**
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              lServInterLine@1100281001 : Record 50075;
+                                                              lpServInterLine@1100281000 : Page 50069;
+                                                            BEGIN
+                                                              lServInterLine.RESET;
+                                                              CLEAR(lpServInterLine);
+                                                              IF ("Service Header No." <> '') THEN
+                                                                lServInterLine.SETRANGE("Service Header No.","Service Header No.");
+                                                              IF ("Service No." <> '') THEN
+                                                                lServInterLine.SETRANGE("Service No.","Service No.");
+                                                              IF ("Document Type" = "Document Type"::Invoice) AND ("Contact No." <> '') THEN
+                                                                lServInterLine.SETRANGE("Provider No.","Contact No.");
+
+                                                              lpServInterLine.SETRECORD(lServInterLine);
+                                                              lpServInterLine.SETTABLEVIEW(lServInterLine);
+                                                              lpServInterLine.LOOKUPMODE(TRUE);
+                                                              IF (lpServInterLine.RUNMODAL = ACTION::LookupOK) THEN
+                                                              BEGIN
+                                                                lpServInterLine.GETRECORD(lServInterLine);
+                                                                "Service No." := lServInterLine."Service No.";
+                                                                "Service Document No." := lServInterLine."Service Header No.";
+                                                                "Service Intervention Line No." := lServInterLine."Line No.";
+                                                                "Service Header No." := lServInterLine."Service Header No.";
+                                                                "Service Intervention No." := lServInterLine."Intervention No.";
+                                                                "Corporate No."  := lServInterLine."Corporate No.";
+                                                                IF "Document Type" <> "Document Type"::Invoice THEN
+                                                                  IF "Contact No." = '' THEN
+                                                                    VALIDATE("Contact No.", lServInterLine."Contact No.");
+                                                              END;
+                                                              Checked := DocQueuePost.CheckFlagLine(Rec);
+                                                            END;
+
+                                                   CaptionML=[ENU=Service Intervention No.;
+                                                              FRA=Nø intervention service];
+                                                   BlankZero=Yes }
+    { 1125;   ;Service Header No.  ;Code20        ;TableRelation="Service Header".No. WHERE (Service No.=FIELD(Service No.),
+                                                                                             Document Type=CONST(Invoice));
+                                                   OnValidate=VAR
+                                                                lServiceHeader@1100281000 : Record 5900;
+                                                                lServInterLine@1100281001 : Record 50075;
+                                                              BEGIN
+                                                                IF "Service No." = '' THEN
+                                                                  IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, "Service Header No.") THEN BEGIN
+                                                                    VALIDATE("Service No.", lServiceHeader."Service No.");
+                                                                  END;
+
+                                                                "Service Document No." := "Service Header No.";
+                                                                Checked := DocQueuePost.CheckFlagLine(Rec);
+
+                                                                //**eb
+                                                                IF "Document Type" = "Document Type"::Invoice THEN
+                                                                  VALIDATE("Contact No.",'');
+                                                                //**
+                                                              END;
+
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Service Header No.;
+                                                              FRA=Nø ligne produit] }
+    { 1126;   ;Service Intervention Quote No.;Integer;
+                                                   OnLookup=VAR
+                                                              lServInterLine@1100281001 : Record 50075;
+                                                              lpServInterLine@1100281000 : Page 50069;
+                                                            BEGIN
+                                                            END;
+
+                                                   CaptionML=[ENU=Service Intervention No.;
+                                                              FRA=Nø intervention service];
+                                                   BlankZero=Yes }
+    { 2000;   ;Territory Code      ;Code10        ;TableRelation=Territory;
+                                                   CaptionML=[ENU=Territory Code;
+                                                              FRA=Code r‚gion] }
+    { 2100;   ;Status To Qualify   ;Option        ;CaptionML=[ENU=Status To Qualify;
+                                                              FRA=Statut … qualifier];
+                                                   OptionCaptionML=[ENU=" ,To Qualify,Error Qualification,Treated";
+                                                                    FRA=" ,A qualifier,Erreur qualification,Trait‚"];
+                                                   OptionString=[ ,To Qualify,Error Qualification,Treated] }
+    { 2101;   ;Description Qualification;Text250  ;CaptionML=[ENU=Description Qualification;
+                                                              FRA=Description qualification] }
+    { 3000;   ;Delay               ;Boolean       ;CaptionML=[ENU=Delay;
+                                                              FRA=Retard];
+                                                   Editable=No }
+    { 50000;  ;Checked             ;Boolean       ;CaptionML=[ENU=Checked;
+                                                              FRA=Contr“l‚];
+                                                   Editable=No }
+    { 50010;  ;Original File Path  ;Text250       ;CaptionML=[ENU=Original File Path;
+                                                              FRA=Nom ficher d'origine] }
+    { 50500;  ;Creation Date       ;DateTime      ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date de cr‚ation];
+                                                   Editable=No }
+    { 50501;  ;Creation User ID    ;Text30        ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Creation User ID;
+                                                              FRA=Utilisateur cr‚ation];
+                                                   Editable=No }
+    { 50502;  ;Last Modification Date;DateTime    ;CaptionML=[ENU=Last Modification Date;
+                                                              FRA=Date derniŠre modification];
+                                                   Editable=No }
+    { 50503;  ;Last Modification User ID;Text30   ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Last Modification User ID;
+                                                              FRA=Utilisateur derniŠre modification];
+                                                   Editable=No }
+    { 50550;  ;Origin File Path    ;Text250       ;CaptionML=[ENU=Origin File Path;
+                                                              FRA=R‚pertoire ficher origine] }
+    { 50551;  ;Tray Line           ;Option        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Tray Line".Status WHERE (Document Flow Code=FIELD(Flow Code),
+                                                                                                Document Queue Type=FIELD(Queue Type),
+                                                                                                Doc. Queue Entry No.=FIELD(Entry No.)));
+                                                   CaptionML=[ENU=Tray Line;
+                                                              FRA=Corbeille];
+                                                   OptionCaptionML=[ENU=Not Started,In Progress,Completed,Transferred,Canceled;
+                                                                    FRA=Non d‚marr‚,En cours,Termin‚,Transf‚r‚,Annul‚];
+                                                   OptionString=[Not Started,In Progress,Completed,Transferred,Canceled ];
+                                                   Editable=No }
+    { 50552;  ;Tray Line History   ;Option        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Tray Line History".Status WHERE (Document Flow Code=FIELD(Flow Code),
+                                                                                                        Document Queue Type=FIELD(Queue Type),
+                                                                                                        Doc. Queue Entry No.=FIELD(Entry No.)));
+                                                   CaptionML=[ENU=Tray Line History;
+                                                              FRA=Corbeille historique];
+                                                   OptionCaptionML=[ENU=Not Started,In Progress,Completed,Transferred,Canceled;
+                                                                    FRA=Non d‚marr‚,En cours,Termin‚,Transf‚r‚,Annul‚];
+                                                   OptionString=[Not Started,In Progress,Completed,Transferred,Canceled ];
+                                                   Editable=No }
+    { 57013;  ;IMA Reference No.   ;Code30        ;CaptionML=[ENU=IMA Reference No.;
+                                                              FRA=Nø r‚f‚rence IMA] }
+  }
+  KEYS
+  {
+    {    ;Flow Code,Queue Type,Entry No.          ;Clustered=Yes }
+    {    ;Flow Code,Status,Date                    }
+    {    ;Service Document Type,Service Document No.,Service Intervention Line No. }
+    {    ;Document Flow Header No.,Line No.        }
+    {    ;Origin Entry No.                         }
+    {    ;Linked Entry No.                         }
+    {    ;Contact No.                              }
+    {    ;Document Flow Header No.,Delay           }
+    {    ;Creation Date                            }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      ApplicationMgt@1100281000 : Codeunit 1;
+      Text001@1100281001 : TextConst 'ENU=Do you want to delete the document?;FRA=Voulez-vous supprimer d‚finitivement le document?';
+      DocumentFlow@1100281002 : Record 50053;
+      HideMessage@1100281003 : Boolean;
+      DocQueuePost@1100281004 : Codeunit 50008;
+      Text002@1100281005 : TextConst 'ENU=%1 must be before workdate.;FRA=La %1 doit ˆtre inf‚rieure ou ‚gale … la date du jour.';
+
+    LOCAL PROCEDURE TouchRecord@1000000001(pInsert@1000000000 : Boolean);
+    BEGIN
+      IF pInsert THEN BEGIN
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+      END;
+      "Last Modification Date" := CURRENTDATETIME;
+      "Last Modification User ID" := USERID;
+    END;
+
+    PROCEDURE SearchContact@1100281000(pUseForm@1100281000 : Boolean);
+    VAR
+      lContactNo@1100281001 : Code[20];
+      lContactSearchMgt@1100281002 : Codeunit 50097;
+    BEGIN
+      //IMH02 isat.zw
+      IF "Entry No." = 0 THEN
+        EXIT;
+      CASE "Flow Nature" OF
+        "Flow Nature"::" "  : BEGIN
+          IF NOT pUseForm THEN
+            EXIT;
+          IF NOT lContactSearchMgt.SearchContact(4,lContactNo) THEN
+            EXIT;
+          END;
+        "Flow Nature"::Outlook :
+          IF NOT lContactSearchMgt.GetContactByEmail("Source No.", pUseForm, lContactNo) THEN
+            EXIT;
+        "Flow Nature"::SMS, "Flow Nature"::Fax :
+          IF NOT lContactSearchMgt.GetContactByPhoneNo("Source No.", pUseForm, lContactNo) THEN
+            EXIT;
+        ELSE
+          EXIT;
+      END;
+      VALIDATE("Contact No.", lContactNo);
+      MODIFY(TRUE);
+    END;
+
+    PROCEDURE SearchService@1100281001(pServiceDocType@1100281000 : 'Service,Service Header,Intervention');
+    VAR
+      lServiceSearchMgt@1100281002 : Codeunit 50060;
+      lService@1100281005 : Record 50066;
+      lServiceHeader@1100281006 : Record 5900;
+      lServIntervLine@1100281007 : Record 50075;
+      lServiceNo@1100281001 : Code[20];
+      lServiceHeaderNo@1100281004 : Code[20];
+      lServInterventionLineNo@1100281003 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      IF "Entry No." = 0 THEN
+        EXIT;
+      CASE pServiceDocType OF
+        pServiceDocType::Service  : BEGIN
+          lService.SETRANGE("Service No.", "Service No.");
+          IF "Service No." = '' THEN BEGIN
+            lService.SETFILTER("Contact No.", "Contact No.");
+            lService.SETFILTER("Corporate No.", "Corporate No.");
+            lService.SETFILTER("Contact Name", Name);
+          END;
+          IF lServiceSearchMgt.SearchService(lService, lServiceNo) THEN BEGIN
+            VALIDATE("Service Document Type", "Service Document Type"::Service);
+            VALIDATE("Service No.", lServiceNo);
+            MODIFY(TRUE);
+          END;
+        END;
+        pServiceDocType::"Service Header" : BEGIN
+          lServiceHeader.SETRANGE("Document Type", lServiceHeader."Document Type"::Invoice);
+          lServiceHeader.SETRANGE("Service No.", "Service No.");
+          lServiceHeader.SETFILTER("No.", "Service Header No.");
+          IF "Service No." = '' THEN BEGIN
+            lServiceHeader.SETFILTER("Contact No.", "Contact No.");
+            lServiceHeader.SETFILTER("Contact Name", Name);
+            lServiceHeader.SETFILTER("Corporate No.", "Corporate No.");
+          END;
+          IF lServiceSearchMgt.SearchServiceHeader(lServiceHeader, lServiceHeaderNo) THEN BEGIN
+            VALIDATE("Service Document Type", "Service Document Type"::"Service Header");
+            VALIDATE("Service Header No.", lServiceHeaderNo);
+            MODIFY(TRUE);
+          END;
+        END;
+        pServiceDocType::Intervention : BEGIN
+          lServIntervLine.SETRANGE("Service No.", "Service No.");
+          lServIntervLine.SETFILTER("Service Header No.", "Service Header No.");
+          IF "Service No." = '' THEN BEGIN
+            lServIntervLine.SETFILTER("Contact No.", "Contact No.");
+            lServIntervLine.SETFILTER("Contact Name", Name);
+            lServIntervLine.SETFILTER("Corporate No.", "Corporate No.");
+          END;
+          IF lServiceSearchMgt.SearchServiceInterv(lServIntervLine, lServiceHeaderNo, lServInterventionLineNo) THEN BEGIN
+            VALIDATE("Service Document Type", "Service Document Type"::Intervention);
+            VALIDATE("Service Header No.", lServiceHeaderNo);
+            VALIDATE("Service Intervention Line No.", lServInterventionLineNo);
+            MODIFY(TRUE);
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE SearchServiceDoc@1100281003();
+    VAR
+      lServiceSearchMgt@1100281002 : Codeunit 50060;
+      lServIntervLine@1100281007 : Record 50075;
+      lServiceNo@1100281001 : Code[20];
+      lServiceHeaderNo@1100281004 : Code[20];
+      lServInterventionLineNo@1100281003 : Integer;
+      lServiceType@1100281000 : Option;
+    BEGIN
+      //IMH02 isat.zw
+      IF "Entry No." = 0 THEN
+        EXIT;
+      IF "Service No." <> '' THEN
+        lServIntervLine.SETFILTER("Service No.", "Service No.");
+      lServIntervLine.SETFILTER("Service Header No.", "Service Header No.");
+      IF "Service No." = '' THEN BEGIN
+        lServIntervLine.SETFILTER("Contact No.", "Contact No.");
+        //lServIntervLine.SETFILTER("Contact Name", Name);
+        //lServIntervLine.SETFILTER("Corporate No.", "Corporate No.");
+      END;
+      IF lServiceSearchMgt.SearchServiceDoc(lServIntervLine, lServiceType,
+                                            lServiceNo, lServiceHeaderNo, lServInterventionLineNo) THEN BEGIN
+        VALIDATE("Service Document Type", lServiceType + 1);
+        VALIDATE("Service No.", lServiceNo);
+        VALIDATE("Service Header No.", lServiceHeaderNo);
+        VALIDATE("Service Intervention Line No.", lServInterventionLineNo);
+        MODIFY(TRUE);
+      END;
+    END;
+
+    PROCEDURE ShowAttachment@1100281002();
+    VAR
+      lDocAttachment@1100281000 : Record 50021;
+      lAttachmentMgt@1100281001 : Codeunit 50002;
+    BEGIN
+      lDocAttachment.SETRANGE(lDocAttachment."Referent Table No.", DATABASE::"Document Queue");
+      lDocAttachment.SETRANGE("Key Integer 1", "Queue Type");
+      lDocAttachment.SETRANGE("Key Integer 2", "Entry No.");
+      lDocAttachment.SETRANGE("Key Code 1", "Flow Code");
+
+      IF lDocAttachment.COUNT = 1 THEN BEGIN
+        lDocAttachment.FINDFIRST;
+        lAttachmentMgt.ShowAttachment(lDocAttachment)
+      END ELSE
+        FORM.RUN(0, lDocAttachment);
+    END;
+
+    PROCEDURE NewQueueDocument@1100281006(pDocFlowHeader@1100281000 : Record 50107);
+    BEGIN
+      pDocFlowHeader.TESTFIELD("Flow Code");
+      FILTERGROUP(4);
+      SETRANGE("Flow Code", pDocFlowHeader."Flow Code");
+      SETRANGE("Queue Type", pDocFlowHeader."Queue Type");
+      SETRANGE("Document Flow Header No.", pDocFlowHeader."No.");
+      FILTERGROUP(0);
+
+      INIT;
+      VALIDATE("Flow Code", pDocFlowHeader."Flow Code");
+      VALIDATE("Queue Type", pDocFlowHeader."Queue Type");
+      VALIDATE("Document Flow Header No.", pDocFlowHeader."No.");
+      INSERT(TRUE);
+    END;
+
+    PROCEDURE ShowCard@1100281004();
+    BEGIN
+      FORM.RUN(FORM::"Document Queue Card", Rec);
+    END;
+
+    PROCEDURE DeleteLine@1100281005();
+    VAR
+      lDocQueue@1100281000 : Record 50054;
+    BEGIN
+      //IF NOT CONFIRM(Text001) THEN
+      //  EXIT;
+      lDocQueue.SETCURRENTKEY("Origin Entry No.");
+      lDocQueue.SETRANGE("Origin Entry No.", "Entry No.");
+      lDocQueue.MODIFYALL("Origin Entry No.", 0);
+
+      lDocQueue.SETCURRENTKEY("Linked Entry No.");
+      lDocQueue.SETRANGE("Linked Entry No.", "Entry No.");
+      lDocQueue.MODIFYALL("Linked Entry No.", 0);
+
+      DeleteDocAttachment(FALSE);
+      DELETE(FALSE);
+    END;
+
+    PROCEDURE DeleteDocAttachment@1100281008(pDeleteAll@1100281002 : Boolean);
+    VAR
+      lDocAttachment@1100281001 : Record 50021;
+      lDocAttachmentMgt@1100281000 : Codeunit 50002;
+    BEGIN
+      lDocAttachment.SETRANGE("Referent Table No.", DATABASE::"Document Queue");
+      lDocAttachment.SETRANGE("Key Integer 1", "Queue Type");
+      lDocAttachment.SETRANGE("Key Integer 2", "Entry No.");
+      lDocAttachment.SETRANGE("Key Code 1", "Flow Code");
+
+      IF lDocAttachment.FINDFIRST THEN
+        REPEAT
+          IF NOT pDeleteAll THEN BEGIN
+            IF NOT lDocAttachment.Deleted THEN
+              lDocAttachmentMgt.DeleteAttachment(lDocAttachment, FALSE);
+          END ELSE BEGIN
+            lDocAttachmentMgt.DeleteAllAttachment(lDocAttachment, FALSE)
+          END;
+        UNTIL lDocAttachment.NEXT = 0;
+    END;
+
+    PROCEDURE DeleteFromDocFlowHeader@1100281016();
+    VAR
+      lDocQueue@1100281000 : Record 50054;
+    BEGIN
+      {
+      IF "Origin Entry No." <> 0 THEN BEGIN
+        IF lDocQueue.GET(lDocQueue."Origin Entry No.") THEN BEGIN
+          lDocQueue.VALIDATE("Document Flow Header No.", '');
+          lDocQueue.MODIFY(TRUE);
+        END;
+
+        lDocQueue.SETCURRENTKEY("Origin Entry No.");
+        lDocQueue.SETRANGE("Origin Entry No.", "Origin Entry No.");
+        IF NOT lDocQueue.ISEMPTY THEN
+          lDocQueue.MODIFYALL("Document Flow Header No.", '', TRUE);
+      END ELSE BEGIN
+        lDocQueue.SETCURRENTKEY("Origin Entry No.");
+        lDocQueue.SETRANGE("Origin Entry No.", "Entry No.");
+        IF NOT lDocQueue.ISEMPTY THEN
+          lDocQueue.MODIFYALL("Document Flow Header No.", '', TRUE);
+
+      END;
+      }
+      VALIDATE("Document Flow Header No.", '');
+      MODIFY(TRUE);
+    END;
+
+    PROCEDURE CheckVatAmount@1100281007(pOpt@1100281000 : 'HT,TVA,TTC';pBooBlocage@1100281003 : Boolean) rMessage : Text[100];
+    VAR
+      lCstTxt001@1100281001 : TextConst 'FRA=Montant TTC <> Montant HT + Montant TVA \‚cart constat‚ : %1';
+      lDecDiff@1100281002 : Decimal;
+      lAmount@1100281004 : Decimal;
+      lMessage@1100281005 : Boolean;
+    BEGIN
+      //IMH05
+      IF Amount <> 0 THEN
+        lAmount := Amount
+      ELSE
+        lAmount := "Exempt VAT Base Amount" + "Reduced VAT Base Amount" + "Normal VAT Base Amount";
+
+      lDecDiff := ABS("Amount Including VAT" - lAmount - "Amount VAT");
+
+      IF lDecDiff<>0 THEN
+        IF pBooBlocage = TRUE THEN
+          ERROR(lCstTxt001,lDecDiff)
+        ELSE
+          CASE pOpt OF
+          pOpt::HT :
+            BEGIN
+              IF ("Amount VAT"<>0) AND ("Amount Including VAT"<>0) THEN
+                rMessage := STRSUBSTNO(lCstTxt001,lDecDiff);
+            END;
+          pOpt::TVA :
+            BEGIN
+              IF (lAmount<>0) AND ("Amount Including VAT"<>0) THEN
+                rMessage := STRSUBSTNO(lCstTxt001,lDecDiff);
+            END;
+          pOpt::TTC :
+            BEGIN
+              IF ("Amount VAT"<>0) AND (lAmount<>0) THEN
+                rMessage := STRSUBSTNO(lCstTxt001,lDecDiff);
+            END;
+          END;
+      IF rMessage <> '' THEN
+        IF NOT HideMessage THEN
+          MESSAGE(rMessage);
+    END;
+
+    PROCEDURE SetHideMessage@1100281009(pHideMessage@1100281000 : Boolean);
+    BEGIN
+      //IMH07
+      pHideMessage := HideMessage;
+    END;
+
+    PROCEDURE SearchServiceTypeDocument@1100281010();
+    VAR
+      lServInterLine@1100281002 : Record 50075;
+      lpServInterLine@1100281001 : Page 50069;
+      lfServInterLine@1100281003 : Form 50069;
+    BEGIN
+      CASE "Document Type" OF
+        "Document Type"::Invoice: SearchServiceDetail;
+        "Document Type"::Quote: SearchInterventionLine;
+        "Document Type"::"Service Request": SearchServiceDetail;
+        "Document Type"::Minutes: SearchInterventionLine;
+        "Document Type"::"Provider Document": SearchServiceDetail;
+        "Document Type"::Claim: SearchInterventionLine;
+      END;
+    END;
+
+    PROCEDURE SearchServiceDetail@1100281011();
+    VAR
+      lServInterLine@1100281002 : Record 50075;
+      lpServInterLine@1100281001 : Page 50069;
+      lfServInterLine@1100281000 : Form 50069;
+      lServHeaderVoucher@1100281003 : Record 50103;
+    BEGIN
+      lServHeaderVoucher.RESET;
+      lServHeaderVoucher.SETCURRENTKEY("Service No.");
+      lServHeaderVoucher.SETFILTER("Service No.",'*' + FORMAT("Service No.") + '*');
+      IF ("Contact No." <> '') THEN
+        lServHeaderVoucher.SETFILTER("Reimbursement Contact No.",'*' + FORMAT("Contact No.") + '*');
+      IF (lServHeaderVoucher.COUNT = 0) THEN
+        SearchInterventionLine
+      ELSE BEGIN
+        lServInterLine.RESET;
+        lServInterLine.SETCURRENTKEY("Service No.","Service Header No.","Line No.");
+        IF ("Contact No." <> '') THEN
+          lServInterLine.SETRANGE("Provider No.","Contact No.");
+        lServInterLine.SETFILTER("Service No.",'*' + FORMAT("Service No.") + '*');
+        IF (lServInterLine.COUNT = 0) THEN
+          SearchVoucher
+        ELSE
+          SearchServiceHeader;
+      END;
+    END;
+
+    PROCEDURE SearchInterventionLine@1100281012();
+    VAR
+      lServInterLine@1100281002 : Record 50075;
+      lpServInterLine@1100281001 : Page 50069;
+      lfServInterLine@1100281000 : Form 50069;
+    BEGIN
+      lServInterLine.RESET;
+      lServInterLine.SETFILTER("Service No.",'*' + FORMAT("Service No.") + '*');
+      IF (lServInterLine.COUNT = 1) THEN
+      BEGIN
+        lServInterLine.FINDFIRST;
+      END ELSE BEGIN
+        lServInterLine.SETCURRENTKEY("Provider No.","Mission Status","Intervention Status",Suspended,Closed);
+        IF ("Contact No." <> '') THEN
+          lServInterLine.SETRANGE("Provider No.","Contact No.");
+        lServInterLine.SETFILTER("Service No.",'*' + FORMAT("Service No.") + '*');
+        IF (lServInterLine.COUNT = 1) THEN
+        BEGIN
+          lServInterLine.FINDFIRST;
+        END ELSE BEGIN
+          IF ISSERVICETIER THEN
+          BEGIN
+             CLEAR(lpServInterLine);
+             lpServInterLine.SETRECORD(lServInterLine);
+             lpServInterLine.SETTABLEVIEW(lServInterLine);
+             lpServInterLine.LOOKUPMODE(TRUE);
+             IF (lpServInterLine.RUNMODAL = ACTION::LookupOK) THEN
+               lpServInterLine.GETRECORD(lServInterLine)
+             ELSE
+               lServInterLine.INIT;
+          END ELSE BEGIN
+             CLEAR(lfServInterLine);
+             lfServInterLine.SETRECORD(lServInterLine);
+             lfServInterLine.SETTABLEVIEW(lServInterLine);
+             lfServInterLine.LOOKUPMODE(TRUE);
+             IF (lfServInterLine.RUNMODAL = ACTION::LookupOK) THEN
+               lfServInterLine.GETRECORD(lServInterLine)
+             ELSE
+               lServInterLine.INIT;
+          END;
+        END;
+      END;
+
+      IF (lServInterLine."Service Header No." <> '') THEN
+      BEGIN
+        "Service No." := lServInterLine."Service No.";
+        "Service Document No." := lServInterLine."Service Header No.";
+        "Service Intervention Line No." := lServInterLine."Line No.";
+        "Service Header No." := lServInterLine."Service Header No.";
+        "Service Intervention No." := lServInterLine."Intervention No.";
+        "Service Intervention Line No." := lServInterLine."Line No.";
+        "Corporate No."  := lServInterLine."Corporate No.";
+        IF "Document Type" <> "Document Type"::Invoice THEN
+          IF "Contact No." = '' THEN
+            VALIDATE("Contact No.", lServInterLine."Contact No.");
+      END;
+    END;
+
+    PROCEDURE SearchVoucher@1100281018();
+    VAR
+      lService@1100281002 : Record 50066;
+      lServHeaderVoucher@1100281003 : Record 50103;
+    BEGIN
+      lServHeaderVoucher.RESET;
+      lServHeaderVoucher.SETCURRENTKEY("Service No.");
+      lServHeaderVoucher.SETFILTER("Service No.",'*' + FORMAT("Service No.") + '*');
+      IF (lServHeaderVoucher.COUNT = 1) THEN
+      BEGIN
+        lServHeaderVoucher.FINDFIRST;
+        VALIDATE("Service No.", lServHeaderVoucher."Service No.");
+        "Service Document No." := lServHeaderVoucher."Service Header No.";
+        "Service Header No." := lServHeaderVoucher."Service Header No.";
+        lService.GET(lServHeaderVoucher."Service No.");
+        "Corporate No."  := lService."Corporate No.";
+      END ELSE BEGIN
+        SearchServiceHeader;
+      END;
+    END;
+
+    PROCEDURE SearchServiceHeader@1100281017();
+    VAR
+      lServHeader@1100281002 : Record 5900;
+      lpServiceHeaderList@1100281004 : Page 50075;
+      lfServiceHeaderList@1100281003 : Form 50075;
+      lService@1100281000 : Record 50066;
+    BEGIN
+      lServHeader.RESET;
+      lServHeader.SETCURRENTKEY("Service No.");
+      lServHeader.SETFILTER("Service No.",'*' + FORMAT("Service No.") + '*');
+      IF (lServHeader.COUNT = 1) THEN
+      BEGIN
+        lServHeader.FINDFIRST;
+      END ELSE BEGIN
+        IF ISSERVICETIER THEN
+        BEGIN
+          CLEAR(lpServiceHeaderList);
+          lpServiceHeaderList.SETRECORD(lServHeader);
+          lpServiceHeaderList.SETTABLEVIEW(lServHeader);
+          lpServiceHeaderList.LOOKUPMODE(TRUE);
+          IF (lpServiceHeaderList.RUNMODAL = ACTION::LookupOK) THEN
+            lpServiceHeaderList.GETRECORD(lServHeader)
+          ELSE
+            lServHeader.INIT;
+        END ELSE BEGIN
+          CLEAR(lfServiceHeaderList);
+          lfServiceHeaderList.SETRECORD(lServHeader);
+          lfServiceHeaderList.SETTABLEVIEW(lServHeader);
+          lfServiceHeaderList.LOOKUPMODE(TRUE);
+          IF (lfServiceHeaderList.RUNMODAL = ACTION::LookupOK) THEN
+            lfServiceHeaderList.GETRECORD(lServHeader)
+          ELSE
+            lServHeader.INIT;
+        END;
+      END;
+
+      IF (lServHeader."No." <> '') THEN
+      BEGIN
+        VALIDATE("Service No.", lServHeader."Service No.");
+        "Service Document No." := lServHeader."No.";
+        "Service Header No." := lServHeader."No.";
+        "Corporate No."  := lServHeader."Corporate No.";
+      END;
+    END;
+
+    PROCEDURE GetServiceByIMARefNo@1100281014();
+    VAR
+      lService@1100281000 : Record 50066;
+      lIMARefNoSave@1100281001 : Text[30];
+    BEGIN
+      //IMH17
+      lIMARefNoSave := "IMA Reference No.";
+      VALIDATE("Service No.", '');
+      VALIDATE("Service Header No.", '');
+      VALIDATE("Service Intervention Line No.", 0);
+      VALIDATE("Service Intervention No.", 0);
+
+      IF lIMARefNoSave = '' THEN BEGIN
+        "IMA Reference No." := lIMARefNoSave;
+        EXIT;
+      END;
+      lService.SETCURRENTKEY("IMA Reference No.");
+      lService.SETRANGE("IMA Reference No.", "IMA Reference No.");
+
+      IF lService.FINDLAST THEN
+        VALIDATE("Service No.", lService."Service No.");
+
+      "IMA Reference No." := lIMARefNoSave;
+      MODIFY(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH17 @d 23/05/14 @a ISAT.ZW @v IMH6.01.P010 @s Projet PMU
+          @c Ajouter champ 57013 chmap IMA Reference No. */
+      /** @r IMH16 @d 03/04/12 @a ISAT.ST @v IMH6.01.165 @s Extranet - Mantis @h 3039 @c Ajout champ 1052 Skip Document Create */
+      /** @r IMH15 @d 12/03/12 @a ISAT.PC @v IMH6.01.165 @s GED @h 3057
+          @c Ajout champ 50551, Tray Line
+          @c Ajout champ 50552, Tray Line History */
+      /** @r IMH14 @d 05/03/12 @a ISAT.PC @v IMH6.01.165 @s GED @c Ajout champ nø3000, Delay
+          @c Ajout de la cl‚ "Document Flow Header No.","Delay" pour la gestion des flux en retard
+          @c Ajout de la cl‚ "Creation Date" pour l'extraction par date pour la mise en retard */
+      /** @r IMH13 @d 08/02/12 @a ISAT.ZW @v IMH6.01.165 @s GED
+          @c Gestion nø s‚quence */
+      /** @r IMH12 @d 12/08/11 @a ISAT.EB @v IMH6.01.165 @s Extranet Prestataire
+          @c Ajout index "Contact No." */
+      /** @r IMH11 @d 09/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Ajout champ 1126 "Service Intervention Quote No." (supprim‚ quand ?) */
+      /** @r IMH10 @d 19/07/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Optimisation validate Source no. */
+      /** @r IMH09 @d 11/07/11 @a ISAT.ZW @v IMH6.01.165 @s Extranet
+          @c ajout Champ 50000 control‚*/
+      /** @r IMH07 @d 05/07/11 @a ISAT.ZW @v IMH6.01.165 @s Extranet
+          @c ajout FOnciton sethidemessage*/
+      /** @r IMH06 @d 05/07/11 @a ISAT.PC @v IMH6.01.165 @s Extranet
+          @c ajout champ 2100, Status To Qualify
+          @c ajout champ 2101, Description qualification*/
+      /** @r IMH05 @d 21/03/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c Gestion flux entrant */
+      /** @r IMH04 @d 09/11/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Passage champ Service No. de integer … code(20) */
+      /** @r IMH03 @d 19/09/10 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention @c Ajout champ Document type + Intervention No. */
+      /** @r IMH02 @d 19/09/10 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention @c Gestion de recherche Contact + Service */
+      /** @r IMH01 @d 27/09/10 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

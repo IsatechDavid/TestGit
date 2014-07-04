@@ -1,0 +1,354 @@
+OBJECT Report 50007 Service Time Process
+{
+  OBJECT-PROPERTIES
+  {
+    Date=03/12/10;
+    Time=08:50:07;
+    Modified=Yes;
+    Version List=A suppr,M4004;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Service Time Process;
+               FRA=Processus temps service];
+    ProcessingOnly=Yes;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50067;
+        DataItemTableView=SORTING(Timing Process,User ID,Start DateTime)
+                          WHERE(Timing Process=CONST(No));
+        OnPreDataItem=BEGIN
+                        IF NOT GUIALLOWED THEN
+                          HideDialog := TRUE;
+                        LoadSessionTempTable;
+                        LaunchProcess;
+                        CurrReport.BREAK;
+                      END;
+
+        ReqFilterFields=User ID,Service No.,Service Header No.,Intervention Line No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      ServTimeRegister@1100281004 : Record 50067;
+      SessionTemp@1100281000 : TEMPORARY Record 2000000009;
+      ServTimeTemp@1100281003 : TEMPORARY Record 50067 INDATASET;
+      LastReg@1100281005 : Record 50067;
+      LastDateTime@1100281002 : DateTime;
+      FirstReg@1100281001 : Boolean;
+      Window@1100281006 : Dialog;
+      Text001@1100281007 : TextConst 'ENU=Processing user #1#####################\Service #2#####################;FRA=Traitement utilisateur #1#####################\Service #2#####################';
+      HideDialog@1100281008 : Boolean;
+
+    PROCEDURE LaunchProcess@1100281064();
+    VAR
+      lServTimeReg@1100281000 : Record 50067;
+      lNextServTimeReg@1100281001 : Record 50067;
+      lUserSetup@1100281002 : Record 91;
+      lTempUserSetup@1100281005 : TEMPORARY Record 91;
+      lDateTime@1100281003 : DateTime;
+      lFirstRec@1100281004 : Boolean;
+    BEGIN
+      ServTimeRegister.COPY("Service Time Register");
+      ServTimeRegister.FILTERGROUP(2);
+      ServTimeRegister.SETFILTER("Entry No.", '>=%1', 0);
+      ServTimeRegister.FILTERGROUP(0);
+      IF ServTimeRegister.ISEMPTY THEN
+        EXIT;
+
+      ServTimeRegister.FINDFIRST;
+      REPEAT
+        IF NOT lTempUserSetup.GET(ServTimeRegister."User ID") THEN BEGIN
+          lTempUserSetup."User ID" := ServTimeRegister."User ID";
+          lTempUserSetup.INSERT;
+        END;
+      UNTIL ServTimeRegister.NEXT = 0;
+      IF NOT lTempUserSetup.FINDSET THEN
+        EXIT;
+      IF NOT HideDialog THEN
+        Window.OPEN(Text001);
+      REPEAT
+        IF NOT HideDialog THEN
+          Window.UPDATE(1,lTempUserSetup."User ID");
+        ServTimeRegister.RESET;
+        ServTimeRegister.COPY("Service Time Register");
+        ServTimeRegister.FILTERGROUP(2);
+        ServTimeRegister.SETFILTER("Entry No.", '>=%1', 0);
+        ServTimeRegister.FILTERGROUP(0);
+        ServTimeRegister.SETRANGE("User ID", lTempUserSetup."User ID");
+        SessionTemp.SETCURRENTKEY("User ID");
+        SessionTemp.SETRANGE("User ID", lTempUserSetup."User ID");
+        IF NOT SessionTemp.ISEMPTY THEN BEGIN
+          SessionTemp.FINDFIRST;
+          lDateTime := CREATEDATETIME(SessionTemp."Login Date", SessionTemp."Login Time");
+          ServTimeRegister.SETFILTER("Start DateTime", '<%1', lDateTime);
+        END
+        ELSE
+          ServTimeRegister.SETFILTER("Start DateTime", '<%1', CURRENTDATETIME);
+        IF ServTimeRegister.FINDFIRST THEN BEGIN
+          REPEAT
+            IF NOT HideDialog THEN
+              Window.UPDATE(2,ServTimeRegister."Service No.");
+
+            lNextServTimeReg.RESET;
+            lNextServTimeReg.COPY(ServTimeRegister);
+            lNextServTimeReg := ServTimeRegister;
+            IF lNextServTimeReg.NEXT = 0 THEN BEGIN
+              ServTimeRegister."Corrected Time" := ServTimeRegister."Open Time";
+              ServTimeRegister.MODIFY;
+            END ELSE BEGIN
+              IF ServTimeRegister."End DateTime" < lNextServTimeReg."Start DateTime" THEN BEGIN
+                ServTimeRegister."Corrected Time" := ServTimeRegister."Open Time";
+                ServTimeRegister.MODIFY;
+              END ELSE BEGIN
+                ServTimeTemp.DELETEALL;
+                AddNewPeriodToTemp(ServTimeRegister);
+                LastDateTime := ServTimeRegister."End DateTime";
+                TreatLine(ServTimeRegister, lNextServTimeReg);
+                ServTimeRegister := LastReg;
+              END;
+            END;
+          UNTIL ServTimeRegister.NEXT = 0;
+          lServTimeReg.COPY(ServTimeRegister);
+          lServTimeReg.MODIFYALL("Timing Process", TRUE);
+        END;
+        COMMIT;
+      UNTIL lTempUserSetup.NEXT = 0;
+      IF NOT HideDialog THEN
+        Window.CLOSE;
+    END;
+
+    PROCEDURE LoadSessionTempTable@1100281003();
+    VAR
+      lSession@1100281000 : Record 2000000009;
+      lDateTime@1100281001 : DateTime;
+      lUserID@1100281002 : Code[50];
+    BEGIN
+      SessionTemp.DELETEALL;
+      IF lSession.ISEMPTY THEN
+        EXIT;
+      lSession.FINDFIRST;
+      SessionTemp.SETCURRENTKEY("User ID");
+      REPEAT
+        IF STRPOS(lSession."User ID", '\') > 0 THEN
+          lUserID := COPYSTR(lSession."User ID",STRPOS(lSession."User ID", '\')+1)
+        ELSE
+          lUserID := lSession."User ID";
+        SessionTemp.SETRANGE(SessionTemp."User ID", lUserID);
+        IF SessionTemp.FINDFIRST THEN BEGIN
+          IF SessionTemp."Login Date" > lSession."Login Date" THEN BEGIN
+            SessionTemp."Login Date" := lSession."Login Date";
+            SessionTemp."Login Time" := lSession."Login Time";
+            SessionTemp.MODIFY;
+          END ELSE BEGIN
+            IF SessionTemp."Login Date" = lSession."Login Date" THEN
+              IF SessionTemp."Login Time" > lSession."Login Time" THEN BEGIN
+                SessionTemp."Login Time" := lSession."Login Time";
+                SessionTemp.MODIFY;
+              END;
+          END;
+        END ELSE BEGIN
+          SessionTemp := lSession;
+          SessionTemp."User ID" := lUserID;
+          SessionTemp.INSERT(FALSE);
+        END;
+      UNTIL lSession.NEXT = 0;
+    END;
+
+    PROCEDURE CheckRegisterLine@1100281002(pServiceTimeRegister@1100281000 : Record 50067) : Boolean;
+    VAR
+      lDateTime@1100281001 : DateTime;
+    BEGIN
+      SessionTemp.SETCURRENTKEY("User ID");
+      SessionTemp.SETRANGE(SessionTemp."User ID", pServiceTimeRegister."User ID");
+      IF SessionTemp.ISEMPTY THEN
+        EXIT(TRUE);
+      SessionTemp.FINDFIRST;
+      lDateTime := CREATEDATETIME(SessionTemp."Login Date", SessionTemp."Login Time");
+      IF lDateTime > pServiceTimeRegister."Start DateTime" THEN
+        EXIT(TRUE);
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE TreatLine@1100281004(VAR pParentRegister@1100281000 : Record 50067;VAR pSonRegister@1100281001 : Record 50067);
+    VAR
+      lParentRegister@1100281007 : Record 50067;
+      lSonRegister@1100281006 : Record 50067;
+      lSaveSonRegister@1100281002 : Record 50067;
+      lLastRegister@1100281003 : Boolean;
+      lFinish@1100281005 : Boolean;
+      lNextRegister@1100281004 : Record 50067;
+      lCount@1100281008 : Integer;
+    BEGIN
+      AddNewPeriodToTemp(pSonRegister);
+      lCount := ServTimeTemp.COUNT;
+      IF pParentRegister."End DateTime" > pSonRegister."Start DateTime" THEN BEGIN
+        pParentRegister."Corrected Time" :=
+            ROUND((pSonRegister."Start DateTime" - pParentRegister."Start DateTime") / 1000, 1);
+        DelPeriodFromTemp(pParentRegister."Start DateTime", pSonRegister."Start DateTime");
+        lCount := ServTimeTemp.COUNT;
+        pParentRegister.MODIFY;
+      END ELSE BEGIN
+        pParentRegister."Corrected Time" := pParentRegister."Open Time";
+        DelPeriodFromTemp(pParentRegister."Start DateTime", pParentRegister."End DateTime");
+        lCount := ServTimeTemp.COUNT;
+        pParentRegister.MODIFY;
+      END;
+
+      IF LastDateTime < pSonRegister."End DateTime" THEN
+        LastDateTime := pSonRegister."End DateTime";
+
+      lSaveSonRegister.COPY(pSonRegister);
+      lSaveSonRegister := pSonRegister;
+      lSonRegister.COPY(pSonRegister);
+      lSonRegister := pSonRegister;
+      IF lSonRegister.NEXT = 0 THEN BEGIN
+        lLastRegister := TRUE;
+        LastReg := lSaveSonRegister;
+      END ELSE BEGIN
+        IF lSonRegister."Start DateTime" > LastDateTime THEN BEGIN
+          lLastRegister := TRUE;
+          LastReg := lSaveSonRegister;
+        END ELSE
+          TreatLine(lSaveSonRegister, lSonRegister);
+      END;
+
+      IF lLastRegister THEN BEGIN
+        lSaveSonRegister.GET(lSaveSonRegister."Service No.", lSaveSonRegister."Service Header No.",
+                             lSaveSonRegister."Intervention Line No.", lSaveSonRegister."Entry No.");
+        lSaveSonRegister."Corrected Time" := lSaveSonRegister."Open Time";
+        DelPeriodFromTemp(lSaveSonRegister."Start DateTime", lSaveSonRegister."End DateTime");
+        lCount := ServTimeTemp.COUNT;
+        lSaveSonRegister.MODIFY;
+        lLastRegister := FALSE;
+      END;
+
+      IF pParentRegister."End DateTime" > lSaveSonRegister."End DateTime" THEN BEGIN
+        pParentRegister."Corrected Time" +=
+          DelPeriodFromTemp(lSaveSonRegister."End DateTime", pParentRegister."End DateTime");
+          lCount := ServTimeTemp.COUNT;
+        pParentRegister.MODIFY;
+      END;
+    END;
+
+    PROCEDURE GetLastServTimeRegEntryNo@1100281014() : Integer;
+    VAR
+      lSaveRec@1100281000 : Record 50067;
+    BEGIN
+      ServTimeTemp.RESET;
+      IF ServTimeTemp.FINDLAST THEN
+        EXIT(ServTimeTemp."Entry No." + 1)
+      ELSE
+        EXIT(1);
+    END;
+
+    PROCEDURE AddNewPeriodToTemp@1100281017(FromTimeReg@1100281000 : Record 50067);
+    BEGIN
+      ServTimeTemp.RESET;
+      ServTimeTemp.SETCURRENTKEY(ServTimeTemp."End DateTime");
+      IF ServTimeTemp.FINDFIRST THEN BEGIN
+        IF FromTimeReg."End DateTime" > ServTimeTemp."End DateTime" THEN BEGIN
+          ServTimeTemp."End DateTime" := FromTimeReg."End DateTime";
+          ServTimeTemp.MODIFY;
+        END;
+      END ELSE BEGIN
+        ServTimeTemp."Entry No." := 1;
+        ServTimeTemp."Start DateTime" := FromTimeReg."Start DateTime";
+        ServTimeTemp."End DateTime" := FromTimeReg."End DateTime";
+        ServTimeTemp.INSERT;
+      END;
+
+    END;
+
+    PROCEDURE DelPeriodFromTemp@1100281020(pStartDateTime@1100281000 : DateTime;pEndDateTime@1100281001 : DateTime) rDelay : Integer;
+    VAR
+      lStartDateTimeSave@1100281003 : DateTime;
+      lEndDateTimeSave@1100281004 : DateTime;
+      lLastNo@1100281005 : Integer;
+    BEGIN
+      IF pEndDateTime <= pStartDateTime THEN
+        EXIT(0);
+      ServTimeTemp.RESET;
+      ServTimeTemp.SETCURRENTKEY("Timing Process","User ID","Start DateTime");
+
+      IF ServTimeTemp.FINDFIRST THEN BEGIN
+        REPEAT
+          CASE TRUE OF
+            pEndDateTime < ServTimeTemp."Start DateTime" : EXIT;
+            pStartDateTime > ServTimeTemp."End DateTime" : ;
+            (pStartDateTime > ServTimeTemp."Start DateTime") AND
+                    (pEndDateTime >= ServTimeTemp."End DateTime") : BEGIN
+              lStartDateTimeSave := pStartDateTime;
+              pStartDateTime := ServTimeTemp."End DateTime";
+              ServTimeTemp."End DateTime" := lStartDateTimeSave;
+              ServTimeTemp.MODIFY;
+              rDelay += ROUND((pStartDateTime - lStartDateTimeSave) / 1000, 1);
+              IF rDelay < 0 THEN
+                ERROR('1');
+              IF pStartDateTime  = pEndDateTime THEN
+                EXIT;
+            END;
+            (pStartDateTime <= ServTimeTemp."Start DateTime") AND
+                    (pEndDateTime >= ServTimeTemp."End DateTime") : BEGIN
+              lStartDateTimeSave := pStartDateTime;
+              pStartDateTime := ServTimeTemp."End DateTime";
+              rDelay += ROUND((ServTimeTemp."End DateTime" - ServTimeTemp."Start DateTime") / 1000, 1);
+              ServTimeTemp.DELETE;
+              IF rDelay < 0 THEN
+                ERROR('1');
+              IF pStartDateTime  = pEndDateTime THEN
+                EXIT;
+            END;
+          END;
+        UNTIL ServTimeTemp.NEXT = 0;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 03/12/10 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c Cr‚ation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

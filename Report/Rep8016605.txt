@@ -1,0 +1,733 @@
+OBJECT Report 8016605 Unreceived Invoices
+{
+  OBJECT-PROPERTIES
+  {
+    Date=15/02/10;
+    Time=14:50:16;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Unreceived Invoices;
+               FRA=Factures non parvenues];
+    OnPostReport=BEGIN
+                    IF Excell THEN
+                       SendToExcell;
+                 END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table32;
+        DataItemTableView=SORTING(Source Type,Source No.,Document No.,Posting Date)
+                          WHERE(Source Type=CONST(Vendor),
+                                Entry Type=CONST(Purchase));
+        DataItemVarName=ILEHeader;
+        OnPreDataItem=BEGIN
+                        InitSendToExcell;
+
+                        IF SituationDate = 0D THEN BEGIN
+                          IF CONFIRM(textconfirm01) THEN BEGIN
+                            SituationDate := WORKDATE
+                          END ELSE BEGIN
+                            EXIT;
+                          END;
+                        END;
+
+                        // ISA01 ajout du filtre fournisseur
+                        VendorFilter := GETFILTER("Source No.");
+                        IF VendorFilter <> ' ' THEN
+                          VendorFilterText := VendorFilterText
+                        ELSE
+                          VendorFilterText := '' ;
+
+                        // R‚ception avant la date
+                        SETFILTER("Posting Date",'<=' + FORMAT(SituationDate));
+                        SavILEHeader.INIT;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF ILEHeader."Source No." = SavILEHeader."Source No." THEN
+                             CurrReport.SKIP;
+                           SavILEHeader := ILEHeader;
+                         END;
+
+        ReqFilterFields=Source No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18300;
+            SectionHeight=2593;
+          }
+          CONTROLS
+          {
+            { 1000000004;TextBox;15000;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1000000007;TextBox;17700;423  ;450  ;423  ;CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 1000000006;Label  ;16950;423  ;750  ;423  ;ParentControl=1000000007 }
+            { 1000000009;TextBox;15900;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+            { 1000000003;Label  ;0    ;0    ;7500 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Vendors Amount Outstanding Not Invoiced;
+                                                                    FRA=Encours fournisseurs non factur‚s] }
+            { 1000000008;TextBox;0    ;423  ;7500 ;423  ;SourceExpr=COMPANYNAME }
+            { 1000000002;TextBox;4500 ;1269 ;3000 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=date;
+                                                                    FRA=Date];
+                                                         SourceExpr=SituationDate }
+            { 1000000005;Label  ;1650 ;846  ;2700 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Receipt;
+                                                                    FRA=R‚ception] }
+            { 1000000048;Label  ;1650 ;1269 ;2700 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Situation Date;
+                                                                    FRA=Date de situation] }
+            { 1000000036;Shape  ;150  ;2563 ;17850;30   ;ShapeStyle=HorzLine }
+            { 1100281000;TextBox;1650 ;1692 ;2700 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=VendorFilterText }
+            { 1100281001;TextBox;4500 ;1692 ;3000 ;423  ;FontSize=8;
+                                                         SourceExpr=VendorFilter }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table32;
+        DataItemTableView=SORTING(Source Type,Source No.,Document No.,Posting Date)
+                          WHERE(Source Type=CONST(Vendor),
+                                Entry Type=CONST(Purchase));
+        OnPreDataItem=BEGIN
+                        // R‚ception avant la date
+                        SETFILTER("Posting Date",'<=' + FORMAT(SituationDate));
+                        CurrReport.CREATETOTALS(LineAmount,LineAmountVAT);
+                      END;
+
+        OnAfterGetRecord=VAR
+                           ValueEntry@1000000001 : Record 5802;
+                           InvQty@1000000000 : Decimal;
+                           locILE@1000000002 : Record 32;
+                           GetIle@1000000003 : Boolean;
+                         BEGIN
+                           InvQty := 0;
+                           LineAmount := 0;
+
+                           IF "Last Invoice Date" <> 0D THEN BEGIN
+                             // Recu et factur‚ entiŠrement avant la date
+                             IF "Completely Invoiced" AND ("Last Invoice Date" <= SituationDate) THEN BEGIN
+                               CurrReport.SKIP;
+                             END;
+
+                             IF "Last Invoice Date" > SituationDate THEN BEGIN
+                               // DerniŠre facturation aprŠs la date
+                               // Ecritures valeurs correspondantes … l'‚criture article
+                               ValueEntry.SETRANGE("Item Ledger Entry Type",ValueEntry."Item Ledger Entry Type"::Purchase);
+                               ValueEntry.SETRANGE("Item Ledger Entry No.","Entry No.");
+                               ValueEntry.SETRANGE("Entry Type",ValueEntry."Entry Type"::"Direct Cost");
+                               // Une ou plusieurs facturation(s)
+                               IF ValueEntry.COUNT > 1 THEN BEGIN
+                                 // Ne tient compte que des receptions no vides
+                                 ValueEntry.SETFILTER("Invoiced Quantity",'>0');
+                                 IF ValueEntry.FIND('-') THEN BEGIN
+                                   REPEAT
+                                     IF ValueEntry."Posting Date" <= SituationDate THEN BEGIN
+                                       InvQty := InvQty + ValueEntry."Invoiced Quantity";
+                                     END;
+                                   UNTIL ValueEntry.NEXT = 0;
+                                 END;
+                               END;
+                               IF InvQty = Quantity THEN BEGIN
+                                 CurrReport.SKIP
+                               END;
+                             END;
+                           END;
+
+                           locILE.SETFILTER("Entry No.",'<>%1',"Entry No.");
+                           locILE.SETRANGE("Item No.","Item No.");
+                           locILE.SETRANGE("Posting Date","Posting Date");
+                           locILE.SETRANGE("Entry Type","Entry Type");
+                           locILE.SETRANGE("Source No.","Source No.");
+                           locILE.SETRANGE("Document No.","Document No.");
+                           locILE.SETRANGE("Location Code","Location Code");
+                           GetIle := FALSE;
+                           IF locILE.FIND('-') THEN BEGIN
+                             IF ((locILE."Applies-to Entry" = "Entry No.") AND
+                                  locILE.Correction) OR
+                                (("Applies-to Entry" = locILE."Entry No.") AND
+                                  Correction) THEN
+                               InvQty += Quantity;
+                             REPEAT
+                               InvQty += locILE.Quantity;
+                               GetIle := TRUE;
+                             UNTIL locILE.NEXT = 0;
+                             IF (InvQty = 0) AND GetIle THEN
+                               CurrReport.SKIP;   // ligne annul‚e
+                             InvQty := 0;
+                           END;
+
+                           PurchRcptHeader.INIT;
+                           PurchRcptLine.INIT;
+                           PurchRcptHeader.SETRANGE("No.","Document No.");
+                           PurchRcptHeader.SETRANGE("Buy-from Vendor No.","Source No.");
+                           //IF PurchRcptHeader.GET("Document No.") THEN BEGIN
+                           IF PurchRcptHeader.FIND('-') THEN BEGIN
+                             PurchRcptLine.RESET;
+                             PurchRcptLine.SETRANGE("Document No.","Document No.");
+                             PurchRcptLine.SETRANGE("No.","Item No.");
+                             //IF NOT PurchRcptLine.FIND('-') THEN
+                             //  PurchRcptLine.INIT;
+                             IF NOT PurchRcptLine.FIND('-') THEN CurrReport.SKIP;
+                             IF (PurchRcptLine."Qty. Rcd. Not Invoiced" = 0) AND
+                               (PurchRcptLine."Quantity Invoiced" = 0)
+                             THEN
+                               CurrReport.SKIP;
+                           END ELSE BEGIN
+                             IF ReturnRcptHeader.GET("Document No.") THEN BEGIN
+                               PurchRcptHeader."Order No.":= ReturnRcptHeader."Return Order No.";
+                               PurchRcptHeader."Posting Date":=ReturnRcptHeader."Posting Date";
+                               ReturnRcptLine.RESET;
+                               ReturnRcptLine.SETRANGE("Document No.","Document No.");
+                               ReturnRcptLine.SETRANGE("No.","Item No.");
+                               //IF NOT ReturnRcptLine.FIND('-') THEN
+                               //  ReturnRcptLine.INIT;
+                               IF NOT ReturnRcptLine.FIND('-') THEN
+                                 CurrReport.SKIP;
+
+                               IF (ReturnRcptLine."Return Qty. Shipped Not Invd." = 0)
+                                AND (ReturnRcptLine."Quantity Invoiced" = 0)
+                               THEN
+                                 CurrReport.SKIP;
+
+                               PurchRcptLine."VAT %" :=ReturnRcptLine."VAT %";
+                             END;
+                           END;
+
+                           Montant := 0;
+                           ValueEntry.RESET;
+                           ValueEntry.SETRANGE("Item Ledger Entry Type",ValueEntry."Item Ledger Entry Type"::Purchase);
+                           ValueEntry.SETRANGE("Item Ledger Entry No.","Entry No.");
+                           ValueEntry.SETRANGE("Entry Type",ValueEntry."Entry Type"::"Direct Cost");
+                           IF ValueEntry.FIND('-') THEN BEGIN
+                             //On parcours les ‚critures valeurs associ‚ … l'‚criture article et on prend le premier cout unitaire no vide;
+                             REPEAT
+                               IF ValueEntry."Posting Date" <= SituationDate THEN BEGIN
+                                 IF Quantity > 0 THEN
+                                   Montant += ABS(ValueEntry."Purchase Amount (Expected)")
+                                 ELSE
+                                   Montant += -ABS(ValueEntry."Purchase Amount (Expected)")
+                               END;
+                             UNTIL (ValueEntry.NEXT = 0);
+                           END;
+
+                           IF (InvQty > 0) AND (Quantity > 0) THEN BEGIN
+                             // Valorisation au prorata de la quantit‚
+                             LineAmount := Montant * ((Quantity - InvQty) / Quantity);
+                           END ELSE BEGIN
+                             LineAmount := Montant;
+                           END;
+
+                           LineAmountVAT := ROUND(LineAmount + (LineAmount * PurchRcptLine."VAT %" / 100 ), 0.01 );
+
+                           IF NOT Item.GET("Item Ledger Entry"."Item No.") THEN
+                             Item.INIT;
+                         END;
+
+        DataItemLink=Source No.=FIELD(Source No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=18300;
+            SectionHeight=2145;
+            OnPreSection=BEGIN
+                           IF Vendor.GET("Item Ledger Entry"."Source No.") THEN;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000019;Shape  ;17850;0    ;300  ;2115 ;ShapeStyle=VertLine }
+            { 1000000017;TextBox;13650;423  ;4050 ;453  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Phone No. :;
+                                                                    FRA=Tel :];
+                                                         SourceExpr=Vendor."Phone No." }
+            { 1000000018;Label  ;11550;423  ;1950 ;453  ;ParentControl=1000000017;
+                                                         HorzAlign=Right;
+                                                         FontSize=10;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000040;Shape  ;150  ;1269 ;17850;30   ;ShapeStyle=HorzLine }
+            { 1000000092;Label  ;15900;1269 ;1950 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Montant TTC] }
+            { 1000000064;Shape  ;15600;1269 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000052;Label  ;13350;1269 ;2250 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Amount HT;
+                                                                    FRA=Montant HT] }
+            { 1000000090;Shape  ;13050;1269 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000059;Label  ;11100;1269 ;1950 ;846  ;ParentControl=1000000112;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000015;TextBox;5400 ;423  ;4050 ;453  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Name;
+                                                                    FRA=Nom];
+                                                         SourceExpr=Vendor.Name }
+            { 1000000053;Shape  ;10800;1269 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000047;Shape  ;8550 ;1269 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000060;Label  ;6600 ;1269 ;1950 ;846  ;ParentControl=1000000121;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000032;Label  ;8850 ;1269 ;1950 ;846  ;VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Groupe compta produit }
+            { 1000000014;TextBox;3000 ;423  ;2250 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU="Vendor : ";
+                                                                    FRA="Fournisseur : "];
+                                                         SourceExpr="Source No." }
+            { 1000000001;Label  ;300  ;423  ;2550 ;453  ;ParentControl=1000000014;
+                                                         HorzAlign=Right;
+                                                         FontSize=10;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000044;Shape  ;6300 ;1269 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000057;Label  ;4500 ;1269 ;1800 ;846  ;ParentControl=1000000117;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         MultiLine=Yes }
+            { 1000000038;Label  ;2400 ;1269 ;1800 ;846  ;ParentControl=1000000116;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         MultiLine=Yes }
+            { 1000000041;Shape  ;4200 ;1269 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000039;Shape  ;2100 ;1269 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000037;Label  ;300  ;1269 ;1800 ;846  ;ParentControl=1000000123;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         MultiLine=Yes }
+            { 1000000074;Shape  ;0    ;0    ;300  ;2115 ;ShapeStyle=VertLine }
+            { 1000000031;Shape  ;150  ;2115 ;17850;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=18300;
+            SectionHeight=1752;
+          }
+          CONTROLS
+          {
+            { 1000000021;Shape  ;17850;0    ;300  ;1722 ;ShapeStyle=VertLine }
+            { 1000000022;TextBox;13650;423  ;4050 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Phone No. :;
+                                                                    FRA=Tel :];
+                                                         SourceExpr=Vendor."Phone No." }
+            { 1000000025;Label  ;12000;423  ;1500 ;423  ;ParentControl=1000000022;
+                                                         HorzAlign=Right;
+                                                         FontSize=10;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000026;TextBox;5400 ;423  ;6450 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Name;
+                                                                    FRA=Nom];
+                                                         SourceExpr=Vendor.Name }
+            { 1000000027;TextBox;2850 ;423  ;2400 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU="Vendor : ";
+                                                                    FRA="Fournisseur : "];
+                                                         SourceExpr="Source No." }
+            { 1000000028;Label  ;300  ;423  ;2550 ;423  ;ParentControl=1000000027;
+                                                         HorzAlign=Right;
+                                                         FontSize=10;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000029;Shape  ;0    ;0    ;300  ;1722 ;ShapeStyle=VertLine }
+            { 1000000043;Label  ;10500;1269 ;4800 ;453  ;FontSize=8;
+                                                         PadChar=.;
+                                                         CaptionML=[ENU=Continued;
+                                                                    FRA=Report] }
+            { 1000000030;Shape  ;150  ;1269 ;17850;30   ;ShapeStyle=HorzLine }
+            { 1000000033;Shape  ;7650 ;1269 ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000035;Shape  ;5100 ;1269 ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000068;Shape  ;2550 ;1269 ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000069;Shape  ;10200;1269 ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000051;TextBox;15600;1269 ;2250 ;423  ;FontSize=8;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Montant];
+                                                         SourceExpr=LineAmount }
+            { 1000000071;Shape  ;15300;1269 ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000010;Shape  ;150  ;1722 ;17850;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18300;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                               EnterRow(CurrRow,LineAmount,LineAmountVAT);
+                               CurrRow+=1;
+
+                               IF TempPostingGroup.GET(Item."Gen. Prod. Posting Group") THEN BEGIN
+                                  TempPostingGroup.Amount:=TempPostingGroup.Amount+LineAmountVAT;
+                                  TempPostingGroup.MODIFY;
+                               END ELSE BEGIN
+                                  TempPostingGroup.INIT;
+                                  TempPostingGroup.Code:=Item."Gen. Prod. Posting Group";
+                                  TempPostingGroup.Amount:=TempPostingGroup.Amount+LineAmountVAT;
+                                  TempPostingGroup.INSERT;
+                               END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000106;Shape  ;17850;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000107;TextBox;15900;0    ;1950 ;423  ;SourceExpr=LineAmountVAT }
+            { 1000000108;TextBox;13350;0    ;2250 ;423  ;SourceExpr=LineAmount }
+            { 1000000109;Shape  ;10800;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000110;Shape  ;15600;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000111;TextBox;8850 ;0    ;1950 ;423  ;SourceExpr=Item."Gen. Prod. Posting Group" }
+            { 1000000112;TextBox;11100;0    ;1950 ;423  ;SourceExpr=Quantity }
+            { 1000000115;Shape  ;13050;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000116;TextBox;2400 ;0    ;1800 ;423  ;FontSize=8;
+                                                         SourceExpr="Document No." }
+            { 1000000117;TextBox;4500 ;0    ;1800 ;423  ;FontSize=8;
+                                                         CaptionML=[ENU=Posting date;
+                                                                    FRA=Date de r‚ception];
+                                                         SourceExpr=PurchRcptHeader."Posting Date" }
+            { 1000000118;Shape  ;6300 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000119;Shape  ;4200 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000120;Shape  ;8550 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000121;TextBox;6600 ;0    ;1950 ;423  ;SourceExpr="Item No." }
+            { 1000000122;Shape  ;2100 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000123;TextBox;300  ;0    ;1800 ;423  ;FontSize=8;
+                                                         CaptionML=[ENU=Order No.;
+                                                                    FRA=Nø de commande];
+                                                         SourceExpr=PurchRcptHeader."Order No." }
+            { 1000000124;Shape  ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransFooter;
+            SectionWidth=18300;
+            SectionHeight=453;
+          }
+          CONTROLS
+          {
+            { 1000000085;Shape  ;15600;0    ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000086;Shape  ;17850;0    ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000062;Label  ;10500;0    ;4800 ;423  ;FontSize=8;
+                                                         PadChar=.;
+                                                         CaptionML=[ENU=Continued;
+                                                                    FRA=Report] }
+            { 1000000065;TextBox;15900;0    ;1950 ;423  ;FontSize=8;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Montant];
+                                                         SourceExpr=LineAmountVAT }
+            { 1000000070;Shape  ;10200;0    ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000067;Shape  ;7650 ;0    ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000066;Shape  ;5100 ;0    ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000088;Shape  ;2550 ;0    ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000089;Shape  ;0    ;0    ;300  ;453  ;ShapeStyle=VertLine }
+            { 1000000011;Shape  ;150  ;423  ;17850;30   ;ShapeStyle=HorzLine }
+            { 1000000016;Shape  ;150  ;0    ;17850;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18300;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1000000081;Shape  ;17850;0    ;300  ;876  ;ShapeStyle=VertLine }
+            { 1000000061;TextBox;15900;0    ;1950 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Montant];
+                                                         SourceExpr=LineAmountVAT }
+            { 1000000000;Label  ;12450;0    ;1200 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Total;
+                                                                    FRA=Total] }
+            { 1000000050;Shape  ;15600;0    ;300  ;876  ;ShapeStyle=VertLine }
+            { 1000000093;TextBox;14100;0    ;1500 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Montant];
+                                                         SourceExpr=LineAmount }
+            { 1000000094;Shape  ;13800;0    ;300  ;876  ;ShapeStyle=VertLine }
+            { 1000000012;TextBox;6600 ;0    ;5100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Name;
+                                                                    FRA=Nom];
+                                                         SourceExpr=Vendor.Name }
+            { 1000000080;Shape  ;6300 ;0    ;300  ;876  ;ShapeStyle=VertLine }
+            { 1000000013;Shape  ;4200 ;0    ;300  ;876  ;ShapeStyle=VertLine }
+            { 1000000083;Shape  ;2100 ;0    ;300  ;876  ;ShapeStyle=VertLine }
+            { 1000000084;Shape  ;0    ;0    ;300  ;876  ;ShapeStyle=VertLine }
+            { 1000000020;Shape  ;150  ;846  ;17850;30   ;ShapeStyle=HorzLine }
+            { 1000000023;Shape  ;150  ;846  ;17850;30   ;ShapeStyle=HorzLine }
+            { 1000000024;Shape  ;150  ;0    ;17850;30   ;ShapeStyle=HorzLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemTable=Table251;
+        DataItemTableView=SORTING(Code);
+        OnPreDataItem=BEGIN
+                        CurrReport.NEWPAGE;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF NOT TempPostingGroup.GET(Code) THEN
+                             CurrReport.SKIP;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=18300;
+            SectionHeight=2115;
+          }
+          CONTROLS
+          {
+            { 1000000096;TextBox;15000;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1000000100;TextBox;15900;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+            { 1000000101;Label  ;0    ;0    ;11100;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Vendors Amount Outstanding Not Invoiced;
+                                                                    FRA=Encours fournisseurs non factur‚s r‚capitulatif] }
+            { 1000000102;TextBox;0    ;423  ;7500 ;423  ;SourceExpr=COMPANYNAME }
+            { 1000000103;TextBox;4500 ;1269 ;3000 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=date;
+                                                                    FRA=Date];
+                                                         SourceExpr=SituationDate }
+            { 1000000104;Label  ;1650 ;846  ;2700 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Receipt;
+                                                                    FRA=R‚ception] }
+            { 1000000105;Label  ;1650 ;1269 ;2700 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Situation Date;
+                                                                    FRA=Date de situation] }
+            { 1100281002;Label  ;16950;423  ;750  ;423  ;ParentControl=1100281003 }
+            { 1100281003;TextBox;17700;423  ;450  ;423  ;CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18300;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+            { 1000000095;TextBox;300  ;0    ;1500 ;423  ;SourceExpr=Code }
+            { 1000000097;TextBox;3000 ;0    ;4500 ;423  ;SourceExpr=Description }
+            { 1000000099;TextBox;7950 ;0    ;1800 ;423  ;SourceExpr=TempPostingGroup.Amount }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=7260;
+      Height=2200;
+    }
+    CONTROLS
+    {
+      { 1000000002;TextBox;3740 ;330  ;2200 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Situation Date;
+                                                              FRA=Date de situation];
+                                                   SourceExpr=SituationDate }
+      { 1000000004;Label  ;330  ;330  ;3300 ;440  ;ParentControl=1000000002;
+                                                   CaptionML=[ENU=Situation Date;
+                                                              FRA=Date de situation] }
+      { 1000000003;CheckBox;3740;1210 ;440  ;440  ;InPage=-1;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Generate file excel;
+                                                              FRA=G‚n‚rer le fichier Excel];
+                                                   SourceExpr=Excell }
+      { 1000000005;Label  ;330  ;1210 ;3300 ;440  ;ParentControl=1000000003;
+                                                   CaptionML=[ENU=Generate Excel file;
+                                                              FRA=G‚n‚rer le fichier Excel] }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      SituationDate@1000000000 : Date;
+      textconfirm01@1000000002 : TextConst 'FRA=Date de situation non renseign‚e.\Souhaitez-vous utiliser la date de travail ?';
+      DateDebut@1000000001 : Date;
+      DateFin@1000000009 : Date;
+      Vendor@1000000003 : Record 23;
+      LineAmount@1000000004 : Decimal;
+      LineAmountVAT@1000000013 : Decimal;
+      PurchRcptHeader@1000000005 : Record 120;
+      PurchRcptLine@1000000012 : Record 121;
+      ReturnRcptHeader@1000000021 : Record 6650;
+      ReturnRcptLine@1000000022 : Record 6651;
+      CoutUnitaire@1000000006 : Decimal;
+      Sortie@1000000007 : Boolean;
+      Montant@1000000008 : Decimal;
+      Text001@1000000011 : TextConst 'FRA=La date de d‚but et de fin ne sont pas renseign‚es.\Souhaitez-vous utiliser la date de travail ?';
+      Item@1000000010 : Record 27;
+      ExcelBuf@1000000018 : TEMPORARY Record 370;
+      Column@1000000017 : Integer;
+      CurrRow@1000000016 : Integer;
+      Excell@1000000014 : Boolean;
+      Text50001@1000000019 : TextConst 'ENU=Sales shipping not invoiced;FRA=Etat factures non parvenues';
+      TempPostingGroup@1000000020 : TEMPORARY Record 251;
+      SavILEHeader@1000000023 : Record 32;
+      VendorFilter@1100281000 : Text[50];
+      Text50002@1100281001 : TextConst 'ENU=Vendor Filter;FRA=Filtre fournisseurs';
+      VendorFilterText@1100281002 : Text[80];
+
+    PROCEDURE InitSendToExcell@1000000004();
+    BEGIN
+      EnterHeader;
+      CurrRow := 4;
+    END;
+
+    PROCEDURE SendToExcell@1000000000();
+    BEGIN
+      ExcelBuf.CreateBook;
+      ExcelBuf.CreateSheet(
+        'Etat facture no parvenues',
+        PADSTR('Etat facture no parvenues',30),
+        COMPANYNAME,USERID);
+
+      // ISA01 d‚sactivation car fonction addColumn modifi‚
+      //ExcelBuf.AddColumn(FileExcell,TRUE);
+      ExcelBuf.GiveUserControl;
+      CLEAR(ExcelBuf);
+    END;
+
+    PROCEDURE EnterCell@1000000001(RowNo@1000000005 : Integer;ColumnNo@1000000004 : Integer;CellValue@1000000003 : Text[250];Bold@1000000002 : Boolean;UnderLine@1000000001 : Boolean;NumberFormat@1000000000 : Text[30]);
+    BEGIN
+      ExcelBuf.INIT;
+      ExcelBuf.VALIDATE("Row No.",RowNo);
+      ExcelBuf.VALIDATE("Column No.",ColumnNo);
+      ExcelBuf."Cell Value as Text" := CellValue;
+      ExcelBuf.Formula := '';
+      ExcelBuf.Bold := Bold;
+      ExcelBuf.Underline := UnderLine;
+      ExcelBuf.NumberFormat := NumberFormat;
+      ExcelBuf.INSERT;
+    END;
+
+    PROCEDURE EnterRow@1000000002(Row@1000000002 : Integer;Loc_Mt1@1000000001 : Decimal;Loc_Mt2@1000000003 : Decimal);
+    BEGIN
+      EnterCell(Row,1,PurchRcptHeader."Pay-to Name",FALSE,FALSE,'');
+      EnterCell(Row,2,PurchRcptHeader."Order No.",FALSE,FALSE,'');
+      EnterCell(Row,3,"Item Ledger Entry"."Document No.",FALSE,FALSE,'');
+      EnterCell(Row,4,FORMAT("Item Ledger Entry"."Posting Date"),FALSE,FALSE,'');
+      EnterCell(Row,5,"Item Ledger Entry"."Item No.",FALSE,FALSE,'');
+      EnterCell(Row,6,Item."Gen. Prod. Posting Group",FALSE,FALSE,'');
+      //EnterCell(Row,7,FORMAT(PurchRcptLine."Order Qty. (Base)"),FALSE,FALSE,'');
+      EnterCell(Row,7,FORMAT("Item Ledger Entry".Quantity),FALSE,FALSE,'');
+      EnterCell(Row,8,FORMAT(Loc_Mt1),FALSE,FALSE,'');
+      EnterCell(Row,9,FORMAT(Loc_Mt2),FALSE,FALSE,'');
+    END;
+
+    PROCEDURE EnterHeader@1000000003();
+    VAR
+      loc_text001@1000000000 : TextConst 'ENU=Amount;FRA=Montant HT';
+      loc_text002@1000000001 : TextConst 'FRA=Montant TTC';
+    BEGIN
+      // Ajoute en-tˆte
+      EnterCell(1,1,Text50001,TRUE,FALSE,'');
+      Column := 1;
+
+      IF "Item Ledger Entry".GETFILTERS <> '' THEN BEGIN
+        EnterCell(2,Column,"Item Ledger Entry".GETFILTERS,FALSE,FALSE,'');
+        Column +=1;
+      END;
+
+      EnterCell(3,1,PurchRcptHeader.FIELDCAPTION("Pay-to Name"),TRUE,FALSE,'');
+      EnterCell(3,2,PurchRcptHeader.FIELDCAPTION("Order No."),TRUE,FALSE,'');
+      EnterCell(3,3,"Item Ledger Entry".FIELDCAPTION("Document No."),TRUE,FALSE,'');
+      EnterCell(3,4,"Item Ledger Entry".FIELDCAPTION("Posting Date"),TRUE,FALSE,'');
+      EnterCell(3,5,"Item Ledger Entry".FIELDCAPTION("Item No."),TRUE,FALSE,'');
+      EnterCell(3,6,Item.FIELDCAPTION("Gen. Prod. Posting Group"),TRUE,FALSE,'');
+      //EnterCell(3,7,PurchRcptLine.FIELDCAPTION("Order Qty. (Base)"),TRUE,FALSE,'');
+      EnterCell(3,7,"Item Ledger Entry".FIELDCAPTION(Quantity),TRUE,FALSE,'');
+      EnterCell(3,8,loc_text001,TRUE,FALSE,'');
+      EnterCell(3,9,loc_text002,TRUE,FALSE,'');
+    END;
+
+    BEGIN
+    {
+      /** @r ISA01 @d 07/07/09 @a ISAT.MA @v ISA6.00.00.01 @s Migration v6 **/
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

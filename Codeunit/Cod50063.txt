@@ -1,0 +1,497 @@
+OBJECT Codeunit 50063 Intervention InfoPane
+{
+  OBJECT-PROPERTIES
+  {
+    Date=06/05/14;
+    Time=12:29:51;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lInterv@1100281000 : Record 50075;
+          BEGIN
+            //IMH09
+            lInterv.SETCURRENTKEY("Service Creation Date");
+            IF lInterv.FINDLAST THEN;
+            PAGE.RUN(0, lInterv);
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE CalcNoOfTrayLines@1100281005(pInterventionLine@1100281001 : Record 50075;pUnclosed@1100281002 : Boolean) : Integer;
+    VAR
+      lTrayLine@1100281000 : Record 50048;
+    BEGIN
+      //IMH02 isat.zw
+      IF (pInterventionLine."Service Header No." = '') OR (pInterventionLine."Line No." = 0) THEN
+        EXIT;
+
+      lTrayLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lTrayLine.SETRANGE("Service No.", pInterventionLine."Service No.");
+
+      lTrayLine.SETRANGE("Service Header No.", pInterventionLine."Service Header No.");
+      //<<IMH07
+      //lTrayLine.SETRANGE("Intervention Line No.", pInterventionLine."Intervention No.");
+      lTrayLine.SETRANGE("Intervention Line No.", pInterventionLine."Line No.");
+      //>>IMH07
+      IF pUnclosed THEN
+        lTrayLine.SETRANGE(Closed, FALSE);
+      EXIT(lTrayLine.COUNT);
+    END;
+
+    PROCEDURE LookupTrayLines@1100281001(pInterventionLine@1100281003 : Record 50075;pUnclosed@1100281002 : Boolean);
+    VAR
+      lTrayLine@1100281001 : Record 50048;
+    BEGIN
+      //IMH02 isat.zw
+      IF (pInterventionLine."Service Header No." = '') OR (pInterventionLine."Line No." = 0) THEN
+        EXIT;
+
+      lTrayLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lTrayLine.FILTERGROUP(2);
+      lTrayLine.SETRANGE("Service No.", pInterventionLine."Service No.");
+      lTrayLine.SETRANGE("Service Header No.", pInterventionLine."Service Header No.");
+      lTrayLine.SETRANGE("Intervention Line No.", pInterventionLine."Line No.");
+      lTrayLine.FILTERGROUP(0);
+      IF pUnclosed THEN
+        lTrayLine.SETRANGE(Closed, FALSE);
+      IF lTrayLine.ISEMPTY THEN
+        EXIT;
+
+      FORM.RUN(0, lTrayLine);
+    END;
+
+    PROCEDURE LookupTrayLineHist@1100281006(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lTrayLine@1100281001 : Record 50049;
+    BEGIN
+      //IMH03.ST
+      IF (pIntervLine."Service Header No." = '') OR (pIntervLine."Line No." = 0) THEN
+        EXIT;
+
+      lTrayLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lTrayLine.FILTERGROUP(2);
+      lTrayLine.SETRANGE("Service No.", pIntervLine."Service No.");
+      lTrayLine.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lTrayLine.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lTrayLine.FILTERGROUP(0);
+      FORM.RUN(0, lTrayLine);
+    END;
+
+    PROCEDURE ShowQuoteActivities@1100281000(VAR pIntervLine@1100281000 : Record 50075) : Boolean;
+    VAR
+      lServOrderType@1100281001 : Record 5903;
+    BEGIN
+      //IMH03.ST
+      WITH pIntervLine DO BEGIN
+        CALCFIELDS("Electrical Failure");
+        IF "Electrical Failure" THEN
+          EXIT(FALSE);
+
+        IF lServOrderType.GET(pIntervLine."Service Order Type") THEN
+          EXIT(NOT (lServOrderType."Service Hdr Card Form ID" =
+                      PAGE::"Service Hdr Real Estate Diag."));
+
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CalcNoOfQUotes@1100281002(VAR pIntervLine@1100281001 : Record 50075;pOnlyActive@1100281000 : Boolean;VAR pQuoteNb@1100281002 : Integer;VAR pQuoteAmount@1100281003 : Decimal);
+    VAR
+      lQuotes@1100281004 : Record 50076;
+    BEGIN
+      //IMH03.ST
+      lQuotes.SETCURRENTKEY("Service Header No.","Intervention Line No.",Active);
+      lQuotes.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lQuotes.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      IF pOnlyActive THEN
+        lQuotes.SETRANGE(Active, TRUE);
+      pQuoteNb := lQuotes.COUNT;
+      IF pQuoteNb > 0 THEN BEGIN
+        lQuotes.CALCSUMS("Amount Incl. VAT (LCY)");
+        pQuoteAmount := lQuotes."Amount Incl. VAT (LCY)";
+      END
+      ELSE
+        pQuoteAmount := 0;
+    END;
+
+    PROCEDURE LookupQuotes@1100281003(pIntervLine@1100281000 : Record 50075;pOnlyActive@1100281001 : Boolean);
+    VAR
+      lQuotes@1100281002 : Record 50076;
+    BEGIN
+      //IMH03.ST
+
+      lQuotes.FILTERGROUP(2);
+      //<<IMH08.PC
+      lQuotes.SETCURRENTKEY(
+        "Service Header No.","Intervention Line No.",Active,"Approval Status","External Approval Status",Acceptance);
+      //>>IMH08.PC
+      lQuotes.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lQuotes.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lQuotes.FILTERGROUP(0);
+      IF pOnlyActive THEN BEGIN
+        lQuotes.SETRANGE(Active, TRUE);
+      END;
+      IF lQuotes.COUNT = 1 THEN BEGIN
+        lQuotes.FINDFIRST;
+        PAGE.RUN(FORM::"Serv. Intervention Quote Card",lQuotes)
+      END ELSE BEGIN
+        PAGE.RUN(0,lQuotes);
+      END;
+    END;
+
+    PROCEDURE CalcNoOfProviderDPSContacts@1100281004(pIntervLine@1100281001 : Record 50075) : Integer;
+    VAR
+      lContact@1100281000 : Record 5050;
+    BEGIN
+      //IMH04.ST
+      IF pIntervLine."Provider No." = '' THEN
+        EXIT;
+      lContact.SETCURRENTKEY("Company No.");
+      lContact.SETRANGE("Company No.", pIntervLine."Provider No.");
+      lContact.SETRANGE(Type, lContact.Type::Person);
+      // <<IMH05.ISAT.MA
+      //lContact.SETRANGE("Preferred Contact DPR", lContact."Preferred Contact DPR"::"2");
+      lContact.SETRANGE("Preferred Contact DGS", TRUE);
+      // >>IMH05.ISAT.MA
+      IF lContact.ISEMPTY THEN
+        EXIT;
+      EXIT(lContact.COUNT);
+    END;
+
+    PROCEDURE LookupProviderDPSContacts@1100281007(pIntervLine@1100281001 : Record 50075);
+    VAR
+      lContact@1100281000 : Record 5050;
+    BEGIN
+      //IMH04.ST
+      IF pIntervLine."Provider No." = '' THEN
+        EXIT;
+      lContact.SETCURRENTKEY("Company No.");
+      lContact.FILTERGROUP(2);
+      lContact.SETRANGE("Company No.", pIntervLine."Provider No.");
+      lContact.SETRANGE(Type, lContact.Type::Person);
+      // <<IMH05.ISAT.MA
+      //lContact.SETRANGE(lContact."Preferred Contact DPR", lContact."Preferred Contact DPR"::"2");
+      lContact.SETRANGE(lContact."Preferred Contact DGS", TRUE);
+      // >>IMH05.ISAT.MA
+      lContact.FILTERGROUP(0);
+      IF lContact.ISEMPTY THEN
+        EXIT;
+      IF lContact.COUNT = 1 THEN BEGIN
+        lContact.FINDFIRST;
+        lContact.SETRECFILTER;
+        FORM.RUN(FORM::"Contact Card", lContact);
+      END
+      ELSE
+        FORM.RUN(FORM::"Contact List", lContact);
+    END;
+
+    PROCEDURE GetProviderDPSContactName@1100281009(pIntervLine@1100281001 : Record 50075) : Text[50];
+    VAR
+      lContact@1100281000 : Record 5050;
+    BEGIN
+      //IMH04.ST
+      IF pIntervLine."Provider No." = '' THEN
+        EXIT;
+      lContact.SETCURRENTKEY("Company No.");
+      lContact.SETRANGE("Company No.", pIntervLine."Provider No.");
+      lContact.SETRANGE(Type, lContact.Type::Person);
+      // <<IMH05.ISAT.MA
+      //lContact.SETRANGE("Preferred Contact DPR", lContact."Preferred Contact DPR"::"2");
+      lContact.SETRANGE("Preferred Contact DGS", TRUE);
+      // >>IMH05.ISAT.MA
+      IF NOT lContact.FINDFIRST THEN
+        EXIT;
+      EXIT(lContact.Name);
+    END;
+
+    PROCEDURE GetProviderDPSContactPhoneNo@1100281010(pIntervLine@1100281001 : Record 50075) : Text[50];
+    VAR
+      lContact@1100281000 : Record 5050;
+    BEGIN
+      //IMH04.ST
+      IF pIntervLine."Provider No." = '' THEN
+        EXIT;
+      lContact.SETCURRENTKEY("Company No.");
+      lContact.SETRANGE("Company No.", pIntervLine."Provider No.");
+      lContact.SETRANGE(Type, lContact.Type::Person);
+      // <<IMH05.ISAT.MA
+      //lContact.SETRANGE("Preferred Contact DPR", lContact."Preferred Contact DPR"::"2");
+      lContact.SETRANGE("Preferred Contact DGS", TRUE);
+      // >>IMH05.ISAT.MA
+      IF NOT lContact.FINDFIRST THEN
+        EXIT;
+      EXIT(lContact."Phone No.");
+    END;
+
+    PROCEDURE CalcNoOfAcceptedQuotes@1000000001(VAR pIntervLine@1100281001 : Record 50075) : Integer;
+    VAR
+      lQuotes@1100281004 : Record 50076;
+    BEGIN
+      //IMH06.ZW
+      lQuotes.SETCURRENTKEY("Service Header No.","Intervention Line No.",Active);
+      lQuotes.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lQuotes.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lQuotes.SETRANGE(Acceptance, lQuotes.Acceptance::Yes);
+      EXIT(lQuotes.COUNT);
+    END;
+
+    PROCEDURE LookupAcceptedQuotes@1000000000(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lQuotes@1100281002 : Record 50076;
+    BEGIN
+      //IMH06.ZW
+      lQuotes.FILTERGROUP(2);
+      lQuotes.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lQuotes.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lQuotes.SETRANGE(Acceptance, lQuotes.Acceptance::Yes);
+      lQuotes.FILTERGROUP(0);
+      IF lQuotes.ISEMPTY THEN
+        EXIT;
+      IF lQuotes.COUNT = 1 THEN BEGIN
+        lQuotes.FINDFIRST;
+        FORM.RUN(FORM::"Serv. Intervention Quote Card",lQuotes)
+      END ELSE
+        FORM.RUN(0,lQuotes);
+    END;
+
+    PROCEDURE CalcNoOfMinutes@1000000003(VAR pIntervLine@1100281001 : Record 50075) : Integer;
+    VAR
+      lServiceInterventionMinutes@1100281004 : Record 50084;
+    BEGIN
+      //IMH06.ZW
+      lServiceInterventionMinutes.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lServiceInterventionMinutes.SETRANGE("Service Intervention Line No.", pIntervLine."Line No.");
+      EXIT(lServiceInterventionMinutes.COUNT);
+    END;
+
+    PROCEDURE LookupMinutes@1000000002(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lServiceInterventionMinutes@1000000000 : Record 50084;
+    BEGIN
+      //IMH06.ZW
+      lServiceInterventionMinutes.FILTERGROUP(2);
+      lServiceInterventionMinutes.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lServiceInterventionMinutes.SETRANGE("Service Intervention Line No.", pIntervLine."Line No.");
+      lServiceInterventionMinutes.FILTERGROUP(0);
+      IF lServiceInterventionMinutes.ISEMPTY THEN
+        EXIT;
+      FORM.RUN(FORM::"Service Intervention Minutes",lServiceInterventionMinutes)
+    END;
+
+    PROCEDURE LookupPurchOrder@1000000008(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lPurchaseHeader@1000000000 : Record 38;
+    BEGIN
+      //IMH06.ZW
+      lPurchaseHeader.FILTERGROUP(2);
+      lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchaseHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchaseHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchaseHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lPurchaseHeader.SETRANGE("Document Type", lPurchaseHeader."Document Type"::Order);
+      lPurchaseHeader.FILTERGROUP(0);
+      IF lPurchaseHeader.ISEMPTY THEN
+        EXIT;
+      IF lPurchaseHeader.COUNT = 1 THEN BEGIN
+        lPurchaseHeader.FINDFIRST;
+        FORM.RUN(FORM::"Purchase Order",lPurchaseHeader)
+      END ELSE
+        FORM.RUN(FORM::"Purchase Order List", lPurchaseHeader);
+    END;
+
+    PROCEDURE CalcNoOfPurchRcpt@1000000015(VAR pIntervLine@1100281001 : Record 50075) : Integer;
+    VAR
+      lPurchRcptHeader@1000000000 : Record 120;
+    BEGIN
+      //IMH06.ZW
+      lPurchRcptHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchRcptHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchRcptHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchRcptHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      EXIT(lPurchRcptHeader.COUNT);
+    END;
+
+    PROCEDURE LookupPurchRcpt@1000000014(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lPurchRcptHeader@1000000001 : Record 120;
+    BEGIN
+      //IMH06.ZW
+      lPurchRcptHeader.FILTERGROUP(2);
+      lPurchRcptHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchRcptHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchRcptHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchRcptHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lPurchRcptHeader.FILTERGROUP(0);
+      IF lPurchRcptHeader.ISEMPTY THEN
+        EXIT;
+      IF lPurchRcptHeader.COUNT = 1 THEN BEGIN
+        lPurchRcptHeader.FINDFIRST;
+        FORM.RUN(FORM::"Posted Purchase Receipt",lPurchRcptHeader)
+      END ELSE
+        FORM.RUN(FORM::"Posted Purchase Receipts", lPurchRcptHeader);
+    END;
+
+    PROCEDURE CalcNoOfPurchInvoice@1000000018(VAR pIntervLine@1100281001 : Record 50075) : Integer;
+    VAR
+      lPurchaseHeader@1000000001 : Record 38;
+    BEGIN
+      //IMH06.ZW
+      lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchaseHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchaseHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchaseHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lPurchaseHeader.SETRANGE("Document Type", lPurchaseHeader."Document Type"::Invoice);
+      EXIT(lPurchaseHeader.COUNT);
+    END;
+
+    PROCEDURE LookupPurchInvoice@1000000017(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lPurchaseHeader@1000000000 : Record 38;
+    BEGIN
+      //IMH06.ZW
+      lPurchaseHeader.FILTERGROUP(2);
+      lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchaseHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchaseHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchaseHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lPurchaseHeader.SETRANGE("Document Type", lPurchaseHeader."Document Type"::Invoice);
+      lPurchaseHeader.FILTERGROUP(0);
+      IF lPurchaseHeader.ISEMPTY THEN
+        EXIT;
+      IF lPurchaseHeader.COUNT = 1 THEN BEGIN
+        lPurchaseHeader.FINDFIRST;
+        FORM.RUN(FORM::"Purchase Invoice",lPurchaseHeader)
+      END ELSE
+        FORM.RUN(FORM::"Pending Purch. Header", lPurchaseHeader);
+    END;
+
+    PROCEDURE CalcNoOfPostedPurchInvoice@1000000025(VAR pIntervLine@1100281001 : Record 50075) : Integer;
+    VAR
+      lPurchInvHeader@1000000001 : Record 122;
+    BEGIN
+      //IMH06.ZW
+      lPurchInvHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lPurchInvHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchInvHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchInvHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      EXIT(lPurchInvHeader.COUNT);
+    END;
+
+    PROCEDURE LookupPostedPurchInvoice@1000000024(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lPurchInvHeader@1000000000 : Record 122;
+    BEGIN
+      //IMH06.ZW
+      lPurchInvHeader.FILTERGROUP(2);
+      lPurchInvHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lPurchInvHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchInvHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchInvHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lPurchInvHeader.FILTERGROUP(0);
+      IF lPurchInvHeader.ISEMPTY THEN
+        EXIT;
+      IF lPurchInvHeader.COUNT = 1 THEN BEGIN
+        lPurchInvHeader.FINDFIRST;
+        FORM.RUN(FORM::"Posted Purchase Invoice",lPurchInvHeader)
+      END ELSE
+        FORM.RUN(FORM::"Posted Purchase Invoices", lPurchInvHeader);
+    END;
+
+    PROCEDURE CalcNoOfPurchCreditMemo@1000000039(VAR pIntervLine@1100281001 : Record 50075) : Integer;
+    VAR
+      lPurchaseHeader@1000000001 : Record 38;
+    BEGIN
+      //IMH06.ZW
+      lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchaseHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchaseHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchaseHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lPurchaseHeader.SETRANGE("Document Type", lPurchaseHeader."Document Type"::"Credit Memo");
+      EXIT(lPurchaseHeader.COUNT);
+    END;
+
+    PROCEDURE LookupPurchCreditMemo@1000000038(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lPurchaseHeader@1000000000 : Record 38;
+    BEGIN
+      //IMH06.ZW
+      lPurchaseHeader.FILTERGROUP(2);
+      lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchaseHeader.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchaseHeader.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchaseHeader.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lPurchaseHeader.SETRANGE("Document Type", lPurchaseHeader."Document Type"::"Credit Memo");
+      lPurchaseHeader.FILTERGROUP(0);
+      IF lPurchaseHeader.ISEMPTY THEN
+        EXIT;
+
+      IF lPurchaseHeader.COUNT = 1 THEN BEGIN
+        lPurchaseHeader.FINDFIRST;
+        FORM.RUN(FORM::"Purchase Credit Memo",lPurchaseHeader)
+      END ELSE
+        FORM.RUN(FORM::"Purchase List", lPurchaseHeader);
+    END;
+
+    PROCEDURE CalcNoOfPostedPurchCreditMemo@1000000047(VAR pIntervLine@1100281001 : Record 50075) : Integer;
+    VAR
+      lPurchCrMemoHdr@1000000001 : Record 124;
+    BEGIN
+      //IMH06.ZW
+      lPurchCrMemoHdr.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchCrMemoHdr.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchCrMemoHdr.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchCrMemoHdr.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      EXIT(lPurchCrMemoHdr.COUNT);
+    END;
+
+    PROCEDURE LookupPostedPurchCreditMemo@1000000046(pIntervLine@1100281000 : Record 50075);
+    VAR
+      lPurchCrMemoHdr@1000000001 : Record 124;
+    BEGIN
+      //IMH06.ZW
+      lPurchCrMemoHdr.FILTERGROUP(2);
+      lPurchCrMemoHdr.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchCrMemoHdr.SETRANGE("Service No.", pIntervLine."Service No.");
+      lPurchCrMemoHdr.SETRANGE("Service Header No.", pIntervLine."Service Header No.");
+      lPurchCrMemoHdr.SETRANGE("Intervention Line No.", pIntervLine."Line No.");
+      lPurchCrMemoHdr.FILTERGROUP(0);
+      IF lPurchCrMemoHdr.ISEMPTY THEN
+        EXIT;
+      IF lPurchCrMemoHdr.COUNT = 1 THEN BEGIN
+        lPurchCrMemoHdr.FINDFIRST;
+        FORM.RUN(FORM::"Posted Purchase Credit Memo",lPurchCrMemoHdr)
+      END ELSE
+        FORM.RUN(FORM::"Posted Purchase Credit Memos", lPurchCrMemoHdr);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH09 @d 05/05/14 @a ISAT.ZW @v IMH6.01.5071 @s Tri Service @h 5071
+          @c Affichage liste des services dans la trigger OnRun */
+      /** @r IMH08 @d 25/03/13 @a ISAT.PC @v @s Hotfix @c ajout setcurrentkey */
+      /** @r IMH07 @d 25/05/2012 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @h mantis 2772
+          @c debug */
+      /** @r IMH06 @d 04/01/2012 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service
+          @c Ajout CalcNoOfAcceptedQuotes, LookupAcceptedQuotes, CalcNoOfMinutes
+          @c Ajout LookupMinutes, LookupPurchOrder, CalcNoOfPurchRcpt, LookupPurchRcpt
+          @c Ajout CalcNoOfPurchInvoice, LookupPurchInvoice, CalcNoOfPostedPurchInvoice
+          @c Ajout LookupPostedPurchInvoice, CalcNoOfPurchCreditMemo, LookupPurchCreditMemo
+          @c Ajout CalcNoOfPostedPurchCreditMemo, LookupPostedPurchCreditMemo */
+      /** @r IMH05 @d 23/06/2011 @a ISAT.MA @v IMH6.01.011 @s Gestion du service
+          @c debug */
+      /** @r IMH04 @d 27/05/2011 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Ajout fonctions CalcNoOfProviderDPSContacts, LookupProviderDPSContacts */
+      /** @r IMH03 @d 16/02/2011 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Ajout fonctions LookupTrayLineHist, ShowQuoteActivities */
+      /** @r IMH02 @d 27/10/2010 @a ISAT.ZW @v IMH6.01.013 @s Gestion des corbeilles @c table TODO --> table Tray Line */
+      /** @r IMH01 @d 14/10/2010 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Cr‚ation objet pour info pane service */
+    }
+    END.
+  }
+}

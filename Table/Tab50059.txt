@@ -1,0 +1,791 @@
+OBJECT Table 50059 Contact Contract
+{
+  OBJECT-PROPERTIES
+  {
+    Date=17/10/13;
+    Time=16:09:50;
+    Modified=Yes;
+    Version List=IMH6.01.08;
+  }
+  PROPERTIES
+  {
+    OnInsert=BEGIN
+               IF NOT ContactInfoInit THEN BEGIN
+                 Contact.GET("Contact No.");
+                 Contact.TESTFIELD("Service Contact", Contact."Service Contact"::Beneficiary);
+                 GetContactInfo(Contact);
+               END;
+               "Occurence No." := GetLastOccurenceNo;
+               IF NOT DisableCheckCorpContract THEN
+                 CheckCorporateContract;
+               TouchRecord(TRUE);
+             END;
+
+    OnModify=BEGIN
+               CheckRequiredFields;
+               TESTFIELD("Start Date");
+               TouchRecord(FALSE);
+             END;
+
+    OnDelete=VAR
+               lContactContractAddress@1100281000 : Record 50039;
+             BEGIN
+               lContactContractAddress.SETRANGE("Contact No.","Contact No.");
+               lContactContractAddress.SETRANGE("Contract Form Code","Contract Form Code");
+               lContactContractAddress.SETRANGE("Occurence No.","Occurence No.");
+               IF NOT lContactContractAddress.ISEMPTY THEN
+                 lContactContractAddress.DELETEALL;
+             END;
+
+    OnRename=BEGIN
+               TouchRecord(FALSE);
+             END;
+
+    CaptionML=[ENU=Contact Contract;
+               FRA=Formule contact];
+    LookupFormID=Form50059;
+    DrillDownFormID=Form50059;
+  }
+  FIELDS
+  {
+    { 1   ;   ;Contact No.         ;Code20        ;TableRelation=Contact.No.;
+                                                   OnValidate=BEGIN
+                                                                IF Contact.GET("Contact No.") THEN
+                                                                  GetContactInfo(Contact);
+                                                              END;
+
+                                                   CaptionML=[ENU=Contact No.;
+                                                              FRA=Nø contact] }
+    { 2   ;   ;Contract Form Code  ;Code10        ;TableRelation="Corporate Contract"."Contract Form Code" WHERE (Corporate No.=FIELD(Corporate No.));
+                                                   OnValidate=BEGIN
+                                                                IF NOT DisableCheckCorpContract THEN BEGIN
+                                                                  IF "Contract Form Code" <> '' THEN
+                                                                    CheckCorporateContract;
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Contract Form Code;
+                                                              FRA=Code formule];
+                                                   NotBlank=Yes }
+    { 3   ;   ;Occurence No.       ;Integer       ;CaptionML=[ENU=Occurence No.;
+                                                              FRA=Nø occurence];
+                                                   BlankZero=Yes;
+                                                   Editable=No }
+    { 10  ;   ;Corporate No.       ;Code20        ;TableRelation=Customer.No. WHERE (Service Contact=CONST(Corporate Customer),
+                                                                                     Service Corporate=CONST(Yes));
+                                                   OnValidate=BEGIN
+                                                                IF "Contract Form Code" = '' THEN EXIT;
+                                                                IF Rec."Corporate No." <> xRec."Corporate No." THEN BEGIN
+                                                                  CheckServiceExists;
+                                                                  "Contract Form Code" := '';
+
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Corporate No.;
+                                                              FRA=Nø grand compte] }
+    { 11  ;   ;Member No.          ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Member No." WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Member No.;
+                                                              FRA=Nø b‚n‚ficiaire];
+                                                   Editable=No }
+    { 12  ;   ;Contract Reference  ;Code30        ;CaptionML=[ENU=Reference;
+                                                              FRA=R‚f‚rence] }
+    { 20  ;   ;Name                ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address"."Company Name" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                   Code=FIELD(Default Address Code)));
+                                                   CaptionML=[ENU=Name;
+                                                              FRA=Nom];
+                                                   Editable=No }
+    { 21  ;   ;Address             ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address".Address WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                            Code=FIELD(Default Address Code)));
+                                                   CaptionML=[ENU=Address;
+                                                              FRA=Adresse];
+                                                   Editable=No }
+    { 22  ;   ;Address 2           ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address"."Address 2" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                Code=FIELD(Default Address Code)));
+                                                   CaptionML=[ENU=Address 2;
+                                                              FRA=Adresse 2];
+                                                   Editable=No }
+    { 23  ;   ;Post Code           ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address"."Post Code" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                Code=FIELD(Default Address Code)));
+                                                   OnValidate=VAR
+                                                                lPostCode@1100281000 : Record 225;
+                                                              BEGIN
+                                                                lPostCode.ValidatePostCode(City,"Post Code", "Country/Region Code"); //IMH03 Ajout Code pays
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              lPostCode@1100281000 : Record 225;
+                                                            BEGIN
+                                                              lPostCode.LookUpPostCode(City,"Post Code","Country/Region Code", TRUE); //IMH03 Ajout Code pays
+                                                            END;
+
+                                                   CaptionML=[ENU=Post Code;
+                                                              FRA=Code postal];
+                                                   Editable=No }
+    { 24  ;   ;City                ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address".City WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                         Code=FIELD(Default Address Code)));
+                                                   OnValidate=VAR
+                                                                lPostCode@1100281000 : Record 225;
+                                                              BEGIN
+                                                                lPostCode.ValidateCity(City,"Post Code","Country/Region Code"); //IMH03 Ajout Code pays
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              lPostCode@1100281000 : Record 225;
+                                                            BEGIN
+                                                              lPostCode.LookUpCity(City,"Post Code", "Country/Region Code", TRUE); //IMH03 Ajout Code pays
+                                                            END;
+
+                                                   CaptionML=[ENU=City;
+                                                              FRA=Ville];
+                                                   Editable=No }
+    { 25  ;   ;Country/Region Code ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address"."Country/Region Code" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                          Code=FIELD(Default Address Code)));
+                                                   TableRelation=Country/Region;
+                                                   CaptionML=[ENU=Country/Region Code;
+                                                              FRA=Code pays/r‚gion];
+                                                   Editable=No }
+    { 26  ;   ;Default Address Code;Code10        ;TableRelation="Contact Alt. Address".Code WHERE (Contact No.=FIELD(Contact No.));
+                                                   OnValidate=VAR
+                                                                lContactContractAddress@1100281000 : Record 50039;
+                                                              BEGIN
+                                                                IF Rec."Default Address Code" <> xRec."Default Address Code" THEN BEGIN
+                                                                  IF xRec."Default Address Code" <> '' THEN BEGIN
+                                                                    lContactContractAddress.RESET;
+                                                                    lContactContractAddress.SETRANGE("Contact No.","Contact No.");
+                                                                    lContactContractAddress.SETRANGE("Contract Form Code","Contract Form Code");
+                                                                    lContactContractAddress.SETRANGE("Occurence No.","Occurence No.");
+                                                                    lContactContractAddress.SETRANGE("Address Code",xRec."Default Address Code");
+                                                                    IF lContactContractAddress.FINDFIRST THEN BEGIN
+                                                                      lContactContractAddress."Main Address" := FALSE;
+                                                                      lContactContractAddress.MODIFY;
+                                                                    END;
+                                                                  END;
+                                                                  IF "Default Address Code" <> '' THEN BEGIN
+                                                                    lContactContractAddress.RESET;
+                                                                    lContactContractAddress."Contact No." := "Contact No.";
+                                                                    lContactContractAddress."Contract Form Code" := "Contract Form Code";
+                                                                    lContactContractAddress."Occurence No." := "Occurence No.";
+                                                                    lContactContractAddress."Address Code" := "Default Address Code";
+                                                                    lContactContractAddress."Main Address" := TRUE;
+                                                                    IF NOT lContactContractAddress.INSERT THEN
+                                                                      lContactContractAddress.MODIFY;
+                                                                  END;
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Default Address Code;
+                                                              FRA=Code adresse par d‚faut] }
+    { 40  ;   ;Start Date          ;Date          ;OnValidate=BEGIN
+                                                                IF ("Expiration Date" <> 0D) AND ("Start Date" <> 0D) THEN BEGIN
+                                                                  IF "Expiration Date" < "Start Date" THEN
+                                                                    ERROR(Text001);
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Start Date;
+                                                              FRA=Date de d‚but];
+                                                   NotBlank=Yes }
+    { 41  ;   ;Expiration Date     ;Date          ;OnValidate=BEGIN
+                                                                IF ("Expiration Date" <> 0D) AND ("Start Date" <> 0D) THEN BEGIN
+                                                                  IF "Expiration Date" < "Start Date" THEN
+                                                                    ERROR(Text001);
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Expiration Date;
+                                                              FRA=Date d'expiration] }
+    { 50  ;   ;Deductible 1 (LCY)  ;Decimal       ;CaptionML=[ENU=Deductible 1;
+                                                              FRA=Franchise];
+                                                   BlankZero=Yes;
+                                                   AutoFormatType=1 }
+    { 51  ;   ;Deductible 2 (LCY)  ;Decimal       ;CaptionML=[ENU=Deductible 2;
+                                                              FRA=Franchise BG];
+                                                   BlankZero=Yes;
+                                                   AutoFormatType=1 }
+    { 52  ;   ;Electrical failure  ;Boolean       ;CaptionML=[ENU=Electrical failure;
+                                                              FRA=Panne ‚lectrom‚nager] }
+    { 89  ;   ;Corporate Picture   ;BLOB          ;CaptionML=[ENU=Logo;
+                                                              FRA=Logo];
+                                                   SubType=Bitmap }
+    { 90  ;   ;Corporate Region Code;Code10       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Corporate Region Code" WHERE (No.=FIELD(Contact No.)));
+                                                   TableRelation="Corporate Region"."Region Code" WHERE (Corporate No.=FIELD(Corporate No.));
+                                                   CaptionML=[ENU=Corporate Region Code;
+                                                              FRA=Code r‚gion grand compte];
+                                                   Editable=No }
+    { 98  ;   ;Contact Address Filter;Code10      ;FieldClass=FlowFilter;
+                                                   CaptionML=[ENU=Contact Address Filter;
+                                                              FRA=Filtre adresse contact] }
+    { 99  ;   ;Alt. Address Exists ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Contact Contract Address" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                       Contract Form Code=FIELD(Contract Form Code),
+                                                                                                       Occurence No.=FIELD(Occurence No.),
+                                                                                                       Address Code=FIELD(Contact Address Filter)));
+                                                   CaptionML=[ENU=Alt. Address Exists;
+                                                              FRA=Adresses secondaires existe] }
+    { 100 ;   ;No. of Address      ;Integer       ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Contact Contract Address" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                       Contract Form Code=FIELD(Contract Form Code),
+                                                                                                       Occurence No.=FIELD(Occurence No.)));
+                                                   CaptionML=[ENU=No. of Address;
+                                                              FRA=Nombre d'adresses];
+                                                   Editable=No }
+    { 101 ;   ;Occupier Nature Code;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address"."Occupier Nature" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                      Code=FIELD(Default Address Code)));
+                                                   TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50070));
+                                                   CaptionML=[ENU=Occupier Nature Code;
+                                                              FRA=Code nature de l'occupant];
+                                                   Editable=No }
+    { 102 ;   ;Residence Type Code ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address"."Residence Type" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                     Code=FIELD(Default Address Code)));
+                                                   TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50071));
+                                                   CaptionML=[ENU=Residence Type Code;
+                                                              FRA=Code type de r‚sidence];
+                                                   Editable=No }
+    { 103 ;   ;Housing Type Code   ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address"."Housing Type" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                   Code=FIELD(Default Address Code)));
+                                                   TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50072));
+                                                   CaptionML=[ENU=Housing Type Code;
+                                                              FRA=Code type d'habitation];
+                                                   Editable=No }
+    { 104 ;   ;Property Type Code  ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Alt. Address"."Property Type" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                    Code=FIELD(Default Address Code)));
+                                                   TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50073));
+                                                   CaptionML=[ENU=Property Type Code;
+                                                              FRA=Code type de propri‚t‚];
+                                                   Editable=No }
+    { 105 ;   ;Contract Name       ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Corporate Contract".Name WHERE (Corporate No.=FIELD(Corporate No.),
+                                                                                                       Contract Form Code=FIELD(Contract Form Code)));
+                                                   CaptionML=[ENU=Contract Name;
+                                                              FRA=Nom formule];
+                                                   Editable=No }
+    { 112 ;   ;Residence Type      ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Code.Description WHERE (Table ID=CONST(5051),
+                                                                                              Field ID=CONST(50071),
+                                                                                              Code=FIELD(Residence Type Code)));
+                                                   CaptionML=[ENU=Residence Type;
+                                                              FRA=Type de r‚sidence];
+                                                   Editable=No }
+    { 113 ;   ;Housing Type        ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Code.Description WHERE (Table ID=CONST(5051),
+                                                                                              Field ID=CONST(50072),
+                                                                                              Code=FIELD(Housing Type Code)));
+                                                   CaptionML=[ENU=Housing Type;
+                                                              FRA=Type d'habitation];
+                                                   Editable=No }
+    { 114 ;   ;Property Type       ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Code.Description WHERE (Table ID=CONST(5051),
+                                                                                              Field ID=CONST(50073),
+                                                                                              Code=FIELD(Property Type)));
+                                                   CaptionML=[ENU=Property Type;
+                                                              FRA=Type de propri‚t‚];
+                                                   Editable=No }
+    { 200 ;   ;Service Order Type Filter;Code10   ;FieldClass=FlowFilter;
+                                                   TableRelation="Service Order Type".Code;
+                                                   CaptionML=[ENU=Service Order Type Filter;
+                                                              FRA=Filtre type produit] }
+    { 50500;  ;Creation Date       ;DateTime      ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date de cr‚ation];
+                                                   Editable=No }
+    { 50501;  ;Creation User ID    ;Text30        ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Creation User ID;
+                                                              FRA=Utilisateur cr‚ation];
+                                                   Editable=No }
+    { 50502;  ;Last Modification Date;DateTime    ;CaptionML=[ENU=Last Modification Date;
+                                                              FRA=Date derniŠre modification];
+                                                   Editable=No }
+    { 50503;  ;Last Modification User ID;Text30   ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Last Modification User ID;
+                                                              FRA=Utilisateur derniŠre modification];
+                                                   Editable=No }
+    { 60000;  ;Contact Name        ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Name WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Name;
+                                                              FRA=Nom];
+                                                   Editable=No }
+    { 60001;  ;Contact Name 2      ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Name 2" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Name 2;
+                                                              FRA=Nom 2];
+                                                   Editable=No }
+    { 60002;  ;Contact Address     ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Address WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Address;
+                                                              FRA=Adresse];
+                                                   Editable=No }
+    { 60003;  ;Contact Address 2   ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Address 2" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Address 2;
+                                                              FRA=Adresse (2Šme ligne)];
+                                                   Editable=No }
+    { 60004;  ;Contact City        ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.City WHERE (No.=FIELD(Contact No.)));
+                                                   TableRelation=IF (Post Code=FILTER(<>'')) "Post Code".City WHERE (Code=FIELD(Post Code))
+                                                                 ELSE IF (Post Code=FILTER('')) "Post Code".City;
+                                                   ValidateTableRelation=No;
+                                                   CaptionML=[ENU=City;
+                                                              FRA=Ville];
+                                                   Editable=No }
+    { 60005;  ;Contact Phone No.   ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Phone No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Phone No.;
+                                                              FRA=Nø t‚l‚phone];
+                                                   Editable=No }
+    { 60006;  ;Contact Mobile Phone No. 2;Text30  ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Mobile Phone No. 2" WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Mobile Phone No. 2;
+                                                              FRA=Nø t‚l‚phone mobile 2];
+                                                   Editable=No }
+    { 60007;  ;Contact Territory Code;Code10      ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Territory Code" WHERE (No.=FIELD(Contact No.)));
+                                                   TableRelation=Territory;
+                                                   CaptionML=[ENU=IMH Country;
+                                                              FRA=Zone IMH];
+                                                   Editable=No }
+    { 60008;  ;Contact Fax No.     ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Fax No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                              END;
+
+                                                   CaptionML=[ENU=Fax No.;
+                                                              FRA=Nø Fax];
+                                                   Editable=No }
+    { 60009;  ;Contact Business Phone No.;Text30  ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Business Phone No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Business Phone No.;
+                                                              FRA=Nø t‚l‚phone affaire];
+                                                   Editable=No }
+    { 60010;  ;Contact VAT Registration No.;Text20;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."VAT Registration No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                VATRegNoFormat@1000 : Record 381;
+                                                              BEGIN
+                                                              END;
+
+                                                   CaptionML=[ENU=VAT Registration No.;
+                                                              FRA=Nø identif. intracomm.];
+                                                   Editable=No }
+    { 60011;  ;Contact Post Code   ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Post Code" WHERE (No.=FIELD(Contact No.)));
+                                                   TableRelation="Post Code".Code;
+                                                   ValidateTableRelation=No;
+                                                   CaptionML=[ENU=Post Code;
+                                                              FRA=Code postal];
+                                                   Editable=No }
+    { 60012;  ;Contact E-Mail      ;Text80        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.E-Mail WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lEmailStandardization@1100281000 : Codeunit 50096;
+                                                              BEGIN
+                                                              END;
+
+                                                   ExtendedDatatype=E-Mail;
+                                                   CaptionML=[ENU=E-Mail;
+                                                              FRA=E-mail];
+                                                   Editable=No }
+    { 60013;  ;Contact First Name  ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."First Name" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=First Name;
+                                                              FRA=Pr‚nom];
+                                                   Editable=No }
+    { 60014;  ;Contact Middle Name ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Middle Name" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Middle Name;
+                                                              FRA=Nom de jeune fille];
+                                                   Editable=No }
+    { 60015;  ;Contact Surname     ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Surname WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Surname;
+                                                              FRA=Nom de famille];
+                                                   Editable=No }
+    { 60016;  ;Contact Extension No.;Text30       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Extension No." WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Extension No.;
+                                                              FRA=Nø t‚l‚phone direct];
+                                                   Editable=No }
+    { 60017;  ;Contact Mobile Phone No.;Text30    ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Mobile Phone No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Mobile Phone No.;
+                                                              FRA=Nø t‚l‚phone mobile];
+                                                   Editable=No }
+    { 60018;  ;Contact Phone No. 2 ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Phone No. 2" WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lPhoneStand@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Phone No. 2;
+                                                              FRA=Nø t‚l‚phone 2];
+                                                   Editable=No }
+    { 60019;  ;Contact Correspondence Type;Option ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Correspondence Type" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Correspondence Type;
+                                                              FRA=Moyen de communication privil‚gi‚];
+                                                   OptionCaptionML=[ENU=" ,Hard Copy,E-Mail,Fax";
+                                                                    FRA=" ,Courrier,E-Mail,Fax"];
+                                                   OptionString=[ ,Hard Copy,E-Mail,Fax];
+                                                   Editable=No }
+    { 60020;  ;Contact Salutation Code;Code10     ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Salutation Code" WHERE (No.=FIELD(Contact No.)));
+                                                   TableRelation=Salutation;
+                                                   CaptionML=[ENU=Salutation Code;
+                                                              FRA=Civilit‚];
+                                                   Editable=No }
+    { 60021;  ;Contact APE Code    ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."APE Code" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=APE Code;
+                                                              FRA=Code APE];
+                                                   Editable=No }
+    { 60022;  ;Contact Legal Form  ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Legal Form" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Legal Form;
+                                                              FRA=Forme juridique];
+                                                   Editable=No }
+    { 60023;  ;Contact Stock Capital;Text30       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Stock Capital" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Stock Capital;
+                                                              FRA=Capital social];
+                                                   Editable=No }
+    { 60024;  ;Contact Registration No.;Code20    ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Registration No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lProviderMgt@1100281000 : Codeunit 50018;
+                                                              BEGIN
+                                                              END;
+
+                                                   CaptionML=[ENU=Registration No.;
+                                                              FRA=Nø SIRET];
+                                                   Editable=No }
+    { 60025;  ;Contact Constraint Phone No.;Text30;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Constraint Phone No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Constraint Phone No.;
+                                                              FRA=Nø t‚l‚phone. astreinte];
+                                                   Editable=No }
+    { 60026;  ;Contact Corporate No.;Code20       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Corporate No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lContactAltAddress@1100281000 : Record 5051;
+                                                                lCust@1100281001 : Record 18;
+                                                              BEGIN
+                                                              END;
+
+                                                   CaptionML=[ENU=Corporate No.;
+                                                              FRA=Nø grand compte];
+                                                   Editable=No }
+    { 60027;  ;Contact Corporate Region Code;Code10;
+                                                   FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Corporate Region Code" WHERE (No.=FIELD(Contact No.)));
+                                                   TableRelation="Corporate Region"."Region Code" WHERE (Corporate No.=FIELD(Corporate No.));
+                                                   OnValidate=VAR
+                                                                lContactAltAddress@1100281000 : Record 5051;
+                                                                lCorporateRegion@1100281001 : Record 50058;
+                                                              BEGIN
+                                                              END;
+
+                                                   CaptionML=[ENU=Corporate Region Code;
+                                                              FRA=R‚gion grand compte];
+                                                   Editable=No }
+    { 60028;  ;Contact VIP Code    ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."VIP Code" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=VIP Code;
+                                                              FRA=Code VIP];
+                                                   Editable=No }
+    { 60029;  ;Contact Birthdate   ;Date          ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Birthdate WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Birthdate;
+                                                              FRA=Date de naissance];
+                                                   Editable=No }
+    { 60030;  ;Contact Notify Customer;Option     ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Notify Customer" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Ideal Channel;
+                                                              FRA=Canal Privil‚gi‚];
+                                                   OptionCaptionML=[ENU=No,By Phone,By Mobile Phone 1,By Mobile Phone 2,By Fax,By Business Phone,By E-maill;
+                                                                    FRA=Non,Par t‚l‚phone,Par t‚l‚phone mobile,Par t‚l‚phone mobile 2,Par fax,Par e-mail,Par courrier];
+                                                   OptionString=No,By Phone,By Mobile Phone,By Mobile Phone 2,By Fax,By E-mail,By Mail;
+                                                   Editable=No }
+    { 60031;  ;Contact Member No.  ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Member No." WHERE (No.=FIELD(Contact No.)));
+                                                   OnValidate=VAR
+                                                                lContactAltAddr@1100281000 : Record 5051;
+                                                              BEGIN
+                                                              END;
+
+                                                   CaptionML=[ENU=Member No.;
+                                                              FRA=Nø b‚n‚ficiaire];
+                                                   Editable=No }
+    { 60032;  ;Contact Corporate Contact No.;Code20;
+                                                   FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Corporate Contact No." WHERE (No.=FIELD(Contact No.)));
+                                                   TableRelation=Contact.No. WHERE (Service Contact=CONST(Corporate Customer));
+                                                   CaptionML=[ENU=Corporate Contact No.;
+                                                              FRA=Nø contact grand compte];
+                                                   Editable=No }
+    { 60033;  ;Contact Service Contact Name;Text30;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Service Contact Name" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Service Contact Name;
+                                                              FRA=Nom type contact];
+                                                   Editable=No }
+    { 60034;  ;Contact GTA Code    ;Code40        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."GTA Code" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Code GTA;
+                                                              FRA=GTA Code];
+                                                   Editable=No }
+  }
+  KEYS
+  {
+    {    ;Contact No.,Corporate No.,Contract Form Code,Occurence No.;
+                                                   Clustered=Yes }
+    {    ;Corporate No.,Contract Form Code         }
+    {    ;Contract Reference,Corporate No.         }
+  }
+  FIELDGROUPS
+  {
+    { 1   ;DropDown            ;Contract Form Code,Contract Reference,Address,Post Code,City,Expiration Date }
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Start date must be lower then expiration date;FRA=La date de d‚but doit ˆtre inf‚rieure … la date d''expiration';
+      Text002@1100281002 : TextConst 'ENU=Can not change the corporate customer, services exist on this contract;FRA=Impossible de modifier le grand compte, des services existent sur cette formule';
+      Text005@1100281004 : TextConst 'ENU=Contract Code %1 does not exist for the %2 Corporate;FRA=Le code contrat %1 n''existe pas pour le grand compte %2';
+      Text006@1100281005 : TextConst 'ENU=Start date is required;FRA=Date de d‚but est obligatoire';
+      Text007@1100281006 : TextConst 'ENU=Expiration date is required;FRA=Date d''expiration obligatoire';
+      Contact@1100281001 : Record 5050;
+      DisableCheckCorpContract@1100281003 : Boolean;
+      ContactInfoInit@1100281007 : Boolean;
+      ContactAltAddr@1100281009 : Record 5051;
+      Text008@1100281008 : TextConst 'ENU=Beneficiairy is rayed. Do you want to continue ?;FRA=Le b‚n‚ficiaire est radi‚. Souhaitez-vous continuer ?';
+
+    PROCEDURE TouchRecord@1000000001(pInsert@1000000000 : Boolean);
+    BEGIN
+      IF pInsert THEN BEGIN
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+        IF "Last Modification Date" =0DT THEN BEGIN
+          "Last Modification Date" := CURRENTDATETIME;
+          "Last Modification User ID" := USERID;
+        END;
+      END
+      ELSE BEGIN
+        "Last Modification Date" := CURRENTDATETIME;
+        "Last Modification User ID" := USERID;
+      END;
+    END;
+
+    PROCEDURE GetLastOccurenceNo@1100281001() : Integer;
+    VAR
+      lContactContract@1100281000 : Record 50059;
+    BEGIN
+      lContactContract.SETRANGE("Contact No.","Contact No.");
+      lContactContract.SETRANGE("Corporate No.", "Corporate No.");
+      lContactContract.SETRANGE("Contract Form Code","Contract Form Code");
+      IF lContactContract.ISEMPTY THEN
+        EXIT(1);
+      lContactContract.FINDLAST;
+      EXIT(lContactContract."Occurence No." + 1);
+    END;
+
+    PROCEDURE CheckRequiredFields@1100281000();
+    VAR
+      lCorporateContract@1100281000 : Record 50057;
+    BEGIN
+      TESTFIELD("Contact No.");
+      TESTFIELD("Contract Form Code");
+      TESTFIELD("Corporate No.");
+    END;
+
+    PROCEDURE CheckCorporateContract@1100281002();
+    VAR
+      lCorporateContract@1100281000 : Record 50057;
+    BEGIN
+      //<<IMH04
+      IF DisableCheckCorpContract THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH04
+      TESTFIELD("Corporate No.");
+      TESTFIELD("Contract Form Code");
+      IF NOT lCorporateContract.GET("Corporate No.","Contract Form Code") THEN
+        ERROR(Text005,"Contract Form Code","Corporate No.");
+      "Deductible 1 (LCY)" := lCorporateContract."Default Deductible 1 (LCY)";
+      "Deductible 2 (LCY)" := lCorporateContract."Default Deductible 2 (LCY)";
+      "Electrical failure" := lCorporateContract."Default Electrical Failure";
+    END;
+
+    PROCEDURE CheckServiceExists@1100281003();
+    VAR
+      lService@1100281000 : Record 50066;
+    BEGIN
+      lService.SETCURRENTKEY("Contact No.","Corporate No.");
+      lService.SETRANGE("Contact No.","Contact No.");
+      lService.SETRANGE("Corporate No.",xRec."Corporate No.");
+      IF NOT lService.ISEMPTY THEN
+        ERROR(Text002);
+    END;
+
+    PROCEDURE GetOccupierNature@1100281004() : Text[50];
+    VAR
+      lContactAltAddr@1100281001 : Record 5051;
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //IMH04
+      IF GetAltAddr THEN
+        EXIT(ContactAltAddr.GetOccupierNature);
+    END;
+
+    PROCEDURE GetResidenceType@1100281005() : Text[50];
+    VAR
+      lContactAltAddr@1100281001 : Record 5051;
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //IMH04
+      IF GetAltAddr THEN
+        EXIT(ContactAltAddr.GetResidenceType);
+    END;
+
+    PROCEDURE GetHousingType@1100281006() : Text[50];
+    VAR
+      lContactAltAddr@1100281001 : Record 5051;
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //IMH04
+      IF GetAltAddr THEN
+        EXIT(ContactAltAddr.GetHousingType);
+    END;
+
+    PROCEDURE GetPropertyType@1100281007() : Text[50];
+    BEGIN
+      //IMH04
+      IF GetAltAddr THEN
+        EXIT(ContactAltAddr.GetPropertyType);
+    END;
+
+    PROCEDURE SetDisableCheckCorpContract@1100281008(pDisableCheckCorpContract@1100281000 : Boolean);
+    BEGIN
+      // IMH04
+      DisableCheckCorpContract := pDisableCheckCorpContract;
+    END;
+
+    PROCEDURE GetContactInfo@1100281009(pContact@1100281000 : Record 5050);
+    BEGIN
+      ContactInfoInit := TRUE;
+      Name := pContact.Name;
+      Address := pContact.Address;
+      "Address 2" := pContact."Address 2";
+      "Post Code" := pContact."Post Code";
+      City := pContact.City;
+      "Country/Region Code" := pContact."Country/Region Code";
+      "Corporate No." := pContact."Corporate No.";
+      "Member No." := pContact."Member No.";
+    END;
+
+    LOCAL PROCEDURE GetAltAddr@1100281010() : Boolean;
+    BEGIN
+      EXIT(ContactAltAddr.GET("Contact No.","Default Address Code"));//IMH05.ST
+    END;
+
+    PROCEDURE CreateService@1100281011(pShowCard@1100281000 : Boolean;VAR pService@1100281001 : Record 50066);
+    VAR
+      lService@1100281004 : Record 50066;
+      lContact@1100281002 : Record 5050;
+      lServMgtSetup@1100281003 : Record 5911;
+    BEGIN
+      //IMH06.ST
+      TESTFIELD("Contract Form Code");
+      lContact.GET("Contact No.");
+      IF GUIALLOWED THEN BEGIN
+        IF lContact.Rayed THEN
+          IF NOT CONFIRM(Text008, TRUE) THEN
+            ERROR('');
+      END;
+      lContact.TESTFIELD("Corporate No.");
+      lContact.TESTFIELD("Service Contact", lContact."Service Contact"::Beneficiary);
+      lServMgtSetup.GET;
+      lService.VALIDATE("Contact No.", "Contact No.");
+      lService."Contract Form Code" := "Contract Form Code";
+      lService.VALIDATE("Contract Occurence No.", "Occurence No.");
+      lService.INSERT(TRUE);
+      lService.GetContact;//IMH07
+      lService."Contract Form Code" := "Contract Form Code";
+      lService.VALIDATE("Contract Occurence No.", "Occurence No.");
+      lService."Process Code" := lServMgtSetup."Service Process Code";
+      lService.VALIDATE("Process Status No.", lServMgtSetup."Service Start Status");
+      lService.MODIFY(TRUE);
+      pService := lService;
+      IF NOT pShowCard THEN
+        EXIT;
+      COMMIT;
+      FORM.RUN(FORM::"Service Card",lService);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH08 @d 17/10/13 @a ISAT.EBA @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR / R‚gion */
+      /** @r IMH07 @d 05/09/11 @a ISAT.LLT @v IMH6.01.012 @s Gestion du service @c Gestion nom beneficiaire */
+      /** @r IMH06 @d 29/08/11 @a ISAT.ST @v IMH6.01.012 @s Gestion du service @c Ajout CreateService */
+      /** @r IMH05 @d 26/07/11 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Cr‚ation auto du contrat */
+      /** @r IHM04 @d 13/07/11 @a ISAT.PC @v IMH6.01.002 @s Gestion des contacts
+          @c Ajout fonction SetDisableCorpContract */
+      /** @r IHM03 @d 10/02/11 @a ISAT.ZW @v IMH6.01.001 @s Normalisation des donn‚es
+          @c Associer les Pays au code postaux - descendre le code pays automatiquement*/
+      /** @r IMH02 @d 28/01/11 @a ISAT.LLT @v IMH6.01.002 @s Gestion des contacts @c Ajout flowfield de d‚signation */
+      /** @r IMH01 @d 24/09/10 @a ISAT.LLT @v IMH6.01.002 @s Gestion des contacts @c Cr‚ation */
+    }
+    END.
+  }
+}

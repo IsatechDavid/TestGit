@@ -1,0 +1,361 @@
+OBJECT Codeunit 50033 Proc. Provider Req. Funct.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/13;
+    Time=16:21:04;
+    Modified=Yes;
+    Version List=IMH6.01.08;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProcCommFct@1100281016 : Codeunit 50049;
+      Funct_Error@1100281007 : TextConst 'ENU=Parameter from function %1 must be %2;FRA=Le paramŠtre de la fonction %1 doit ˆtre %2';
+      Funct001_Name@1100281001 : TextConst 'ENU=Tray line activities exists;FRA=Activit‚s corbeilles en cours';
+      Funct001_Assist@1100281002 : TextConst 'ENU=Team code filter (unmandatory);FRA=Filtre code corbeille (non obligatoire)';
+      AssistMode@1100281003 : Boolean;
+      CurrRec@1100281004 : Record 50000;
+      Funct002_Name@1100281005 : TextConst 'ENU=Min. affected service number;FRA=Min. nombre interventions confi‚es';
+      Funct002_Assist@1100281006 : TextConst 'ENU=Min. affected service nunmber (mandatory);FRA=Nombre d''interventions confi‚es mini. (obligatoire)';
+      Funct002_Error@1100281008 : TextConst 'ENU=integer type higher than 0.;FRA=de type entier sup‚rieur … 0.';
+      Funct003_Name@1100281009 : TextConst 'ENU=Completeness complete;FRA=Compl‚tude complŠte';
+      Funct004_Name@1100281010 : TextConst 'ENU=Is it a area responsible ?;FRA=Est-ce un responsable de zone ?';
+      Funct005_Name@1100281011 : TextConst 'ENU=Is it facilitator ?;FRA=Est-ce un charg‚ de pilotage r‚seau ?';
+      Funct006_Name@1100281012 : TextConst 'ENU=Is it an assistant ?;FRA=Est-ce une assistante ?';
+      Funct007_Name@1100281013 : TextConst 'ENU=Success with quality test ?;FRA=SuccŠs au test de qualit‚ ?';
+      Funct008_Name@1100281015 : TextConst 'ENU=Completeness incomplete;FRA=Compl‚tude incomplŠte';
+      Funct009_Name@1100281014 : TextConst 'ENU=Is it a manager user ?;FRA=Est-ce un responsable r‚seau ?';
+
+    LOCAL PROCEDURE GetTableNo@1100281000() : Integer;
+    BEGIN
+      EXIT(DATABASE::Provider);
+    END;
+
+    PROCEDURE LoadFunctionList@1100281001();
+    VAR
+      lProcFunction@1100281000 : Record 50085;
+    BEGIN
+      // Source Table, Type, nø de la fonction, Description, ParamŠtre o/n
+      WITH lProcFunction DO BEGIN
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 1, Funct001_Name , TRUE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 2, Funct002_Name , TRUE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 3, Funct003_Name , FALSE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 4, Funct004_Name , FALSE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 5, Funct005_Name , FALSE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 6, Funct006_Name , FALSE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 7, Funct007_Name , FALSE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 8, Funct008_Name , FALSE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 9, Funct009_Name , FALSE);
+      END;
+      // Plage 200 : fonction communes
+      ProcCommFct.LoadTestFunctionList(GetTableNo); //IMH05.ST
+    END;
+
+    PROCEDURE AssistFunction@1100281009(pFunctionNo@1100281000 : Integer);
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      AssistMode := TRUE;
+      TestFunction(pFunctionNo, '', lRecRef);
+      AssistMode := FALSE;
+    END;
+
+    PROCEDURE TestFunction@1100281003(pFunctionNo@1100281000 : Integer;pParameters@1100281001 : Text[1024];pCurrRecRef@1100281002 : RecordRef) : Boolean;
+    BEGIN
+      IF NOT AssistMode THEN
+        pCurrRecRef.SETTABLE(CurrRec);
+      CASE pFunctionNo OF
+        1 : EXIT(TrayLineExist(TRUE, pParameters));
+        2 : EXIT(CheckRealisedServiceNb(pParameters));
+        3 : EXIT(CheckCompletenessComplete);
+        4 : EXIT(CheckIsRegionalCoordinator);
+        5 : EXIT(CheckIsFacilitator);
+        6 : EXIT(CheckIsAssistant);
+        //7 : EXIT(CheckQualityTest);
+        8 : EXIT(CheckCompletenessIncomplete);
+        9 : EXIT(CheckIsManagerUser);
+
+        201 : IF NOT AssistMode THEN
+                EXIT(AndFunction(pParameters, pCurrRecRef)); //IMH05.ST
+      END;
+      IF AssistMode THEN
+        ProcCommFct.AssistTestFunction(GetTableNo, pFunctionNo, pParameters)
+      ELSE
+        EXIT(ProcCommFct.TestFunction(GetTableNo, pFunctionNo, pParameters)); //IMH05.ST
+    END;
+
+    PROCEDURE CheckParameters@1100281013(pFunctionNo@1100281000 : Integer;pParameter@1100281002 : Text[1024];VAR pErrorText@1100281001 : Text[250]) : Boolean;
+    BEGIN
+      //IMH04.zw
+    END;
+
+    LOCAL PROCEDURE "------------------------------"@1100281004();
+    BEGIN
+    END;
+
+    LOCAL PROCEDURE TrayLineExist@1100281006(pUnclosed@1100281002 : Boolean;pParameters@1100281000 : Text[1024]) : Boolean;
+    VAR
+      lTrayLine@1100281001 : Record 50048;
+    BEGIN
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct001_Assist);
+        EXIT;
+      END;
+
+      lTrayLine.SETCURRENTKEY("Contact No.");
+      lTrayLine.SETRANGE("Contact No.", CurrRec."No.");
+      IF pUnclosed THEN
+        lTrayLine.SETRANGE(Closed, FALSE);
+      IF pParameters <> '' THEN
+        lTrayLine.SETFILTER("Team Code", pParameters);
+
+      EXIT(NOT lTrayLine.ISEMPTY);
+    END;
+
+    LOCAL PROCEDURE CheckRealisedServiceNb@1100281002(pParameters@1100281000 : Text[1024]) rValue : Boolean;
+    VAR
+      lServiceInterventionLine@1100281001 : Record 50075;
+      lInteger@1100281002 : Integer;
+    BEGIN
+      // Le prestataire a-t-il pParameters interventions confi‚es ?
+
+      rValue := FALSE;
+
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct002_Assist);
+        EXIT;
+      END;
+
+      IF pParameters <> '' THEN BEGIN
+        IF NOT EVALUATE(lInteger,pParameters) THEN BEGIN
+          ERROR(Funct_Error,Funct002_Name,Funct002_Error);
+        END ELSE BEGIN
+          IF lInteger < 0 THEN BEGIN
+            ERROR(Funct_Error,Funct002_Name,Funct002_Error);
+          END;
+        END;
+      END ELSE BEGIN
+        ERROR(Funct_Error,Funct002_Name,Funct002_Error);
+      END;
+
+      lServiceInterventionLine.SETCURRENTKEY("Provider No.");
+      lServiceInterventionLine.SETRANGE("Provider No.",CurrRec."No.");
+      //<<IMH07.PC
+      //lServiceInterventionLine.SETRANGE("Intervention Status",lServiceInterventionLine."Intervention Status"::Closed);
+      //>>IMH07.PC
+      rValue := lServiceInterventionLine.COUNT >= lInteger;
+    END;
+
+    LOCAL PROCEDURE CheckCompletenessComplete@1100281005() rValue : Boolean;
+    VAR
+      lCompletnessTask@1100281000 : Record 50004;
+    BEGIN
+      // La completude est-elle complŠte ?
+
+      rValue := FALSE;
+
+      lCompletnessTask.RESET;
+      lCompletnessTask.SETRANGE("Provider No.",CurrRec."No.");
+      //<<IMH06.PC
+      lCompletnessTask.SETRANGE(Mandatory,TRUE);
+      //>>IMH06.PC
+      IF lCompletnessTask.FINDSET THEN BEGIN
+        REPEAT
+          IF lCompletnessTask."Receive Date" = 0D THEN BEGIN
+            EXIT;
+          END;
+          // ajout‚ test sur document … renouveler uniquement
+          //workdate
+          IF lCompletnessTask."Renew Mandatory" THEN
+            IF (lCompletnessTask."Validity Start Date" > WORKDATE) OR
+               (lCompletnessTask."Validity End Date" < WORKDATE) THEN
+             EXIT;
+        UNTIL lCompletnessTask.NEXT = 0;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE CheckCompletenessIncomplete@1100281012() rValue : Boolean;
+    VAR
+      lCompletnessTask@1100281000 : Record 50004;
+    BEGIN
+      // La completude est-elle incomplŠte ?
+
+      rValue := TRUE;
+
+      lCompletnessTask.RESET;
+      lCompletnessTask.SETRANGE("Provider No.",CurrRec."No.");
+      //<<IMH06.PC
+      lCompletnessTask.SETRANGE(Mandatory,TRUE);
+      //>>IMH06.PC
+      IF lCompletnessTask.FINDSET THEN BEGIN
+        REPEAT
+          IF lCompletnessTask."Receive Date" = 0D THEN BEGIN
+            EXIT;
+          END;
+          // ajout‚ test sur document … renouvelker uniquement
+          //workdate
+          IF lCompletnessTask."Renew Mandatory" THEN
+            IF (lCompletnessTask."Validity Start Date" > WORKDATE) OR
+               (lCompletnessTask."Validity End Date" < WORKDATE) THEN
+             EXIT;
+        UNTIL lCompletnessTask.NEXT = 0;
+      END;
+
+      rValue := FALSE;
+    END;
+
+    LOCAL PROCEDURE CheckIsRegionalCoordinator@1100281007() rValue : Boolean;
+    VAR
+      lUserSetup@1100281000 : Record 91;
+    BEGIN
+      // L'utilisateur est-il un coordonnateur r‚gional
+
+      rValue := FALSE;
+
+      IF CurrRec."Regional Coordinator" = '' THEN BEGIN
+        lUserSetup.GET(USERID);
+        IF lUserSetup."User Type" <> lUserSetup."User Type"::"Area Responsible" THEN BEGIN
+          EXIT;
+        END;
+      END ELSE BEGIN
+        IF CurrRec."Regional Coordinator" <> USERID THEN BEGIN
+          EXIT;
+        END;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE CheckIsFacilitator@1100281008() rValue : Boolean;
+    VAR
+      lUserSetup@1100281000 : Record 91;
+    BEGIN
+      // L'utilisateur est-il un animateur r‚seau
+
+      rValue := FALSE;
+
+      IF CurrRec."Network Facilitator" = '' THEN BEGIN
+        lUserSetup.GET(USERID);
+        IF lUserSetup."User Type" <> lUserSetup."User Type"::"Network Facilitator" THEN BEGIN
+          EXIT;
+        END;
+      END ELSE BEGIN
+        IF CurrRec."Network Facilitator" <> USERID THEN BEGIN
+          EXIT;
+        END;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE CheckIsAssistant@1100281010() rValue : Boolean;
+    VAR
+      lUserSetup@1100281000 : Record 91;
+    BEGIN
+      // L'utilisateur est-il un assistant r‚seau
+
+      rValue := FALSE;
+
+      IF CurrRec."Network Assistant" = '' THEN BEGIN
+        lUserSetup.GET(USERID);
+        IF lUserSetup."User Type" <> lUserSetup."User Type"::"Network Assistant" THEN BEGIN
+          EXIT;
+        END;
+      END ELSE BEGIN
+        IF CurrRec."Network Assistant" <> USERID THEN BEGIN
+          EXIT;
+        END;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE CheckQualityTest@1100281011() rValue : Boolean;
+    VAR
+      lQualityControlLine@1100281001 : Record 50091;
+      lProviderSetup@1100281000 : Record 50011;
+    BEGIN
+      // V‚rification si les tests de qualit‚ sont ok
+      rValue := FALSE;
+      {obsolŠte
+      lProviderSetup.GET;
+      lProviderSetup.TESTFIELD("Trial Period - Min Controls");
+      IF CurrRec.Status <> CurrRec.Status::"Trial Period" THEN BEGIN
+        EXIT;
+      END;
+
+      lQualityControlLine.SETCURRENTKEY("Answer 5 Comment Mandatory","Answer 5 Result","Answer 1 Result");
+      lQualityControlLine.SETRANGE("Answer 5 Comment Mandatory", lQualityControlLine."Answer 5 Comment Mandatory"::"3");
+      lQualityControlLine.SETRANGE("Answer 1 Result", CurrRec."No.");
+      lQualityControlLine.SETRANGE("Answer 5 Result",TRUE);
+      lQualityControlLine.SETRANGE("Control Done", TRUE);
+      IF lQualityControlLine.COUNT < lProviderSetup."Trial Period - Min Controls" THEN BEGIN
+        EXIT;
+      END;
+      }
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CheckIsManagerUser@1100281014() rValue : Boolean;
+    VAR
+      lProviderSetup@1100281001 : Record 50011;
+      lUserSetup@1100281000 : Record 91;
+    BEGIN
+      //IMH04
+      // L'utilisateur est-il un responsable r‚seau
+
+      rValue := FALSE;
+      lProviderSetup.GET;
+      IF NOT lUserSetup.GET(USERID) THEN
+        EXIT;
+
+      IF lUserSetup."User ID" <> lProviderSetup."Manager User Code" THEN BEGIN
+        EXIT;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE AndFunction@1100281015(pParameters@1100281000 : Text[1024];pCurrRecRef@1100281001 : RecordRef) : Boolean;
+    VAR
+      lFunctionNo@1100281002 : Integer;
+      lFunctionParam@1100281003 : Text[1024];
+    BEGIN
+      //IMH05.ST
+      IF pParameters  = '' THEN
+        EXIT(TRUE);
+      REPEAT
+        ProcCommFct.RetrieveFctParam(pParameters, lFunctionNo, lFunctionParam);
+        IF NOT TestFunction(lFunctionNo, lFunctionParam, pCurrRecRef) THEN
+          EXIT(FALSE);
+      UNTIL pParameters = '';
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH08 @d 14/10/13 @a ISAT.ST @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR */
+      /** @r IMH07 @d 24/09/11 @a ISAT.PC @v IMH6.01.102 @s Gestion des status @h mantis1543 @c correctif */
+      /** @r IMH06 @d 13/09/11 @a ISAT.PC @v IMH6.01.102 @s Gestion des status @c correctif */
+      /** @r IMH05 @d 04/07/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Appel fonctions communes, impl‚mentation AndFunction */
+      /** @r IMH04 @d 07/06/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction CheckIsManagerUser */
+      /** @r IMH03 @d 05/05/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction CheckParameters */
+      /** @r IMH02 @d 08/02/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c CheckQualityTest + controle date validit‚ completude*/
+      /** @r IMH01 @d 27/12/10 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Cr‚ation objet */
+    }
+    END.
+  }
+}

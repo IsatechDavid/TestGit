@@ -1,0 +1,945 @@
+OBJECT Codeunit 50097 Contact Search Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=09/02/12;
+    Time=18:08:05;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lSearchForm@1100281001 : Form 50050;
+          BEGIN
+            //IMH01
+            lSearchForm.RUN;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text010@1100281005 : TextConst 'ENU=The minimum length of phone number is at least 6 digits;FRA=Le nø de t‚l‚phone doit comporter au moins 6 chiffres';
+      Contact@1100281006 : Record 5050;
+      Text011@1100281007 : TextConst 'ENU=Please enter at least one search field inside this fields :;FRA=Veuillez saisir au moins un champ de recherche parmi les suivants :';
+      CRMSetup@1100281000 : Record 5079;
+      CRMSetupRead@1100281001 : Boolean;
+      Text012@1100281002 : TextConst 'ENU=Result limited to %1 records.;FRA=R‚sultats limit‚s … %1 enregistrements.';
+      ToolsMgt@1100281003 : Codeunit 8016602;
+      Text013@1100281004 : TextConst 'FRA=%1 et %2';
+      Text014@1100281008 : TextConst 'ENU=You can''t search only with %1.;FRA=Vous ne pouvez pas rechercher uniquement avec %1.';
+      OnlyUnique@1100281009 : Boolean;
+
+    PROCEDURE SearchContact@1100281007(pDefaultContactType@1100281000 : 'Corporate Customer,Provider,Adjuster,Beneficiary,All';VAR pContactNo@1100281001 : Code[20]) : Boolean;
+    BEGIN
+      //IMH01
+      Contact.RESET;
+      IF pDefaultContactType <> pDefaultContactType::All THEN
+        Contact.SETRANGE("Service Contact", pDefaultContactType);
+
+      EXIT(SearchContactWithFilters(Contact, pContactNo));
+    END;
+
+    PROCEDURE SearchContactWithFilters@1100281008(VAR pContactFilters@1100281000 : Record 5050;VAR pContactNo@1100281001 : Code[20]) : Boolean;
+    VAR
+      lSearchForm@1100281002 : Form 50050;
+    BEGIN
+      //IMH01
+      IF pContactFilters.GETFILTER("Country/Region Code") = '' THEN
+        pContactFilters.SETRANGE("Country/Region Code", GetCompanyCountry);
+      lSearchForm.SetContactFilter(pContactFilters);
+
+      lSearchForm.LOOKUPMODE(TRUE);
+      COMMIT;
+      IF lSearchForm.RUNMODAL IN [ACTION::LookupOK,ACTION::OK] THEN BEGIN
+        pContactNo := lSearchForm.GetContact;
+        EXIT(TRUE);
+      END
+      ELSE
+        IF lSearchForm.ClosedFromCreate(pContactNo) THEN
+          EXIT(TRUE);
+    END;
+
+    PROCEDURE CheckSearchFields@1100281004(VAR pContactFilters@1100281000 : Record 5050;pShowDialog@1100281001 : Boolean) : Boolean;
+    VAR
+      lSearchBen@1100281002 : Boolean;
+      lContactFilters@1100281003 : Record 5050;
+    BEGIN
+      //IMH01
+      // V‚rifie que les valeurs saisie par l'utilisateurs sont suffisantes pour lancer la recherche
+
+      // ******************************************************** //
+      // A compl‚ter : v‚rifier les critŠres de recherche : longueur de champs ...
+
+      IF pContactFilters.GETFILTER("Member No.") <> '' THEN
+        IF STRLEN(pContactFilters.GETFILTER("Member No.")) > 4 THEN
+          EXIT(TRUE);
+
+      IF pContactFilters.GETFILTER("Phone No.")<> '' THEN BEGIN
+        IF STRLEN(pContactFilters.GETFILTER("Phone No.")) < 6 THEN BEGIN
+          IF pShowDialog THEN
+            ERROR(Text010);
+          EXIT(FALSE);
+        END;
+        EXIT(TRUE);
+      END;
+
+      lSearchBen := FALSE;
+      IF pContactFilters.GETFILTER("Service Contact") <> '' THEN
+        IF pContactFilters.GETRANGEMIN("Service Contact") = pContactFilters."Service Contact"::Beneficiary THEN
+          lSearchBen := TRUE;
+
+      IF lSearchBen THEN BEGIN
+        IF pContactFilters.GETFILTER(Surname) <> '' THEN BEGIN
+          lContactFilters.COPYFILTERS(pContactFilters);
+          lContactFilters.SETRANGE("Service Contact");
+          lContactFilters.SETRANGE(Surname);
+          IF (pContactFilters.GETFILTER("First Name") = '') THEN
+             lContactFilters.SETFILTER("First Name",'%1','');
+          IF lContactFilters.GETFILTERS = '' THEN BEGIN
+            IF pShowDialog THEN
+              ERROR(Text014, pContactFilters.FIELDCAPTION(Surname));
+            EXIT(FALSE);
+          END;
+        END;
+        IF pContactFilters.GETFILTER("Corporate No.") <> '' THEN BEGIN
+          lContactFilters.COPYFILTERS(pContactFilters);
+          lContactFilters.SETRANGE("Service Contact");
+          lContactFilters.SETRANGE("Corporate No.");
+          IF lContactFilters.GETFILTERS = '' THEN BEGIN
+            IF pShowDialog THEN
+              ERROR(Text014, pContactFilters.FIELDCAPTION("Corporate No."));
+            EXIT(FALSE);
+          END;
+        END;
+      END;
+
+      // Autoriser si on a les premiers champs de cl‚
+      IF (pContactFilters.GETFILTER("No.") <> '') OR
+         (pContactFilters.GETFILTER(Name) <> '') OR
+         (pContactFilters.GETFILTER("Post Code") <> '') OR
+         (pContactFilters.GETFILTER(City) <> '') OR
+         (pContactFilters.GETFILTER("E-Mail") <> '') OR
+         //<<IMH05.isat.PC
+         (pContactFilters.GETFILTER("VAT Registration No.") <> '') OR
+         (pContactFilters.GETFILTER("Registration No.") <> '') OR
+         //>>IMH05.isat.PC
+         (pContactFilters.GETFILTER(Surname) <> '')
+      THEN
+        EXIT(TRUE);
+
+      IF pShowDialog THEN BEGIN
+        WITH pContactFilters DO BEGIN
+          ERROR(Text011 +
+                '\    ' + FIELDCAPTION("Member No.") +
+                '\    ' + FIELDCAPTION(Name) +
+                '\    ' + FIELDCAPTION("Phone No.") +
+                '\    ' + FIELDCAPTION("E-Mail") +
+                '\    ' + FIELDCAPTION("Post Code") +
+                '\    ' + FIELDCAPTION(City) +
+                 //<<IMH05.isat.PC
+                '\    ' + FIELDCAPTION("VAT Registration No.") +
+                '\    ' + FIELDCAPTION("Registration No.")+
+                //>>IMH05.isat.PC
+                '\    ' + FIELDCAPTION(Surname)
+                );
+        END;
+      END;
+      EXIT(FALSE);
+      // ******************************************************** //
+    END;
+
+    PROCEDURE CreateContactList@1100281003(VAR pContactFilters@1100281000 : Record 5050;VAR pResultContactList@1100281001 : Record 5050;VAR pResultInfo@1100281003 : Text[1024]) ReturnValue : Boolean;
+    VAR
+      lContactAltAddress@1100281012 : Record 5051;
+      lTempContactAltAddress@1100281017 : TEMPORARY Record 5051;
+      lContact@1100281013 : Record 5050;
+      lContact2@1100281008 : Record 5050;
+      lServiceContact@1100281020 : Integer;
+      lContactNo@1100281009 : Code[20];
+      lUseTempAddr@1100281023 : Boolean;
+      lSearchPhoneNo@1100281002 : Text[60];
+      lSearchCountry@1100281004 : Text[30];
+      lRegistrationNo@1100281006 : Text[30];
+      lVATRegistrationNo@1100281005 : Text[30];
+      lIncludeRayed@1100281007 : Boolean;
+    BEGIN
+      //IMH01
+      //<<IMH10.ST
+      lIncludeRayed := TRUE;
+      IF pContactFilters.GETFILTER(Rayed) <> '' THEN
+        IF pContactFilters.GETRANGEMIN(Rayed) = FALSE THEN
+          lIncludeRayed := FALSE;
+      //>>IMH10.ST
+
+
+      //<<IMH12.PC
+      // Dans le cas d'un filtre sur le nø de b‚n‚ficiaire on filtre directement dessus
+      IF pContactFilters.GETFILTER("Member No.") <> '' THEN BEGIN
+        EXIT(LoadContactFromContact(pContactFilters, pResultContactList, pResultInfo, lIncludeRayed));
+      END;
+      //>>IMH12.PC
+
+      //Alimente la table temporaire presultContactList avec les critŠres pContactFilters
+      lSearchPhoneNo := pContactFilters.GETFILTER("Phone No.");
+      lSearchCountry := pContactFilters.GETFILTER("Country/Region Code");
+      //<<IMH05.isat.PC
+      lRegistrationNo := pContactFilters.GETFILTER("Registration No.");
+      lVATRegistrationNo := pContactFilters.GETFILTER("VAT Registration No.");
+      //>>IMH05.isat.PC
+
+      IF pContactFilters.GETFILTER("Service Contact") <> '' THEN
+        lServiceContact := pContactFilters.GETRANGEMIN("Service Contact")
+      ELSE
+        lServiceContact := -1;
+
+      IF lSearchPhoneNo <> '' THEN BEGIN
+        // Recherche dans l'annuaire invers‚
+        // V‚rifie si le nø de t‚l‚phone saisi contient le pr‚fixe
+        GetPrefixePhoneNo(lSearchCountry,lSearchPhoneNo);
+        IF GetContactByPhoneNo(lSearchPhoneNo,FALSE,lContactNo) THEN BEGIN
+          // Note ST : attention on n'applique pas les autres filtres
+          IF lContact.GET(lContactNo) THEN BEGIN
+            IF (pContactFilters."Service Contact" = -1) OR (lServiceContact = lContact."Service Contact") THEN BEGIN
+              pResultContactList := lContact;
+              pResultContactList.INSERT;
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        lSearchPhoneNo := lSearchPhoneNo +'*';
+        IF NOT MakeDirectoryByPhoneNo(lSearchPhoneNo,lTempContactAltAddress) THEN
+          EXIT(FALSE);
+        lUseTempAddr := TRUE;
+      END;
+
+      //<<IMH05.isat.PC
+      // Partie Nø SIRET
+      IF lRegistrationNo <> '' THEN BEGIN
+        IF GetContactByRegistrationNo(lRegistrationNo,lContactNo) THEN BEGIN
+          // Note ST : attention on n'applique pas les autres filtres
+          IF lContact.GET(lContactNo) THEN BEGIN
+            IF (pContactFilters."Service Contact" = -1) OR (lServiceContact = lContact."Service Contact") THEN BEGIN
+              pResultContactList := lContact;
+              pResultContactList.INSERT;
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        lUseTempAddr := TRUE;
+      END;
+
+      // Partie TVA Intracommunautaire
+      IF lVATRegistrationNo <> '' THEN BEGIN
+        IF GetContactByVATRegistrationNo(lVATRegistrationNo,lContactNo) THEN BEGIN
+          // Note ST : attention on n'applique pas les autres filtres
+          IF lContact.GET(lContactNo) THEN BEGIN
+            IF (pContactFilters."Service Contact" = -1) OR (lServiceContact = lContact."Service Contact") THEN BEGIN
+              pResultContactList := lContact;
+              pResultContactList.INSERT;
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        lUseTempAddr := TRUE;
+      END;
+
+      //>>IMH05.isat.PC
+
+      IF lUseTempAddr THEN BEGIN
+        SetContactAltAddrFilters(pContactFilters, lTempContactAltAddress);
+        EXIT(LoadContactFromAltAddress(lTempContactAltAddress, pResultContactList, pResultInfo, lIncludeRayed));
+      END
+      ELSE BEGIN
+        SetContactAltAddrFilters(pContactFilters, lContactAltAddress);
+        EXIT(LoadContactFromAltAddress(lContactAltAddress, pResultContactList, pResultInfo, lIncludeRayed));
+      END;
+    END;
+
+    LOCAL PROCEDURE MakeDirectoryByPhoneNo@1100281009(pPhoneNo@1100281003 : Text[60];VAR pAltAddress@1100281001 : Record 5051) : Boolean;
+    VAR
+      lPhoneNoList@1100281002 : Record 50055;
+      lContactAltAddress@1100281000 : Record 5051;
+      lPhoneNo@1100281004 : Text[30];
+      lPhoneNo1@1100281006 : Text[30];
+      lPos@1100281007 : Integer;
+    BEGIN
+      //IMH01
+      //Creer en temporaire la table d'adresse secondaire filtr‚ par t‚l‚phone
+
+      lPhoneNoList.SETCURRENTKEY("Phone No.","Contact No.","Field ID");
+      //Recherche avec ou sans pr‚fixe
+      lPos := STRPOS(pPhoneNo,'|');
+      IF lPos <> 0 THEN BEGIN
+        lPhoneNo := COPYSTR(pPhoneNo,1,lPos -1);
+        lPhoneNo1 := COPYSTR(pPhoneNo,lPos+1,STRLEN(pPhoneNo)-lPos);
+        lPhoneNo := lPhoneNo + '*';
+        lPhoneNo1 := lPhoneNo1 + '*';
+        lPhoneNoList.SETFILTER("Phone No.",'%1|%2',lPhoneNo,lPhoneNo1);
+      END ELSE BEGIN
+        lPhoneNo := pPhoneNo;
+        lPhoneNo := lPhoneNo + '*';
+        lPhoneNoList.SETFILTER("Phone No.",'%1',lPhoneNo);
+      END;
+
+      IF lPhoneNoList.ISEMPTY THEN
+        EXIT(FALSE);
+      lPhoneNoList.FINDSET(FALSE);
+      REPEAT
+        IF NOT pAltAddress.GET(lPhoneNoList."Contact No.",lPhoneNoList."Address Code") THEN BEGIN
+          IF lContactAltAddress.GET(lPhoneNoList."Contact No.",lPhoneNoList."Address Code") THEN BEGIN
+            pAltAddress := lContactAltAddress;
+            pAltAddress.INSERT;
+          END;
+        END;
+      UNTIL lPhoneNoList.NEXT = 0;
+      EXIT(NOT pAltAddress.ISEMPTY);
+    END;
+
+    LOCAL PROCEDURE SetContactAltAddrFilters@1100281015(VAR pContactFilters@1100281001 : Record 5050;VAR pContactAltAddr@1100281002 : Record 5051);
+    VAR
+      lServiceContact@1100281020 : Integer;
+      lSearchCity@1100281019 : Text[150];
+      lSearchPostCode@1100281018 : Text[30];
+      lSearchCountry@1100281017 : Text[30];
+      lSearchAddress@1100281016 : Text[50];
+      lSearchAddress2@1100281015 : Text[50];
+      lSearchName@1100281014 : Text[200];
+      lSearchSurname@1100281013 : Text[30];
+      lSearchFirstname@1100281012 : Text[30];
+      lSearchPhoneNo@1100281011 : Text[60];
+      lSearchEmail@1100281010 : Text[50];
+      lContactCorporate@1100281008 : Text[30];
+      lContactRegion@1100281007 : Text[30];
+      lSearchMember@1100281000 : Text[30];
+      lToolsMgt@1100281003 : Codeunit 8016602;
+    BEGIN
+      //IMH02.ST
+      IF pContactFilters.GETFILTER("Service Contact") <> '' THEN
+        lServiceContact := pContactFilters.GETRANGEMIN("Service Contact")
+      ELSE
+        lServiceContact := -1;
+
+      IF pContactFilters.GETFILTER(Name) <> '' THEN BEGIN //IMH15.ST
+        lSearchName := pContactFilters.GETFILTER(Name);
+      //<<IMH15.ST
+        lSearchName := lSearchName + '*';
+      END;
+      //>>IMH15.ST
+      lSearchFirstname := pContactFilters.GETFILTER("First Name");
+      lSearchSurname := pContactFilters.GETFILTER(Surname);
+      lSearchPostCode := pContactFilters.GETFILTER("Post Code");
+
+      IF (lSearchName = '') AND ((lSearchFirstname <> '') OR (lSearchSurname <> '')) THEN BEGIN
+        IF (lSearchFirstname = '') THEN BEGIN
+          //<<IMH18
+          {
+          IF (lSearchPostCode <> '') THEN
+          BEGIN
+            lSearchName := '*' + lSearchSurname + '*';
+            lSearchSurname := '';
+          END ELSE BEGIN
+            lSearchName := '';
+            lSearchSurname := lSearchSurname;
+          END;
+          }
+          //>>IMH18
+        END ELSE BEGIN
+          IF (lSearchSurname = '') THEN BEGIN
+            IF (lSearchPostCode = '') THEN
+            BEGIN
+              lSearchName := '';
+              lSearchFirstname := '*' + lSearchFirstname + '*';
+            END ELSE BEGIN
+              lSearchName := lSearchFirstname;
+              lSearchFirstname := '';
+            END;
+          END ELSE BEGIN
+            lSearchName := lSearchSurname + '*' + lSearchFirstname + '*|' +
+                           lSearchFirstname + '*' + lSearchSurname + '*';
+            lSearchSurname := '';
+            lSearchFirstname := '';
+          END;
+        END;
+      END;
+
+      lSearchAddress := pContactFilters.GETFILTER(Address);
+      lSearchAddress2 := pContactFilters.GETFILTER("Address 2");
+      //lSearchCity := pContactFilters.GETFILTER(City);
+      lSearchPostCode := pContactFilters.GETFILTER("Post Code");
+      //<<IMH11
+      //CheckSearchCity(lSearchCity,lSearchPostCode);
+      //>>IMH11
+
+      lSearchCountry := pContactFilters.GETFILTER("Country/Region Code");
+      lSearchPhoneNo := pContactFilters.GETFILTER("Phone No.");
+      lSearchEmail := pContactFilters.GETFILTER("E-Mail");
+      lContactCorporate := pContactFilters.GETFILTER("Corporate No.");
+      lContactRegion := pContactFilters.GETFILTER("Corporate Region Code");
+      lSearchMember := pContactFilters.GETFILTER("Member No."); //IMH03.ST
+      // Positionnement des filtres
+      WITH pContactAltAddr DO BEGIN
+        IF lServiceContact <> -1 THEN
+          SETRANGE("Service Contact", lServiceContact);
+        IF lSearchEmail <> '' THEN
+          SETRANGE("Search E-Mail", ToolsMgt.ReplaceAccent(lSearchEmail));
+        IF lSearchName <> '' THEN
+      //<<IMH15.ST
+      //    SETFILTER("Search Name", GetContainFilter(ToolsMgt.ReplaceAccent(lSearchName)));
+          SETFILTER("Search Name", ToolsMgt.ReplaceAccent(lSearchName));
+      //>>IMH15.ST
+        IF (lSearchFirstname <> '' ) AND (lSearchFirstname <> '''''' ) THEN
+          SETFILTER("Search First Name", ToolsMgt.ReplaceAccent(lSearchFirstname) + '*');
+        IF lSearchSurname <> '' THEN
+      //<<IMH14.ST
+      //    SETFILTER("Search name", ToolsMgt.ReplaceAccent(lSearchSurname) + '*');
+          SETFILTER("Search Surname", ToolsMgt.ReplaceAccent(lSearchSurname) + '*');
+      //>>IMH14.ST
+        IF lSearchCity <> '' THEN
+          SETFILTER("Search City", ToolsMgt.GetSearchString(ToolsMgt.ReplaceAccent(lSearchCity)) + '*');
+        IF lSearchAddress <> '' THEN
+          SETFILTER("Search Address", GetContainFilter(ToolsMgt.ReplaceAccent(lSearchAddress)));
+        IF lSearchAddress2 <> '' THEN
+          SETFILTER("Address 2", GetContainFilter(lSearchAddress2));
+        IF lContactCorporate <> '' THEN
+          SETFILTER("Corporate No.", lContactCorporate);
+        IF lContactRegion <> '' THEN
+          SETFILTER("Corporate Region Code", lContactRegion);
+        IF lSearchPostCode <> '' THEN
+          SETFILTER("Post Code", lSearchPostCode + '*');
+        IF lSearchCountry <> '' THEN
+          SETFILTER("Country/Region Code", lSearchCountry);
+        IF lSearchMember <> '' THEN
+          SETFILTER("Member No.", lSearchMember); //IMH03.ST
+      //<<IMH08.ST
+        IF pContactFilters.GETFILTER("No.") <> '' THEN
+          SETFILTER("Contact No.", pContactFilters.GETFILTER("No."));
+      //>>IMH08.ST
+      END; // WITH
+
+      // Recherche meilleure cl‚ (dans l'ordre !)
+      CASE TRUE OF
+        STRLEN(lSearchMember) > 4 : pContactAltAddr.SETCURRENTKEY("Member No."); //IMH03.ST
+        lSearchEmail <> '' :   pContactAltAddr.SETCURRENTKEY("Search E-Mail");
+        //<<IMH13.PC
+        //(lSearchPostCode <> '') AND (lSearchName <> '' ) : pContactAltAddr.SETCURRENTKEY("Post Code","Search Name","Service Contact");
+        (lSearchPostCode <> '') : pContactAltAddr.SETCURRENTKEY("Post Code","Search Name","Service Contact");
+        //>>IMH13.PC
+        lSearchSurname <> '' : pContactAltAddr.SETCURRENTKEY("Search Surname");
+        lSearchCity <> '' :    pContactAltAddr.SETCURRENTKEY("Search City"); //IMH14.ST
+        lSearchName <> '' :    pContactAltAddr.SETCURRENTKEY("Search Name");
+        lSearchPostCode <> '' : pContactAltAddr.SETCURRENTKEY("Post Code");
+      END; // CASE
+    END;
+
+    LOCAL PROCEDURE LoadContactFromAltAddress@1100281017(VAR pAltAddress@1100281002 : Record 5051;VAR pResultContactList@1100281000 : Record 5050;VAR pResultText@1100281004 : Text[1024];pIncludeRayed@1100281006 : Boolean) ReturnValue : Boolean;
+    VAR
+      lContact@1100281003 : Record 5050;
+      lCount@1100281001 : Integer;
+      lCountLimit@1100281005 : Integer;
+      lInsertContact@1100281007 : Boolean;
+    BEGIN
+      IF NOT pAltAddress.FINDSET(FALSE) THEN
+        EXIT;
+      GetSetup;
+      IF OnlyUnique THEN
+        lCountLimit := 2
+      ELSE
+        lCountLimit := CRMSetup."Contact Search Limit";
+      REPEAT
+        IF NOT pResultContactList.GET(pAltAddress."Contact No.") THEN BEGIN
+          IF lContact.GET(pAltAddress."Contact No.") THEN BEGIN
+      //<<IMH19.ST
+      //      lInsertContact := TRUE;
+            lInsertContact := lContact.Type = lContact.Type::Company;
+      //>>IMH19.ST
+      //<<IMH10.ST
+            IF lInsertContact THEN
+              IF lContact."Service Contact" = lContact."Service Contact"::Beneficiary THEN BEGIN
+                IF lContact."Rayed Date" <> 0D THEN
+                  lContact.VALIDATE("Rayed Date");
+                IF NOT pIncludeRayed THEN
+                  lInsertContact := NOT lContact.Rayed;
+              END;
+      //>>IMH10.ST
+            IF lInsertContact THEN BEGIN
+              pResultContactList := lContact;
+              pResultContactList.INSERT;
+              lCount += 1;
+              IF lCountLimit > 0 THEN
+                IF lCount >= lCountLimit THEN BEGIN
+                  pResultText := STRSUBSTNO(Text012, lCount);
+                  EXIT;
+                END;
+            END;
+          END;
+        END;
+      UNTIL (pAltAddress.NEXT = 0);
+      EXIT(NOT pResultContactList.ISEMPTY);
+    END;
+
+    PROCEDURE GetContactByPhoneNo@1100281005(pPhoneNo@1100281003 : Text[60];pFind@1100281000 : Boolean;VAR pContactNo@1100281001 : Code[20]) : Boolean;
+    VAR
+      lPhoneNoList@1100281002 : Record 50055;
+      lPhoneNo@1100281004 : Text[30];
+      lPhoneNo1@1100281006 : Text[30];
+      lPos@1100281007 : Integer;
+    BEGIN
+      //IMH01
+      IF pFind THEN BEGIN
+        Contact.RESET;
+        IF pPhoneNo <> '' THEN
+          Contact.SETRANGE("Phone No.", pPhoneNo);
+        EXIT(SearchContactWithFilters(Contact,pContactNo));
+      END
+      ELSE BEGIN
+        lPhoneNoList.SETCURRENTKEY("Phone No.","Contact No.","Field ID");
+        lPos := STRPOS(pPhoneNo,'|');
+        //Recherche avec ou sans pr‚fixe
+        IF lPos <> 0 THEN BEGIN
+          lPhoneNo := COPYSTR(pPhoneNo,1,lPos -1);
+          lPhoneNo1 := COPYSTR(pPhoneNo,lPos+1,STRLEN(pPhoneNo)-lPos);
+      //    lPhoneNo := lPhoneNo + '*';
+      //    lPhoneNo1 := lPhoneNo1 + '*';
+          lPhoneNoList.SETFILTER("Phone No.",'%1|%2',lPhoneNo,lPhoneNo1);
+        END ELSE BEGIN
+          lPhoneNo := pPhoneNo;
+      //    lPhoneNo := lPhoneNo + '*';
+          lPhoneNoList.SETFILTER("Phone No.",'%1',lPhoneNo);
+        END;
+        // Renvoi nø contact si un r‚sultat
+        IF lPhoneNoList.COUNT = 1 THEN BEGIN
+          IF lPhoneNoList.FINDFIRST THEN BEGIN
+            pContactNo := lPhoneNoList."Contact No.";
+            EXIT(TRUE);
+          END;
+        END;
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE GetContactByEmail@1100281006(pEmail@1100281003 : Text[80];pFind@1100281000 : Boolean;VAR pContactNo@1100281001 : Code[20]) : Boolean;
+    VAR
+      lContactAltAddress@1100281002 : Record 5051;
+      lSearchMail@1100281004 : Code[80];
+    BEGIN
+      //IMH01
+      IF pFind THEN BEGIN
+        Contact.RESET;
+        IF pEmail <> '' THEN
+          Contact.SETRANGE("E-Mail", pEmail);
+        SearchContactWithFilters(Contact,pContactNo);
+        EXIT(TRUE);
+      END
+      ELSE BEGIN
+        lSearchMail := pEmail;
+        IF lSearchMail = '' THEN
+          EXIT;
+        lContactAltAddress.SETCURRENTKEY("Search E-Mail");
+        lContactAltAddress.SETRANGE("Search E-Mail",lSearchMail);
+        // Renvoi nø contact si un r‚sultat
+        IF lContactAltAddress.COUNT = 1 THEN BEGIN
+          lContactAltAddress.FINDFIRST;
+          pContactNo := lContactAltAddress."Contact No.";
+          EXIT(TRUE);
+        END;
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE CreateContact@1100281000(VAR pContact@1100281000 : Record 5050;pOpenCard@1100481000 : Boolean);
+    VAR
+      lCountryRegion@1100281002 : Record 9;
+      lContact@1100281001 : Record 5050;
+    BEGIN
+      //IMH01
+      //Ouvre le formulaire de cr‚ation de contact avec les champs de recherche pr‚renseign‚s
+      lContact.INIT;
+      //<<IMH20.ST
+      IF pContact.GETFILTER("Service Contact") <> '' THEN
+        lContact.VALIDATE("Service Contact", pContact.GETRANGEMIN("Service Contact"))
+      ELSE
+        lContact.VALIDATE("Service Contact", pContact."Service Contact"::Beneficiary); // par d‚faut b‚n‚ficiaire
+      //>>IMH20.ST
+      lContact.INSERT(TRUE);
+
+      //<<IMH.PC
+      CRMSetup.GET;
+      lContact."Salutation Code" := CRMSetup."Default Person Salutation Code";
+      lContact.Type := lContact.Type::Person;
+      //>>IMH.PC
+
+      IF pContact.GETFILTER("Service Contact") <> '' THEN
+        lContact.VALIDATE("Service Contact", pContact.GETRANGEMIN("Service Contact"))
+      ELSE
+        lContact.VALIDATE("Service Contact", pContact."Service Contact"::Beneficiary); // par d‚faut b‚n‚ficiaire
+      IF pContact.GETFILTER("Corporate No.") <> '' THEN
+        lContact.VALIDATE("Corporate No.", pContact.GETRANGEMIN("Corporate No."));
+      IF pContact.GETFILTER("Corporate Region Code") <> '' THEN
+        lContact.VALIDATE("Corporate Region Code", pContact.GETRANGEMIN("Corporate Region Code"));
+      //<<IMH07
+      //lContact.SetNameBreakdownDisable(TRUE);
+      //>>IMH07
+      IF pContact.GETFILTER(Name) <> '' THEN
+        lContact.VALIDATE(Name, pContact.GETFILTER(Name));
+      IF pContact.GETFILTER("First Name") <> '' THEN
+        //<<IMH17.ISAT.EBA
+        //lContact."First Name" := pContact.GETFILTER("First Name");
+        lContact.VALIDATE("First Name",pContact.GETFILTER("First Name"));
+        //>>IMH17.ISAT.EBA
+      IF pContact.GETFILTER(Surname) <> '' THEN BEGIN
+      //<<IMH09.ST
+        IF lContact."Service Contact" = lContact."Service Contact"::Beneficiary THEN
+          //<<IMH17.ISAT.EBA
+          //lContact.Surname := UPPERCASE(pContact.GETFILTER(Surname))
+          lContact.VALIDATE(Surname,UPPERCASE(pContact.GETFILTER(Surname)))
+          //>>IMH17.ISAT.EBA
+        ELSE
+      //>>IMH09.ST
+          //<<IMH17.ISAT.EBA
+          //lContact.Surname := pContact.GETFILTER(Surname);
+          lContact.VALIDATE(Surname,pContact.GETFILTER(Surname));
+          //>>IMH17.ISAT.EBA
+      END;
+
+      IF pContact.GETFILTER(Address) <> '' THEN
+        lContact.VALIDATE(Address, pContact.GETFILTER(Address));
+      IF pContact.GETFILTER("Post Code") <> '' THEN
+        IF pContact.GETFILTER(City) <> '' THEN
+          lContact."Post Code" := pContact.GETFILTER("Post Code")
+        ELSE
+          lContact.VALIDATE("Post Code",pContact.GETFILTER("Post Code"));
+      IF pContact.GETFILTER(City) <> '' THEN
+        lContact.City := pContact.GETFILTER(City);
+      IF pContact.GETFILTER("Country/Region Code") <> '' THEN BEGIN
+        lContact."Country/Region Code" := pContact.GETRANGEMIN("Country/Region Code");
+        IF lContact."Country/Region Code" <> '' THEN
+          IF lCountryRegion.GET(lContact."Country/Region Code") THEN
+            IF lContact."Language Code" = '' THEN
+              lContact.VALIDATE("Language Code", lCountryRegion."Language Code");
+      END;
+
+      IF pContact.GETFILTER("Phone No.") <> '' THEN
+        lContact.VALIDATE("Phone No.", pContact.GETFILTER("Phone No."));
+      IF pContact.GETFILTER("E-Mail") <> '' THEN
+        lContact.VALIDATE("E-Mail", pContact.GETFILTER("E-Mail"));
+      IF pContact.GETFILTER("Member No.") <> '' THEN
+        lContact.VALIDATE("Member No.", pContact.GETFILTER("Member No."));
+
+      lContact."Correspondence Type" := lContact."Correspondence Type"::" ";
+      lContact.MODIFY(TRUE);
+      pContact := lContact;
+      IF pOpenCard THEN BEGIN
+        COMMIT;
+        FORM.RUNMODAL(FORM::"Contact Card",lContact);
+      END;
+    END;
+
+    LOCAL PROCEDURE GetPrefixePhoneNo@1100281010(pCountry@1100281000 : Code[10];VAR pPhoneNo@1100281001 : Text[30]);
+    VAR
+      lCountry@1100281002 : Record 9;
+    BEGIN
+      //IMH01
+      //V‚rifie si le nø contient le pr‚fixe du pays, sinon
+      IF NOT lCountry.GET(pCountry) THEN
+        EXIT;
+
+      IF (NOT lCountry."Phone Standardization") OR (lCountry."Phone International Prefix No."='') THEN
+        EXIT;
+
+      IF COPYSTR(pPhoneNo,1,STRLEN(lCountry."Phone International Prefix No.")) = lCountry."Phone International Prefix No." THEN
+        EXIT;
+      pPhoneNo := pPhoneNo + '|' + lCountry."Phone International Prefix No." + pPhoneNo;
+    END;
+
+    LOCAL PROCEDURE GetCompanyCountry@1100281011() : Code[10];
+    VAR
+      lCompInfo@1100281000 : Record 79;
+    BEGIN
+      lCompInfo.GET;
+      EXIT(lCompInfo."Country/Region Code");
+    END;
+
+    LOCAL PROCEDURE GetSetup@1100281012();
+    BEGIN
+      IF CRMSetupRead THEN
+        EXIT;
+      CRMSetup.GET;
+      CRMSetupRead := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetContainFilter@1100281016(pText@1100281000 : Text[80]) : Text[80];
+    BEGIN
+      EXIT(STRSUBSTNO('*%1*', pText));
+    END;
+
+    PROCEDURE ContactInput@1100281001(VAR pUserInput@1100281000 : Text[1024];pContactType@1100281001 : Integer;pOpenSearchForm@1100281003 : Boolean) : Boolean;
+    VAR
+      lContact@1100281002 : Record 5050;
+      lContactNo@1100281004 : Code[20];
+    BEGIN
+      //IMH04.ST Fonction appel‚ … la saisie d'une zone de contact
+      IF pUserInput = '' THEN
+        EXIT(TRUE);
+
+      WITH lContact DO BEGIN
+        IF STRLEN(pUserInput) <= MAXSTRLEN("No.") THEN
+          IF GET(pUserInput) THEN
+            EXIT(TRUE);
+
+        // Processus de recherche simplifi‚ : member, nom de recherche
+        IF (STRLEN(pUserInput) <= MAXSTRLEN("Member No.")) AND (
+           pContactType IN [-1, "Service Contact"::Beneficiary])  THEN BEGIN
+          SETCURRENTKEY("Member No.");
+          SETRANGE("Member No.", pUserInput);
+          IF NOT ISEMPTY THEN BEGIN
+            IF COUNT = 1 THEN BEGIN
+              FINDFIRST;
+              pUserInput := "No.";
+              EXIT(TRUE);
+            END;
+          END
+        END;
+
+        IF STRLEN(pUserInput) <= MAXSTRLEN("Search Name") THEN BEGIN
+          RESET;
+          // Nom de recherche
+          SETCURRENTKEY("Search Name");
+          SETFILTER("Search Name", STRSUBSTNO('%1*',pUserInput));
+          IF pContactType >= 0 THEN
+            SETRANGE("Service Contact", pContactType);
+          IF NOT ISEMPTY THEN
+            IF COUNT = 1 THEN BEGIN
+              FINDFIRST;
+              pUserInput := "No.";
+              EXIT(TRUE);
+            END;
+        END;
+      END;
+
+      IF pOpenSearchForm THEN BEGIN
+        // Activation de l'‚cran de recherche sur le nom
+        lContact.RESET;
+        lContact.SETCURRENTKEY("Search Name");
+        lContact.SETFILTER("Search Name", pUserInput);
+      //<<IMH06.ST
+      //  lContact.SETRANGE("Service Contact", lContact."Service Contact"::Beneficiary);
+        IF pContactType = -1 THEN
+          lContact.SETRANGE("Service Contact")
+        ELSE
+          lContact.SETRANGE("Service Contact", pContactType);
+      //>>IMH06.ST
+        IF SearchContactWithFilters(lContact, lContactNo) THEN BEGIN
+          pUserInput := lContactNo;
+          EXIT(TRUE);
+        END;
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE CreateProvider@1100281002(VAR pContact@1100281000 : Record 5050;pOpenCard@1100481000 : Boolean);
+    VAR
+      lProvider@1100281001 : Record 50000;
+    BEGIN
+      //<<IMH05.isat.PC
+      // Fonction pour cr‚er un prestataire
+
+      lProvider.INIT;
+
+      IF pContact.GETFILTER(Name) <> '' THEN
+        lProvider.VALIDATE(Name, pContact.GETFILTER(Name));
+      IF pContact.GETFILTER("Phone No.") <> '' THEN
+        lProvider.VALIDATE("Phone No.", pContact.GETFILTER("Phone No."));
+      IF pContact.GETFILTER("E-Mail") <> '' THEN
+        lProvider.VALIDATE("E-Mail", pContact.GETFILTER("E-Mail"));
+      IF pContact.GETFILTER("Fax No.") <> '' THEN
+        lProvider.VALIDATE("Fax No.", pContact.GETFILTER("Fax No."));
+      IF pContact.GETFILTER("VAT Registration No.") <> '' THEN
+        lProvider.VALIDATE("VAT Registration No.", pContact.GETFILTER("VAT Registration No."));
+      IF pContact.GETFILTER("Registration No.") <> '' THEN
+        lProvider.VALIDATE("Registration No.", pContact.GETFILTER("Registration No."));
+
+      IF pContact.GETFILTER("Country/Region Code") <> '' THEN
+        lProvider.VALIDATE("Country/Region Code",pContact.GETFILTER("Country/Region Code"));
+      IF pContact.GETFILTER("Post Code") <> '' THEN
+        lProvider.VALIDATE("Post Code",pContact.GETFILTER("Post Code"));
+      IF pContact.GETFILTER(City) <> '' THEN
+        lProvider.VALIDATE(City,pContact.GETFILTER(City));
+      IF pContact.GETFILTER(Address) <> '' THEN
+        lProvider.VALIDATE(Address,pContact.GETFILTER(Address));
+      IF pContact.GETFILTER("Address 2") <> '' THEN
+        lProvider.VALIDATE("Address 2",pContact.GETFILTER("Address 2"));
+
+      lProvider.INSERT(TRUE);
+
+      IF pOpenCard THEN BEGIN
+        COMMIT;
+        FORM.RUNMODAL(FORM::"Provider Card",lProvider);
+      END;
+      //>>IMH05.isat.PC
+    END;
+
+    PROCEDURE GetContactByRegistrationNo@1100281020(pRegistrationNo@1100281003 : Text[60];VAR pContactNo@1100281001 : Code[20]) : Boolean;
+    VAR
+      lProvider@1100281000 : Record 50000;
+    BEGIN
+      //<<IMH05.isat.PC
+      // Permet la recherche par nø de SIRET
+      IF pRegistrationNo <> '' THEN BEGIN
+        lProvider.SETCURRENTKEY("Registration No.");
+        lProvider.SETRANGE("Registration No.", pRegistrationNo);
+        IF lProvider.FINDFIRST THEN BEGIN
+          pContactNo := lProvider."No.";
+          EXIT(TRUE);
+        END;
+      END
+      //>>IMH05.isat.PC
+    END;
+
+    PROCEDURE GetContactByVATRegistrationNo@1100281021(pVATRegistrationNo@1100281003 : Text[60];VAR pContactNo@1100281001 : Code[20]) : Boolean;
+    VAR
+      lProvider@1100281000 : Record 50000;
+    BEGIN
+      //<<IMH05.isat.PC
+      // Permet la recherche par nø de TVA intracommunautaire
+
+      IF pVATRegistrationNo <> '' THEN BEGIN
+        lProvider.SETCURRENTKEY("VAT Registration No.");
+        lProvider.SETRANGE("VAT Registration No.", pVATRegistrationNo);
+        IF lProvider.FINDFIRST THEN BEGIN
+          pContactNo := lProvider."No.";
+          EXIT(TRUE);
+        END;
+      END;
+      //>>IMH05.isat.PC
+    END;
+
+    PROCEDURE ExtractPhoneNo@1100281013(VAR PhoneNo@1100281000 : Text[30]) lPhoneNo : Text[30];
+    VAR
+      lI@1100281001 : Integer;
+    BEGIN
+      PhoneNo := DELCHR(PhoneNo,'=',' ');
+      PhoneNo := COPYSTR(PhoneNo,STRLEN(PhoneNo)-8,9);
+
+      FOR lI := 1 TO 9 DO
+        lPhoneNo += '*' + COPYSTR(PhoneNo,lI,1);
+
+      lPhoneNo := lPhoneNo + '*';
+    END;
+
+    PROCEDURE GetUniqueContact@1100281014(VAR pContactFilters@1100281002 : Record 5050;VAR pContactNo@1100281001 : Code[20]) : Boolean;
+    VAR
+      lTempContactList@1100281000 : TEMPORARY Record 5050;
+      lTempText@1100281003 : Text[1024];
+    BEGIN
+      //IMH10.ST
+      OnlyUnique := TRUE;
+      IF NOT CreateContactList(pContactFilters, lTempContactList, lTempText) THEN
+        EXIT(FALSE);
+      OnlyUnique := FALSE;
+      lTempContactList.RESET;
+      IF lTempContactList.COUNT <> 1 THEN
+        EXIT(FALSE);
+      lTempContactList.FINDFIRST;
+      pContactNo := lTempContactList."No.";
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CheckSearchCity@1100281019(VAR pSearchCity@1100281000 : Text[150];pSearchCode@1100281001 : Code[10]);
+    VAR
+      lPostCode@1100281002 : Record 225;
+    BEGIN
+      //IMH11
+      IF pSearchCity <> '' THEN
+        pSearchCity := UPPERCASE(pSearchCity) + '|' + CONVERTSTR(UPPERCASE(pSearchCity),'-',' ');
+
+      IF (pSearchCity = '') OR (pSearchCode = '') THEN
+        EXIT;
+      lPostCode.SETCURRENTKEY(Code,City);
+      lPostCode.SETRANGE(Code,pSearchCode);
+      IF lPostCode.COUNT = 1 THEN
+        pSearchCity := '';
+    END;
+
+    PROCEDURE LoadContactFromContact@1100281018(VAR pContact@1100281003 : Record 5050;VAR pResultContactList@1100281002 : Record 5050;VAR pResultText@1100281001 : Text[1024];pIncludeRayed@1100281000 : Boolean) : Boolean;
+    VAR
+      lContact@1100281007 : Record 5050;
+      lCount@1100281006 : Integer;
+      lCountLimit@1100281005 : Integer;
+      lInsertContact@1100281004 : Boolean;
+    BEGIN
+      // IMH12.PC
+      // Recherche directe par nø de b‚n‚ficiare
+
+      lContact.SETCURRENTKEY("Member No.");
+      lContact.SETFILTER("Member No.",pContact.GETFILTER("Member No."));
+      lContact.SETRANGE("Service Contact",lContact."Service Contact"::Beneficiary);
+      //<<IMH16.ST
+      IF pContact.GETFILTER("Corporate No.") <> '' THEN
+        lContact.SETRANGE("Corporate No.", pContact.GETFILTER("Corporate No."));
+      //>>IMH16.ST
+      IF NOT pIncludeRayed THEN BEGIN
+        lContact.SETRANGE(Rayed,FALSE);
+      END;
+      IF lContact.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      GetSetup;
+      IF OnlyUnique THEN BEGIN
+        lCountLimit := 2;
+      END ELSE BEGIN
+        lCountLimit := CRMSetup."Contact Search Limit";
+      END;
+
+      lContact.FINDSET;
+      REPEAT
+        IF NOT pResultContactList.GET(lContact."No.") THEN BEGIN
+          pResultContactList := lContact;
+          pResultContactList.INSERT;
+          lCount += 1;
+          IF lCountLimit > 0 THEN BEGIN
+            IF lCount >= lCountLimit THEN BEGIN
+              pResultText := STRSUBSTNO(Text012, lCount);
+              EXIT;
+            END;
+          END;
+        END;
+      UNTIL lContact.NEXT = 0;
+      EXIT(NOT pResultContactList.ISEMPTY);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH20 @d 09/02/12 @a ISAT.ST @v IMH6.01.002 @s Cr‚ation contact @c Gestion type contact avant cr‚ation pour s‚curit‚ filtr */
+      /** @r IMH19 @d 08/12/11 @a ISAT.ST @v IMH6.01.002 @s Exclusion des contacts personnes */
+      /** @r IMH18 @d 07/12/11 @a ISAT.ZW @v IMH6.01.002 @s Gestion des contacts @h mantis 2114
+          @c Debug recherche sur le nom b‚n‚ficiaire */
+      /** @r IMH17 @d 05/12/11 @a ISAT.EBA @v IMH6.01.002 @s Gestion des contacts
+          @c Cr‚ation de contact */
+      /** @r IMH16 @d 29/11/11 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts
+          @c suivi du filtre nø de grand compte sur recherche member no */
+      /** @r IMH15 @d 10/11/11 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Plus de filtre contient sur SearchName */
+      /** @r IMH14 @d 25/10/11 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @h mantis1567 @c Search City prioritaire … search name */
+      /** @r IMH13 @d 13/10/11 @a ISAT.PC @v IMH6.01.002 @s Gestion des contacts @h mantis1591 @c Gestion de la cl‚ pour le code postal */
+      /** @r IMH12 @d 24/09/11 @a ISAT.PC @v IMH6.01.002 @s Gestion des contacts @h mantis1591 @c Gestion du nø de benef en direct */
+      /** @r IMH11 @d 08/09/11 @a ISAT.LLT @v IMH6.01.002 @s Gestion des contacts
+          @c SI une seule ville par CP alors recherche seulement sur CP
+          @c Gestion des accents et - dans le nom de villes*/
+      /** @r IMH10 @d 24/08/11 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts
+          @c Ajout fonction GetUniqueContact
+          @c Gestion des radi‚s */
+      /** @r IMH09 @d 20/05/11 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Nom du contact en majuscule pour les b‚n‚ficiaires */
+      /** @r IMH08 @d 07/04/11 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Recherche par nø */
+      /** @r IMH07 @d 15/03/11 @a ISAT.LLT @v IMH6.01.002 @s Gestion des contacts @c Gestion nom contact */
+      /** @r IMH06 @d 10/03/11 @s ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Correction ContactInput */
+      /** @r IMH05 @d 07/02/10 @a ISAT.PC @v IMH6.01.020 @s Gestion prestataire @c Partie prestataire */
+      /** @r IMH04 @d 04/11/10 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Ajout ContactInput */
+      /** @r IMH03 @d 26/10/10 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Recherche Member No. */
+      /** @r IMH02 @d 05/10/10 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Modifications */
+      /** @r IMH01 @d 27/09/10 @a ISAT.LLT @v IMH6.01.002 @s Gestion des contacts @c Cr‚ation recherche contact */
+    }
+    END.
+  }
+}

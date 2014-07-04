@@ -1,0 +1,144 @@
+OBJECT Report 10873 Archive Payment Slips
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/09;
+    Time=12:00:00;
+    Version List=NAVFR6.00,ISA6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Archive Payment Slips;
+               FRA=Archiver les bordereaux de paiement];
+    ProcessingOnly=Yes;
+    OnPreReport=BEGIN
+                  ArchivedDocs := 0;
+                END;
+
+    OnPostReport=BEGIN
+                   IF ArchivedDocs = 0 THEN
+                     MESSAGE(Text002)
+                   ELSE IF ArchivedDocs = 1 THEN
+                     MESSAGE(Text003)
+                   ELSE
+                     MESSAGE(Text001,ArchivedDocs);
+                 END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table10865;
+        DataItemTableView=SORTING(No.);
+        OnPreDataItem=VAR
+                        lPaymentStep@8016600 : Record 10862;
+                      BEGIN
+                        //<<ISA01.ST Chargement des ‚tapes type cr‚ation en temporaire
+                        IF GETFILTER("Payment Class") <> '' THEN
+                          lPaymentStep.SETFILTER("Payment Class", GETFILTER("Payment Class"));
+                        IF GETFILTER("Status No.") <> '' THEN
+                          lPaymentStep.SETFILTER("Previous Status", GETFILTER("Status No."));
+                        lPaymentStep.SETRANGE("Action Type", lPaymentStep."Action Type"::"Create New Document");
+                        IF lPaymentStep.FINDSET(FALSE) THEN
+                          REPEAT
+                            TempPaymentStep := lPaymentStep;
+                            TempPaymentStep.INSERT;
+                          UNTIL lPaymentStep.NEXT=0;
+                        //>>ISA01.ST
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF "Archiving Authorized" THEN BEGIN
+                           //<<ISA01.ST
+                             IF CreationStepExists("Payment Class","Status No.") THEN
+                               IF NOT AllLinesCopied("No.") THEN
+                                 CurrReport.SKIP;
+                           //>>ISA01.ST
+                             PaymentManagement.ArchiveDocument("Payment Header");
+                             ArchivedDocs += 1;
+                           END;
+                         END;
+
+        ReqFilterFields=No.,Payment Class;
+        CalcFields=Archiving Authorized;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      PaymentManagement@1120000 : Codeunit 10860;
+      ArchivedDocs@1120001 : Integer;
+      Text001@1120002 : TextConst 'ENU=%1 Payment Headers have been archived.;FRA=%1 bordereaux ont ‚t‚ archiv‚s.';
+      Text002@1120003 : TextConst 'ENU=There is no Payment Header to archive.;FRA=Il n''y a pas de bordereau … archiver.';
+      Text003@1120004 : TextConst 'ENU=One Payment Header has been archived.;FRA=Un bordereau a ‚t‚ archiv‚.';
+      TempPaymentStep@8016601 : TEMPORARY Record 10862;
+
+    PROCEDURE CreationStepExists@8016600(pPaymentClass@8016600 : Text[30];pCurrentStatus@8016601 : Integer) : Boolean;
+    BEGIN
+      //ISA01.ST
+      WITH TempPaymentStep DO BEGIN
+        SETRANGE("Payment Class", pPaymentClass);
+        SETRANGE("Previous Status", pCurrentStatus);
+        SETRANGE("Action Type", "Action Type"::"Create New Document"); // non obligatoire : seul les cr‚ations en temp
+        EXIT(NOT ISEMPTY);
+      END;
+    END;
+
+    PROCEDURE AllLinesCopied@8016605(pPaymentNo@8016600 : Code[20]) : Boolean;
+    VAR
+      lPaymentLine@8016601 : Record 10866;
+    BEGIN
+      //ISA01.ST
+      WITH lPaymentLine DO BEGIN
+        SETRANGE("No.", pPaymentNo);
+        SETFILTER("Copied To No.", '=%1','');
+        EXIT(ISEMPTY);
+      END;
+    END;
+
+    BEGIN
+    {
+      /**@r ISA01 @d 20/07/09 @a ISAT.ST @v ISA6.00.00.06 @s Gestion des bordereaux
+         @c Controle des ‚tapes de cr‚ation si archivage */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

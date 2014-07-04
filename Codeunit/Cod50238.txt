@@ -1,0 +1,3487 @@
+OBJECT Codeunit 50238 DARVA Rcvd DT Matmut
+{
+  OBJECT-PROPERTIES
+  {
+    Date=27/03/14;
+    Time=12:17:11;
+    Modified=Yes;
+    Version List=IMH6.01,MATMUT01,SysAgDarva,5005;
+  }
+  PROPERTIES
+  {
+    TableNo=8016721;
+    Permissions=TableData 50168=rimd,
+                TableData 50169=rimd;
+    OnRun=VAR
+            lEAIRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+            lService@1000000005 : Record 50066;
+            lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+            lXmlDom2@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+            lXmlDom3@1000000017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+            lXmlNodeList@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+            lInStream@1000000001 : InStream;
+            lLength@1000000000 : Integer;
+          BEGIN
+            // G‚n‚ration demande de prise en charge
+
+            CASE "DARVA Action" OF
+              "DARVA Action"::" " : ;
+              "DARVA Action"::"Create Service" : BEGIN
+                ForceCreateService := TRUE;
+              END;
+              "DARVA Action"::"Create Service Header" : BEGIN
+                Service.GET("Service No.");
+                ServiceSetted := TRUE;
+              END;
+              "DARVA Action"::"Affect DT" : BEGIN
+                ServiceHeader.GET(ServiceHeader."Document Type"::Invoice, "Service Header No.");
+
+                //stockage des donn‚es de la DT
+                CREATE(lXmlDom);
+                CALCFIELDS("XML Source");
+                "XML Source".CREATEINSTREAM(lInStream);
+                lXmlDom.load(lInStream);
+
+                //<<IMH23.ACO
+                DARVAXMLMgt.InitXMLDom(lXmlDom,lXmlDom3);
+                //DARVAMgt.StorageAllDT("Entry No.","EAI MQ Code",
+                //                      ServiceHeader."Service No.", ServiceHeader."No.", lXmlDom);
+                DARVAMgt.StorageAllDT("Entry No.","EAI MQ Code",
+                                      ServiceHeader."Service No.", ServiceHeader."No.", lXmlDom3);
+                //>>IMH23.ACO
+
+                ServiceHeader."DARVA Interface" := TRUE;
+                IF ("Origin Entry No." <> '') AND (ServiceHeader."DARVA Carrier Subscriber No." = '') THEN BEGIN
+                  ServiceHeader."DARVA Carrier Subscriber No." := "Origin Entry No.";
+                END;
+                IF ("Origin EAI Act Code" <> '') AND (ServiceHeader."DARVA Recipient Subscriber No." = '') THEN BEGIN
+                  ServiceHeader."DARVA Recipient Subscriber No." := "Origin EAI Act Code";
+                END;
+                IF ("Reference No." <> '') AND (ServiceHeader."Reference No." = '') THEN BEGIN
+                  ServiceHeader."Reference No." := "Reference No.";
+                  lService.GET(ServiceHeader."Service No.");
+                  IF lService."Reference No." = '' THEN BEGIN
+                    lService."Reference No." := "Reference No.";
+                    lService.MODIFY;
+                  END;
+                END;
+                IF ("Your Reference" <> '') AND (ServiceHeader."Your Reference" = '') THEN BEGIN
+                  ServiceHeader."Your Reference" := "Your Reference";
+                END;
+                ServiceHeader.MODIFY;
+
+                CLEAR(lXmlNodeList);
+                CreateAttachmentFile(lXmlDom,FALSE,lXmlNodeList);
+
+                CALCFIELDS("Response XML Source");
+                IF "Response XML Source".HASVALUE THEN BEGIN
+                  "Response XML Source".CREATEINSTREAM(lInStream);
+                  CREATE(lXmlDom2);
+                  lXmlDom2.load(lInStream);
+                  lXmlNodeList := lXmlDom2.getElementsByTagName('ns2:pieceJointe');
+                  lLength := lXmlNodeList.length;
+                  IF lLength <> 0 THEN BEGIN
+                    CreateAttachment(lXmlNodeList);
+                  END;
+                END;
+                //<<IMH23.ACO
+                //GetDARVAMissionWorkLot(lXmlDom);
+                GetDARVAMissionWorkLot(lXmlDom3);
+                //>>IMH23.ACO
+                EXIT;
+              END;
+            END;
+
+            lEAIRcvdMQBuffer.COPY(Rec,TRUE);
+            Rec.CALCFIELDS("XML Source");
+            lEAIRcvdMQBuffer."XML Source" := "XML Source";
+            Code(lEAIRcvdMQBuffer);
+
+            CASE "DARVA Action" OF
+              "DARVA Action"::"Create Service",
+              "DARVA Action"::"Create Service Header" : BEGIN
+                CALCFIELDS("Response XML Source");
+                IF "Response XML Source".HASVALUE THEN BEGIN
+                  "Response XML Source".CREATEINSTREAM(lInStream);
+                  CREATE(lXmlDom2);
+                  lXmlDom2.load(lInStream);
+                  lXmlNodeList := lXmlDom2.getElementsByTagName('ns2:pieceJointe');
+                  lLength := lXmlNodeList.length;
+                  IF lLength <> 0 THEN BEGIN
+                    CreateAttachment(lXmlNodeList);
+                  END;
+                END;
+              END;
+            END;
+
+            COPY(lEAIRcvdMQBuffer,TRUE);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Service@1100281038 : Record 50066;
+      ServiceHeader@1100281037 : Record 5900;
+      TmpServHeader@1100281036 : TEMPORARY Record 5900;
+      Contact@1100281035 : Record 5050;
+      InterfaceSetup@1100281006 : Record 50139;
+      TmpCommentLine@1100281005 : TEMPORARY Record 50056;
+      TmpCommentLine2@1100281004 : TEMPORARY Record 50056;
+      TmpCommentLine3@1100281003 : TEMPORARY Record 50056;
+      TempContact@1100281001 : TEMPORARY Record 5050;
+      TrayLine@1100281047 : Record 50048;
+      PostCode@1000000001 : Record 225;
+      TrayLineMgt@1100281017 : Codeunit 50050;
+      DARVAMgt@1100281000 : Codeunit 50150;
+      DARVAXMLMgt@1100281026 : Codeunit 50154;
+      EAIXMLMgt@1100281008 : Codeunit 8016710;
+      ToolsMgt@1100281010 : Codeunit 8016602;
+      XmlDom@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      Text000@1100281009 : TextConst 'ENU=This DT has already been received. (Event no. %1, mission no. %2, service header no. %3);FRA=Cette DT a d‚j… ‚t‚ re‡ue. (Nø ‚vŠnement %1, nø mission %2, nø ligne produit %3)';
+      InterfaceSetupGet@1100281020 : Boolean;
+      Text001@1100281021 : TextConst 'ENU=Disable to Create Contact.;FRA=Impossible de cr‚er le contact associ‚.';
+      Text002@1100281025 : TextConst 'ENU=Building Trade No. %1 hasn'' t EAI reference.;FRA=Le corps de m‚tier %1 n''a pas de r‚ference associ‚.';
+      NoError@1100281031 : Boolean;
+      ServiceSetted@1100281043 : Boolean;
+      Text003@1100281023 : TextConst 'ENU=GTA reference %1 doesn''t exists.;FRA=La r‚f‚rence GTA %1 n''est pas d‚finie.';
+      Text004@1100281029 : TextConst 'ENU=Building Trade not recognized. Detail :;FRA=Le corps de m‚tier n''est pas reconnu. Descriptif :';
+      Text005@1100281040 : TextConst 'ENU=Max Interface Alt. adress ranged to contact %1;FRA=Nombre maximum d''adresses secondaires interface atteint pour le contact %1';
+      Text008@1100281044 : TextConst 'ENU=Export Attachment;FRA=Exporter document';
+      EAIPartnerCode@1100281024 : Code[20];
+      ForceCreateService@1100281048 : Boolean;
+      IntervDescCheckMode@1000000000 : Boolean;
+      Text009@1000000002 : TextConst 'ENU=Unknown Adjuster Office;FRA=Cabinet expertise inconnu';
+      Text010@1100281050 : TextConst 'ENU=There is not work demand in DARVA flux;FRA=Pas de DT dans le flux DARVA re‡u';
+      Text011@1100281051 : TextConst 'ENU=There is not attachment in DARVA flux;FRA=Pas de piŠces jointes associ‚es au flux DARVA re‡u';
+      Text012@1000000003 : TextConst 'ENU=Error in attachment rec research;FRA=Erreur de la recherche du flux piŠce jointe';
+      Text013@1000000004 : TextConst 'ENU=Attachment difference between DT (%1) and DARVA request (%2);FRA=Diff‚rence de nb PJ entre les infos DT (%1) et la demande DARVA (%2)';
+      InterfaceLocationBuffer@1000000005 : TEMPORARY Record 5915;
+      IsCorporateCust@1000000006 : Boolean;
+      Text014@1000000007 : TextConst 'ENU=Humidity rate %1 - visit date %2;FRA=Taux d''humidit‚ %1 - date de visite %2';
+      Text015@1000000008 : TextConst 'ENU=Work - %1;FRA=Travaux - %1';
+      EAISetup@1000000009 : Record 8016700;
+      TextUGS@1000000010 : TextConst 'FRA=UGS';
+      DARVASetup@1100281007 : Record 50126;
+
+    PROCEDURE Code@1100281000(VAR pEAIRcvdMQBuffer@1100281000 : Record 8016721);
+    VAR
+      lEAIAct@1000000002 : Record 8016706;
+      lTrayLine@1000000001 : Record 50048;
+      lEAIDocEntryMgt@1000000000 : Codeunit 8016707;
+      lEAIXMLDocMgt@1100281009 : Codeunit 8016713;
+      lXmlDom@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDom2@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lNewXmlDoc@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlNodeList@1000000012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lRecRef@1000000004 : RecordRef;
+      lInStream@1100281001 : InStream;
+      lOutStream@1100281006 : OutStream;
+      i@1000000005 : Integer;
+      lToCreate@1100281008 : Boolean;
+      lServiceCreated@1100281010 : Boolean;
+      lServiceHeaderCreated@1100281021 : Boolean;
+      lNewDT@1100281015 : Boolean;
+      lUnknownMission@1100281017 : Boolean;
+      lServiceToCreate@1000000008 : Boolean;
+      lTeamCode@1100281019 : Code[10];
+      lTaskCode@1100281020 : Code[10];
+      lResult@1000000011 : ' ,Quit,NoAttach,CreateMessage,ToTreat';
+      lAttachNb@1100281003 : Integer;
+      lDarvaMission@1100281011 : Record 50168;
+      lServiceHeader@1000000013 : Record 5900;
+      lDarvaSwitchSetup@1000000014 : Record 50180;
+      lService@1000000017 : Record 50066;
+      lServiceRefNo@1000000018 : Code[20];
+      lCorporateNo@1000000019 : Code[20];
+      lServiceCause@1000000020 : Code[20];
+      lMissionOrder@1000000021 : Code[20];
+      lOccupierNature@1000000022 : Code[20];
+      lExpertContactNo@1000000023 : Code[20];
+      lIMHRefNo@1000000024 : Code[20];
+      lEAIEntryNo@1000000025 : Code[20];
+      lCorporateRegionCode@1000000026 : Code[10];
+      lCorporateContactNo@1000000007 : Code[20];
+      lDARVACarrierSubscriberNo@1000000027 : Code[20];
+      lDARVACorporateNo@1000000028 : Code[20];
+      lDARVARecipientSubscriberNo@1000000029 : Code[20];
+      lExpertRef@1000000030 : Text[30];
+      lMemberNo@1000000032 : Code[20];
+      lNewMemberNo@1000000033 : Code[20];
+      lHumidityComment@1000000031 : TEMPORARY Record 50056;
+      lWorkComment@1000000006 : TEMPORARY Record 50056;
+      lResidenceType@1000000009 : Code[80];
+      lHousingType@1000000010 : Code[20];
+      lServiceTeamCode@1100281004 : Code[10];
+      lFilterTeamTrayTask@1000000015 : Record 50129;
+    BEGIN
+      NoError := TRUE;
+
+      pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+      pEAIRcvdMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      CREATE(lXmlDom);
+      lXmlDom.load(lInStream);
+
+      DARVAXMLMgt.InitXMLDom(lXmlDom,XmlDom);
+
+      //initialisation des donn‚es communes
+      GetInterfaceSetup;
+
+      //r‚cup‚ration des donn‚es issues du flux DARVA
+      //<<IMH03.zw
+      EAIPartnerCode := pEAIRcvdMQBuffer."EAI Partner Code";
+      //GetInfos(lDARVACarrierSubscriberNo,lDARVARecipientSubscriberNo, lDARVACorporateNo, lCorporateNo,
+      //         lCorporateRegionCode,lServiceRefNo, lMissionOrder,lMemberNo, lNewMemberNo, lServiceCause);
+      //<<IMH15.ACO
+      //GetInfos(lDARVACarrierSubscriberNo,lDARVARecipientSubscriberNo, lDARVACorporateNo, lCorporateNo,
+      //         lCorporateRegionCode,lServiceRefNo, lMissionOrder,lMemberNo, lNewMemberNo, lServiceCause,
+      //         lCorporateContactNo, lOccupierNature);
+      GetInfos(lDARVACarrierSubscriberNo,lDARVARecipientSubscriberNo, lDARVACorporateNo, lCorporateNo,
+               lCorporateRegionCode,lServiceRefNo, lMissionOrder,lMemberNo, lNewMemberNo, lServiceCause,
+               lCorporateContactNo, lOccupierNature, lHousingType);
+      //>>IMH15.ACO
+      //EAIPartnerCode := pEAIRcvdMQBuffer."EAI Partner Code";
+      //>>IMH03.zw
+
+      pEAIRcvdMQBuffer."Reference No." := lServiceRefNo;
+      pEAIRcvdMQBuffer."Your Reference" := lMissionOrder;
+
+      lEAIEntryNo := pEAIRcvdMQBuffer."Entry No.";
+
+      //Gestion des PJ
+      IF NOT ServiceSetted AND NOT ForceCreateService THEN BEGIN
+        lAttachNb := CheckAttachment(lXmlDom,pEAIRcvdMQBuffer,lResult);
+        CASE lResult OF
+          lResult::" " : ERROR(Text012);
+          lResult::Quit : BEGIN
+            pEAIRcvdMQBuffer."Not Change Status" := TRUE;
+            EXIT;
+          END;
+          lResult::NoAttach : ;
+          lResult::CreateMessage : BEGIN
+            CreateAttachmentDemand(pEAIRcvdMQBuffer,lAttachNb);
+            pEAIRcvdMQBuffer."Not Change Status" := TRUE;
+            pEAIRcvdMQBuffer."Attachment Nb" := lAttachNb;
+            EXIT;
+          END;
+          lResult::ToTreat : GetEAIRcvdPJ(pEAIRcvdMQBuffer,lXmlNodeList,lNewXmlDoc);
+        END;
+      END;
+
+      // Recherche d'un nø de sinistre sans 0
+      lIMHRefNo := GetServiceRefNo(lServiceRefNo,lCorporateNo);
+
+      // Gestion de l'aiguillage
+      lDarvaMission.SETCURRENTKEY("GTA Code", "Reference No.", "Mission No.");
+      lDarvaMission.SETRANGE("GTA Code", DARVAXMLMgt.GetDARVAGTACode(XmlDom));
+      lDarvaMission.SETRANGE("Reference No.", lIMHRefNo);
+      lDarvaMission.SETRANGE("Mission No.", lMissionOrder);
+      IF lDarvaMission.FINDFIRST THEN BEGIN
+        lServiceHeader.SETRANGE("No.", lDarvaMission."Service Header No.");
+        IF lServiceHeader.FINDFIRST THEN BEGIN
+          lDarvaSwitchSetup.SETCURRENTKEY("Message Code", "Message Version", "Message Release", "Message Sub-type");
+          lDarvaSwitchSetup.SETRANGE("Message Code", pEAIRcvdMQBuffer."Message Code");
+          lDarvaSwitchSetup.SETRANGE("Message Version", pEAIRcvdMQBuffer."Message Version");
+          lDarvaSwitchSetup.SETRANGE("Message Release", pEAIRcvdMQBuffer."Message Release");
+          lDarvaSwitchSetup.SETRANGE("Message Sub-type", pEAIRcvdMQBuffer."Message Sub-type");
+          lDarvaSwitchSetup.SETRANGE("Line Type", lDarvaSwitchSetup."Line Type"::"Service Order Type");
+          lDarvaSwitchSetup.SETRANGE("Service Order Type", lServiceHeader."Service Order Type");
+          lDarvaSwitchSetup.SETRANGE("Corporate No.", lCorporateNo);
+          lDarvaSwitchSetup.SETRANGE("Corporate Region Code", lCorporateRegionCode);
+          lDarvaSwitchSetup.SETRANGE(Direction, lDarvaSwitchSetup.Direction::Receipt);
+
+          IF lDarvaSwitchSetup.ISEMPTY THEN
+            lDarvaSwitchSetup.SETRANGE("Corporate Region Code");
+
+          IF lDarvaSwitchSetup.FINDFIRST THEN BEGIN
+            IF pEAIRcvdMQBuffer."EAI Act Code" <>  lDarvaSwitchSetup."Act Code" THEN BEGIN
+               pEAIRcvdMQBuffer."EAI Act Code" := lDarvaSwitchSetup."Act Code";
+               pEAIRcvdMQBuffer."Not Change Status" := TRUE;
+               //<<IMH14.ACO
+               pEAIRcvdMQBuffer."EAI Partner Code" := lDarvaSwitchSetup."Partner Code";
+               //>>IMH14.ACO
+               EXIT;
+            END;
+          END;
+        END;
+      END;
+
+      TmpCommentLine.RESET;
+      TmpCommentLine.DELETEALL;
+
+      // initialisation des activit‚s corbeille
+      TrayLine.INIT;
+      TrayLine."Service Reference No." := lServiceRefNo;
+      TrayLine."Mission No." := lMissionOrder;
+      TrayLine."Corporate No." := lCorporateNo;
+      TrayLine."DARAV Message ID" := pEAIRcvdMQBuffer."Message ID";
+      TrayLine."EAI Entry No." := pEAIRcvdMQBuffer."Entry No.";
+
+      // R‚cup‚ration des contacts
+      InitContact(lCorporateNo, lCorporateRegionCode, lDARVACarrierSubscriberNo, lOccupierNature,
+                  lExpertContactNo, lExpertRef, lNewMemberNo);
+
+      IF NOT ServiceSetted THEN BEGIN
+        IF NOT ForceCreateService THEN BEGIN
+          Service.SETCURRENTKEY("Reference No.","Corporate No.");
+          Service.SETRANGE("Corporate No.",lCorporateNo);
+          //Nø b‚n‚ficiaire
+          Service.SETRANGE("Member No.", lMemberNo);
+          Service.SETRANGE("Reference No.",lIMHRefNo);
+          lServiceToCreate := FALSE;
+          IF Service.ISEMPTY THEN BEGIN
+            Service.SETRANGE("Reference No.",lServiceRefNo);
+            IF Service.ISEMPTY THEN BEGIN
+              lServiceToCreate := TRUE;
+            END;
+          END;
+
+          //Si nø evenement inconnu et service en cours trouv‚ :
+      //     - si un service avec un nø evenement vide :pas de cr‚ation Service + Cr‚ation d'une activit‚ DAR_DT dans la corbeille EDI
+          //     - si pas de service avec un nø evenement vide : cr‚ation Service + Lp
+          //Si nø evenement inconnu et service en cours non trouv‚ : cr‚ation Service + Lp
+          IF lServiceToCreate THEN BEGIN
+            lService.RESET;
+            lService.SETCURRENTKEY("Member No.","Corporate No.");
+            lService.SETRANGE("Corporate No.",lCorporateNo);
+            lService.SETRANGE("Member No.", lMemberNo);
+            lService.SETFILTER(Status,'%1|%2', lService.Status::"In Process", lService.Status::"On Hold");
+            IF NOT lService.ISEMPTY THEN BEGIN
+              lService.SETRANGE("Reference No.",'');
+              IF lService.FINDLAST THEN BEGIN
+                lTeamCode := InterfaceSetup."DAR DT Team Code";
+                lTaskCode := InterfaceSetup."DAR DT Task Code";
+                //<<IMH24
+                IF lTeamCode = '' THEN BEGIN
+                  lFilterTeamTrayTask."Corporate No." := lService."Corporate No.";
+                  lFilterTeamTrayTask."Corporate Region Code" := lService."Corporate Region Code";
+                  lTeamCode := TrayLineMgt.GetTeamByTask(lTaskCode, lFilterTeamTrayTask, '');
+                END;
+                //>>IMH24
+                IF (lTeamCode <> '') AND (lTaskCode <> '') THEN BEGIN
+                  TrayLineMgt.InitTrayLine(TrayLine);
+                  TrayLineMgt.CreateTLFromService(lService,lTeamCode,lTaskCode,FALSE);
+                  TrayLineMgt.GetResultLine(lTrayLine);
+                  pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+                  lTrayLine.Attachment := pEAIRcvdMQBuffer."XML Source";
+                  IF lResult = lResult::ToTreat THEN BEGIN
+                    IF NOT ISCLEAR(lNewXmlDoc) THEN BEGIN
+                      lTrayLine."Attachment 2".CREATEOUTSTREAM(lOutStream);
+                      lNewXmlDoc.save(lOutStream);
+                    END;
+                  END;
+                  lTrayLine."EAI Partner Code" := pEAIRcvdMQBuffer."EAI Partner Code";
+                  lTrayLine."EAI Entry No." := pEAIRcvdMQBuffer."Entry No.";
+                  lTrayLine.MODIFY(FALSE);
+                END;
+                EXIT;
+              END;
+            END ;
+          END;
+        END ELSE BEGIN
+          lServiceToCreate := TRUE;
+        END;
+
+        IF lServiceToCreate THEN BEGIN
+          // Contact b‚n‚ficiaire
+          //<<IMH03.ZW
+          //CreateService(lEAIEntryNo, lCorporateRegionCode, lServiceRefNo, lServiceCause, lMemberNo, lNewMemberNo, lOccupierNature, );
+          //<<IMH15.ACO
+          //CreateService(lEAIEntryNo, lCorporateRegionCode, lServiceRefNo, lServiceCause,
+          //  lMemberNo, lNewMemberNo, lCorporateContactNo, lOccupierNature);
+          CreateService(lEAIEntryNo, lCorporateRegionCode, lServiceRefNo, lServiceCause,
+            lMemberNo, lNewMemberNo, lCorporateContactNo, lOccupierNature, lHousingType);
+          //>>IMH15.ACO
+          //IMH03.ZW
+          lEAIDocEntryMgt.AddEntryFromRcvdBuffer(DATABASE::Service, 0, Service."Service No.", lServiceRefNo, 0, pEAIRcvdMQBuffer);
+          lServiceCreated := TRUE;
+        END;
+        IF NOT ForceCreateService THEN BEGIN
+          Service.FINDFIRST;
+        END;
+      END;
+
+      // R‚cup‚ration des commentaires
+      GetServiceComments;
+
+      pEAIRcvdMQBuffer."Service No." := Service."Service No.";
+
+      // Ligne produit
+      ServiceHeader.SETCURRENTKEY("Service No.");
+      ServiceHeader.SETRANGE("Service No.",Service."Service No.");
+      ServiceHeader.SETRANGE("Your Reference",lMissionOrder);
+      //<<IMH02 seule LP non clotur‚e non annul‚e peut etre affect‚.
+      ServiceHeader.SETFILTER(Status, '<>%1&<>%2', ServiceHeader.Status::Finished, ServiceHeader.Status::Cancelled);
+      //>>IMH02
+
+      lToCreate := ServiceHeader.ISEMPTY;
+      IF lToCreate THEN BEGIN
+        IF lServiceCreated OR ServiceSetted THEN BEGIN
+          //<<IMH15.ACO
+      //IF CreateServiceHeader(lEAIEntryNo, lDARVACarrierSubscriberNo, lDARVARecipientSubscriberNo, lDARVACorporateNo, lMissionOrder,
+          //                       lOccupierNature, lExpertContactNo, lExpertRef, lIMHRefNo) THEN BEGIN
+          IF CreateServiceHeader(lEAIEntryNo, lDARVACarrierSubscriberNo, lDARVARecipientSubscriberNo, lDARVACorporateNo, lMissionOrder,
+                                 lOccupierNature, lExpertContactNo, lExpertRef, lIMHRefNo, lHousingType) THEN BEGIN
+          //>>IMH15.ACO
+            IF NOT ServiceSetted THEN BEGIN
+              lEAIDocEntryMgt.AddEntryFromRcvdBuffer(
+                DATABASE::"Service Header",
+                ServiceHeader."Document Type", ServiceHeader."No.",
+                lMissionOrder, 0, pEAIRcvdMQBuffer);
+            END;
+            lServiceCreated := TRUE;
+            lServiceHeaderCreated := TRUE;
+          END ELSE BEGIN
+            NoError := FALSE;
+          END;
+        END ELSE BEGIN
+          lUnknownMission := TRUE;
+        END;
+      END ELSE BEGIN
+        ServiceHeader.FINDFIRST;
+        ServiceHeader."DARVA Interface" := TRUE;
+        ServiceHeader."DARVA Carrier Subscriber No." := lDARVACarrierSubscriberNo;
+        ServiceHeader."DARVA Recipient Subscriber No." := lDARVARecipientSubscriberNo;
+        UpdateServiceHeaderAdd;
+        ServiceHeader.MODIFY;
+        CreateDARVAMissionEntry(ServiceHeader,lMissionOrder, lDARVACorporateNo);
+        lNewDT := TRUE;
+      END;
+
+      //stockage des donn‚es de la DT
+      DARVAMgt.StorageAllDT(pEAIRcvdMQBuffer."Entry No.",pEAIRcvdMQBuffer."EAI MQ Code",
+                                ServiceHeader."Service No.", ServiceHeader."No.", XmlDom);
+
+      lRecRef.GETTABLE(ServiceHeader);
+      pEAIRcvdMQBuffer.RecordId := lRecRef.RECORDID;
+
+      pEAIRcvdMQBuffer."Service Header No." := ServiceHeader."No.";
+
+      IF lServiceCreated THEN BEGIN
+        CreateIntervDescription(lMissionOrder, lDARVACorporateNo);
+      END ELSE BEGIN
+        IF lNewDT THEN BEGIN
+          // cr‚ation activit‚ corbeille
+          //<<IMH22
+          //ServiceHeader.TESTFIELD("Default Team Code");
+          //lTeamCode := ServiceHeader."Default Team Code";
+          lTeamCode := ServiceHeader.GetTeamByServiceTask(ServiceHeader, InterfaceSetup."New DT Task Code");
+          //>>IMH22
+          lTaskCode := InterfaceSetup."New DT Task Code";
+          IF (lTeamCode <> '') AND (lTaskCode <> '') THEN BEGIN
+            TrayLineMgt.InitTrayLine(TrayLine);
+            TrayLineMgt.CreateTLFromServHeader(ServiceHeader,lTeamCode,lTaskCode,FALSE);
+            TrayLineMgt.GetResultLine(lTrayLine);
+            pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+            lTrayLine.Attachment := pEAIRcvdMQBuffer."XML Source";
+            IF lResult = lResult::ToTreat THEN BEGIN
+              IF NOT ISCLEAR(lNewXmlDoc) THEN BEGIN
+                lTrayLine."Attachment 2".CREATEOUTSTREAM(lOutStream);
+                lNewXmlDoc.save(lOutStream);
+              END;
+            END;
+            lTrayLine.MODIFY;
+          END;
+        END;
+        IF lUnknownMission THEN BEGIN
+          // cr‚ation activit‚ corbeille
+          lTeamCode := InterfaceSetup."DAR DT Team Code";
+          lTaskCode := InterfaceSetup."DAR DT Task Code";
+          //<<IMH24
+          IF lTeamCode = '' THEN BEGIN
+            lFilterTeamTrayTask."Corporate No." := Service."Corporate No.";
+            lFilterTeamTrayTask."Corporate Region Code" := Service."Corporate Region Code";
+            lTeamCode := TrayLineMgt.GetTeamByTask(lTaskCode, lFilterTeamTrayTask, '');
+          END;
+          //>>IMH24
+          IF (lTeamCode <> '') AND (lTaskCode <> '') THEN BEGIN
+            TrayLineMgt.InitTrayLine(TrayLine);
+            TrayLineMgt.CreateTLFromService(Service,lTeamCode,lTaskCode,FALSE);
+            TrayLineMgt.GetResultLine(lTrayLine);
+            pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+            lTrayLine.Attachment := pEAIRcvdMQBuffer."XML Source";
+            IF lResult = lResult::ToTreat THEN BEGIN
+              IF NOT ISCLEAR(lNewXmlDoc) THEN BEGIN
+                lTrayLine."Attachment 2".CREATEOUTSTREAM(lOutStream);
+                lNewXmlDoc.save(lOutStream);
+              END;
+            END;
+            lTrayLine."EAI Partner Code" := pEAIRcvdMQBuffer."EAI Partner Code";
+            lTrayLine."EAI Entry No." := pEAIRcvdMQBuffer."Entry No.";
+            lTrayLine.MODIFY(FALSE);
+          END;
+        END;
+      END;
+
+      //Commentaires
+      //<<IMH04.ACO
+      //EAISetup.GET;
+      //EAISetup.TESTFIELD(EAISetup."Humidity Comment Code");
+
+      DARVASetup.GET;
+      DARVASetup.TESTFIELD("Humidity Comment Code");
+
+      GetHumidityComment(XmlDom, lHumidityComment);
+      //SaveComments(lHumidityComment, DATABASE::"Service Header", ServiceHeader."Service No.",
+      //             ServiceHeader."No.", EAISetup."Humidity Comment Code");
+      SaveComments(lHumidityComment, DATABASE::"Service Header", ServiceHeader."Service No.",
+                   ServiceHeader."No.", DARVASetup."Humidity Comment Code");
+
+      //EAISetup.TESTFIELD(EAISetup."Working Comment Code");
+      DARVASetup.TESTFIELD("Working Comment Code");
+
+      GetWorkComment(XmlDom, lWorkComment);
+      //SaveComments(lWorkComment, DATABASE::"Service Header", ServiceHeader."Service No.",
+      //             ServiceHeader."No.", EAISetup."Working Comment Code");
+      SaveComments(lWorkComment, DATABASE::"Service Header", ServiceHeader."Service No.",
+                   ServiceHeader."No.", DARVASetup."Working Comment Code");
+      //>>IMH04.ACO
+
+      // ajout PJ et sauvegarde nø mision
+      IF NOT lUnknownMission THEN BEGIN
+        CreateAttachmentFile(lXmlDom,lNewDT,lXmlNodeList);
+        pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+        pEAIRcvdMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+        CREATE(lXmlDom2);
+        lXmlDom2.load(lInStream);
+        //<<IMH23.ACO
+        //GetDARVAMissionWorkLot(lXmlDom2);
+        GetDARVAMissionWorkLot(XmlDom);
+        //>>IMH23.ACO
+      END;
+
+      IF lServiceHeaderCreated AND (NOT ServiceSetted) AND (NOT ForceCreateService) THEN BEGIN
+        lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code", pEAIRcvdMQBuffer."EAI Act Code");
+        IF lEAIAct."Tray Line Task Code On Receive" <> '' THEN BEGIN
+          lTrayLine.SETRANGE("Service No.",ServiceHeader."Service No.");
+          lTrayLine.SETRANGE("Service Header No.",ServiceHeader."No.");
+          lTrayLine.SETRANGE("Task Code",lEAIAct."Tray Line Task Code On Receive");
+          IF lTrayLine.ISEMPTY THEN BEGIN
+            IF lEAIAct."Create Tray Line On Receive" AND (lEAIAct."Tray Line Task Code On Receive" <> '') THEN BEGIN
+              // si statut non complet
+              //<<IMH22
+              lServiceTeamCode := ServiceHeader.GetTeamByServiceTask(ServiceHeader, lEAIAct."Tray Line Task Code On Receive");
+              //IF (ServiceHeader."Process Status No." < 20) AND NoError AND (ServiceHeader."Default Team Code" <> '') THEN BEGIN
+              IF (ServiceHeader."Process Status No." < 20) AND NoError AND (lServiceTeamCode <> '') THEN BEGIN
+              //>>IMH22
+                TrayLineMgt.InitTrayLine(TrayLine);
+                TrayLineMgt.CreateTLFromServHeader(
+                  //<<IMH22
+                  //ServiceHeader,ServiceHeader."Default Team Code",lEAIAct."Tray Line Task Code On Receive",FALSE);
+                  ServiceHeader,lServiceTeamCode,lEAIAct."Tray Line Task Code On Receive",FALSE);
+                  //>>IMH22
+                TrayLineMgt.GetResultLine(lTrayLine);
+                pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+                lTrayLine.Attachment := pEAIRcvdMQBuffer."XML Source";
+                IF lResult = lResult::ToTreat THEN BEGIN
+                  IF NOT ISCLEAR(lNewXmlDoc) THEN BEGIN
+                    lTrayLine."Attachment 2".CREATEOUTSTREAM(lOutStream);
+                    lNewXmlDoc.save(lOutStream);
+                  END;
+                END;
+                lTrayLine.MODIFY;
+              END ELSE BEGIN
+                IF NOT NoError AND (InterfaceSetup."DARVA Error Tray Code" <> '') THEN BEGIN
+                  TrayLineMgt.InitTrayLine(TrayLine);
+                  TrayLineMgt.CreateTLFromServHeader(
+                    ServiceHeader,InterfaceSetup."DARVA Error Tray Code",lEAIAct."Tray Line Task Code On Receive",FALSE);
+                  TrayLineMgt.GetResultLine(lTrayLine);
+                  pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+                  lTrayLine.Attachment := pEAIRcvdMQBuffer."XML Source";
+                  IF lResult = lResult::ToTreat THEN BEGIN
+                    IF NOT ISCLEAR(lNewXmlDoc) THEN BEGIN
+                      lTrayLine."Attachment 2".CREATEOUTSTREAM(lOutStream);
+                      lNewXmlDoc.save(lOutStream);
+                    END;
+                  END;
+                  lTrayLine.MODIFY;
+                END;
+              END;
+            END;
+          END;
+        END;
+      END;
+
+      COMMIT;
+      Service.SetAutoStepToDARVA(FALSE);
+      Service.MODIFY(TRUE);
+      IF lServiceHeaderCreated THEN BEGIN
+        IF ServiceHeader.GET(ServiceHeader."Document Type"::Invoice,ServiceHeader."No.") THEN BEGIN
+          ServiceHeader.MODIFY(TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE GetInfos@1100281010(VAR pDARVACarrierSubscriberNo@1100281008 : Code[20];VAR pDARVARecipientSubscriberNo@1100281009 : Code[20];VAR pDARVACorporateNo@1000000008 : Code[20];VAR pCorporateNo@1100281000 : Code[20];VAR pCorporateRegionCode@1100281012 : Code[10];VAR pServiceRefNo@1100281001 : Code[20];VAR pMissionOrder@1100281006 : Code[20];VAR pMemberNo@1100281007 : Code[20];VAR pNewMemberNo@1000000009 : Code[20];VAR pServiceCause@1000000006 : Code[20];VAR pCorporateContactNo@1000000010 : Code[20];VAR pOccupierNature@1000000011 : Code[20];VAR pHousingType@1000000013 : Code[20]);
+    VAR
+      lContact@1100281016 : Record 5050;
+      lCustomer@1100281014 : Record 18;
+      lCorporateRegion@1100281011 : Record 50058;
+      lProductReason@1100281010 : Record 50065;
+      lXmlDomElement@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lEAIPartnerCrossRef@1100281002 : Record 8016748;
+      lDARVACorporateNo@1100281005 : Code[20];
+      lProductType@1100281015 : Code[20];
+      i@1100281013 : Integer;
+      j@1000000002 : Integer;
+      lChar13@1000000000 : Char;
+      lContactName@1000000001 : Text[1024];
+      lExitLoop@1000000003 : Boolean;
+      lMinNbChar@1000000005 : Integer;
+      lMaxNbChar@1000000004 : Integer;
+      lEventDate@1000000007 : Date;
+    BEGIN
+      lXmlDomElement := XmlDom.getElementsByTagName('SE0010201').item(0);
+      pDARVACarrierSubscriberNo := DARVAMgt.GetNodeValue(lXmlDomElement,'DE00380101'); //code abonn‚ ‚metteur
+      IsCorporateCust :=
+        lEAIPartnerCrossRef.GetFromCrossRef(
+          DATABASE::Contact,
+          EAIPartnerCode,pDARVACarrierSubscriberNo,lEAIPartnerCrossRef);
+      pDARVARecipientSubscriberNo := DARVAMgt.GetNodeValue(lXmlDomElement,'DE00390101'); //code abonn‚ destinataire
+      lXmlDomElement := XmlDom.getElementsByTagName('GR010101').item(0);
+      lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE0020101');
+      lDARVACorporateNo := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00460101');//code GTA
+      pDARVACorporateNo := lDARVACorporateNo;
+      lEAIPartnerCrossRef.INIT;
+      IF NOT lEAIPartnerCrossRef.GetFromCrossRef(DATABASE::Customer,EAIPartnerCode,lDARVACorporateNo,lEAIPartnerCrossRef) THEN
+        ERROR(Text003, lDARVACorporateNo);
+      lEAIPartnerCrossRef.TESTFIELD("Source No.");
+      pCorporateNo := lEAIPartnerCrossRef."Source No.";
+      pCorporateRegionCode := '';
+      lCustomer.GET(pCorporateNo);
+      lMinNbChar := lCustomer."DARVA Min. Char. Number";
+      lMaxNbChar := lCustomer."DARVA Max. Char. Number";
+      //<<IMH03.ZW
+      GetCorporateRegion(lXmlDomElement, pCorporateNo, pCorporateRegionCode, pCorporateContactNo);
+      {
+      IF lCustomer."Parent Customer No." <> '' THEN BEGIN
+        lCorporateRegion.SETRANGE("Corporate No.", lCustomer."Parent Customer No.");
+        lCorporateRegion.SETRANGE("Sell-to Customer No.", lCustomer."No.");
+        IF NOT lCorporateRegion.ISEMPTY THEN BEGIN
+          lCorporateRegion.FINDFIRST;
+          pCorporateNo := lCorporateRegion."Corporate No.";
+          pCorporateRegionCode := lCorporateRegion."Region Code";
+        END;
+      END;
+      }
+      //>>IMH03.ZW
+
+      pServiceRefNo := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00470101'); // r‚f‚rence sinistre
+      pMissionOrder := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00530101'); // Nø ordre de mission
+      pMissionOrder := DELCHR(pMissionOrder,'=',' ');
+      lChar13 := 13;
+      pMissionOrder := DELCHR(pMissionOrder,'=',FORMAT(lChar13));
+      pMemberNo := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00540101'); // num‚ro de police ou de soci‚taire
+      pMemberNo := GetMemberNo(pCorporateNo,pMemberNo);
+
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR040801').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR041901').item(0);
+      //<IMH11.ACO
+      IF NOT ISCLEAR(lXmlDomElement) THEN BEGIN
+        lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE2050101');
+        IF NOT ISCLEAR(lXmlDomElement2) THEN BEGIN
+      //>>IMH11.ACO
+          // Date du sinistre
+          lEventDate := DARVAMgt.FormatDate(DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00030201'));
+          //<<IMH10.ACO
+          //Cause intervention
+          pServiceCause := DARVAMgt.GetNodeAttribute(lXmlDomElement2,'DT92090101','code');
+          //>>IMH10.ACO
+      //<<IMH11.ACO
+        END;
+      END;
+      IF lEventDate = 0D THEN
+        lEventDate := TODAY;
+      //>>IMH11.ACO
+
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR020601').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR022301').item(0);
+      //<<IMH11.ACO
+      IF NOT ISCLEAR(lXmlDomElement) THEN
+      //>>IMH11.ACO
+      //lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE2070101');
+        lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE0620101');
+
+      IF IsCorporateCust THEN BEGIN
+        lProductType := InterfaceSetup."DARVA Without Exp. Prod. Type";
+      END ELSE BEGIN
+        lProductType := InterfaceSetup."DARVA With Expert Product Type";
+      END;
+      //<<IMH10.ACO
+      // Garantie
+      //pServiceCause := DARVAMgt.GetNodeAttribute(lXmlDomElement2,'DT92150101','code');
+      //>>IMH10.ACO
+
+      //<<IMH15.ACO
+      //lXmlDomElement := XmlDom.getElementsByTagName('SE2890201').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('SE2890501').item(0);
+      //Nature de l'occupant (qualit‚)
+      pOccupierNature := DARVAMgt.GetNodeAttribute(lXmlDomElement,'DT90700101','code');
+
+      //Type d'habitation (type de risque)
+      pHousingType := DARVAMgt.GetNodeAttribute(lXmlDomElement,'DT97090101','code');
+
+      //>>IMH15.ACO
+
+      CLEAR(lEAIPartnerCrossRef);
+      lEAIPartnerCrossRef.GetFromCrossRef(DATABASE::"Fault Reason Code",EAIPartnerCode,pServiceCause,lEAIPartnerCrossRef);
+      IF lEAIPartnerCrossRef."Source No." <> '' THEN BEGIN
+        pServiceCause := lEAIPartnerCrossRef."Source No.";
+      END;
+      IF lProductReason.GET(
+           pCorporateNo,lProductType,lProductReason."Code Type"::FaultReason,
+           lEAIPartnerCrossRef."Source No.")
+      THEN BEGIN
+        pServiceCause := lProductReason.Code;
+      END;
+
+      lContact.SETCURRENTKEY("Member No.","Corporate No.");
+      lContact.SETRANGE("Member No.",pMemberNo);
+      lContact.SETRANGE("Corporate No.",pCorporateNo);
+      lContact.SETRANGE("Service Contact",lContact."Service Contact"::Beneficiary);
+      pNewMemberNo := pMemberNo;
+      IF (lMinNbChar > 0) THEN BEGIN
+        i := 0;
+        WHILE (i <= (lMaxNbChar - lMinNbChar)) AND lContact.ISEMPTY DO BEGIN
+          i += 1;
+          pNewMemberNo := COPYSTR(pMemberNo,STRLEN(pMemberNo) - lMaxNbChar + i);
+          lContact.SETRANGE("Member No.", pNewMemberNo);
+          IF lContact.FINDFIRST THEN BEGIN
+            lContactName := UPPERCASE(GetContactName);
+            IF (STRPOS(lContactName,UPPERCASE(lContact."First Name")) = 0) AND
+               (STRPOS(lContactName,UPPERCASE(lContact.Surname)) = 0)
+            THEN BEGIN
+              lExitLoop := FALSE;
+              j := 0;
+              WHILE NOT lExitLoop DO BEGIN
+                j += 1;
+                lExitLoop := (COPYSTR(pMemberNo,j,1) IN ['1','2','3','4','5','6','7','8','9']) OR (j >= STRLEN(pMemberNo));
+              END;
+              pNewMemberNo := COPYSTR(pMemberNo,j);
+            END;
+          END;
+        END;
+      END ELSE BEGIN
+        pNewMemberNo := pMemberNo;
+      END;
+      pMemberNo := pNewMemberNo;
+    END;
+
+    PROCEDURE InitContact@1100281004(pCorporateNo@1000000000 : Code[20];pCorporateRegionCode@1000000003 : Code[10];pDARVACarrierSubscriberNo@1000000004 : Code[20];VAR pOccupierNature@1000000001 : Code[20];VAR pExpertContactNo@1000000002 : Code[20];VAR pExpertRef@1000000005 : Text[30];VAR pNewMemberNo@1000000006 : Code[20]);
+    BEGIN
+      pExpertContactNo := '';
+      pExpertRef := '';
+
+      TempContact.RESET;
+      TempContact.DELETEALL;
+      IF NOT GetAllContacts(pCorporateNo,pCorporateRegionCode,pNewMemberNo,pOccupierNature, pExpertRef) THEN BEGIN
+        ERROR(Text001);
+      END;
+
+      // R‚cup du contact soci‚taire existant
+      Contact.SETCURRENTKEY("Member No.","Corporate No.");
+      Contact.SETRANGE("Member No.",pNewMemberNo);
+      Contact.SETRANGE("Corporate No.",pCorporateNo);
+      Contact.SETRANGE(Type, Contact.Type::Company);
+      Contact.SETRANGE("Service Contact",Contact."Service Contact"::Beneficiary);
+      IF NOT Contact.FINDFIRST THEN BEGIN
+        CreateContactDARVA(pCorporateNo, pCorporateRegionCode, pNewMemberNo,pOccupierNature);
+        Contact.RESET;
+        Contact.SETCURRENTKEY("Member No.","Corporate No.");
+        Contact.SETRANGE("Member No.",pNewMemberNo);
+        Contact.SETRANGE("Corporate No.",pCorporateNo);
+        Contact.SETRANGE(Type, Contact.Type::Company);
+        Contact.SETRANGE("Service Contact",Contact."Service Contact"::Beneficiary);
+        IF Contact.FINDFIRST THEN;
+      END;
+
+      // Cr‚ation/modification du contact expert si besoin
+      TempContact.SETRANGE("Service Contact", TempContact."Service Contact"::Expert);
+      IF TempContact.FINDFIRST THEN BEGIN
+        RetrieveContact(TempContact, pDARVACarrierSubscriberNo, pExpertRef, TRUE, TRUE, pExpertContactNo);
+      END;
+    END;
+
+    LOCAL PROCEDURE GetAllContacts@1100281003(pCorporateNo@1100281000 : Code[20];pCorporateRegionCode@1000000001 : Code[20];pMemberNo@1100281009 : Code[20];VAR pOccupierNature@1000000000 : Code[20];VAR pExpertRef@1000000002 : Text[30]) rValue : Boolean;
+    VAR
+      lXmlDomNodeList@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomNodeList2@1100281022 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement4@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      i@1100281010 : Integer;
+      k@1100281024 : Integer;
+      lType@1100281013 : Code[2];
+      lAddressContactMEONo@1000000003 : Integer;
+    BEGIN
+      // Note : cette fonction ne cr‚e rien, elle charge seulement la liste des contacts
+
+      rValue := FALSE;
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR050701LIST').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR051301LIST').item(0);
+      //lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR050701');
+      lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR051301');
+
+      FOR i := 0 TO lXmlDomNodeList.length() - 1 DO BEGIN
+        CLEAR(lXmlDomElement2);
+        CLEAR(lXmlDomElement3);
+        lXmlDomElement2 := lXmlDomNodeList.item(i);
+        //lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0070501');
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0071201');
+        lType := DARVAMgt.GetNodeAttribute(lXmlDomElement3,'DT90720102','code');
+
+        CASE lType OF
+          '01','52' : BEGIN
+            lXmlDomElement4 := lXmlDomElement3.selectSingleNode('DCC0500103');
+
+            TempContact.INIT;
+            IF NOT DecodeContact(lXmlDomElement4, lType, TempContact) THEN BEGIN
+              NoError := FALSE;
+            END;
+            IF TempContact."Service Contact" = TempContact."Service Contact"::Beneficiary THEN BEGIN
+              TempContact.VALIDATE("Corporate No.", pCorporateNo);
+              TempContact."Member No." := pMemberNo;
+              TempContact.VALIDATE("Corporate Region Code",pCorporateRegionCode);
+              //<<IMH15.ACO
+              //Pas r‚cup‚r‚ au niveau du contact
+              //pOccupierNature := DARVAMgt.GetNodeAttribute(lXmlDomElement3,'DT90870102','code');
+              //>>IMH15.ACO
+            END;
+            // Moyens de communication (t‚l‚phones)
+            CLEAR(lXmlDomElement3);
+            lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE1600102LIST');
+            IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+              lXmlDomNodeList2 := lXmlDomElement3.getElementsByTagName('SE1600102');
+              AddTeleCommCoord(lXmlDomNodeList2, TempContact);
+            END;
+            // Moyens de communication (informatique)
+            CLEAR(lXmlDomElement3);
+            lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE2010101LIST');
+            IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+              lXmlDomNodeList2 := lXmlDomElement3.getElementsByTagName('SE2010101');
+              AddInfoCoord(lXmlDomNodeList2, TempContact);
+            END;
+            // Contr“le des donn‚es
+            IF NOT ContactCheckData(TempContact) THEN BEGIN
+              NoError := FALSE;
+            END;
+            TempContact."No." := FORMAT(i);
+            IF TempContact."Service Contact" = TempContact."Service Contact"::Expert THEN BEGIN
+              TempContact.VALIDATE(Name,DeleteSpecCarToExpert(TempContact.Name));
+              TempContact.NameBreakdown;
+            END;
+            TempContact.INSERT(FALSE);
+
+            // REFERENCES
+            CLEAR(lXmlDomElement3);
+            lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE1620101LIST');
+            IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+              lXmlDomNodeList2 := lXmlDomElement3.getElementsByTagName('SE1620101');
+              FOR k := 0 TO lXmlDomNodeList2.length() - 1 DO BEGIN
+                lXmlDomElement4 := lXmlDomNodeList2.item(k);
+                lType := DARVAMgt.GetNodeAttribute(lXmlDomElement4,'DT92240101','code');
+                CASE lType OF
+                  '09' : pExpertRef := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE08210101');
+                END;
+              END;
+            END;
+            GetComments(lXmlDomElement2, TmpCommentLine);
+          END;
+          // PRESTATAIRE PRESSENTI
+          '31' : BEGIN
+          END;
+          //<<IMH18.ACO
+          '02','05','17','25','99': BEGIN
+            CLEAR(lXmlDomElement4);
+            lXmlDomElement4 := lXmlDomElement3.selectSingleNode('DCC2520102');
+            IF DARVAMgt.GetNodeAttribute(lXmlDomElement4,'DT97200102','code') = 'L' THEN BEGIN
+              CLEAR(lXmlDomElement4);
+              lXmlDomElement4 := lXmlDomElement3.selectSingleNode('DCC0500103');
+              DecodePersonToContact(lXmlDomElement4, lType, i, TempContact);
+              // Moyens de communication (t‚l‚phones)
+              CLEAR(lXmlDomElement3);
+              lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE1600102LIST');
+              IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+                lXmlDomNodeList2 := lXmlDomElement3.getElementsByTagName('SE1600102');
+                AddTeleCommCoord(lXmlDomNodeList2, TempContact);
+                TempContact.MODIFY(FALSE);
+              END;
+            END;
+          END;
+          //>>IMH18.ACO
+        END;
+      END;
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CreateService@1100281002(pEAIEntryNo@1000000004 : Code[20];pCorporateRegionCode@1000000005 : Code[20];pServiceRefNo@1000000001 : Code[20];pServiceCause@1000000002 : Code[20];pMemberNo@1000000006 : Code[20];pNewMemberNo@1000000007 : Code[20];pCorporateContactNo@1000000008 : Code[20];VAR pOccupierNature@1000000003 : Code[20];VAR pHousingType@1000000010 : Code[20]);
+    VAR
+      lXmlDomElement@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lEventDateText@1100281000 : Text[30];
+      lEAIPartnerCrossRef@1100281001 : Record 8016748;
+      lAddress@1100281005 : ARRAY [4] OF Text[50];
+      lAltAdrrCode@1100281008 : Code[10];
+      lCalcGeoCode@1000000000 : Boolean;
+    BEGIN
+      // Cr‚ation du service
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR040801').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR041901').item(0);
+      lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE2050101');
+      WITH Service DO BEGIN
+        INIT;
+        VALIDATE("Corporate No.", Contact."Corporate No.");
+        Contact.CreateService(Service,FALSE);
+        "Service Cause" := pServiceCause;
+        lEventDateText := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00030201');
+        // Date du sinistre
+        "Event Date" := DARVAMgt.FormatDate(lEventDateText);
+        //<<IMH11.ACO
+        IF "Event Date" = 0D THEN
+          "Event Date" := TODAY;
+        //>>IMH11.ACO
+        "Reference No." := pServiceRefNo;
+        "Corporate Region Code" := pCorporateRegionCode;
+        "Member No." := pNewMemberNo;
+        "EAI Entry No." := pEAIEntryNo;
+        "DARVA Source Member No." := pMemberNo;
+        VALIDATE("Corporate Contact No.", pCorporateContactNo);  //IMH03.ZW
+        CLEAR(lEAIPartnerCrossRef);
+
+        IF lEAIPartnerCrossRef.GetFromCrossRef2(
+             DATABASE::"Contact Alt. Address",50070,
+             EAIPartnerCode,pOccupierNature,lEAIPartnerCrossRef)
+        THEN BEGIN
+          pOccupierNature := lEAIPartnerCrossRef."Source No.";
+        END;
+        //<<IMH15.ACO
+        CLEAR(lEAIPartnerCrossRef);
+        IF lEAIPartnerCrossRef.GetFromCrossRef2(DATABASE::"Contact Alt. Address",
+                                              50072,
+                                              EAIPartnerCode,
+                                              pHousingType,
+                                              lEAIPartnerCrossRef) THEN BEGIN
+          pHousingType := lEAIPartnerCrossRef."Source No.";
+        END;
+
+
+        //>>IMH15.ACO
+
+        lCalcGeoCode := FALSE;
+        TempContact.RESET;
+        TempContact.SETRANGE("Service Contact", TempContact."Service Contact"::Beneficiary);
+        IF TempContact.FINDFIRST THEN BEGIN
+          IF ("Contact Name" = '') AND (TempContact.Name <> '') THEN BEGIN
+            "Contact Name" := TempContact.Name;
+          END;
+          IF (Address = '') AND (TempContact.Address <> '') THEN BEGIN
+            Address := TempContact.Address;
+          END;
+          IF ("Address 2" = '') AND (TempContact."Address 2" <> '') THEN BEGIN
+            "Address 2" := TempContact."Address 2";
+          END;
+          IF (City = '') AND (TempContact.City <> '') THEN BEGIN
+            City := TempContact.City;
+            lCalcGeoCode := TRUE;
+          END;
+          IF ("Post Code" = '') AND (TempContact."Post Code" <> '') THEN BEGIN
+            "Post Code" := TempContact."Post Code";
+            lCalcGeoCode := TRUE;
+          END;
+          IF ("Country/Region Code" = '') AND (TempContact."Country/Region Code" <> '') THEN BEGIN
+            "Country/Region Code" := TempContact."Country/Region Code";
+          END;
+          IF lCalcGeoCode THEN BEGIN
+            "Geo. Reference Code" := PostCode.GetGeoCode("Post Code",City);
+          END;
+          IF ("Contact Mobile Phone No." = '') AND (TempContact."Mobile Phone No." <> '') THEN BEGIN
+            "Contact Mobile Phone No." := TempContact."Mobile Phone No.";
+          END;
+          IF ("Contact Phone No." = '') AND (TempContact."Phone No." <> '') THEN BEGIN
+            "Contact Phone No." := TempContact."Phone No.";
+          END;
+          IF ("Contact E-mail" = '') AND (TempContact."E-Mail" <> '') THEN BEGIN
+            "Contact E-mail" := TempContact."E-Mail";
+          END;
+        END;
+
+        // Adresse MEO
+        TmpServHeader.INIT;
+
+        CLEAR(lXmlDomElement3);
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('DCC0080102');
+        IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+          lAddress[1] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05350101');
+          lAddress[2] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05360101');
+          IF lAddress[2] = '' THEN BEGIN
+            lAddress[2] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05370101');
+          END ELSE BEGIN
+            lAddress[3] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05370101');
+          END;
+          IF lAddress[2] = '' THEN BEGIN
+            lAddress[2] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05380101');
+          END ELSE BEGIN
+            IF lAddress[3] = '' THEN BEGIN
+              lAddress[3] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05380101');
+            END ELSE BEGIN
+              lAddress[4] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05380101');
+            END;
+          END;
+
+          TmpServHeader."Ship-to Address" := lAddress[2];
+          TmpServHeader."Ship-to Address 2" := lAddress[3];
+          TmpServHeader."Ship-to Address 3" := lAddress[4];
+          TmpServHeader."Ship-to Post Code" := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05390101');
+          TmpServHeader."Ship-to City" := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05410101');
+          TmpServHeader."Ship-to Country/Region Code" := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE91090101');
+
+          //<<IMH06.ACO
+          //Tel. destinataire MEO
+          IF TempContact."Phone No." <> '' THEN
+            TmpServHeader."Ship-to Phone" := TempContact."Phone No."
+          ELSE
+            TmpServHeader."Ship-to Phone" := "Contact Phone No.";
+
+          //Tel. mobile destinataire MEO
+          IF TempContact."Mobile Phone No." <> '' THEN
+            TmpServHeader."Ship-to Mobile Phone No." := TempContact."Mobile Phone No."
+          ELSE
+            TmpServHeader."Ship-to Mobile Phone No." := "Contact Mobile Phone No.";
+
+          //Tel. professionnel MEO (tel autre MEO)
+          IF TempContact."Business Phone No." <> '' THEN
+            TmpServHeader."Other Phone No." := TempContact."Business Phone No.";
+
+          //>>IMH06.ACO
+
+          IF TempContact."E-Mail" <> '' THEN BEGIN
+            TmpServHeader."Ship-to E-Mail" := TempContact."E-Mail";
+          END;
+
+          lAltAdrrCode :=
+            FindAltAddr(
+              Contact."No.",lAddress[2],lAddress[3],lAddress[4],
+              TmpServHeader."Ship-to Post Code",TmpServHeader."Ship-to City");
+          IF lAltAdrrCode = '' THEN BEGIN
+            lAltAdrrCode :=
+              CreateNewAltAddr(
+                Contact."No.",lAddress[2],lAddress[3],lAddress[4],
+                TmpServHeader."Ship-to Post Code",TmpServHeader."Ship-to City");
+          END;
+          TmpServHeader."Ship-to Address Code" := lAltAdrrCode;
+        END;
+
+        MODIFY(TRUE);
+      END;
+    END;
+
+    PROCEDURE UpdateShiptoAddrServHeader@1100281032(VAR pServiceHeader@1100281009 : Record 5900);
+    VAR
+      lXmlDomElement@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lAddress@1100281005 : ARRAY [3] OF Text[50];
+      lAltAdrrCode@1100281008 : Code[10];
+    BEGIN
+      // Mise … jour de l'addresse MEO de la ligne produit
+
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR040801').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR041901').item(0);
+      lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE2050101');
+
+      CLEAR(lXmlDomElement3);
+      lXmlDomElement3 := lXmlDomElement2.selectSingleNode('DCC0080102');
+      IF ISCLEAR(lXmlDomElement3) THEN BEGIN
+        EXIT;
+      END;
+
+      lAddress[1] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05360101');
+      IF lAddress[1] = '' THEN BEGIN
+        lAddress[1] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05370101');
+      END ELSE BEGIN
+        lAddress[2] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05370101');
+      END;
+      IF lAddress[1] = '' THEN BEGIN
+        lAddress[1] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05380101');
+      END ELSE BEGIN
+        IF lAddress[2] = '' THEN BEGIN
+          lAddress[2] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05380101');
+        END ELSE BEGIN
+          lAddress[3] := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05380101');
+        END;
+      END;
+
+      WITH pServiceHeader DO BEGIN
+        IF (lAddress[1] = "Ship-to Address") AND
+           (lAddress[2] = "Ship-to Address 2") AND
+           (lAddress[3] = "Ship-to Address 3")
+        THEN BEGIN
+          EXIT;
+        END;
+        "Ship-to Address" := lAddress[1];
+        "Ship-to Address 2" := lAddress[2];
+        "Ship-to Address 3" := lAddress[3];
+        "Ship-to Post Code" := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05390101');
+        "Ship-to City" := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05410101');
+        "Ship-to Country/Region Code" := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE91090101');
+        lAltAdrrCode :=
+          FindAltAddr(
+            "Contact No.",lAddress[1],lAddress[2],lAddress[3],
+            "Ship-to Post Code","Ship-to City");
+        IF lAltAdrrCode = '' THEN BEGIN
+          lAltAdrrCode :=
+            CreateNewAltAddr(
+              "Contact No.",
+              lAddress[1],
+              lAddress[2],
+              lAddress[3],
+              "Ship-to Post Code",
+              "Ship-to City");
+        END;
+        "Ship-to Address Code" := lAltAdrrCode;
+        "Default Team Code" := GetDefaultTeamCodeByServOrder(pServiceHeader);
+        MODIFY;
+      END;
+    END;
+
+    PROCEDURE CreateServiceHeader@1100281011(pEAIEntryNo@1000000005 : Code[20];pDARVACarrierSubscriberNo@1000000006 : Code[20];pDARVARecipientSubscriberNo@1000000008 : Code[20];pDARVACorporateNo@1000000007 : Code[20];pMissionOrder@1000000001 : Code[20];pOccupierNature@1000000002 : Code[20];pExpertContactNo@1000000003 : Code[20];pExpertRef@1000000009 : Text[30];pIMHRefNo@1000000004 : Code[20];pHousingType@1000000012 : Code[20]) rValue : Boolean;
+    VAR
+      lXmlDomNodeList@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lEAIPartnerCrossRef@1100281011 : Record 8016748;
+      lServiceOrderType@1000000000 : Record 5903;
+      lPostCode@1000000010 : Record 225;
+      lType@1100281002 : Code[2];
+      lProductType@1100281008 : Code[20];
+      lRequisitioner@1100281009 : Code[20];
+      lAmount@1100281003 : Decimal;
+      i@1100281005 : Integer;
+      lAddressNo@1000000011 : Integer;
+    BEGIN
+      IntervDescCheckMode := TRUE;
+      CreateIntervDescription(pMissionOrder, pDARVACorporateNo);
+      IntervDescCheckMode := FALSE;
+
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR020601').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR022301').item(0);
+      lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE2070201');
+      rValue := FALSE;
+      WITH ServiceHeader DO BEGIN
+        INIT;
+        IF IsCorporateCust THEN BEGIN
+          lProductType := InterfaceSetup."DARVA Without Exp. Prod. Type";
+          lRequisitioner := InterfaceSetup."DARVA Corporate Cust. Code";
+        END ELSE BEGIN
+          lProductType := InterfaceSetup."DARVA With Expert Product Type";
+          lRequisitioner := InterfaceSetup."DARVA Expert Code";
+        END;
+
+        IF GetPrincExpert(pDARVACarrierSubscriberNo, pExpertRef) = InterfaceSetup."DARVA IMH Exp. Comp. Cont. No." THEN BEGIN
+          lRequisitioner := InterfaceSetup."DARVA Tele-Expert Code";
+        END;
+        IF Service."Occupier Nature" = '' THEN BEGIN
+          Service.VALIDATE("Occupier Nature",pOccupierNature);
+        END;
+        //<<IMH15.ACO
+        IF Service."Residence Type" = '' THEN BEGIN
+          //Service.VALIDATE("Residence Type",pResidenceType);
+        END;
+
+        IF Service."Housing Type" = '' THEN BEGIN
+          Service.VALIDATE("Housing Type",pHousingType);
+        END;
+        //>>IMH15.ACO
+
+        Service.SetHideMessage(TRUE);
+        Service.MODIFY;
+        Service.SetAutoStepToDARVA(TRUE);
+        Service.CreateServiceHeader(ServiceHeader,lProductType);
+        IF "Reference No." = '' THEN BEGIN
+          "Reference No." := pIMHRefNo;
+        END;
+        "EAI Entry No." := pEAIEntryNo;
+        IF "Occupier Nature" = '' THEN BEGIN
+          "Occupier Nature" := pOccupierNature;
+        END;
+        //<<IMH15.ACO
+        IF "Housing Type" = '' THEN BEGIN
+          "Housing Type" := pHousingType;
+        END;
+        //>>IMH15.ACO
+
+        Requisitioner := lRequisitioner;
+        //A ETUDIER
+        VALIDATE("Max. Est. Work Amt Excl. VAT",ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement2,'DE04230101')));
+        IF lServiceOrderType.GET(lProductType) THEN;
+        IF NOT lServiceOrderType."Ignore Interv. Ceiling DT" THEN BEGIN
+          //A ETUDIER
+          VALIDATE("Intervention Ceiling",ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement2,'DE09870101')));
+        END;
+        VALIDATE("Unsecured Depreciation Amount",ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement2,'DE11150101')));
+        lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE2880101LIST');
+        lXmlDomNodeList := lXmlDomElement2.getElementsByTagName('SE2880101');
+        FOR i := 0 TO lXmlDomNodeList.length() - 1 DO BEGIN
+          lXmlDomElement3 := lXmlDomNodeList.item(i);
+          lType := DARVAMgt.GetNodeAttribute(lXmlDomElement3,'DT97080101','code');
+          lAmount += ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement3,'DE14410101'));
+        END;
+        IF lAmount <> 0 THEN BEGIN
+          "Appropriate Deductible Amount" := ServiceHeader."Appropriate Deductible Amount"::Other;
+          VALIDATE("Deductible Amount",lAmount);
+        END ELSE BEGIN
+          "Appropriate Deductible Amount" := ServiceHeader."Appropriate Deductible Amount"::"No Deductible";
+        END;
+        "Your Reference" := pMissionOrder;
+        Urgent := Urgent::No;
+
+        //<<IMH21
+        IF NOT lPostCode.GET(TmpServHeader."Ship-to Post Code", TmpServHeader."Ship-to City") THEN BEGIN //ZW
+          lPostCode.SETCURRENTKEY(Code, "City 2");
+          lPostCode.SETRANGE(Code, TmpServHeader."Ship-to Post Code");
+          lPostCode.SETRANGE("City 2", TmpServHeader."Ship-to City");
+          IF lPostCode.FINDFIRST THEN
+            TmpServHeader."Ship-to City" := lPostCode.City
+          ELSE
+            TmpServHeader."Ship-to Post Code" := '';
+        END;
+        //>>IMH21
+        // Adresse MEO
+        IF (TmpServHeader."Ship-to Address" <> '') OR (TmpServHeader."Ship-to Post Code" <> '') OR (TmpServHeader."Ship-to City" <> '')
+        THEN BEGIN
+          "Ship-to Address Code" := TmpServHeader."Ship-to Address Code";
+          "Ship-to Address" := TmpServHeader."Ship-to Address";
+          "Ship-to Address 2" := TmpServHeader."Ship-to Address 2";
+          "Ship-to City" := TmpServHeader."Ship-to City";
+          "Ship-to Post Code" := TmpServHeader."Ship-to Post Code";
+          "Ship-to Country/Region Code" := TmpServHeader."Ship-to Country/Region Code";
+          "Default Team Code" := GetDefaultTeamCodeByServOrder(ServiceHeader);
+          "Ship-to Geo. Reference Code" := PostCode.GetGeoCode("Ship-to Post Code","Ship-to City");
+        END;
+        //<<IMH12.ACO
+        IF (TmpServHeader."Ship-to Phone" <> '') THEN
+          "Ship-to Phone" :=  TmpServHeader."Ship-to Phone";
+
+        IF (TmpServHeader."Ship-to Mobile Phone No." <> '') THEN
+          "Ship-to Mobile Phone No." :=  TmpServHeader."Ship-to Mobile Phone No.";
+
+        IF (TmpServHeader."Other Phone No." <> '') THEN
+          "Other Phone No." :=  TmpServHeader."Other Phone No.";
+
+        //>>IMH12.ACO
+        IF Service."Contact E-mail" <> '' THEN BEGIN
+          "Ship-to E-Mail" := Service."Contact E-mail";
+        END;
+
+        //<<IMH21 D‚sactiv‚ g‚r‚ au dessus
+        {
+        //<<IMH13
+        IF NOT lPostCode.GET("Ship-to Post Code", "Ship-to City") THEN BEGIN //ZW
+          "Ship-to Post Code" := '';
+        END;
+        //<<IMH13
+        }
+        //>>IMH21
+
+        //<<IMH18.ACO
+        TempContact.RESET;
+        TempContact.SETRANGE("Service Contact", TempContact."Service Contact"::"To Contact");
+        IF TempContact.FINDFIRST THEN BEGIN
+          CreateSHAddressFromTempContact(TempContact, "No.", lAddressNo);
+          ServiceHeader."Person To Contact MEO No." := lAddressNo;
+        END;
+        //>>IMH18.ACO
+
+        "Expert Contact No." := pExpertContactNo;
+        "Expert Ref." := pExpertRef;
+        "Princ. Expert Contact No." := GetPrincExpert(pDARVACarrierSubscriberNo, pExpertRef);
+        "DARVA Interface" := TRUE;
+        "DARVA Carrier Subscriber No." := pDARVACarrierSubscriberNo;
+        "DARVA Recipient Subscriber No." := pDARVARecipientSubscriberNo;
+        GetInterfaceSetup;
+        ServiceHeader.Channel := InterfaceSetup."DARVA Channel Code";
+        IF Name = '' THEN BEGIN
+          Name := Service."Contact Name";
+        END;
+        MODIFY;
+        CreateDARVAMissionEntry(ServiceHeader,pMissionOrder, pDARVACorporateNo);
+        // Sauvegarde des commentaires charg‚s avant
+        SaveComments(TmpCommentLine, DATABASE::"Service Header", ServiceHeader."Service No.", ServiceHeader."No.", '');
+        SaveComments(TmpCommentLine2, DATABASE::"Service Header", ServiceHeader."Service No.", ServiceHeader."No.", '');
+        SaveComments(TmpCommentLine3, DATABASE::"Service Header", ServiceHeader."Service No.", ServiceHeader."No.", '');
+        GetComments(lXmlDomElement, TmpCommentLine);
+        SaveComments(TmpCommentLine, DATABASE::"Service Header", ServiceHeader."Service No.", ServiceHeader."No.", '');
+      END;
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CreateGestionnaireContact@1100281001(VAR pContact@1100281000 : Record 5050;pGUIDDarvaCode@1100281009 : Code[20]);
+    VAR
+      lXmlDomNodeList@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement4@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lGUIDDARVACode@1100281003 : Code[10];
+      lEAIPartnerCrossRef@1100281008 : Record 8016748;
+      i@1100281010 : Integer;
+      lType@1100281012 : Code[1];
+    BEGIN
+      // Cr‚ation ou mise … jour du contact gestionnaire
+
+      // GR01 GROUPE ENTREPRISE
+      lXmlDomElement := XmlDom.getElementsByTagName('GR010101').item(0);
+      // - SE003 GESTIONNAIRE
+      lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE0030401');
+      lGUIDDARVACode := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00560101');
+      // -- Nom et Adresse
+      lXmlDomElement3 := lXmlDomElement2.selectSingleNode('DCC0500103');
+      pContact.INIT;
+      pContact.VALIDATE(Name,DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05350101'));                    // Nom
+      pContact.VALIDATE(Address,DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05360101'));                 // Adresse
+      pContact.VALIDATE("Address 2",DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05370101'));             // Adresse 2
+      pContact.VALIDATE("Post Code",DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05390101'));             // Code postal
+      pContact.VALIDATE(City, DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05410101'));                   // Ville
+      pContact.VALIDATE("Country/Region Code",DARVAMgt.GetNodeValue(lXmlDomElement3,'DE05400101'));   // Pays
+      pContact.INSERT(TRUE);
+
+      // - SE160 COORDONNEES DE TELECOMMUNICATION
+      lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE1600102LIST');
+      //<<IMH11.ACO
+      IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+      //>>IMH11.ACO
+        lXmlDomNodeList := lXmlDomElement3.getElementsByTagName('SE1600102');
+        //<<IMH11.ACO
+        IF NOT ISCLEAR(lXmlDomNodeList) THEN BEGIN
+        //>>IMH11.ACO
+          FOR i := 0 TO lXmlDomNodeList.length() - 1 DO BEGIN
+            lXmlDomElement4 := lXmlDomNodeList.item(i);
+            //<<IMH11.ACO
+            IF NOT ISCLEAR(lXmlDomElement4) THEN BEGIN
+            //>>IMH11.ACO
+              lType := DARVAMgt.GetNodeAttribute(lXmlDomElement4,'DT92210102','code');
+              CASE lType OF
+                '1' : Contact.VALIDATE("Phone No.", DARVAMgt.GetNodeValue(lXmlDomElement4,'DE0820102')); // Personnel
+                '2' : Contact.VALIDATE("Business Phone No.", DARVAMgt.GetNodeValue(lXmlDomElement4,'DE0820102')); // Professionnel
+                '3' : Contact.VALIDATE("Fax No.", DARVAMgt.GetNodeValue(lXmlDomElement4,'DE0820102')); // Fax
+                '6' : Contact.VALIDATE("Mobile Phone No.", DARVAMgt.GetNodeValue(lXmlDomElement4,'DE0820102')); // Portable
+                '7' : Contact.VALIDATE("Extension No.", DARVAMgt.GetNodeValue(lXmlDomElement4,'DE0820102')); // Interne
+              END;
+            //<<IMH11.ACO
+            END;
+            //>>IMH11.ACO
+          END;
+      //<<IMH11.ACO
+        END;
+      END;
+      //>>IMH11.ACO
+      Contact."Correspondence Type" := Contact."Correspondence Type"::" ";
+      Contact.MODIFY(TRUE);
+    END;
+
+    PROCEDURE CreateIntervDescription@1100281035(pMissionOrder@1000000002 : Code[20];pDARVACorporateNo@1000000003 : Code[20]);
+    VAR
+      lBuildingTrade@1000000004 : Record 50032;
+      lDARVALot@1000000001 : Record 50169;
+      lProductReason@1000000000 : Record 50065;
+      lInterventionDescription@1100281000 : Record 50070;
+      lPartnerCrossRef@1100281006 : Record 8016748;
+      lTempCommentLine@1100281020 : TEMPORARY Record 50056;
+      lIntervDescriptionDetail@1100281016 : Record 50161;
+      lTextMgt@1100281018 : Codeunit 50085;
+      lXmlDomNodeList@1100281021 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomNodeList2@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement4@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lServiceHeaderNo@1100281028 : Code[20];
+      lAffectedLocationCode@1100281029 : Code[20];
+      lBuildingTradeNo@1100281007 : Code[20];
+      lSpecializationCode@1100281008 : Code[20];
+      lAffectedLocationDesc@1100281011 : Text[20];
+      lAffectedLocationDetailDesc@1100281010 : Text[80];
+      lInterventionLotNo@1100281032 : Text[50];
+      lPressentProvider@1100281030 : ARRAY [6] OF Text[50];
+      lVATProdPostingGrp@1100281012 : Code[20];
+      lBigText@1100281019 : BigText;
+      i@1100281005 : Integer;
+      j@1100281022 : Integer;
+      lTotalAmount@1100281023 : ARRAY [4] OF Decimal;
+      lAmount@1100281024 : ARRAY [2] OF Decimal;
+      lQuantity@1100281026 : Decimal;
+      lUnit@1100281027 : Text[50];
+    BEGIN
+      // Cr‚ation des descriptifs de travaux
+
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR100501LIST').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR100901LIST').item(0);
+      //lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR100501');
+      lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR100901');
+      CLEAR(lTotalAmount);
+
+      lDARVALot.SETRANGE("Service No.",ServiceHeader."Service No.");
+      lDARVALot.SETRANGE("Service Header No.",ServiceHeader."No.");
+      lDARVALot.DELETEALL;
+
+      // Parcours des balises GR100501
+      FOR i := 0 TO lXmlDomNodeList.length - 1 DO BEGIN
+        lXmlDomElement2 := lXmlDomNodeList.item(i);
+        //lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE2650101');
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE2650201');
+
+        lInterventionLotNo := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE12280101');
+        // Recherche du prestataire pressenti
+        GetProviderPressent(lInterventionLotNo,lPressentProvider);
+
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE2690101');
+        lTotalAmount[1] += ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement3,'DE09940101'));
+        lTotalAmount[2] += ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement3,'DE09980101'));
+        lTotalAmount[3] += ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement3,'DE12360101')); // v‚tust‚
+        lTotalAmount[4] += ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement3,'DE00290201')); // franchise
+        lServiceHeaderNo := ServiceHeader."No.";
+
+        InterfaceLocationBuffer.RESET;
+        InterfaceLocationBuffer.DELETEALL;
+
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE2060101LIST');
+        lXmlDomNodeList2 := lXmlDomElement3.getElementsByTagName('SE2060101');
+        FOR j := 0 TO lXmlDomNodeList2.length() - 1 DO BEGIN
+          lXmlDomElement4 := lXmlDomNodeList2.item(j);
+
+          lBuildingTradeNo := DARVAMgt.GetNodeAttribute(lXmlDomElement4,'DT90790101','code');
+          IF lPartnerCrossRef.GetFromCrossRef(DATABASE::"Building Trade",EAIPartnerCode,lBuildingTradeNo,lPartnerCrossRef) THEN BEGIN
+            lBuildingTradeNo := lPartnerCrossRef."Source No.";
+            lSpecializationCode := lBuildingTrade.GetDefaultSpec(lBuildingTradeNo,1);
+          END ELSE BEGIN
+            lBuildingTradeNo := '';
+            lSpecializationCode := '';
+          END;
+          lAffectedLocationDesc := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE14570101');
+          lAffectedLocationCode := GetAffectedLocationCode(lAffectedLocationDesc);
+          IF lAffectedLocationCode = '' THEN BEGIN
+            lAffectedLocationCode := GetInterfaceLocationCode(lAffectedLocationDesc);
+          END;
+          InterfaceSetup.GET;
+          IF lPartnerCrossRef."Source No." = InterfaceSetup."DARVA Other Building Trade" THEN BEGIN
+            IF lProductReason.GET(
+              ServiceHeader."Service Order Type",
+              ServiceHeader."Corporate No.",
+              lProductReason."Code Type"::FaultReason,
+              ServiceHeader."Service Cause")
+            THEN BEGIN
+              IF lProductReason."Default Building Trade No." <> '' THEN BEGIN
+                lBuildingTradeNo := lProductReason."Default Building Trade No.";
+              END;
+              IF lProductReason."Default Speciality Code" <> '' THEN BEGIN
+                lSpecializationCode := lProductReason."Default Speciality Code";
+              END;
+              IF lProductReason."Default Affected Location Code" <> '' THEN BEGIN
+                lAffectedLocationCode := lProductReason."Default Affected Location Code";
+              END;
+            END;
+          END;
+
+          lAffectedLocationDetailDesc := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE01520101');
+          lVATProdPostingGrp := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE01530101');
+          lPartnerCrossRef.INIT;
+          IF lPartnerCrossRef.GetFromCrossRef(DATABASE::"VAT Product Posting Group",EAIPartnerCode,lVATProdPostingGrp,lPartnerCrossRef)
+          THEN BEGIN
+            lVATProdPostingGrp := lPartnerCrossRef."Source No.";
+          END;
+          lAmount[1] := ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement4,'DE02340101'));
+          lAmount[2] := ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement4,'DE14490101'));
+          lQuantity := ToolsMgt.TextToDecimal2(DARVAMgt.GetNodeValue(lXmlDomElement4,'DE14450101'));
+          lUnit := DARVAMgt.GetNodeAttribute(lXmlDomElement4,'DT97260101','code');
+          lPartnerCrossRef.INIT;
+          IF lPartnerCrossRef.GetFromCrossRef2(
+               DATABASE::"Interv. Description Detail",56017,EAIPartnerCode,lUnit,lPartnerCrossRef)
+          THEN BEGIN
+            lUnit := lPartnerCrossRef."Source No."
+          END ELSE BEGIN
+            lUnit := '';
+          END;
+
+          WITH lInterventionDescription DO BEGIN
+            IF (lSpecializationCode <> '') AND (lBuildingTradeNo <> '') THEN BEGIN
+              // On regarde si la ligne de descriptif existe si non on la cr‚‚e
+              IF NOT GET(lServiceHeaderNo,lAffectedLocationCode,lSpecializationCode,lBuildingTradeNo) THEN BEGIN
+                "Service Header No." := lServiceHeaderNo;
+                "Affected Location Code" := lAffectedLocationCode;
+                "Speciality Code" := lSpecializationCode;
+                "Building Trade No." := lBuildingTradeNo;
+                "Intervention Lot No." := lInterventionLotNo;
+                "Affected Location Description" := COPYSTR(lAffectedLocationDesc,1,MAXSTRLEN("Affected Location Description"));
+                "Location Detail Code" :=
+                  GetRecCode(
+                    DATABASE::"Intervention Description",
+                    FIELDNO("Location Detail Code"),
+                    COPYSTR(lAffectedLocationDetailDesc,1,50));
+                "Location Detail Description" := COPYSTR(lAffectedLocationDetailDesc,1,MAXSTRLEN("Location Detail Description"));
+                "Unit Price" := lAmount[1];
+                "Amount Excl. VAT" := lAmount[1] * lQuantity;
+                "Amount Incl. VAT" := lAmount[2];
+                Quantity := lQuantity;
+                VALIDATE("VAT Prod. Posting Group",lVATProdPostingGrp);
+                "Sensed Provider Name" := lPressentProvider[1];
+                "Sensed Provider Post Code" := lPressentProvider[2];
+                "Sensed Provider City" := lPressentProvider[3];
+                "Sensed Provider Agreement No." := lPressentProvider[5];
+                "Sensed Provider No." := lPressentProvider[6];
+                IF NOT IntervDescCheckMode THEN BEGIN
+                  INSERT(TRUE);
+                END;
+              END ELSE BEGIN
+                IF "Sensed Provider No." = '' THEN BEGIN
+                  "Sensed Provider Name" := lPressentProvider[1];
+                  "Sensed Provider Post Code" := lPressentProvider[2];
+                  "Sensed Provider City" := lPressentProvider[3];
+                  "Sensed Provider Agreement No." := lPressentProvider[5];
+                  "Sensed Provider No." := lPressentProvider[6];
+                END;
+                "Amount Excl. VAT" += lAmount[1] * lQuantity;
+                "Amount Incl. VAT" += lAmount[2];
+                Quantity += lQuantity;
+                VALIDATE("VAT Prod. Posting Group");
+                IF NOT IntervDescCheckMode THEN BEGIN
+                  MODIFY(TRUE);
+                END;
+              END;
+            END ELSE BEGIN
+              IF NOT IntervDescCheckMode THEN BEGIN
+                // Sauvegarde en commentaire
+                CLEAR(lBigText);
+                lBigText.ADDTEXT(Text004 + GetEOL);
+                IF "Intervention Lot No." <> '' THEN BEGIN
+                  lBigText.ADDTEXT(STRSUBSTNO('%1 : %2',FIELDCAPTION("Intervention Lot No."), lInterventionLotNo) + GetEOL);
+                END;
+                lBigText.ADDTEXT(STRSUBSTNO('%1 : %2', FIELDCAPTION("Building Trade No."), lBuildingTradeNo) + GetEOL);
+                lBigText.ADDTEXT(STRSUBSTNO('%1 : %2', FIELDCAPTION("Affected Location Description"),lAffectedLocationDesc) + GetEOL);
+                lBigText.ADDTEXT(STRSUBSTNO('%1 : %2', FIELDCAPTION("Location Detail Description"),lAffectedLocationDetailDesc) + GetEOL
+      );
+                IF lVATProdPostingGrp <> '' THEN BEGIN
+                  lBigText.ADDTEXT(STRSUBSTNO('%1 : %2', FIELDCAPTION("VAT Prod. Posting Group"),lVATProdPostingGrp) + GetEOL);
+                END;
+                IF lAmount[1] <> 0 THEN BEGIN
+                  lBigText.ADDTEXT(STRSUBSTNO('%1 : %2', FIELDCAPTION("Amount Excl. VAT"),lAmount[1]) + GetEOL);
+                END;
+                IF lAmount[2] <> 0 THEN BEGIN
+                  lBigText.ADDTEXT(STRSUBSTNO('%1 : %2', FIELDCAPTION("Amount Incl. VAT"),lAmount[2]) + GetEOL);
+                END;
+                lTempCommentLine."Source Table ID" := DATABASE::"Service Header";
+                lTempCommentLine."Source No." := ServiceHeader."Service No.";
+                lTempCommentLine."Source No. 2" := ServiceHeader."No.";
+                lTempCommentLine.Code := InterfaceSetup."DARVA Int. Desc. Comment Code";
+                lTempCommentLine.Reception := lTempCommentLine.Reception::Darva;
+                lTextMgt.SaveBigText(lTempCommentLine, WORKDATE, lBigText);
+              END;
+            END;
+            //<<IMH03 d‚sactiv‚ et remplac‚ par la fonction GetWorkComment
+            //<<IMH20 D‚sactiv‚
+            {
+            IF NOT IntervDescCheckMode THEN BEGIN
+              GetComments(lXmlDomElement2, TmpCommentLine);
+              SaveComments(TmpCommentLine, DATABASE::"Service Header", ServiceHeader."Service No.", ServiceHeader."No.",'');
+            END;
+            }
+            //>>IMH20
+            //>>IMH03
+          END;
+          WITH lIntervDescriptionDetail DO BEGIN
+            // On regarde si la ligne de descriptif detail existe si non on la cr‚‚e
+            SETRANGE("Service Header No.",lServiceHeaderNo);
+            SETRANGE("Affected Location Code",lAffectedLocationCode);
+            SETRANGE("Speciality Code",lSpecializationCode);
+            SETRANGE("Building Trade No.",lBuildingTradeNo);
+            SETRANGE("Affected Location Description",lAffectedLocationDesc);
+            SETRANGE("Location Detail Description",lAffectedLocationDetailDesc);
+            IF ISEMPTY THEN BEGIN
+              SetIntervDescrNotModifyTrue(TRUE);
+              "Service Header No." := lServiceHeaderNo;
+              "Speciality Code" := lSpecializationCode;
+              "Building Trade No." := lBuildingTradeNo;
+              "Line No." := 0;
+              "Intervention Lot No." := lInterventionLotNo;
+              "Affected Location Code" := lAffectedLocationCode;
+              "Affected Location Description" := COPYSTR(lAffectedLocationDesc,1,MAXSTRLEN("Affected Location Description"));
+              "Location Detail Code" :=
+                GetRecCode(
+                  DATABASE::"Intervention Description",
+                  FIELDNO("Location Detail Code"),
+                  COPYSTR(lAffectedLocationDetailDesc,1,50));
+              "Location Detail Description" := COPYSTR(lAffectedLocationDetailDesc,1,MAXSTRLEN("Location Detail Description"));
+              "Unit Price" := lAmount[1];
+              "Amount Excl. VAT" := lAmount[1] * lQuantity;
+              "Amount Incl. VAT" := lAmount[2];
+              Quantity := lQuantity;
+              "Unit of Measure" := lUnit;
+              VALIDATE("VAT Prod. Posting Group",lVATProdPostingGrp);
+              "Sensed Provider Name" := lPressentProvider[1];
+              "Sensed Provider Post Code" := lPressentProvider[2];
+              "Sensed Provider City" := lPressentProvider[3];
+              "Sensed Provider Agreement No." := lPressentProvider[5];
+              "Sensed Provider No." := lPressentProvider[6];
+              SetSkipUpdateIntervDescrip(TRUE);
+              IF NOT IntervDescCheckMode THEN BEGIN
+                INSERT(TRUE);
+              END;
+              CreateDARVALotEntry(ServiceHeader,lIntervDescriptionDetail, pMissionOrder, pDARVACorporateNo)
+            END;
+          END;
+        END;
+      END;
+
+      IF NOT IntervDescCheckMode THEN BEGIN
+        ServiceHeader.SETRECFILTER;
+        ServiceHeader.FINDFIRST;
+
+        ServiceHeader.VALIDATE("Unsecured Depreciation Amount",lTotalAmount[3]);
+        IF (lTotalAmount[4] = 0) AND (ServiceHeader."Deductible Amount" = 0) THEN BEGIN
+          ServiceHeader."Appropriate Deductible Amount" := ServiceHeader."Appropriate Deductible Amount"::"No Deductible"
+        END ELSE BEGIN
+          IF (lTotalAmount[4] <> 0) THEN BEGIN
+            ServiceHeader."Appropriate Deductible Amount" := ServiceHeader."Appropriate Deductible Amount"::Other;
+            ServiceHeader.VALIDATE("Deductible Amount", lTotalAmount[4]);
+          END;
+        END;
+        ServiceHeader.MODIFY(TRUE);
+      END;
+    END;
+
+    PROCEDURE CreateAttachmentFile@1100281012(pXMLDom@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pNewDT@1100281016 : Boolean;VAR pXmlNodeList@1100281018 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList");
+    VAR
+      lXMLDOMNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lAdoStream@1100281007 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+      lTempFile@1100281003 : File;
+      lFileName@1100281002 : Text[250];
+      lDocAttach@1100281008 : Record 50021;
+      lDocAttach2@1100281015 : Record 50021;
+      lSourceAttchMgt@1100281006 : Codeunit 50003;
+      lAttachmentTemp@1100281005 : TEMPORARY Record 5062;
+    BEGIN
+      lXMLDOMNode := pXMLDom.getElementsByTagName('ns2:formatPdf').item(0);
+      IF NOT ISCLEAR(lXMLDOMNode) THEN BEGIN
+        lXMLDOMNode.dataType := 'bin.base64';
+        CREATE(lAdoStream);
+        lAdoStream.Open;
+        lAdoStream.Type := 1;
+        lAdoStream.Write(lXMLDOMNode.nodeTypedValue);
+        lTempFile.CREATETEMPFILE();
+        lFileName := COPYSTR(lTempFile.NAME,1,STRLEN(lTempFile.NAME) - 4) + '.pdf';
+        lTempFile.CLOSE;
+        lAdoStream.SaveToFile(lFileName);
+        lAdoStream.Close;
+
+        WITH lDocAttach DO BEGIN
+          SETCURRENTKEY("Service Document No.","Service Intervention Line No.","Intervention Quote Line No.");
+          SETRANGE("Service Document No.",ServiceHeader."No.");
+          lDocAttach."Key Integer 1" := 0;
+          lDocAttach."Key Integer 2" := 0;
+          lDocAttach."Key Code 1" := '';
+          lDocAttach."Key Code 2" := '';
+          IF pNewDT THEN BEGIN
+            lDocAttach2.SETCURRENTKEY("Service Document No.","Service Intervention Line No.","Intervention Quote Line No.");
+            lDocAttach2.SETRANGE("Service Document No.",ServiceHeader."No.");
+            lDocAttach2.SETFILTER(Description,'DT*');
+            IF lDocAttach2.FINDLAST THEN BEGIN
+              Description := INCSTR(lDocAttach2.Description);
+              "Description 2" := 'Demande de travaux';
+            END ELSE BEGIN
+              Description := 'DT 1';
+              "Description 2" := 'Demande de travaux';
+            END;
+          END ELSE BEGIN
+            Description := 'DT 1';
+            "Description 2" := 'Demande de travaux';
+          END;
+        END;
+        lSourceAttchMgt.CreateAttachment(lDocAttach,lFileName,lAttachmentTemp);
+      END;
+
+      CreateAttachment(pXmlNodeList);
+    END;
+
+    PROCEDURE ShowAttachmentFileByTrayLine@1100281029(pTrayLine@1100281004 : Record 50048);
+    VAR
+      lXMLDom@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLDOMNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lAdoStream@1100281007 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+      lTempFile@1100281003 : File;
+      lFileName@1100281002 : Text[250];
+      lInStream@1100281005 : InStream;
+      pExoportFileName@1100281006 : Text[1024];
+      lFileFilter@1100281008 : Text[250];
+      lRBAutoMgt@1100281010 : Codeunit 419;
+    BEGIN
+      pTrayLine.CALCFIELDS(Attachment);
+      IF NOT pTrayLine.Attachment.HASVALUE THEN BEGIN
+        EXIT;
+      END;
+      CREATE(lXMLDom);
+      pTrayLine.CALCFIELDS(Attachment);
+      pTrayLine.Attachment.CREATEINSTREAM(lInStream);
+      lXMLDom.load(lInStream);
+
+      lXMLDOMNode := lXMLDom.getElementsByTagName('ns2:formatPdf').item(0);
+      IF ISCLEAR(lXMLDOMNode) THEN BEGIN
+        MESSAGE(Text010);
+        EXIT;
+      END;
+      lXMLDOMNode.dataType := 'bin.base64';
+      CREATE(lAdoStream);
+      lAdoStream.Open;
+      lAdoStream.Type := 1;
+      lAdoStream.Write(lXMLDOMNode.nodeTypedValue);
+
+      lTempFile.CREATETEMPFILE();
+      lFileName := COPYSTR(lTempFile.NAME,1,STRLEN(lTempFile.NAME) - 4) + '.pdf';
+      lAdoStream.SaveToFile(lFileName);
+      lAdoStream.Close;
+
+      lFileFilter := UPPERCASE('pdf') + ' (*.' + 'pdf' + ')|*.' + 'pdf';
+      pExoportFileName := lRBAutoMgt.ClientTempFileName('.','pdf');
+      IF ISSERVICETIER THEN BEGIN
+        DOWNLOAD(lFileName,Text008,'',lFileFilter,pExoportFileName);
+      END ELSE BEGIN
+        FILE.COPY(lFileName,pExoportFileName);
+      END;
+      HYPERLINK(pExoportFileName);
+      IF ERASE(lFileName) THEN;
+      IF ERASE(pExoportFileName) THEN;
+    END;
+
+    PROCEDURE ShowElseAttachFileByTrayLine@1000000001(pTrayLine@1100281004 : Record 50048);
+    VAR
+      lRBAutoMgt@1100281006 : Codeunit 419;
+      lDocumentAttachmentBuffer@1100281011 : TEMPORARY Record 50021;
+      lAttachmentsTempList@1100281010 : Form 50306;
+      lXMLDom@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLDOMNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLDOMNode1@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLDOMNode2@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlNodeList@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lAdoStream@1100281007 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+      lTempFile@1100281003 : File;
+      lInStream@1100281005 : InStream;
+      lLength@1000000002 : Integer;
+      i@1000000003 : Integer;
+      lExportFileName@1000000008 : Text[1024];
+      lFileFilter@1100281008 : Text[250];
+      lFileName@1100281002 : Text[250];
+      j@1100281013 : Integer;
+      lMetadata@1100281012 : ARRAY [5] OF Text[50];
+    BEGIN
+      pTrayLine.CALCFIELDS("Attachment 2");
+      IF NOT pTrayLine."Attachment 2".HASVALUE THEN BEGIN
+        EXIT;
+      END;
+      CREATE(lXMLDom);
+      pTrayLine.CALCFIELDS("Attachment 2");
+      pTrayLine."Attachment 2".CREATEINSTREAM(lInStream);
+      lXMLDom.load(lInStream);
+
+      lXmlNodeList := lXMLDom.getElementsByTagName('ns2:pieceJointe');
+      lLength := lXmlNodeList.length;
+      IF lLength = 0 THEN BEGIN
+        MESSAGE(Text011);
+        EXIT;
+      END;
+
+      FOR i := 1 TO lLength DO BEGIN
+        lXMLDOMNode := lXmlNodeList.item(i - 1);
+        FOR j := 1 TO 5 DO BEGIN
+          lMetadata[j] := '';
+        END;
+
+        // R‚cup‚artion des Metadata
+        lXMLDOMNode1 := lXMLDOMNode.selectSingleNode('ns2:metadata');
+        IF NOT ISCLEAR(lXMLDOMNode1) THEN BEGIN
+          // ID PJ
+          lXMLDOMNode2 := lXMLDOMNode1.selectSingleNode('ns2:idPJ');
+          IF NOT ISCLEAR(lXMLDOMNode2) THEN BEGIN
+            lMetadata[1]  := lXMLDOMNode2.text;
+          END;
+          // LIBELLE PJ
+          lXMLDOMNode2 := lXMLDOMNode1.selectSingleNode('ns2:libellePJ');
+          IF NOT ISCLEAR(lXMLDOMNode2) THEN BEGIN
+            lMetadata[2]  := lXMLDOMNode2.text;
+          END;
+          // NATURE PJ
+          lXMLDOMNode2 := lXMLDOMNode1.selectSingleNode('ns2:naturePJ');
+          IF NOT ISCLEAR(lXMLDOMNode2) THEN BEGIN
+            lMetadata[3]  := lXMLDOMNode2.text;
+          END;
+          // FORMAT PJ
+          lXMLDOMNode2 := lXMLDOMNode1.selectSingleNode('ns2:formatPJ');
+          IF NOT ISCLEAR(lXMLDOMNode2) THEN BEGIN
+            lMetadata[4]  := lXMLDOMNode2.text;
+          END;
+          // VERSION PJ
+          lXMLDOMNode2 := lXMLDOMNode1.selectSingleNode('ns2:versionPJ');
+          IF NOT ISCLEAR(lXMLDOMNode2) THEN BEGIN
+            lMetadata[5]  := lXMLDOMNode2.text;
+          END;
+        END;
+
+        lXMLDOMNode1 := lXMLDOMNode.selectSingleNode('ns2:fluxPJ');
+        IF NOT ISCLEAR(lXMLDOMNode1) THEN BEGIN
+          lXMLDOMNode1.dataType := 'bin.base64';
+          CLEAR(lAdoStream);
+          CREATE(lAdoStream);
+          lAdoStream.Open;
+          lAdoStream.Type := 1;
+          lAdoStream.Write(lXMLDOMNode1.nodeTypedValue);
+          lTempFile.CREATETEMPFILE;
+          lFileName := COPYSTR(lTempFile.NAME,1,STRLEN(lTempFile.NAME) - 4) + '.' + lMetadata[4];
+          lTempFile.CLOSE;
+          lAdoStream.SaveToFile(lFileName);
+          lAdoStream.Close;
+
+          lFileFilter := UPPERCASE(lMetadata[4]) + ' (*.' + lMetadata[4] + ')|*.' + lMetadata[4];
+          lExportFileName := lRBAutoMgt.ClientTempFileName('.',lMetadata[4]);
+          IF ISSERVICETIER THEN BEGIN
+            DOWNLOAD(lFileName,Text008,'',lFileFilter,lExportFileName);
+          END ELSE BEGIN
+            FILE.COPY(lFileName,lExportFileName);
+          END;
+        END;
+
+        // sauvegarde Document Attachment
+        lDocumentAttachmentBuffer."Entry No." := i;
+        lDocumentAttachmentBuffer."Darva ID" := lMetadata[1];
+        lDocumentAttachmentBuffer.Description := lMetadata[2];
+        lDocumentAttachmentBuffer."Description 2" := lMetadata[3];
+        lDocumentAttachmentBuffer."File Extension" := lMetadata[4];
+        lDocumentAttachmentBuffer."Darva Attachment Version" := lMetadata[5];
+        lDocumentAttachmentBuffer."Storage Type" :=   lDocumentAttachmentBuffer."Storage Type"::Internet;
+        lDocumentAttachmentBuffer."Storage Url" := lExportFileName;
+        lDocumentAttachmentBuffer.INSERT(FALSE);
+      END;
+
+      IF lLength = 1 THEN BEGIN
+        HYPERLINK(lExportFileName);
+        IF ERASE(lExportFileName) THEN;
+      END ELSE BEGIN
+        lAttachmentsTempList.LoadTable(lDocumentAttachmentBuffer);
+        lAttachmentsTempList.RUNMODAL;
+      END;
+    END;
+
+    PROCEDURE GetServiceComments@1000000000();
+    VAR
+      lXmlDomElement@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1000000000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+    BEGIN
+      lXmlDomElement := XmlDom.getElementsByTagName('GR041901').item(0);
+      lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE2050101');
+      // R‚cup‚ration des commentaires de l'evenement en temporaire
+      GetComments(lXmlDomElement, TmpCommentLine2);
+
+      // R‚cup‚ration des commentaires du messages
+      lXmlDomElement := XmlDom.getElementsByTagName('ME110201').item(0);
+      GetComments(lXmlDomElement, TmpCommentLine3);
+    END;
+
+    PROCEDURE GetComments@1100281015(pXMLDOMElement@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";VAR pAdvCommentLine@1100281006 : Record 50056);
+    VAR
+      lXmlDomNodeList@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      i@1100281000 : Integer;
+      lLineNo@1100281008 : Integer;
+    BEGIN
+      lXmlDomElement := pXMLDOMElement.selectSingleNode('SE0120102LIST');
+      //<<IMH11.ACO
+      //IF ISCLEAR(lXmlDomElement) THEN BEGIN
+        //EXIT;
+      //END;
+      IF NOT ISCLEAR(lXmlDomElement) THEN BEGIN
+      //>>iMH11.ACO
+        lXmlDomNodeList := lXmlDomElement.getElementsByTagName('SE0120102');
+        //>>IMH11.ACO
+        IF NOT ISCLEAR(lXmlDomNodeList) THEN BEGIN
+        //>>IMH11.ACO
+          IF pAdvCommentLine.FINDLAST THEN BEGIN
+            lLineNo := pAdvCommentLine."Line No.";
+          END ELSE BEGIN
+            lLineNo := 1;
+          END;
+
+          FOR i := 0 TO lXmlDomNodeList.length - 1 DO BEGIN
+            lXmlDomElement2 := lXmlDomNodeList.item(i);
+            //<<IMH11.ACO
+            IF NOT ISCLEAR(lXmlDomElement2) THEN BEGIN
+            //>>IMH11.ACO
+              pAdvCommentLine."Line No." := lLineNo + i;
+              pAdvCommentLine.Comment := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00080201');
+              pAdvCommentLine.INSERT;
+            //<<IMH11.ACO
+            END;
+            //>>IMH11.ACO
+          END;
+      //<<IMH11.ACO
+        END;
+      END;
+      //>>IMH11.ACO
+    END;
+
+    PROCEDURE SaveComments@1100281016(VAR pAdvCommentLine@1100281000 : Record 50056;pSourceTableID@1100281001 : Integer;pSourceNo@1100281002 : Code[20];pSourceNo2@1100281003 : Code[20];pCode@1100281004 : Code[20]);
+    VAR
+      lAdvCommentLine@1100281005 : Record 50056;
+      lServiceCommentLine@1100281010 : Record 5906;
+      lLineNo@1100281006 : Integer;
+      lLastLine@1100281007 : Integer;
+      lCommentLineCount@1100281008 : Integer;
+      lCommentNbCountToAdd@1100281011 : Integer;
+      lCommentNbCountActual@1100281012 : Integer;
+      lDate@1100281009 : Date;
+      lCommentToAdd@1100281013 : Text[250];
+      lCheckCFComment@1000000000 : Boolean;
+    BEGIN
+      pAdvCommentLine.RESET;
+      lCommentLineCount  := pAdvCommentLine.COUNT;
+      IF lCommentLineCount = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      // Calcul du nombre de caractŠre commentaires … ajouter
+      lCommentNbCountToAdd := 0;
+      pAdvCommentLine.FINDSET;
+      REPEAT
+        lCommentNbCountToAdd += STRLEN(pAdvCommentLine.Comment);
+      UNTIL pAdvCommentLine.NEXT = 0;
+
+      // V‚rification du nb de commentaire au niveau du champ contexte de la ligne de produit
+      lCheckCFComment := FALSE;
+      lCommentNbCountActual := 0;
+      lServiceCommentLine.SETRANGE("Table Name",lServiceCommentLine."Table Name"::"Service Header");
+      lServiceCommentLine.SETRANGE("Table Subtype",ServiceHeader."Document Type");
+      lServiceCommentLine.SETRANGE("No.",ServiceHeader."No.");
+      lServiceCommentLine.SETRANGE(Type,lServiceCommentLine.Type::General);
+      lServiceCommentLine.SETRANGE("Table Line No.",0);
+      lServiceCommentLine.SETRANGE("Line No.",-50012);
+      IF lServiceCommentLine.FINDFIRST THEN BEGIN
+        lCommentNbCountActual := STRLEN(lServiceCommentLine.Text);
+        // On v‚rifie que l'on a pas d‚j… int‚gr‚ un CF Commentaire
+        lCheckCFComment := STRPOS(lServiceCommentLine.Text,'Cf commentaire') <> 0;
+      END;
+
+      // 233 = 250 - 17 caractŠre de ' - Cf commentaire'
+      // (lCommentLineCount - 1) = nb espace … ajouter entre chaque ligne
+      //<<IMH20
+      //IF (lCommentNbCountToAdd + lCommentNbCountActual + (lCommentLineCount - 1) <= 233) AND NOT lCheckCFComment THEN BEGIN
+      IF (lCommentNbCountToAdd + lCommentNbCountActual + (lCommentLineCount - 1) <= 233) AND NOT lCheckCFComment
+         AND (pCode = '') THEN BEGIN
+      //>>IMH20
+        pAdvCommentLine.FINDSET;
+        REPEAT
+          IF STRLEN(lCommentToAdd) = 0 THEN BEGIN
+            lCommentToAdd := pAdvCommentLine.Comment;
+          END ELSE BEGIN
+            lCommentToAdd += ' ' + pAdvCommentLine.Comment;
+          END;
+        UNTIL pAdvCommentLine.NEXT = 0;
+        IF lCommentNbCountActual = 0 THEN BEGIN
+          lServiceCommentLine."Table Name" := lServiceCommentLine."Table Name"::"Service Header";
+          lServiceCommentLine."Table Subtype" := ServiceHeader."Document Type";
+          lServiceCommentLine."No." := ServiceHeader."No.";
+          lServiceCommentLine.Type := lServiceCommentLine.Type::General;
+          lServiceCommentLine."Table Line No." := 0;
+          lServiceCommentLine."Line No." := -50012;
+          lServiceCommentLine.Text := lCommentToAdd;
+          lServiceCommentLine.INSERT;
+        END ELSE BEGIN
+          lServiceCommentLine.Text += ' ' + lCommentToAdd;
+          lServiceCommentLine.MODIFY;
+        END;
+        pAdvCommentLine.DELETEALL;
+      END ELSE BEGIN
+        IF NOT lCheckCFComment THEN BEGIN
+          IF lCommentNbCountActual = 0 THEN BEGIN
+            lServiceCommentLine."Table Name" := lServiceCommentLine."Table Name"::"Service Header";
+            lServiceCommentLine."Table Subtype" := ServiceHeader."Document Type";
+            lServiceCommentLine."No." := ServiceHeader."No.";
+            lServiceCommentLine.Type := lServiceCommentLine.Type::General;
+            lServiceCommentLine."Table Line No." := 0;
+            lServiceCommentLine."Line No." := -50012;
+            lServiceCommentLine.Text := 'Cf commentaire';
+            lServiceCommentLine.INSERT;
+          END ELSE BEGIN
+            IF lCommentNbCountActual + 17 <= 250 THEN BEGIN
+              lServiceCommentLine.Text += ' - Cf commentaire';
+              lServiceCommentLine.MODIFY;
+            END;
+          END;
+        END;
+
+        lAdvCommentLine.SETRANGE("Source Table ID", pSourceTableID);
+        lAdvCommentLine.SETRANGE("Source No.", pSourceNo);
+        lAdvCommentLine.SETRANGE("Source No. 2", pSourceNo2);
+        IF lAdvCommentLine.FINDLAST THEN BEGIN
+          lLineNo := lAdvCommentLine."Line No." + 10000
+        END ELSE BEGIN
+          lLineNo := 10000;
+        END;
+
+        lLastLine := lLineNo + lCommentLineCount -1;
+        lDate := TODAY;
+        pAdvCommentLine.FIND('+');
+        REPEAT
+          lAdvCommentLine := pAdvCommentLine;
+          lAdvCommentLine."Source Table ID" := pSourceTableID;
+          lAdvCommentLine."Source No." := pSourceNo;
+          lAdvCommentLine."Source No. 2" := pSourceNo2;
+          lAdvCommentLine."Line No." := lLineNo;
+          IF lLineNo <> lLastLine THEN
+            lAdvCommentLine."Attached To Line No." := lLastLine
+          ELSE
+            lAdvCommentLine.Date := lDate;
+          lAdvCommentLine.Reception := lAdvCommentLine.Reception::Darva;
+          lAdvCommentLine.Code := pCode;
+          lAdvCommentLine.INSERT(TRUE);
+          lLineNo += 1;
+        UNTIL pAdvCommentLine.NEXT(-1) = 0;
+        pAdvCommentLine.DELETEALL;
+      END;
+    END;
+
+    PROCEDURE GetRecCode@1100281020(pSourceTableID@1100281002 : Integer;pFieldID@1100281003 : Integer;pCodeDesc@1100281000 : Text[50]) : Code[10];
+    VAR
+      lCodeRec@1100281001 : Record 50079;
+      lPartnerCrossRef@1100281004 : Record 8016748;
+    BEGIN
+      IF STRLEN(pCodeDesc) > MAXSTRLEN(lCodeRec.Description) THEN BEGIN
+        EXIT;
+      END;
+
+      IF STRLEN(pCodeDesc) <= MAXSTRLEN(lCodeRec.Code) THEN BEGIN
+        IF lCodeRec.GET(pSourceTableID, pFieldID, pCodeDesc) THEN BEGIN
+          EXIT(pCodeDesc);
+        END;
+      END;
+
+      lCodeRec.SETRANGE("Table ID", pSourceTableID);
+      lCodeRec.SETRANGE("Field ID", pFieldID);
+      lCodeRec.SETRANGE(Description, pCodeDesc);
+      IF NOT lCodeRec.ISEMPTY THEN BEGIN
+        lCodeRec.FINDFIRST;
+        EXIT(lCodeRec.Code);
+      END;
+
+      IF STRLEN(pCodeDesc) > 30 THEN BEGIN
+        EXIT;
+      END;
+
+      IF lPartnerCrossRef.GetFromCrossRef(pSourceTableID, EAIPartnerCode, pCodeDesc, lPartnerCrossRef) THEN BEGIN
+        IF lPartnerCrossRef."Source No." <> '' THEN BEGIN
+          EXIT(lPartnerCrossRef."Source No.");
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetEOL@1100281021() rValue : Text[2];
+    BEGIN
+      rValue[1] := 13;
+      rValue[2] := 10;
+    END;
+
+    PROCEDURE FindAltAddr@1100281018(pContactNo@1100281004 : Code[20];pAddr1@1100281000 : Text[50];pAddr2@1100281007 : Text[50];pAddr3@1100281008 : Text[50];pPostCode@1100281001 : Text[50];pCity@1100281002 : Text[50]) : Code[10];
+    VAR
+      lContAltAddr@1100281003 : Record 5051;
+      lTempContAltAddr@1100281005 : TEMPORARY Record 5051;
+      lTempContAltAddr2@1100281006 : TEMPORARY Record 5051;
+    BEGIN
+      lContAltAddr.SETRANGE("Contact No.", pContactNo);
+      lContAltAddr.SETRANGE("Post Code", pPostCode);
+      IF lContAltAddr.FINDSET THEN BEGIN
+        REPEAT
+          lTempContAltAddr := lContAltAddr;
+          lTempContAltAddr.INSERT(FALSE);
+        UNTIL lContAltAddr.NEXT = 0;
+      END;
+
+      lTempContAltAddr2.INIT;
+      lTempContAltAddr2.Address := pAddr1;
+      lTempContAltAddr2."Address 2" := pAddr2;
+      lTempContAltAddr2."Address 3" := pAddr3;
+      lTempContAltAddr2.City := pCity;
+      lTempContAltAddr2.UpdateSearchFields;
+
+      lTempContAltAddr.SETRANGE("Search Address", lTempContAltAddr2."Search Address");
+      lTempContAltAddr.SETRANGE("Address 2", lTempContAltAddr2."Address 2");
+      lTempContAltAddr.SETRANGE("Address 3", lTempContAltAddr2."Address 3");
+      lTempContAltAddr.SETRANGE("Search City", lTempContAltAddr2."Search City");
+      IF lTempContAltAddr.FINDFIRST THEN BEGIN
+        EXIT(lTempContAltAddr.Code);
+      END;
+
+      lTempContAltAddr.SETRANGE("Address 3");
+      IF lTempContAltAddr.FINDFIRST THEN BEGIN
+        EXIT(lTempContAltAddr.Code);
+      END;
+
+      lTempContAltAddr.SETRANGE("Address 2");
+      IF lTempContAltAddr.FINDFIRST THEN BEGIN
+        EXIT(lTempContAltAddr.Code);
+      END;
+
+      EXIT('');
+    END;
+
+    PROCEDURE CreateNewAltAddr@1100281019(pContactNo@1100281004 : Code[20];pAddr1@1100281000 : Text[50];pAddr2@1100281007 : Text[50];pAddr3@1100281008 : Text[50];pPostCode@1100281001 : Text[50];pCity@1100281002 : Text[50]) : Code[10];
+    VAR
+      lContactAltAddress@1100281003 : Record 5051;
+      i@1100281005 : Integer;
+      lExitLoop@1100281006 : Boolean;
+    BEGIN
+      // Fonction qui cr‚e une nouvelle adresse secondaire dans le cas
+
+      GetInterfaceSetup;
+      InterfaceSetup.TESTFIELD("Interface Alt. Address Code");
+      lExitLoop := FALSE;
+      i := 0;
+      WHILE (i < 1000) AND NOT lExitLoop DO BEGIN
+        i += 1;
+        lExitLoop := NOT lContactAltAddress.GET(pContactNo,InterfaceSetup."Interface Alt. Address Code" + FORMAT(i));
+        IF (i = 1000) AND NOT lExitLoop THEN BEGIN
+          ERROR(Text005,pContactNo);
+        END;
+      END;
+
+      WITH lContactAltAddress DO BEGIN
+        INIT;
+        "Contact No." := pContactNo;
+        Code := InterfaceSetup."Interface Alt. Address Code" + FORMAT(i);
+        Address := pAddr1;
+        "Address 2" := pAddr2;
+        "Address 3" := pAddr3;
+        "Post Code" := pPostCode;
+        City := pCity;
+        INSERT(TRUE);
+      END;
+      EXIT(InterfaceSetup."Interface Alt. Address Code" + FORMAT(i));
+    END;
+
+    LOCAL PROCEDURE DecodeContact@1100281009(VAR lXmlDomElement4@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";pType@1100281003 : Code[20];VAR pResultContact@1100281001 : Record 5050) : Boolean;
+    VAR
+      lEAIPartnerCrossRef@1100281013 : Record 8016748;
+      lAddress@1100281011 : ARRAY [3] OF Text[32];
+      lCountryCode@1100281009 : Code[10];
+      lPostCode@1100281008 : Code[10];
+      lCity@1100281006 : Text[50];
+    BEGIN
+      WITH pResultContact DO BEGIN
+        INIT;
+        "No." := '';
+        Type := TempContact.Type::Company;
+        CASE pType OF
+          '01' : "Service Contact" := Contact."Service Contact"::Beneficiary;
+          '52' : "Service Contact" := Contact."Service Contact"::Expert;
+        END;
+        VALIDATE(Name,DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05350101'));
+        lAddress[1] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05360101');
+        lAddress[2] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05370101');
+        lAddress[3] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05380101');
+        VALIDATE(Address, lAddress[1]);
+        VALIDATE("Address 2", lAddress[2]);
+        VALIDATE("Address 3", lAddress[3]);
+        lPostCode := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05390101');
+        lCity := COPYSTR(DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05410101'),1,50);
+        IF (lPostCode <> '') OR (lCity <> '') THEN BEGIN
+          ToolsMgt.CheckCity(lPostCode,lCity);
+          "Post Code" := lPostCode;
+          City := lCity;
+        END;
+        "Correspondence Type" := "Correspondence Type"::" ";
+        lCountryCode := DARVAMgt.GetNodeAttribute(lXmlDomElement4,'DE05400101','code');
+        lEAIPartnerCrossRef.INIT;
+        lEAIPartnerCrossRef.GetFromCrossRef(DATABASE::"Country/Region",EAIPartnerCode,lCountryCode,lEAIPartnerCrossRef);
+        lEAIPartnerCrossRef.FINDFIRST;
+        lEAIPartnerCrossRef.TESTFIELD("Source No.");
+        IF ("Post Code" <> '') AND (City <> '') THEN BEGIN
+          VALIDATE("Country/Region Code",lEAIPartnerCrossRef."Source No.");
+        END;
+      END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE AddTeleCommCoord@1100281023(VAR pXmlDomList@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";VAR pToContact@1100281001 : Record 5050);
+    VAR
+      lXMLDomElement@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lInt@1100281002 : Integer;
+      lValue@1100281006 : Text[250];
+      lType@1100281005 : Code[2];
+    BEGIN
+      IF ISCLEAR(pXmlDomList) THEN BEGIN
+        EXIT;
+      END;
+
+      IF pXmlDomList.length = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      FOR lInt := 0 TO pXmlDomList.length - 1 DO BEGIN
+        lXMLDomElement := pXmlDomList.item(lInt);
+        lType := DARVAMgt.GetNodeAttribute(lXMLDomElement,'DT92210102','code');
+        lValue := DARVAMgt.GetNodeValue(lXMLDomElement,'DE08200102');
+        IF lValue <> '' THEN BEGIN
+          WITH pToContact DO BEGIN
+            CASE lType OF
+              '1' : // Personnel
+                "Phone No." := TestPhoneFormat(lValue,FIELDNO("Phone No."), "Country/Region Code");
+              '2' : // Professionnel
+                "Business Phone No." := TestPhoneFormat(lValue,FIELDNO("Business Phone No."), "Country/Region Code");
+              '3' : // Fax
+                "Fax No." := TestPhoneFormat(lValue,FIELDNO("Fax No."), "Country/Region Code");
+              '6' : // Portable
+                "Mobile Phone No." := TestPhoneFormat(lValue,FIELDNO("Mobile Phone No."), "Country/Region Code");
+              '7' : // Interne
+                "Extension No." := TestPhoneFormat(lValue,FIELDNO("Extension No."), "Country/Region Code");
+            END; // CASE
+          END; // WITH
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE AddInfoCoord@1100281028(VAR pXmlDomList@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";VAR pToContact@1100281001 : Record 5050);
+    VAR
+      lXMLDomElement@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lInt@1100281002 : Integer;
+      lValue@1100281006 : Text[250];
+      lType@1100281005 : Code[2];
+    BEGIN
+      IF ISCLEAR(pXmlDomList) THEN BEGIN
+        EXIT;
+      END;
+      IF pXmlDomList.length = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      FOR lInt := 0 TO pXmlDomList.length - 1 DO BEGIN
+        lXMLDomElement := pXmlDomList.item(lInt);
+        lType := DARVAMgt.GetNodeAttribute(lXMLDomElement,'DT92980101','code');
+        lValue := DARVAMgt.GetNodeValue(lXMLDomElement,'DE09740101');
+
+        IF lValue <> '' THEN BEGIN
+          CASE lType OF
+            '1' : // Adresse email
+              pToContact."E-Mail" := lValue;
+            '2' :
+              pToContact."Home Page" := lValue;
+            '3' : ;// Nø d'abonn‚ DARVA
+            '4' : ;// Groupement
+          END;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE ContactCheckData@1100281031(VAR pTempContact@1100281000 : Record 5050) rHasError : Boolean;
+    VAR
+      lTableId@1100281002 : Integer;
+    BEGIN
+      rHasError := FALSE;
+      lTableId := DATABASE::Contact;
+      WITH pTempContact DO BEGIN
+        IF Name = '' THEN BEGIN
+          rHasError := TRUE;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE RetrieveContact@1100281022(VAR pTempContact@1100281000 : Record 5050;pDARVACarrierSubscriberNo@1000000000 : Code[20];pExpertRef@1000000001 : Text[30];pUpdateContact@1100281003 : Boolean;pAllowCreate@1100281001 : Boolean;VAR pContactFound@1100281005 : Code[20]) : Boolean;
+    VAR
+      lContact@1100281002 : Record 5050;
+      lRecFound@1100281004 : Boolean;
+      lRecUpdated@1100281006 : Boolean;
+      lPrincContactNo@1100281008 : Code[20];
+    BEGIN
+      // pour les experts, on recherche le cabinet
+      lPrincContactNo := GetPrincExpert(pDARVACarrierSubscriberNo, pExpertRef);
+
+      WITH lContact DO BEGIN
+        SETCURRENTKEY("Search Name");
+        SETRANGE("Service Contact", pTempContact."Service Contact");
+        IF lPrincContactNo = '' THEN BEGIN
+          SETRANGE(Type,Type::Company);
+          IF pTempContact."Search Name" = '' THEN BEGIN
+            pTempContact."Search Name" := pTempContact.Name;
+          END;
+          SETRANGE("Search Name",pTempContact."Search Name");
+          lRecFound := FINDFIRST;
+          IF NOT lRecFound THEN BEGIN
+            SETRANGE(Type, Type::Person);
+            lRecFound := FINDFIRST;
+          END;
+        END ELSE BEGIN
+          lRecFound := FindExpertContact(lPrincContactNo,pTempContact,lContact);
+        END;
+        IF NOT lRecFound THEN BEGIN
+          // Mode cr‚ation
+          IF pAllowCreate THEN BEGIN
+            lContact := pTempContact;
+            "No." := '';
+            IF lPrincContactNo <> '' THEN BEGIN
+              Type := Type::Person;
+              VALIDATE("Company No.",lPrincContactNo);
+            END;
+            INSERT(TRUE);
+            pContactFound := "No.";
+            EXIT(TRUE);
+          END ELSE BEGIN
+            EXIT(FALSE);
+          END;
+        END;
+        pContactFound := "No.";
+      END;
+      IF NOT pUpdateContact THEN BEGIN
+        EXIT(TRUE);
+      END;
+
+      // Mode mise … jour
+      WITH pTempContact DO BEGIN
+        IF (Address <> '') OR ("Post Code" <> '') OR (City <> '') THEN BEGIN
+          IF (Address <> lContact.Address) OR
+             ("Address 2" <> lContact."Address 2") OR
+             ("Address 3" <> lContact."Address 3") OR
+             ("Post Code" <> lContact."Post Code") OR
+             (City <> lContact.City) OR
+             ("Country/Region Code" <> lContact."Country/Region Code")
+          THEN BEGIN
+            lContact.Address := Address;
+            lContact."Address 2" := "Address 2";
+            lContact."Address 3" := "Address 3";
+            lContact."Post Code" := "Post Code";
+            lContact.City := City;
+            lContact."Country/Region Code" := "Country/Region Code";
+            lRecUpdated := TRUE;
+          END;
+        END;
+
+        UpdateField(lContact."Phone No.", "Phone No.", lRecUpdated);
+        IF lContact."Phone No." = '' THEN BEGIN
+          UpdateField(lContact."Phone No.", "Business Phone No.", lRecUpdated);
+        END ELSE BEGIN
+          UpdateField(lContact."Business Phone No.", "Business Phone No.", lRecUpdated);
+        END;
+        UpdateField(lContact."Fax No.", "Fax No.", lRecUpdated);
+        UpdateField(lContact."Mobile Phone No.", "Mobile Phone No.", lRecUpdated);
+        UpdateField(lContact."Extension No.", "Extension No.", lRecUpdated);
+        UpdateField(lContact."E-Mail", "E-Mail", lRecUpdated);
+        lContact."Correspondence Type" := "Correspondence Type"::" ";
+        IF lRecUpdated THEN BEGIN
+          lContact.MODIFY(TRUE);
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE UpdateField@1100281024(VAR pFieldValue@1100281000 : Text[100];pNewValue@1100281001 : Text[100];VAR pValueChanged@1100281002 : Boolean);
+    BEGIN
+      IF pNewValue = '' THEN BEGIN
+        EXIT;
+      END;
+      IF pFieldValue = pNewValue THEN BEGIN
+        EXIT;
+      END;
+      pFieldValue := pNewValue;
+      pValueChanged := TRUE;
+    END;
+
+    LOCAL PROCEDURE TestPhoneFormat@1100281017(pPhoneNo@1100281000 : Text[50];pFieldNo@1100281001 : Integer;pCountry@1100281002 : Code[10]) : Text[50];
+    VAR
+      lPhoneStd@1100281003 : Codeunit 50099;
+      lPhoneNo@1100281004 : Text[50];
+    BEGIN
+      lPhoneNo := pPhoneNo;
+      lPhoneStd.SetHideMessage(TRUE);
+      IF lPhoneStd.ValidatePhoneNo(DATABASE::Contact, pFieldNo, pCountry, lPhoneNo) THEN BEGIN
+        EXIT(lPhoneNo)
+      END ELSE BEGIN
+        EXIT(pPhoneNo);
+      END;
+    END;
+
+    PROCEDURE CheckService@1100281025(pServiceRefNo@1000000001 : Code[20];pCorporateNo@1000000000 : Code[20];pServiceCause@1000000002 : Code[20];pEventDate@1000000003 : Date) : Boolean;
+    VAR
+      lService@1100281000 : Record 50066;
+      lVal@1100281001 : Boolean;
+    BEGIN
+      lService.SETCURRENTKEY("Reference No.","Corporate No.");
+      lService.SETRANGE("Reference No.",pServiceRefNo);
+      lService.SETRANGE("Corporate No.",pCorporateNo);
+      lService.SETRANGE("Service Cause", pServiceCause);
+      lService.SETRANGE("Event Date", pEventDate);
+
+      lVal := lService.ISEMPTY;
+      EXIT(lService.ISEMPTY);
+    END;
+
+    PROCEDURE GetResultServHeader@1100281027(VAR pServiceHeader@1100281000 : Record 5900);
+    BEGIN
+      pServiceHeader := ServiceHeader;
+    END;
+
+    PROCEDURE GetProviderPressent@1100281007(pInterventionNoLot@1100281008 : Code[20];VAR pPressentProvider@1100281009 : ARRAY [6] OF Text[50]);
+    VAR
+      lProviderAgreement@1100281011 : Record 50012;
+      lProvider@1100281012 : Record 50000;
+      lXmlDomNodeList@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomNodeList2@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement4@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      i@1100281000 : Integer;
+      j@1100281014 : Integer;
+      lType@1100281010 : Text[30];
+      lInterventionLotNo@1100281015 : Text[30];
+      lAgrementNo@1100281016 : Text[30];
+      lTempCode@1100281013 : Code[30];
+    BEGIN
+      // Recherche du prestataire pr‚senti pour ce nø de lot de travaux
+
+      FOR i := 1 TO 6 DO BEGIN
+        pPressentProvider[i] := '';
+      END;
+
+      IF pInterventionNoLot = '' THEN BEGIN
+        EXIT;
+      END;
+
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR050701LIST').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR051301LIST').item(0);
+      //lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR050701');
+      lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR051301');
+      FOR i := 0 TO lXmlDomNodeList.length - 1 DO BEGIN
+        lXmlDomElement2 := lXmlDomNodeList.item(i);
+        //lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0070501');
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0071201');
+        lType := DARVAMgt.GetNodeAttribute(lXmlDomElement3,'DT90720102','code');
+        IF lType = '31' THEN BEGIN
+          lXmlDomNodeList2 := lXmlDomElement2.getElementsByTagName('SE1620101');
+          FOR j := 0 TO lXmlDomNodeList2.length - 1 DO BEGIN
+            lXmlDomElement3 := lXmlDomNodeList2.item(j);
+            lTempCode := DARVAMgt.GetNodeAttribute(lXmlDomElement3,'DT92240101','code');
+            lInterventionLotNo := '';
+            CASE lTempCode OF
+              // Nø AGREMENT
+              '08' : BEGIN
+                lAgrementNo := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE08210101');
+              END;
+              // Nø intervention travaux
+              '15' : BEGIN
+                 lInterventionLotNo := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE08210101');
+              END;
+            END;
+            IF lInterventionLotNo = pInterventionNoLot THEN BEGIN
+              //lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0070501');
+              lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0071201');
+              lXmlDomElement4 := lXmlDomElement3.selectSingleNode('DCC0500103');
+              // RAISON SOCIALE PRESTATAIRE
+              pPressentProvider[1] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05350101');
+              // CODE POSTAL PRESTATAIRE
+              pPressentProvider[2] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05390101');
+              // VILLE PRESTATAIRE
+              pPressentProvider[3] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05410101');
+              // PAYS PRESTATAIRE
+              pPressentProvider[4] := DARVAMgt.GetNodeAttribute(lXmlDomElement4,'DT91090101','code');
+              // Nø AGREMENT
+              pPressentProvider[5] := lAgrementNo;
+              // Recherche d'un prestataire r‚pondant au Nø agreement,
+              lProviderAgreement.SETCURRENTKEY("Agreement No.");
+              lProviderAgreement.SETRANGE("Agreement No.",pPressentProvider[5]);
+              IF lProviderAgreement.FINDSET THEN BEGIN
+                REPEAT
+                  IF lProvider.GET(lProviderAgreement."Provider No.") THEN BEGIN
+                    pPressentProvider[6] := lProvider."No.";
+                  END;
+                UNTIL (pPressentProvider[6] <> '') OR (lProviderAgreement.NEXT = 0);
+              END;
+              // Si pas de prestataire trouv‚ par nø agr‚ment alors recherche par nom et code postal
+              IF pPressentProvider[6] = '' THEN BEGIN
+                lProvider.SETCURRENTKEY("Search Name");
+                lProvider.SETRANGE("Search Name",pPressentProvider[1]);
+                lProvider.SETRANGE("Post Code",pPressentProvider[2]);
+                IF lProvider.FINDFIRST THEN BEGIN
+                  pPressentProvider[6] := lProvider."No.";
+                END;
+              END;
+            END;
+          END;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetAffectedLocationCode@1100281008(pAffectedLocationDesc@1100281000 : Text[30]) : Code[10];
+    VAR
+      lFaultArea@1100281001 : Record 5915;
+      lPartnerCrossRef@1100281002 : Record 8016748;
+    BEGIN
+      IF STRLEN(pAffectedLocationDesc) <= MAXSTRLEN(lFaultArea.Code) THEN BEGIN
+        IF lFaultArea.GET(pAffectedLocationDesc) THEN BEGIN
+          EXIT(pAffectedLocationDesc);
+        END;
+      END;
+
+      lFaultArea.SETRANGE(Description, pAffectedLocationDesc);
+      IF NOT lFaultArea.ISEMPTY THEN BEGIN
+        lFaultArea.FINDFIRST;
+        EXIT(lFaultArea.Code);
+      END;
+      IF lPartnerCrossRef.GetFromCrossRef(DATABASE::"Fault Area", EAIPartnerCode, pAffectedLocationDesc, lPartnerCrossRef) THEN BEGIN
+        IF lPartnerCrossRef."Source No." <> '' THEN BEGIN
+          EXIT(lPartnerCrossRef."Source No.");
+        END;
+      END;
+    END;
+
+    PROCEDURE GetMemberNo@1100281036(pCorporateNo@1100281001 : Code[20];pMemberNo@1100281002 : Code[20]) rValue : Code[20];
+    VAR
+      lEAISetup@1100281000 : Record 8016700;
+      lPos@1100281003 : Integer;
+    BEGIN
+      // Gestion des rŠgles sp‚cifiques grand compte
+      rValue := pMemberNo;
+    END;
+
+    LOCAL PROCEDURE GetPrincExpert@1100281034(pDARVACarrierSubscriberNo@1100281000 : Code[20];pExpertRef@1000000000 : Text[30]) rValue : Code[20];
+    VAR
+      lFusionReference@1100281001 : Record 50164;
+      lContact@1100281002 : Record 5050;
+      lInterfaceSetup@1100281003 : Record 50139;
+      lTrayLine@1100281004 : Record 50048;
+      lTeamCode@1000000002 : Code[10];
+      lFilterTeamTrayTask@1000000001 : Record 50129;
+    BEGIN
+
+
+      rValue := '';
+      IF pExpertRef = '' THEN BEGIN
+        EXIT;
+      END;
+
+      IF pDARVACarrierSubscriberNo = '' THEN BEGIN
+        EXIT;
+      END;
+
+      lFusionReference.SETCURRENTKEY("DARVA Subscriber No.");
+      lFusionReference.SETRANGE("Source Table ID",DATABASE::Contact);
+      lFusionReference.SETRANGE("Source No.",'EXP' + pDARVACarrierSubscriberNo);
+      IF lFusionReference.FINDFIRST THEN BEGIN
+        rValue := lFusionReference."Source No."
+      END ELSE BEGIN
+        // cr‚ation du cabinet
+        lContact."No." := 'EXP' + pDARVACarrierSubscriberNo;
+        lContact.Type := lContact.Type::Company;
+        lContact."Service Contact" := lContact."Service Contact"::Expert;
+        lContact.INSERT(TRUE);
+        lContact.VALIDATE(Name,Text009);
+        lContact.MODIFY(TRUE);
+        lFusionReference."Source Table ID" := DATABASE::Contact;
+        lFusionReference."Source No." := lContact."No.";
+        lFusionReference."DARVA Subscriber No." := pDARVACarrierSubscriberNo;
+        lFusionReference.INSERT(TRUE);
+        rValue := lContact."No.";
+
+        // g‚n‚ration de l'activit‚ corbeille
+        lInterfaceSetup.GET;
+        //<<IMH24
+        lTeamCode := lInterfaceSetup."DARVA Team Code Exp. Comp.";
+        IF lTeamCode = '' THEN BEGIN
+          lTeamCode := TrayLineMgt.GetTeamByTask(lInterfaceSetup."DARVA Task Code Exp. Comp.",
+                          lFilterTeamTrayTask, ServiceHeader."No.");
+        END;
+
+        //IF (lInterfaceSetup."DARVA Team Code Exp. Comp." <> '') AND
+        IF (lTeamCode <> '') AND
+        //>>IMH24
+           (lInterfaceSetup."DARVA Task Code Exp. Comp." <> '')
+        THEN BEGIN
+          TrayLineMgt.InitTrayLine(TrayLine);
+          TrayLineMgt.CreateTLFromServHeader(
+            ServiceHeader,
+            //<<IMH24
+            //lInterfaceSetup."DARVA Team Code Exp. Comp.",
+            lTeamCode,
+            //>>IMH24
+            lInterfaceSetup."DARVA Task Code Exp. Comp.",
+            FALSE);
+          TrayLineMgt.GetResultLine(lTrayLine);
+          lTrayLine.VALIDATE("Contact No.", lContact."No.");
+          lTrayLine.MODIFY;
+        END
+      END;
+    END;
+
+    PROCEDURE GetServiceRefNo@1100281037(pServiceRefNo@1100281000 : Code[20];pCorporateNo@1100281001 : Code[20]) rValue : Code[20];
+    VAR
+      lService@1100281003 : Record 50066;
+      lReferenceNo@1100281004 : Code[20];
+      lExitLoop@1100281005 : Boolean;
+      i@1100281006 : Integer;
+    BEGIN
+      rValue := pServiceRefNo;
+
+      lExitLoop := FALSE;
+      i := 0;
+      lReferenceNo := pServiceRefNo;
+      REPEAT
+        i += 1;
+        lService.SETCURRENTKEY("Reference No.","Corporate No.");
+        lService.SETRANGE("Reference No.",lReferenceNo);
+        IF lService.ISEMPTY THEN BEGIN
+          IF COPYSTR(lReferenceNo,1,1) <> '0' THEN BEGIN
+            lExitLoop := TRUE;
+            rValue := pServiceRefNo;
+          END;
+          lReferenceNo := COPYSTR(lReferenceNo,2);
+        END ELSE BEGIN
+          lExitLoop := TRUE;
+          lService.FINDFIRST;
+          rValue := lService."Reference No.";
+        END;
+      UNTIL lExitLoop OR (i = 17);
+    END;
+
+    LOCAL PROCEDURE CreateContactDARVA@1100281042(pCorporateNo@1100281000 : Code[20];pCorporateRegionCode@1000000003 : Code[20];pMemberNo@1100281009 : Code[20];VAR pOccupierNature@1000000002 : Code[20]) rValue : Boolean;
+    VAR
+      lContact@1100281015 : Record 5050;
+      lXmlDomNodeList@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomNodeList2@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement4@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      i@1100281010 : Integer;
+      lType@1000000000 : Text[30];
+    BEGIN
+      rValue := FALSE;
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR050701LIST').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR051301LIST').item(0);
+      //lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR050701');
+      lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR051301');
+      FOR i := 0 TO lXmlDomNodeList.length() - 1 DO BEGIN
+        CLEAR(lXmlDomElement2);
+        CLEAR(lXmlDomElement3);
+        lXmlDomElement2 := lXmlDomNodeList.item(i);
+        //lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0070501');
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0071201');
+        lType := DARVAMgt.GetNodeAttribute(lXmlDomElement3,'DT90720102','code');
+        IF lType = '01' THEN BEGIN
+          lXmlDomElement4 := lXmlDomElement3.selectSingleNode('DCC0500103');
+          lContact.INIT;
+          IF NOT DecodeContact(lXmlDomElement4, lType, lContact) THEN BEGIN
+            NoError := FALSE;
+          END;
+          lContact."Member No." := pMemberNo;
+          lContact."Service Contact" := lContact."Service Contact"::Beneficiary;
+          lContact.VALIDATE("Corporate No.", pCorporateNo);
+          lContact."Member No." := pMemberNo;
+          lContact.VALIDATE("Corporate Region Code",pCorporateRegionCode);
+          pOccupierNature := DARVAMgt.GetNodeAttribute(lXmlDomElement3,'DT90870102','code');
+          // Moyens de communication (t‚l‚phones)
+          CLEAR(lXmlDomElement3);
+          lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE1600102LIST');
+          IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+            lXmlDomNodeList2 := lXmlDomElement3.getElementsByTagName('SE1600102');
+            AddTeleCommCoord(lXmlDomNodeList2,lContact);
+          END;
+          // Moyens de communication (informatique)
+          CLEAR(lXmlDomElement3);
+          lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE2010101LIST');
+          IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+            lXmlDomNodeList2 := lXmlDomElement3.getElementsByTagName('SE2010101');
+            AddInfoCoord(lXmlDomNodeList2, lContact);
+          END;
+          // Contr“le des donn‚es
+          IF NOT ContactCheckData(lContact) THEN BEGIN
+            NoError := FALSE;
+          END;
+          lContact."DARVA Contact" := TRUE;
+          lContact.NameBreakdown;
+          lContact.INSERT(TRUE);
+        END;
+      END;
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CreateDARVAMissionEntry@1100281040(VAR pServiceHeader@1100281001 : Record 5900;pMissionOrder@1000000000 : Code[20];pDARVACorporateNo@1000000001 : Code[20]);
+    VAR
+      lDARVAMission@1100281000 : Record 50168;
+    BEGIN
+      IF (pServiceHeader."Service No." = '')  THEN BEGIN
+        EXIT;
+      END;
+
+      IF lDARVAMission.GET(pServiceHeader."Service No.",pServiceHeader."No.",pMissionOrder) THEN BEGIN
+        EXIT;
+      END;
+
+      lDARVAMission."Service No." := pServiceHeader."Service No.";
+      lDARVAMission."Service Header No." := pServiceHeader."No.";
+      lDARVAMission."Corporate No." := pServiceHeader."Corporate No.";
+      lDARVAMission."Reference No." := pServiceHeader."Reference No.";
+      lDARVAMission."Mission No." := pMissionOrder;
+      lDARVAMission."GTA Code" := pDARVACorporateNo;
+      lDARVAMission.System := TRUE;
+      lDARVAMission.INSERT(TRUE);
+    END;
+
+    PROCEDURE CreateDARVALotEntry@1100281039(pServiceHeader@1100281002 : Record 5900;pIntervDescriptionDetail@1000000000 : Record 50161;pMissionOrder@1000000001 : Code[20];pDARVACorporateNo@1000000002 : Code[20]);
+    VAR
+      lDARVAWorkLot@1100281000 : Record 50169;
+    BEGIN
+      IF (pServiceHeader."Service No." = '') OR (pIntervDescriptionDetail."Service Header No." = '') THEN BEGIN
+        EXIT;
+      END;
+
+      IF pIntervDescriptionDetail."Intervention Lot No." = '' THEN BEGIN
+        EXIT;
+      END;
+
+      IF lDARVAWorkLot.GET(pServiceHeader."Service No.",pServiceHeader."No.",pIntervDescriptionDetail."Intervention Lot No.") THEN BEGIN
+        EXIT;
+      END;
+
+      lDARVAWorkLot."Service No." := pServiceHeader."Service No.";
+      lDARVAWorkLot."Service Header No." := pServiceHeader."No.";
+      lDARVAWorkLot."Corporate No." := pServiceHeader."Corporate No.";
+      lDARVAWorkLot."Reference No." := pServiceHeader."Reference No.";
+      lDARVAWorkLot."Mission No." := pMissionOrder;
+      lDARVAWorkLot."GTA Code" := pDARVACorporateNo;
+      lDARVAWorkLot."Lot No." := pIntervDescriptionDetail."Intervention Lot No.";
+      lDARVAWorkLot.System := TRUE;
+      lDARVAWorkLot.INSERT(TRUE);
+    END;
+
+    PROCEDURE UpdateServiceHeaderAdd@1100281043();
+    BEGIN
+      // Adresse MEO
+      WITH ServiceHeader DO BEGIN
+        IF (TmpServHeader."Ship-to Address" <> '') OR (TmpServHeader."Ship-to Post Code" <> '') OR (TmpServHeader."Ship-to City" <> '')
+        THEN BEGIN
+          "Ship-to Address Code" := TmpServHeader."Ship-to Address Code";
+          "Ship-to Address" := TmpServHeader."Ship-to Address";
+          "Ship-to Address 2" := TmpServHeader."Ship-to Address 2";
+          "Ship-to City" := TmpServHeader."Ship-to City";
+          "Ship-to Post Code" := TmpServHeader."Ship-to Post Code";
+          "Ship-to Country/Region Code" := TmpServHeader."Ship-to Country/Region Code";
+          "Default Team Code" := GetDefaultTeamCodeByServOrder(ServiceHeader);
+          "Ship-to Geo. Reference Code" := PostCode.GetGeoCode("Ship-to Post Code","Ship-to City");
+        END;
+        //<<IMH12.ACO
+        TempContact.RESET;
+        TempContact.SETRANGE("Service Contact", TempContact."Service Contact"::Beneficiary);
+        IF TempContact.FINDFIRST THEN BEGIN
+
+          IF (ServiceHeader."Ship-to Phone" = '') AND (TempContact."Phone No."<> '') THEN
+            ServiceHeader."Ship-to Phone" := TempContact."Phone No.";
+
+          IF (ServiceHeader."Ship-to Mobile Phone No." = '') AND (TempContact."Mobile Phone No."<> '') THEN
+            ServiceHeader."Ship-to Mobile Phone No." := TempContact."Mobile Phone No.";
+
+          IF (ServiceHeader."Other Phone No." = '') AND (TempContact."Business Phone No."<> '') THEN
+            ServiceHeader."Other Phone No." := TempContact."Business Phone No.";
+
+        END;
+        //>>IMH12.ACO
+      END;
+    END;
+
+    PROCEDURE GetContactName@1000000003() rValue : Text[1024];
+    VAR
+      lXmlDomNodeList@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement4@1000000000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      i@1000000006 : Integer;
+    BEGIN
+      // R‚cup‚ration du nom et prenom du contact
+      rValue := '';
+
+      //lXmlDomElement := XmlDom.getElementsByTagName('GR050701LIST').item(0);
+      lXmlDomElement := XmlDom.getElementsByTagName('GR051301LIST').item(0);
+      //lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR050701');
+      lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR051301');
+      FOR i := 0 TO lXmlDomNodeList.length() - 1 DO BEGIN
+        CLEAR(lXmlDomElement2);
+        CLEAR(lXmlDomElement3);
+        lXmlDomElement2 := lXmlDomNodeList.item(i);
+        //lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0070501');
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE0071201');
+        IF DARVAMgt.GetNodeAttribute(lXmlDomElement3,'DT90720102','code') = '01' THEN BEGIN
+          lXmlDomElement4 := lXmlDomElement3.selectSingleNode('DCC0500103');
+          rValue := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05350101');
+          EXIT;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetDARVAMissionWorkLot@1100281041(pXmlDom@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument");
+    VAR
+      lDARVAMission@1100281004 : Record 50168;
+      lDARVAWorkLot@1100281002 : Record 50169;
+      lXmlDom@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDomElement@1100281019 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281018 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1100281017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomNodeList@1100281016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lMissionNo@1100281013 : Code[20];
+      lDARVACorporateNo@1100281003 : Code[20];
+      lDarvaWorkLotValue@1100281012 : Code[20];
+      lChar13@1100281001 : Char;
+      i@1100281000 : Integer;
+    BEGIN
+      //<<IMH23.ACO
+      //DARVAXMLMgt.InitXMLDom(pXmlDom,lXmlDom);
+      //lXmlDomElement := lXmlDom.getElementsByTagName('GR010101').item(0);
+      lXmlDomElement := pXmlDom.getElementsByTagName('GR010101').item(0);
+      //>>IMH23.ACO
+
+      lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE0020101');
+      lDARVACorporateNo := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00460101');
+      lMissionNo := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00530101');
+      lMissionNo := DELCHR(lMissionNo,'=',' ');
+      lChar13 := 13;
+      lMissionNo := DELCHR(lMissionNo,'=',FORMAT(lChar13));
+
+      IF NOT lDARVAMission.GET(ServiceHeader."Service No.",ServiceHeader."No.",lMissionNo) THEN BEGIN
+        lDARVAMission."Service No." := ServiceHeader."Service No.";
+        lDARVAMission."Service Header No." := ServiceHeader."No.";
+        lDARVAMission."Corporate No." := ServiceHeader."Corporate No.";
+        lDARVAMission."Reference No." := ServiceHeader."Reference No.";
+        lDARVAMission."Mission No." := lMissionNo;
+        lDARVAMission."GTA Code" := lDARVACorporateNo;
+        lDARVAMission.System := TRUE;
+        lDARVAMission.INSERT(TRUE);
+      END;
+
+      //<<IMH23.ACO
+      //lXmlDomElement := lXmlDom.getElementsByTagName('GR100901LIST').item(0);
+      lXmlDomElement := pXmlDom.getElementsByTagName('GR100901LIST').item(0);
+      //>>IMH23.ACO
+      lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR100901');
+      lDARVAWorkLot.SETRANGE("Service No.",ServiceHeader."Service No.");
+      lDARVAWorkLot.SETRANGE("Service Header No.",ServiceHeader."No.");
+      lDARVAWorkLot.DELETEALL;
+      FOR i := 0 TO lXmlDomNodeList.length - 1 DO BEGIN
+        lXmlDomElement2 := lXmlDomNodeList.item(i);
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE2650201');
+
+        //A ETUDIER
+        lDarvaWorkLotValue := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE12280101');
+        IF lDarvaWorkLotValue <> '' THEN BEGIN
+          IF NOT lDARVAWorkLot.GET(ServiceHeader."Service No.",ServiceHeader."No.",lDarvaWorkLotValue) THEN BEGIN
+            lDARVAWorkLot."Service No." := ServiceHeader."Service No.";
+            lDARVAWorkLot."Service Header No." := ServiceHeader."No.";
+            lDARVAWorkLot."Corporate No." := ServiceHeader."Corporate No.";
+            lDARVAWorkLot."Reference No." := ServiceHeader."Reference No.";
+            lDARVAWorkLot."Mission No." := lMissionNo;
+            lDARVAWorkLot."GTA Code" := lDARVACorporateNo;
+            lDARVAWorkLot."Lot No." := lDarvaWorkLotValue;
+            lDARVAWorkLot.System := TRUE;
+            lDARVAWorkLot.INSERT(TRUE);
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetCorporateNo@1100281006(pEAIPartnerCode@1100281004 : Code[10]) : Code[20];
+    VAR
+      lXmlDomElement@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lEAIPartnerCrossRef@1100281003 : Record 8016748;
+      lCorporateNo@1100281002 : Code[20];
+    BEGIN
+      lXmlDomElement := XmlDom.getElementsByTagName('GR010101').item(0);
+      lXmlDomElement2 := lXmlDomElement.selectSingleNode('SE0020101');
+      // Code societ‚ assurance ou GTA
+      lCorporateNo := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE00460101');
+      lEAIPartnerCrossRef.GetFromCrossRef(DATABASE::Customer,pEAIPartnerCode,lCorporateNo,lEAIPartnerCrossRef);
+      lEAIPartnerCrossRef.FINDFIRST;
+      lEAIPartnerCrossRef.TESTFIELD("Source No.");
+      EXIT(lEAIPartnerCrossRef."Source No.");
+    END;
+
+    PROCEDURE GetInterfaceSetup@1100281013();
+    BEGIN
+      IF InterfaceSetupGet THEN BEGIN
+        EXIT;
+      END;
+
+      InterfaceSetupGet := TRUE;
+      InterfaceSetup.GET;
+    END;
+
+    PROCEDURE SetForceCreateService@1100281038();
+    BEGIN
+      ForceCreateService := TRUE;
+    END;
+
+    PROCEDURE SetService@1100281026(pServiceNo@1100281000 : Code[20]);
+    BEGIN
+      Service.GET(pServiceNo);
+      ServiceSetted := TRUE;
+    END;
+
+    PROCEDURE SetServiceHeader@1100281030(pServiceHeaderNo@1100281000 : Code[20]);
+    BEGIN
+      ServiceHeader.GET(ServiceHeader."Document Type"::Invoice, pServiceHeaderNo);
+      ServiceHeader."DARVA Interface" := TRUE;
+      ServiceHeader.MODIFY;
+    END;
+
+    LOCAL PROCEDURE CheckAttachment@1000000002(VAR pXmlDom@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pEAIRcvdMQBuffer@1000000003 : Record 8016721;VAR pResult@1000000005 : ' ,Quit,NoAttach,CreateMessage,ToTreat') rValue : Integer;
+    VAR
+      lEAIMQBufferMgt@1000000000 : Codeunit 8016708;
+      lXmlNodeList@1000000013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lText001@1000000004 : TextConst 'ENU=Attachment Rec with ID %1 was error.;FRA=Le flux PJ portant l''ID %1 est en erreur.';
+    BEGIN
+      rValue := 0;
+      pResult := pResult::" ";
+
+      lXmlNodeList := pXmlDom.getElementsByTagName('ns2:pieceJointe');
+
+      rValue := lXmlNodeList.length;
+      IF rValue = 0 THEN BEGIN
+        pResult := pResult::NoAttach;
+        EXIT;
+      END;
+
+      // V‚rification de la pr‚sence du flux DARVA_PJ
+      // pStep : 0 = Generate / 1 = Validation
+      // pStatus : 0 = Non trait‚ / 1 = Trait‚ / 2 = Erreur / 3 = Test unitaire
+      IF lEAIMQBufferMgt.CheckIfActExistsToNextAct(pEAIRcvdMQBuffer,FALSE,'','',TRUE,1,TRUE,1) THEN BEGIN
+        pResult := pResult::ToTreat;
+        EXIT;
+      END;
+
+      IF lEAIMQBufferMgt.CheckIfActExistsToNextAct(pEAIRcvdMQBuffer,FALSE,'','',FALSE,0,TRUE,2) THEN BEGIN
+        ERROR(lText001,pEAIRcvdMQBuffer."Message ID");
+      END;
+
+      IF lEAIMQBufferMgt.CheckIfActExistsToNextAct(pEAIRcvdMQBuffer,FALSE,'','',FALSE,0,FALSE,2) THEN BEGIN
+        pResult := pResult::Quit;
+        EXIT;
+      END ELSE BEGIN
+        pResult := pResult::CreateMessage;
+        EXIT;
+      END;
+    END;
+
+    LOCAL PROCEDURE CreateAttachmentDemand@1000000004(pEAIRcvdMQBuffer@1000000000 : Record 8016721;pAttachNb@1100281000 : Integer);
+    VAR
+      lEAIRcvdMQBuffer@1000000001 : Record 8016721;
+      lEAIAct@1000000002 : Record 8016706;
+      lEAIMQBufferMgt@1000000003 : Codeunit 8016708;
+    BEGIN
+      lEAIRcvdMQBuffer := pEAIRcvdMQBuffer;
+      WITH lEAIRcvdMQBuffer DO BEGIN
+        lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Code");
+        lEAIAct.TESTFIELD("Next Act Type Code Af. Val.");
+        lEAIAct.TESTFIELD("Next Act Code After Validation");
+        "EAI Act Type Code" := lEAIAct."Next Act Type Code Af. Val.";
+        "EAI Act Code" := lEAIAct."Next Act Code After Validation";
+        "Entry No." := '';
+        IF lEAIAct.GET("EAI Act Type Code","EAI Act Code") THEN BEGIN
+          "Act Priority" := lEAIAct."Act Priority";
+        END;
+        "Date Creation" := WORKDATE;
+        "Time Creation" := TIME;
+        "User Creation" := USERID;
+        Step := Step::Generation;
+        Status := Status::Unprocessed;
+        "Attachment Nb" := pAttachNb;
+        "Origin Entry No." := pEAIRcvdMQBuffer."Entry No.";
+        "Origin EAI Act Code" := pEAIRcvdMQBuffer."EAI Act Code";
+        CLEAR("XML Source");
+        CLEAR("Response XML Source");
+        INSERT;
+        lEAIMQBufferMgt.InsertReceivedBufferToMQCode("EAI MQ Code",lEAIRcvdMQBuffer);
+        DELETE;
+      END;
+    END;
+
+    PROCEDURE CreateAttachment@1000000011(VAR pXmlNodeList@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList");
+    VAR
+      lAttachmentTemp@1000000004 : TEMPORARY Record 5062;
+      lDocumentAttachmentBuffer@1000000007 : TEMPORARY Record 50021;
+      lSourceAttchMgt@1000000005 : Codeunit 50003;
+      lXmlDOMNode@1000000016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlDOMNode1@1000000015 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlDOMNode2@1000000014 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lAdoStream@1000000012 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+      lTempFile@1000000011 : File;
+      lLength@1000000002 : Integer;
+      i@1000000001 : Integer;
+      j@1100281001 : Integer;
+      lMetadata@1000000020 : ARRAY [5] OF Text[50];
+      lFileName@1000000006 : Text[1024];
+    BEGIN
+      IF ISCLEAR(pXmlNodeList) THEN BEGIN
+        EXIT;
+      END;
+
+      lLength := pXmlNodeList.length;
+      IF lLength = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      FOR i := 1 TO lLength DO BEGIN
+        lXmlDOMNode := pXmlNodeList.item(i - 1);
+        FOR j := 1 TO 5 DO BEGIN
+          lMetadata[j] := '';
+        END;
+
+        // R‚cup‚artion des Metadata
+        lXmlDOMNode1 := lXmlDOMNode.selectSingleNode('ns2:metadata');
+        IF NOT ISCLEAR(lXmlDOMNode1) THEN BEGIN
+          // ID PJ
+          lXmlDOMNode2 := lXmlDOMNode1.selectSingleNode('ns2:idPJ');
+          IF NOT ISCLEAR(lXmlDOMNode2) THEN BEGIN
+            lMetadata[1]  := lXmlDOMNode2.text;
+          END;
+          // LIBELLE PJ
+          lXmlDOMNode2 := lXmlDOMNode1.selectSingleNode('ns2:libellePJ');
+          IF NOT ISCLEAR(lXmlDOMNode2) THEN BEGIN
+            lMetadata[2]  := lXmlDOMNode2.text;
+          END;
+          // NATURE PJ
+          lXmlDOMNode2 := lXmlDOMNode1.selectSingleNode('ns2:naturePJ');
+          IF NOT ISCLEAR(lXmlDOMNode2) THEN BEGIN
+            lMetadata[3]  := lXmlDOMNode2.text;
+          END;
+          // FORMAT PJ
+          lXmlDOMNode2 := lXmlDOMNode1.selectSingleNode('ns2:formatPJ');
+          IF NOT ISCLEAR(lXmlDOMNode2) THEN BEGIN
+            lMetadata[4]  := lXmlDOMNode2.text;
+          END;
+          // VERSION PJ
+          lXmlDOMNode2 := lXmlDOMNode1.selectSingleNode('ns2:versionPJ');
+          IF NOT ISCLEAR(lXmlDOMNode2) THEN BEGIN
+            lMetadata[5]  := lXmlDOMNode2.text;
+          END;
+        END;
+
+        lXmlDOMNode1 := lXmlDOMNode.selectSingleNode('ns2:fluxPJ');
+        IF NOT ISCLEAR(lXmlDOMNode1) THEN BEGIN
+          lXmlDOMNode1.dataType := 'bin.base64';
+          CLEAR(lAdoStream);
+          CREATE(lAdoStream);
+          lAdoStream.Open;
+          lAdoStream.Type := 1;
+          lAdoStream.Write(lXmlDOMNode1.nodeTypedValue);
+          lTempFile.CREATETEMPFILE;
+          lFileName := COPYSTR(lTempFile.NAME,1,STRLEN(lTempFile.NAME) - 4) + '.' + lMetadata[4];
+          lTempFile.CLOSE;
+          lAdoStream.SaveToFile(lFileName);
+          lAdoStream.Close;
+        END;
+
+        // sauvegarde Document Attachment
+        lDocumentAttachmentBuffer.SETRANGE("Service Document No.",ServiceHeader."No.");
+        lDocumentAttachmentBuffer."Darva ID" := lMetadata[1];
+        lDocumentAttachmentBuffer.Description := lMetadata[2];
+        lDocumentAttachmentBuffer."Description 2" := lMetadata[3];
+        lDocumentAttachmentBuffer."File Extension" := lMetadata[4];
+        lDocumentAttachmentBuffer."Darva Attachment Version" := lMetadata[5];
+        lSourceAttchMgt.CreateAttachment(lDocumentAttachmentBuffer,lFileName,lAttachmentTemp);
+      END;
+    END;
+
+    PROCEDURE GetEAIRcvdPJ@1000000005(pEAIRcvdMQBuffer@1000000000 : Record 8016721;VAR pXmlNodeList@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";VAR pXmlDoc@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument");
+    VAR
+      lEAIRcvdMQBufferPJ@1000000006 : Record 8016721;
+      lEAIAct@1000000005 : Record 8016706;
+      lEAIMQBufferMgt@1000000007 : Codeunit 8016708;
+      lLength@1000000002 : Integer;
+      lInStream@1000000001 : InStream;
+    BEGIN
+      CLEAR(pXmlNodeList);
+
+      // On r‚cupŠre le flux DARVA_PJ
+      lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Code");
+      lEAIMQBufferMgt.GetSpecificAct(
+        pEAIRcvdMQBuffer,
+        lEAIAct."Next Act Type Code Af. Val.",lEAIAct."Next Act Code After Validation",
+        lEAIRcvdMQBufferPJ);
+
+      lEAIRcvdMQBufferPJ.CALCFIELDS("Response XML Source");
+      lEAIRcvdMQBufferPJ."Response XML Source".CREATEINSTREAM(lInStream);
+      CREATE(pXmlDoc);
+      pXmlDoc.load(lInStream);
+      lEAIRcvdMQBufferPJ.DELETE;
+      pXmlNodeList := pXmlDoc.getElementsByTagName('ns2:pieceJointe');
+      lLength := pXmlNodeList.length;
+      IF lLength = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      IF pEAIRcvdMQBuffer."Attachment Nb" <> lLength THEN BEGIN
+        ERROR(Text013,pEAIRcvdMQBuffer."Attachment Nb",lLength);
+      END;
+    END;
+
+    LOCAL PROCEDURE FindExpertContact@1000000007(pCompanyExpertNo@1000000001 : Code[20];pContact@1000000002 : Record 5050;VAR pContactFound@1100281000 : Record 5050) rValue : Boolean;
+    VAR
+      lContact@1000000000 : Record 5050;
+      lSearchNameFilter@1000000003 : Text[50];
+    BEGIN
+      rValue := FALSE;
+
+      lContact.RESET;
+      lContact.SETCURRENTKEY("Corporate No.","Corporate Region Code");
+      lContact.SETRANGE("Company No.",pCompanyExpertNo);
+      lContact.SETRANGE("Service Contact",lContact."Service Contact"::Expert);
+      lContact.SETRANGE(Type,lContact.Type::Person);
+      IF lContact.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+      lContact.SETCURRENTKEY("Search Name");
+      lSearchNameFilter := STRSUBSTNO('%1 %2',UPPERCASE(pContact."First Name"),UPPERCASE(pContact.Surname));
+      lContact.SETFILTER("Search Name",lSearchNameFilter);
+      IF lContact.ISEMPTY THEN BEGIN
+        lSearchNameFilter := STRSUBSTNO('%1 %2',UPPERCASE(pContact.Surname),UPPERCASE(pContact."First Name"));
+        lContact.SETFILTER("Search Name",lSearchNameFilter);
+        IF lContact.ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+      END;
+      lContact.FINDFIRST;
+      pContactFound := lContact;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE DeleteSpecCarToExpert@1000000008(pText@1000000000 : Text[1024]) rValue : Text[1024];
+    VAR
+      lExitLoop@1000000003 : Boolean;
+      i@1000000002 : Integer;
+    BEGIN
+      rValue := pText;
+
+      lExitLoop := FALSE;
+      i := 1;
+      WHILE NOT lExitLoop DO BEGIN
+        lExitLoop := i > STRLEN(rValue);
+        IF NOT lExitLoop THEN BEGIN
+          IF rValue[i] IN ['''',',','.','/','\','-','_'] THEN BEGIN
+            IF i = 1 THEN BEGIN
+              rValue := COPYSTR(rValue,2);
+            END ELSE BEGIN
+              rValue := COPYSTR(rValue,1,i - 1) + COPYSTR(rValue,i + 1);
+            END;
+          END ELSE BEGIN
+            i += 1;
+          END;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetInterfaceLocationCode@1000000006(pLocationDesc@1000000000 : Text[30]) : Code[10];
+    VAR
+      lCount@1000000001 : Integer;
+    BEGIN
+      WITH InterfaceLocationBuffer DO BEGIN
+        RESET;
+        lCount := COUNT;
+
+        SETCURRENTKEY(Description);
+        SETRANGE(Description, pLocationDesc);
+        IF NOT FINDFIRST THEN BEGIN
+          INIT;
+          Code := STRSUBSTNO('INTER %1', lCount + 1);
+          Description := pLocationDesc;
+          INSERT;
+        END;
+        EXIT(Code);
+      END;
+    END;
+
+    LOCAL PROCEDURE GetHumidityComment@1000000009(VAR pXMLDOM@1000000010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";VAR pAdvCommentLine@1000000009 : Record 50056);
+    VAR
+      lXmlDomNodeList@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement4@1000000006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      i@1000000001 : Integer;
+      lLineNo@1000000000 : Integer;
+      lVisitDate@1000000007 : Text[250];
+      lHumidityRate@1000000008 : Text[250];
+    BEGIN
+      lXmlDomElement := pXMLDOM.getElementsByTagName('GR100901LIST').item(0);
+      IF ISCLEAR(lXmlDomElement) THEN BEGIN
+        EXIT;
+      END;
+      lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR100901');
+      IF pAdvCommentLine.FINDLAST THEN BEGIN
+        lLineNo := pAdvCommentLine."Line No.";
+      END ELSE BEGIN
+        lLineNo := 1;
+      END;
+
+      FOR i := 0 TO lXmlDomNodeList.length - 1 DO BEGIN
+        lXmlDomElement2 := lXmlDomNodeList.item(i);
+        lXmlDomElement3 := lXmlDomElement2.selectSingleNode('SE2080101');
+
+        lVisitDate := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE01320102');  // date de visite
+        lHumidityRate := DARVAMgt.GetNodeValue(lXmlDomElement3,'DE11090101'); // taux d'himidit‚
+
+        pAdvCommentLine."Line No." := lLineNo + i;
+        pAdvCommentLine.Comment := STRSUBSTNO(Text014, lHumidityRate, lVisitDate);
+        pAdvCommentLine.INSERT;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetWorkComment@1000000010(VAR pXMLDOM@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";VAR pAdvCommentLine@1000000000 : Record 50056);
+    VAR
+      lXmlDomNodeList@1000000010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomNodeList2@1000000012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1000000009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1000000008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement3@1000000007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement4@1000000006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      i@1000000005 : Integer;
+      lLineNo@1000000004 : Integer;
+      lWork@1000000003 : Text[250];
+      j@1000000011 : Integer;
+    BEGIN
+      lXmlDomElement := pXMLDOM.getElementsByTagName('GR100901LIST').item(0);
+      IF ISCLEAR(lXmlDomElement) THEN BEGIN
+        EXIT;
+      END;
+      lXmlDomNodeList := lXmlDomElement.getElementsByTagName('GR100901');
+      //<<IMH17.ACO
+      //IF pAdvCommentLine.FINDLAST THEN BEGIN
+      //  lLineNo := pAdvCommentLine."Line No.";
+      //END ELSE BEGIN
+      //  lLineNo := 1;
+      //END;
+      lLineNo := 1;
+      //>>IMH17.ACO
+
+      FOR i := 0 TO lXmlDomNodeList.length - 1 DO BEGIN
+        lXmlDomElement2 := lXmlDomNodeList.item(i);
+        lXmlDomElement3 := lXmlDomElement2.getElementsByTagName('SE0120102LIST').item(0);
+        //<<IMH11.ACO
+        IF NOT ISCLEAR(lXmlDomElement3) THEN BEGIN
+        //>>IMH11.ACO
+          lXmlDomNodeList2 := lXmlDomElement.getElementsByTagName('SE0120102');
+          //<<IMH11.ACO
+          IF NOT ISCLEAR(lXmlDomNodeList2) THEN BEGIN
+          //>>IMH11.ACO
+            FOR j := 0 TO lXmlDomNodeList2.length - 1 DO BEGIN
+              lXmlDomElement4 := lXmlDomNodeList2.item(j);
+
+              lWork := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE00080201');
+              //<<IMH17.ACO
+              lLineNo += 1;
+              pAdvCommentLine."Line No." := lLineNo;
+              //>>IMH17.ACO
+              //<<IMH16.ACO
+              //pAdvCommentLine.Comment := STRSUBSTNO(Text015, lWork);
+              pAdvCommentLine.Comment := lWork;
+              //>>IMH16.ACO
+              pAdvCommentLine.INSERT;
+            END;
+        //<<IMH11.ACO
+          END;
+        END
+        //>>IMH11.ACO
+      END;
+    END;
+
+    PROCEDURE GetCorporateRegion@1000000012(VAR pXmlDomElement@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";pCorporateNo@1000000005 : Code[20];VAR pCorporateRegionCode@1000000004 : Code[10];VAR pCorporateContactNo@1000000003 : Code[20]);
+    VAR
+      lXmlDomElement@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1000000000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lCorporateRegion@1000000008 : Record 50058;
+      lContact@1000000009 : Record 5050;
+      lManagerCode@1000000007 : Text[80];
+      lPostCode@1000000006 : Text[30];
+    BEGIN
+      //IMH03 ZW
+      lXmlDomElement := pXmlDomElement.selectSingleNode('SE0030401');
+      lManagerCode := DARVAMgt.GetNodeValue(lXmlDomElement,'DE00560101');  //Code gestionnaire
+      pCorporateContactNo := '';
+      //<<IMH08.ACO
+      pCorporateRegionCode := '';
+      //>>IMH08.ACO
+
+      //si code = 1, MATMUT PGS
+      IF STRLEN(lManagerCode) = 1 THEN BEGIN
+        lXmlDomElement2 := lXmlDomElement.selectSingleNode('DCC0500103');
+        lPostCode := DARVAMgt.GetNodeValue(lXmlDomElement2,'DE05390101');  //Code postal r‚gion PGS
+        lCorporateRegion.SETRANGE("Corporate No.", pCorporateNo);
+        lCorporateRegion.SETRANGE("Post Code", lPostCode);
+        //<<IMH08.ACO
+        //lCorporateRegion.FINDFIRST;
+        IF lCorporateRegion.FINDFIRST THEN BEGIN
+        //>>IMH08.ACO
+          pCorporateRegionCode := lCorporateRegion."Region Code";
+          lContact.SETCURRENTKEY("Corporate No.","Corporate Region Code",Type,"Organizational Level Code");
+          lContact.SETRANGE("Corporate No.", pCorporateNo);
+          lContact.SETRANGE(Type, lContact.Type::Person);
+          lContact.SETRANGE("Corporate Region Code", pCorporateRegionCode);
+          lContact.SETRANGE("Organizational Level Code", lManagerCode);
+          //<<IMH07.ACO
+          lContact.SETFILTER(Name, '%1', 'Equipe*');
+          IF lContact.FINDFIRST THEN BEGIN
+          //>>IMH07.ACO
+            pCorporateContactNo := lContact."No.";
+          //<<IMH07.ACO
+          END;
+          //>>IMH07.ACO
+        //<<IMH08.ACO
+        END;
+        //>>IMH08.ACO
+      END ELSE BEGIN
+        //<<IMH05.ACO
+        //pCorporateRegionCode := TextUGS + COPYSTR(lManagerCode, 3);
+        //lCorporateRegion.GET(pCorporateNo,pCorporateRegionCode);
+        pCorporateRegionCode := lManagerCode;
+        IF NOT lCorporateRegion.GET(pCorporateNo,pCorporateRegionCode) THEN BEGIN
+          pCorporateRegionCode := TextUGS + COPYSTR(lManagerCode, 3);
+          lCorporateRegion.GET(pCorporateNo,pCorporateRegionCode);
+        END;
+        //>>IMH05.ACO
+      END;
+    END;
+
+    LOCAL PROCEDURE DecodePersonToContact@1000000014(VAR lXmlDomElement4@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";pQuality@1100281003 : Code[10];pContactNo@1000000001 : Integer;VAR pTempContact@1000000000 : Record 5050);
+    VAR
+      lEAIPartnerCrossRef@1100281013 : Record 8016748;
+      lCountryCode@1100281009 : Code[10];
+      lPostCode@1100281008 : Code[10];
+      lCity@1100281006 : Text[50];
+      lAddress@1000000002 : ARRAY [3] OF Text[32];
+    BEGIN
+      //IMH18.ACO
+
+      pTempContact.INIT;
+
+      pTempContact.Type := pTempContact.Type::Company;
+      pTempContact."Service Contact" := pTempContact."Service Contact"::"To Contact";
+
+      pTempContact.VALIDATE(Name,DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05350101'));
+
+      {lAddress[1] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05360101');
+      lAddress[2] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05370101');
+      lAddress[3] := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05380101');
+      pTempContact.VALIDATE(Address, lAddress[1]);
+      pTempContact.VALIDATE("Country/Region Code",lEAIPartnerCrossRef."Source No.");
+      pTempContact.VALIDATE("Address 3", lAddress[3]);
+      lPostCode := DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05390101');
+      lCity := COPYSTR(DARVAMgt.GetNodeValue(lXmlDomElement4,'DE05410101'),1,50);
+      IF (lPostCode <> '') OR (lCity <> '') THEN BEGIN
+        ToolsMgt.CheckCity(lPostCode,lCity);
+        pTempContact."Post Code" := lPostCode;
+        pTempContact.City := lCity;
+      END;
+      lCountryCode := DARVAMgt.GetNodeAttribute(lXmlDomElement4,'DE05400101','code');
+      lEAIPartnerCrossRef.INIT;
+      lEAIPartnerCrossRef.GetFromCrossRef(DATABASE::"Country/Region",EAIPartnerCode,lCountryCode,lEAIPartnerCrossRef);
+      lEAIPartnerCrossRef.TESTFIELD("Source No.");
+      IF (pTempContact."Post Code" <> '') AND (pTempContact.City <> '') THEN BEGIN
+        pTempContact.VALIDATE("Country/Region Code",lEAIPartnerCrossRef."Source No.");
+      END;}
+
+      //Qualit‚ (Role Code)
+      lEAIPartnerCrossRef.INIT;
+      lEAIPartnerCrossRef.GetFromCrossRef2(DATABASE::"Service Header Address",30,EAIPartnerCode,pQuality,lEAIPartnerCrossRef);
+      lEAIPartnerCrossRef.TESTFIELD("Source No.");
+      pTempContact.VALIDATE("External ID",lEAIPartnerCrossRef."Source No.");
+
+      pTempContact."No." := FORMAT(pContactNo);
+      pTempContact.INSERT(FALSE);
+    END;
+
+    PROCEDURE CreateSHAddressFromTempContact@1000000017(pTempContact@1000000000 : Record 5050;pServiceHeaderNo@1000000001 : Code[20];VAR pAddressNo@1000000003 : Integer);
+    VAR
+      lAddress@1000000002 : Record 50068;
+    BEGIN
+      //IMH18.ACO
+      WITH lAddress DO BEGIN
+        INIT;
+        "Service Header No." := pServiceHeaderNo;
+        "Address Type" := "Address Type"::"Annexe Contact";
+        //<<IMH19.ACO
+        //"Address No." := lAddress.GetNextAddressNo;
+        pAddressNo := lAddress.GetNextAddressNo;
+        "Address No." := pAddressNo;
+        //>>IMH19.ACO
+
+        VALIDATE(Name, pTempContact.Name);
+        VALIDATE("Phone No.", pTempContact."Phone No.");
+        VALIDATE("Mobile Phone No.", pTempContact."Mobile Phone No.");
+        VALIDATE("Role Code", pTempContact."External ID");
+        VALIDATE(Address, pTempContact.Address);
+        VALIDATE("Address 2", pTempContact."Address 2");
+        VALIDATE("Address 3", pTempContact."Address 3");
+        VALIDATE("Post Code", pTempContact."Post Code");
+        VALIDATE(City, pTempContact.City);
+        VALIDATE("Country/Region Code", pTempContact."Country/Region Code");
+
+        INSERT(FALSE);
+        //<<IMH19.ACO
+        //pAddressNo := "Address No.";
+        //>>IMH19.ACO
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH24 @d 26/03/14 @a ISAT.ZW @v IMH6.01.5005 @s Reorganisation DPS @h 5005
+          @c Ajout la gestion de team code par defaut */
+      /** @r IMH23 @d 26/02/14 @a ISAT.ACO @v IMH6.01.5004 @s Erreur stockage DT
+          @c R‚cup‚ration du flux dans balise format XML pour stockage DT lors de affecter DT */
+      /** @r IMH22 @d 24/02/14 @a ISAT.ZW @v IMH6.01.4985 @s R‚organisation DPS @c Gestion de code corbeille service par d‚faut */
+      /** @r IMH21 @d 19/12/13 @a ISAT.ZW @v IMH6.01.4916 @s Correction DARVA @h 4916
+          @c Correctif gestion ville inconnu --> code postal = vide */
+      /** @r IMH20 @d 13/12/13 @a ISAT.ZW @v IMH6.01.4912 @s Correction DARVA @h 4912
+          @c Correctif */
+      /** @r IMH19 @d 21/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4792
+          @c Correctif */
+      /** @r IMH18 @d 18/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4792
+          @c R‚cup‚ration infos personne … contacter */
+      /** @r IMH17 @d 16/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4816
+          @c Correction incr‚ment Line No. commentaire*/
+      /** @r IMH16 @d 15/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4816
+          @c Suppression du pr‚fixe devant les commentaires travaux */
+      /** @r IMH15 @d 14/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4749
+          @c R‚cup‚ration de la nature de l'occupant et du type d'habitation */
+      /** @r IMH14 @d 09/10/13 @a ISAT.ACO @v IMH6.01.350 @s SystŠme d'aiguillage
+          @c R‚cup‚ration du EAI Partner Code */
+      /** @r IMH13 @d 08/10/13 @a ISAT.ZW @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4718
+          @c Code postal reste … vide si inconnu */
+      /** @r IMH12 @d 07/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4698
+          @c Mise … jour champs "Ship-to Phone", "Ship-to Mobile Phone No.", "Other Phone No." */
+      /** @r IMH11 @d 26/09/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4759
+          @c Contr“le de pr‚sence sur balises facultatives
+          @c si la date ‚vŠnement est absente, mettre la date du jour */
+      /** @r IMH10 @d 24/09/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4740
+          @c Modification balise r‚cup‚ration cause intervention */
+      /** @r IMH09 @d 23/09/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4736
+          @c Correction longueur de champ EAIPartnerCode */
+      /** @r IMH08 @d 18/09/13 @a ISAT.ACO @v IMH6.01.348 @s 4716 DARVA MATMUT Lot 1
+          @c Cr‚ation de service mˆme si code postal gestionnaire ne permet pas de r‚cup‚rer r‚gion GC */
+      /** @r IMH07 @d 16/09/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4706
+          @c R‚cup‚ration du contact avec un nom commen‡ant par 'Equipe' */
+      /** @r IMH06 @d 06/09/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4698
+          @c Mise … jour champs "Ship-to Phone" et "Ship-to Mobile Phone No." (onglet mise en oeuvre sur la fiche) de la ligne produit */
+      /** @r IMH05 @d 06/09/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4708
+          @c Le code de l'UGS est correspond exactement … la balise code gestionnaire (Pas de concat‚nation n‚cessaire) */
+      /** @r IMH04 @d 03/09/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1
+          @c Modification r‚cup‚ration code commentaire humidit‚ et travaux */
+      /** @r IMH03 @d 02/08/13 @a ISAT.ZW @v IMH6.01.348 @s DARVA MATMUT Lot 1 @c Gestion gestionnaire + r‚gion */
+      /** @r IMH02 @d 08/07/13 @a ISAT.ZW @v IMH6.01.347 @s JUIN @h 4604 @c Correction cas demande de travaux: LP Clos */
+      /** @r IMH01 @d 17/07/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @s Cr‚ation */
+    }
+    END.
+  }
+}

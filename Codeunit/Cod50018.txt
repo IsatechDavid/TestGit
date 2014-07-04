@@ -1,0 +1,929 @@
+OBJECT Codeunit 50018 Provider Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/13;
+    Time=16:20:54;
+    Modified=Yes;
+    Version List=IMH6.01.08;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Provider@1100281000 : Record 50000;
+      Text001@1100281001 : TextConst 'ENU=Average cost at 0 on specialization %1;FRA=Co–t moyen … 0 sur la sp‚cialit‚ %1';
+      ProviderSetup@1100281002 : Record 50011;
+      ProviderSetupOK@1100281003 : Boolean;
+      Text002@1100281004 : TextConst 'ENU=The number %1 is incorrect.;FRA=Le num‚ro %1 est incorrect.';
+      DisableIsEditable@1100281005 : Boolean;
+      Text003@1100281006 : TextConst 'ENU=Your SIREN No. has %1 numbers, it should have %2.;FRA=Votre nø de  SIREN comporte %1 chiffres, il devrait en comporter %2.';
+      Text004@1100281007 : TextConst 'ENU=Registration No. must have 14 numbers.;FRA=Votre nø de SIRET doit comporter 14 chiffres.';
+      Text005@1100281008 : TextConst 'FRA=Un autre prestataire existe avec le mˆme %1 %2.\Prestataire Nø %3 !';
+
+    PROCEDURE LinkProvider@1100281000(pLinkedProvider@1100281000 : Record 50001);
+    VAR
+      lLinkedProvider@1100281001 : Record 50001;
+    BEGIN
+      // IMH03.ISAT.MA
+      lLinkedProvider."Provider No." := pLinkedProvider."Linked Provider No.";
+      lLinkedProvider."Linked Provider No." := pLinkedProvider."Provider No.";
+      lLinkedProvider.Description := pLinkedProvider.Description;
+      lLinkedProvider.TouchRecord(TRUE);
+      lLinkedProvider.INSERT;
+    END;
+
+    PROCEDURE UnlinkProvider@1100281004(pLinkedProvider@1100281000 : Record 50001);
+    VAR
+      lLinkedProvider@1100281001 : Record 50001;
+    BEGIN
+      // IMH03.ISAT.MA
+      IF lLinkedProvider.GET(pLinkedProvider."Linked Provider No.",pLinkedProvider."Provider No.") THEN
+        lLinkedProvider.DELETE;
+    END;
+
+    PROCEDURE ModifyLinkProvider@1100281005(pLinkedProvider@1100281000 : Record 50001);
+    VAR
+      lLinkedProvider@1100281001 : Record 50001;
+    BEGIN
+      // IMH03.ISAT.MA
+      lLinkedProvider.GET(pLinkedProvider."Linked Provider No.",pLinkedProvider."Provider No.");
+      lLinkedProvider.Description := pLinkedProvider.Description;
+      lLinkedProvider.TouchRecord(FALSE);
+      lLinkedProvider.MODIFY;
+    END;
+
+    PROCEDURE ManageOperationalAddress@1100281001(VAR pContactAltAddress@1100281002 : Record 5051;pWithNewCode@1100281006 : Boolean;pUseToGeoSearch@1100281001 : Boolean;pWithModify@1100281000 : Boolean);
+    VAR
+      lContactAltAddress@1100281003 : Record 5051;
+      lMarketingSetup@1100281004 : Record 5079;
+      lCodeFilter@1100281005 : Code[20];
+    BEGIN
+      //<<IMH02.isat.PC
+      // Possitionne de l'addresse secondaire op‚rationnelle d'un prestataire
+
+      lMarketingSetup.GET;
+      lContactAltAddress.SETRANGE("Contact No.",pContactAltAddress."Contact No.");
+      lContactAltAddress.MODIFYALL("Geo. Reference Address",FALSE,TRUE);
+
+      IF pWithNewCode THEN BEGIN
+        lCodeFilter := lMarketingSetup."Operationnal Address Code" + '*';
+        lContactAltAddress.SETFILTER(Code,lCodeFilter);
+        IF NOT lContactAltAddress.FINDLAST THEN BEGIN
+          pContactAltAddress.Code := lMarketingSetup."Operationnal Address Code" + '1';
+        END ELSE BEGIN
+          pContactAltAddress.Code := INCSTR(lContactAltAddress.Code);
+        END;
+      END;
+
+      pContactAltAddress."Geo. Reference Address" := pUseToGeoSearch;
+      IF pWithModify THEN BEGIN
+        pContactAltAddress.MODIFY;
+      END;
+      //>>IMH02.isat.PC
+    END;
+
+    PROCEDURE IsEditable@1100281003(pProviderNo@1100281002 : Code[20]) rValue : Boolean;
+    VAR
+      lUserSetup@1100281000 : Record 91;
+      lUserSetup2@1100281003 : Record 91;
+      lUserID@1100281001 : Code[30];
+      lProviderSetup@1100281004 : Record 50011;
+      lText001@1100281005 : TextConst 'ENU=User ID %1 is not set up.;FRA=Utilisateur %1 non param‚tr‚';
+    BEGIN
+      // IMH01.ISAT.MA
+      // Le form est ‚ditable si l'utilisateur est l'utisateur coordonnateur r‚gional ou assistant r‚seau
+      // ou leur rempla‡ant dans la p‚riode de remplacement.
+
+      //<<IMH07
+      lProviderSetup.GET;
+      IF lProviderSetup."Desact. Provider card security" THEN BEGIN
+        EXIT(TRUE);
+      END;
+      //>>IMH07
+
+      //<<IMH09.isat.PC
+      IF DisableIsEditable THEN BEGIN
+        EXIT(TRUE);
+      END;
+      //>>IMH09.isat.PC
+
+      rValue := TRUE;
+
+      IF NOT GUIALLOWED THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT lUserSetup.GET(USERID) THEN BEGIN
+        MESSAGE(lText001,USERID);
+        EXIT(FALSE);
+      END;
+
+      GetProviderSetup;
+      IF lUserSetup."User ID" = ProviderSetup."Manager User Code" THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT GetProvider(pProviderNo) THEN
+        EXIT;
+
+      IF (Provider."Regional Coordinator" = '') AND (Provider."Network Assistant" = '') THEN BEGIN
+        EXIT;
+      END;
+
+      IF (Provider."Regional Coordinator" = lUserSetup."User ID") OR (Provider."Network Assistant" = lUserSetup."User ID") THEN BEGIN
+        EXIT;
+      END;
+
+      CASE lUserSetup."User Type" OF
+        lUserSetup."User Type"::"Area Responsible" :
+        BEGIN
+          IF (Provider."Regional Coordinator" = '') THEN
+            EXIT;
+          IF NOT lUserSetup2.GET(Provider."Regional Coordinator") THEN BEGIN
+            EXIT(FALSE);
+          END;
+        END;
+        lUserSetup."User Type"::"Network Assistant" :
+        BEGIN
+          IF (Provider."Network Assistant" = '') THEN
+            EXIT(FALSE);
+          IF NOT lUserSetup2.GET(Provider."Network Assistant") THEN BEGIN
+            EXIT;
+          END;
+        END;
+        ELSE EXIT(FALSE);
+      END;
+
+      rValue :=
+        (lUserSetup2."Substitute User ID" = lUserSetup."User ID") AND
+        ((lUserSetup2."Substitution Starting Date" <= TODAY) OR (lUserSetup2."Substitution Starting Date" = 0D)) AND
+        ((lUserSetup2."Substitution Ending Date" >= TODAY) OR (lUserSetup2."Substitution Ending Date" = 0D));
+    END;
+
+    PROCEDURE CalcIntervMaximum@1100281006(pProvider@1100281000 : Record 50000) rValue : Integer;
+    VAR
+      lSpecialization@1100281001 : Record 50005;
+      lYearInervNb@1000000000 : Decimal;
+    BEGIN
+      //IMH15
+      //Limite globale dÉinterventions = Nb Inter par Jour x D‚lai moyen de la sp‚cialit‚ principale
+      //Nb Inter par Jour = Nb Inter An / 365
+      //Nb Inter par An = Montant CA maxi / co–t moyen de la sp‚cialit‚ principale
+      //Montant CA maxi = X % du CA d‚clar‚
+      //D‚lai moyen de la sp‚cialit‚ principale : valeur calcul‚e en jours.
+
+      rValue := 0;
+      IF pProvider."Main Specialization Code" = '' THEN BEGIN
+        EXIT;
+      END;
+      IF NOT lSpecialization.GET(pProvider."Main Specialization Code") THEN
+        EXIT;
+
+      IF lSpecialization."Average Cost" = 0 THEN
+        EXIT;
+      IF lSpecialization."Average Time" = 0 THEN
+        EXIT;
+
+      lYearInervNb := pProvider."Turnover Amount Max." / lSpecialization."Average Cost";
+      rValue := ROUND((lYearInervNb / 365) * lSpecialization."Average Time", 1);
+    END;
+
+    PROCEDURE CreateContactOnSpeciality@1100281007(VAR pProviderSpecialization@1100281001 : Record 50006;pContactNo@1100281003 : Code[20];pDisplayList@1100281005 : Boolean);
+    VAR
+      lContact@1100281000 : Record 5050;
+      lContactProvider@1100281002 : Record 50038;
+      lContactNo@1100281004 : Code[20];
+    BEGIN
+      //IMH05
+      //Ces contacts ont le nø de soci‚t‚ ‚gal au nø de prestataire et le code de sp‚cialit‚ ‚gal … la sp‚cialit‚ sur laquelle on se tr.
+      //Si aucun contact n'existe demande confirmation avant cr‚ation.
+      lContactNo := pContactNo;
+      IF pContactNo = '' THEN BEGIN
+        lContact.INIT;
+        lContact.Type := lContact.Type::Person;
+        lContact."Service Contact" := lContact."Service Contact"::Provider;
+        lContact.VALIDATE("Company No.",pProviderSpecialization."Provider No.");
+        lContact.INSERT(TRUE);
+        lContactNo := lContact."No.";
+      END;
+      lContactProvider."Provider No." := pProviderSpecialization."Provider No.";
+      lContactProvider."Specialization Code" := pProviderSpecialization."Specialization Code";
+      lContactProvider."Contact No." := lContactNo;
+      lContactProvider.INSERT(TRUE);
+      COMMIT;
+      IF pContactNo = '' THEN BEGIN
+        IF ISSERVICETIER THEN
+          PAGE.RUNMODAL(PAGE::"Contact Card",lContact)
+        ELSE
+          FORM.RUNMODAL(FORM::"Contact Card",lContact);
+      END;
+      IF pDisplayList THEN
+        OpenContactProvider(pProviderSpecialization,pDisplayList);
+    END;
+
+    PROCEDURE OpenContactProvider@1100281008(VAR pProviderSpecialization@1100281000 : Record 50006;pDisplayList@1100281010 : Boolean);
+    VAR
+      lContact@1100281002 : Record 5050;
+      lLinkedContact@1100281003 : Record 5050;
+      lContactProvider@1100281001 : Record 50038;
+      lLinkedContactNo@1100281004 : Code[20];
+      lCreateOption@1100281005 : 'Cr‚er nouveau contact, Associer contact existant, Annuler';
+      lOption@1100281006 : Integer;
+      lText001@1100281007 : TextConst 'ENU=Create a linked contact on the speciality ?;FRA=Cr‚er un contact li‚ pour la sp‚cialit‚ ?';
+      lText002@1100281008 : TextConst 'ENU=No linked contact on speciality, select an option;FRA=Pas de contact li‚ sur cette sp‚cialit‚, s‚lectionnez une option';
+      lText003@1100281009 : TextConst 'FRA=Cr‚er nouveau contact, Associer contact existant, Annuler';
+    BEGIN
+      //IMH05
+      // Affiche les contacts prestataire avec la sp‚cialit‚ pass‚e en paramŠtre
+      // Si aucun contact demande de cr‚ation
+      lContactProvider.SETRANGE("Provider No.",pProviderSpecialization."Provider No.");
+      lContactProvider.SETRANGE("Specialization Code",pProviderSpecialization."Specialization Code");
+      IF NOT lContactProvider.ISEMPTY THEN BEGIN
+        IF ISSERVICETIER THEN
+          PAGE.RUNMODAL(0,lContactProvider)
+        ELSE
+          FORM.RUNMODAL(0,lContactProvider);
+        EXIT;
+      END;
+      // Pas de contact li‚s … la sp‚cialit‚s ....
+      // Affichage des contacts li‚s au prestataire
+      lLinkedContact.SETRANGE("Company No.",pProviderSpecialization."Provider No.");
+      IF NOT lLinkedContact.ISEMPTY THEN BEGIN
+        lOption := DIALOG.STRMENU(lText003,2,lText002);
+        CASE lOption OF
+          1:BEGIN
+            // Cr‚e un nouveau contact
+            CreateContactOnSpeciality(pProviderSpecialization,'',pDisplayList);
+          END;
+          2:BEGIN
+            // Associe un contact existant
+            IF ISSERVICETIER THEN BEGIN
+              IF PAGE.RUNMODAL(0,lLinkedContact) = ACTION::LookupOK THEN
+                lLinkedContactNo := lLinkedContact."No.";
+            END ELSE BEGIN
+              IF FORM.RUNMODAL(0,lLinkedContact) = ACTION::LookupOK THEN
+                lLinkedContactNo := lLinkedContact."No.";
+            END;
+            IF lLinkedContactNo <> '' THEN
+              CreateContactOnSpeciality(pProviderSpecialization,lLinkedContactNo,pDisplayList);
+          END;
+          3:BEGIN
+            // Annule
+            EXIT;
+          END;
+        END;//CASE
+        EXIT;
+      END;//
+      IF NOT CONFIRM(lText001) THEN
+        EXIT;
+      CreateContactOnSpeciality(pProviderSpecialization,'',pDisplayList);
+      EXIT;
+    END;
+
+    PROCEDURE DeleteContactOnSpeciality@1100281009(VAR pContactProvider@1100281001 : Record 50038);
+    BEGIN
+      pContactProvider.DELETE(TRUE);
+    END;
+
+    PROCEDURE GetProviderSetup@1100281011();
+    BEGIN
+      IF ProviderSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      ProviderSetup.GET;
+      ProviderSetupOK := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetProvider@1100281002(pProviderNo@1100281000 : Code[20]) : Boolean;
+    BEGIN
+      // IMH01.ISAT.MA
+      IF pProviderNo = '' THEN
+        EXIT(FALSE);
+      IF Provider."No." <> pProviderNo THEN
+        EXIT(Provider.GET(pProviderNo));
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ValidateSIRETNo@1100281010(pSIRETNo@1100281000 : Code[20];pErrorMessage@1100281001 : Boolean) : Boolean;
+    BEGIN
+      //IMH06 isat.zw
+      //Le num‚ro SIRET est compos‚ de 14 chiffres (SIREN + NIC).
+
+      IF pSIRETNo = '' THEN
+        EXIT(TRUE);
+      IF STRLEN(pSIRETNo) <> 14 THEN BEGIN
+        IF pErrorMessage THEN
+        // IMH11.ISAT.MA
+          //ERROR(Text002, pSIRETNo);
+          ERROR(Text004);
+        // IMH11.ISAT.MA
+        EXIT(FALSE);
+      END;
+
+      IF NOT CheckNo(pSIRETNo) THEN BEGIN
+        IF pErrorMessage THEN
+          ERROR(Text002, pSIRETNo);
+        EXIT(FALSE);
+      END;
+    END;
+
+    PROCEDURE ValidateSIRENNo@1100281017(pSIRENNo@1100281000 : Code[9];pNICNo@1100281002 : Code[5];pErrorMessage@1100281001 : Boolean) : Boolean;
+    VAR
+      lNumber@1100281003 : Code[14];
+    BEGIN
+      //IMH06 isat.zw
+      //Le SIREN est compos‚ de 9 chiffres
+
+      IF pSIRENNo = '' THEN
+        EXIT(TRUE);
+
+      IF STRLEN(pSIRENNo) <> 9 THEN BEGIN
+        IF pErrorMessage THEN
+          //ERROR(Text002, pSIRENNo);
+          ERROR(Text003, STRLEN(pSIRENNo), 9);
+        EXIT(FALSE);
+      END;
+
+      IF pNICNo <> '' THEN
+        IF STRLEN(pNICNo) <> 5 THEN BEGIN
+          IF pErrorMessage THEN
+            ERROR(Text002, pNICNo);
+          EXIT(FALSE);
+        END;
+
+      lNumber := pSIRENNo + pNICNo;
+
+      IF NOT CheckNo(lNumber) THEN BEGIN
+        IF pErrorMessage THEN
+          ERROR(Text002, lNumber);
+        EXIT(FALSE);
+      END;
+    END;
+
+    PROCEDURE CheckNo@1100281012(pNumber@1100281000 : Code[20]) : Boolean;
+    VAR
+      i@1100281002 : Integer;
+      lSum@1100281001 : Integer;
+      lInt@1100281003 : Integer;
+    BEGIN
+      //IMH06 isat.zw
+      //Le principe est le suivant : on multiplie les chiffres de rang impair … partir de la droite par 1,
+      //ceux de rang pair par 2 ; la somme des chiffres obtenus doit ˆtre multiple de 10.
+
+      FOR i := STRLEN(pNumber) DOWNTO 1 DO BEGIN
+        IF NOT EVALUATE(lInt, FORMAT(pNumber[i])) THEN
+          EXIT(FALSE);
+        IF ((STRLEN(pNumber) - i + 1) MOD 2) = 0 THEN BEGIN
+          IF lInt * 2 >= 10 THEN
+            lSum += lInt * 2 - 9
+          ELSE
+            lSum += lInt * 2;
+        END ELSE
+          lSum += lInt;
+      END;
+
+      IF (lSum MOD 10) = 0 THEN
+        EXIT(TRUE);
+
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE CheckInterventionLimit@1100281019(pProviderNo@1100281001 : Code[20];pSpecailizationCode@1100281005 : Code[20];pCurrentProviderLimit@1100281008 : Integer;pCurrentSpecializationLimit@1100281006 : Integer;pWithErrorMsg@1100281003 : Boolean) rValue : Boolean;
+    VAR
+      lProvider@1100281007 : Record 50000;
+      lProviderSpecialization@1100281002 : Record 50006;
+      lSpecializationLimit@1100281000 : Integer;
+      lText001@1100281004 : TextConst 'ENU=You can not exceed the provider limit\Provider %1\Sum specialization %2;FRA=Vous ne pouvez pas d‚passer la limite d''intervention du prestataire\Prestataire %1\Somme sp‚cialit‚ %2';
+      lProviderLimit@1100281009 : Integer;
+      lText002@1100281010 : TextConst 'ENU=The value should not higher than the value setted(%1).;FRA=La valeur du champ ne doit pas ˆtre sup‚rieure … la valeur param‚tr‚e(%1) dans les param‚tres prestataires.';
+    BEGIN
+      //<<IMH08.isat.PC
+      // Fonction pour v‚rifier le rapport entre les limites d'intervention sur les sp‚cialit‚s et sur la fiche prestataire
+      rValue := FALSE;
+
+      lSpecializationLimit := pCurrentSpecializationLimit;
+
+      lProvider.GET(pProviderNo);
+      IF pCurrentProviderLimit = 0 THEN BEGIN
+        lProviderLimit := lProvider."Current Interv. Limit Max.";
+      END ELSE BEGIN
+        lProviderLimit := pCurrentProviderLimit;
+      END;
+
+      WITH lProviderSpecialization DO BEGIN
+        RESET;
+        SETRANGE("Provider No.",pProviderNo);
+        IF pSpecailizationCode <> '' THEN BEGIN
+          lProviderSpecialization.SETFILTER("Specialization Code",'<>%1',pSpecailizationCode);
+        END;
+        IF FINDSET THEN BEGIN
+          REPEAT
+            lSpecializationLimit += "Current Interv. Limit";
+          UNTIL NEXT = 0;
+        END;
+      END;
+
+      rValue  := lSpecializationLimit <= lProviderLimit;
+
+      IF NOT rValue AND pWithErrorMsg THEN BEGIN
+        ERROR(lText001,lProviderLimit,lSpecializationLimit);
+      END;
+      //>>IMH08.isat.PC
+      //<<IMH10 isat.zw
+      ProviderSetup.GET;
+      IF ProviderSetup."Simplified Category Code" <> '' THEN
+        IF ProviderSetup."Max Inter. Simplified Category" <> 0 THEN
+          IF ProviderSetup."Simplified Category Code" = lProvider.Category THEN
+            IF lProviderLimit > ProviderSetup."Max Inter. Simplified Category" THEN
+              ERROR(lText002,ProviderSetup."Max Inter. Simplified Category");
+      //>>IMH10 isat.zw
+    END;
+
+    PROCEDURE SetDisableIsEditable@1100281014(pDisableIsEditable@1100281000 : Boolean);
+    BEGIN
+      //<<IMH09.isat.PC
+      DisableIsEditable := pDisableIsEditable;
+      //>>IMH09.isat.PC
+    END;
+
+    PROCEDURE LookupTrayLines@1100281013(ProviderNo@1100281000 : Code[20]);
+    VAR
+      lTrayLine@1100281001 : Record 50048;
+    BEGIN
+      //IMH002 isat.zw
+      IF ProviderNo = '' THEN
+        EXIT;
+
+      lTrayLine.SETCURRENTKEY("Intervention Provider No.");
+      lTrayLine.FILTERGROUP(2);
+      lTrayLine.SETRANGE("Intervention Provider No.", ProviderNo);
+      lTrayLine.FILTERGROUP(0);
+      lTrayLine.SETRANGE(Closed, FALSE);
+      IF lTrayLine.ISEMPTY THEN
+        EXIT;
+
+      FORM.RUNMODAL(0, lTrayLine);
+    END;
+
+    PROCEDURE CreateProvPriorityEntry@1100281913(pProvider@1100281002 : Record 50000);
+    VAR
+      lProviderPriorityEntry@1100281000 : Record 50014;
+    BEGIN
+      //IMH12
+      lProviderPriorityEntry.SETRANGE("Provider No.", pProvider."No.");
+      IF lProviderPriorityEntry.FINDLAST THEN
+        IF (lProviderPriorityEntry.Priority = pProvider.Priority)
+           AND (lProviderPriorityEntry."Priority Start Date" = pProvider."Priority Start Date")
+           AND (lProviderPriorityEntry."Priority End Date" = pProvider."Priority End Date") THEN
+          EXIT;
+
+      lProviderPriorityEntry.INIT;
+      lProviderPriorityEntry."Provider No." := pProvider."No.";
+      lProviderPriorityEntry."Entry No." := 0;
+      lProviderPriorityEntry.Priority := pProvider.Priority;
+      lProviderPriorityEntry."Priority Start Date" := pProvider."Priority Start Date";
+      lProviderPriorityEntry."Priority End Date" := pProvider."Priority End Date";
+      lProviderPriorityEntry.INSERT(TRUE);
+    END;
+
+    PROCEDURE ProviderExclusionSendMail@1100281015(pProvider@1100281000 : Record 50000);
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lRBAutoMgt@1100281002 : Codeunit 419;
+      lTempFileName@1100281003 : Text[1024];
+      lTextSujet001@1100281004 : TextConst 'FRA=Bonjour,';
+      lTextSujet002@1100281005 : TextConst 'FRA=Nous vous informons que le prestataire nø %2 - %1 a ‚t‚ exclu du r‚seau.';
+      lTextSujet003@1100281006 : TextConst 'FRA=Vous trouvez ci-dessous la liste des interventions concern‚es par cette exclusion.';
+      lTextSujet004@1100281007 : TextConst 'FRA=Cordialement,';
+      lFile@1100281008 : File;
+      lTextSujet005@1100281009 : TextConst 'ENU=Nø %1 %2 %3 %4 %5 %6 %7 %8 %9;FRA=Nø %1 %2 %3 %4 %5 %6 %7 %8 %9';
+      lWordManagement@1100281010 : Codeunit 5054;
+      lSalespersonPurchaser@1100281011 : Record 13;
+      lSalespersonPurchaser2@1100281021 : Record 13;
+      lSalespersonPurchaserTmp@1100281012 : TEMPORARY Record 13;
+      lTeam@1100281013 : Record 5083;
+      lTeamTmp@1100281015 : TEMPORARY Record 5083;
+      lProviderSetup@1100281018 : Record 50011;
+      lUserSetup@1100281020 : Record 91;
+      lReportingBuffer@1100281014 : TEMPORARY Record 50143;
+      lTempIntervLine@1100281025 : TEMPORARY Record 50075;
+      lMailText@1100281016 : Text[250];
+      lMailCCText@1100281017 : Text[250];
+      lTextSujet006@1100281019 : TextConst 'FRA=Exclusion prestataire';
+      lMail@1100281022 : Codeunit 397;
+      lLine@1100281026 : Text[260];
+      lTextSujet007@1000000000 : TextConst 'FRA=Le responsable de zone prendra prochainement contact avec vous sur le devenir de ces missions.';
+      lBigText@1000000001 : BigText;
+      lCRLF@1000000002 : Text[2];
+      lTempCCContact@1000000003 : TEMPORARY Record 5050;
+      lTempToContact@1000000004 : TEMPORARY Record 5050;
+      lTempCCiContact@1000000005 : TEMPORARY Record 5050;
+      lTempAttach@1000000006 : TEMPORARY Record 50021;
+      lInterSetup@1000000007 : Record 5122;
+      lNAVSendMail@1000000008 : Codeunit 50128;
+      lTempSegLine@1000000009 : TEMPORARY Record 5077;
+      lTempSalesPerson@1000000010 : TEMPORARY Record 13;
+    BEGIN
+      IF NOT pProvider.Exclusion THEN
+        EXIT;
+
+      WITH lInterventionLine DO BEGIN
+        SETCURRENTKEY("Provider No.","Mission Status","Intervention Status",Suspended,Closed);
+        SETRANGE("Provider No.", pProvider."No.");
+        SETRANGE("Intervention Status", "Intervention Status"::InProgress);
+        IF ISEMPTY THEN
+          EXIT;
+
+        IF FINDSET(FALSE) THEN
+          REPEAT
+            CALCFIELDS("Default Team Code");
+            // Rupture par vendeur et ‚quipe
+            CLEAR(lTeamTmp);
+            IF NOT lTeamTmp.GET("Default Team Code") THEN BEGIN
+              IF lTeam.GET("Default Team Code") THEN BEGIN
+                IF lSalespersonPurchaser.GET(lTeam."Salesperson Code") THEN BEGIN
+                  lSalespersonPurchaser.TESTFIELD("E-Mail");
+                  lTempSalesPerson := lSalespersonPurchaser;
+                  IF lTempSalesPerson.INSERT THEN;
+                  lTeamTmp := lTeam;
+                  lTeamTmp.INSERT;
+                END;
+              END;
+            END;
+            //<<IMH14.ISAT.EBA
+            //lReportingBuffer."Code 1" := lInterventionLine."Default Team Code";
+            //lReportingBuffer."Code 2" := lInterventionLine."Service Header No.";
+            //lReportingBuffer."Integer 1" := lInterventionLine."Line No.";
+            //lReportingBuffer.INSERT;
+
+            lTempIntervLine := lInterventionLine;
+            lTempIntervLine."Process Code" := lTeamTmp.Code;
+            lTempIntervLine."Campaign No." := lTeamTmp."Salesperson Code";
+            lTempIntervLine.INSERT;
+            //>>IMH14.ISAT.EBA
+          UNTIL NEXT = 0;
+      END; // WITH
+
+      lCRLF[1] := 10;
+      lCRLF[2] := 13;
+      lUserSetup.GET(USERID);
+      lSalespersonPurchaser2.GET(lUserSetup."Salespers./Purch. Code");
+      lSalespersonPurchaser2.TESTFIELD("E-Mail");
+
+      // Chargement des copies
+      lProviderSetup.GET;
+      lInterSetup.GET;
+      lInterSetup.TESTFIELD("E-Mails");
+      WITH lTempSegLine DO BEGIN
+        "Interaction Template Code" := lInterSetup."E-Mails";
+        "Force Correspondence Type" := TRUE;
+        "Salesperson Code" := lSalespersonPurchaser2.Code;
+        "Information Flow" := "Information Flow"::Outbound;
+        "Initiated By":= "Initiated By"::Us;
+        "Correspondence Type" := "Correspondence Type"::"E-Mail";
+      END;
+      IF lSalespersonPurchaser.GET(lProviderSetup."Exclusion Salesperson Code 1") THEN BEGIN
+        lSalespersonPurchaser.TESTFIELD("E-Mail");
+        lTempCCContact.INIT;
+        lTempCCContact."No." := lSalespersonPurchaser.Code;
+        lTempCCContact."E-Mail" := lSalespersonPurchaser."E-Mail";
+        lTempCCContact.INSERT(FALSE);
+      END;
+      IF lSalespersonPurchaser.GET(lProviderSetup."Exclusion Salesperson Code 2") THEN BEGIN
+        lSalespersonPurchaser.TESTFIELD("E-Mail");
+        lTempCCContact.INIT;
+        lTempCCContact."No." := lSalespersonPurchaser.Code;
+        lTempCCContact."E-Mail" := lSalespersonPurchaser."E-Mail";
+        IF lTempCCContact.INSERT(FALSE) THEN;
+      END;
+
+      //<<IMH20
+      IF lSalespersonPurchaser.GET(lProviderSetup."Exclusion Salesperson Code 3") THEN BEGIN
+        lSalespersonPurchaser.TESTFIELD("E-Mail");
+        lTempCCContact.INIT;
+        lTempCCContact."No." := lSalespersonPurchaser.Code;
+        lTempCCContact."E-Mail" := lSalespersonPurchaser."E-Mail";
+        IF lTempCCContact.INSERT(FALSE) THEN;
+      END;
+
+      IF lSalespersonPurchaser.GET(lProviderSetup."Exclusion Salesperson Code 4") THEN BEGIN
+        lSalespersonPurchaser.TESTFIELD("E-Mail");
+        lTempCCContact.INIT;
+        lTempCCContact."No." := lSalespersonPurchaser.Code;
+        lTempCCContact."E-Mail" := lSalespersonPurchaser."E-Mail";
+        IF lTempCCContact.INSERT(FALSE) THEN;
+      END;
+
+      IF lProviderSetup."Exclusion CC Email 1" <> '' THEN BEGIN
+        lTempCCContact.INIT;
+        lTempCCContact."No." := 'EXCLCC1';
+        lTempCCContact."E-Mail" := lProviderSetup."Exclusion CC Email 1";
+        IF lTempCCContact.INSERT(FALSE) THEN;
+      END;
+
+      IF lProviderSetup."Exclusion CC Email 2" <> '' THEN BEGIN
+        lTempCCContact.INIT;
+        lTempCCContact."No." := 'EXCLCC2';
+        lTempCCContact."E-Mail" := lProviderSetup."Exclusion CC Email 2";
+        IF lTempCCContact.INSERT(FALSE) THEN;
+      END;
+      //>>IMH20
+
+      IF NOT lTempSalesPerson.FINDSET THEN
+        EXIT;
+      REPEAT
+        lTempIntervLine.SETRANGE("Campaign No.", lTempSalesPerson.Code);
+        IF lTempIntervLine.FINDSET THEN BEGIN
+      // en-tˆte de mail
+          lTempToContact.RESET;
+          lTempToContact.DELETEALL;
+          lTempToContact.INIT;
+          lTempToContact."No." := lTempSalesPerson.Code;
+          lTempToContact."E-Mail" := lTempSalesPerson."E-Mail";
+          lTempToContact."Lookup Contact No." := pProvider."No.";
+          lTempToContact.INSERT;
+      // Corps de mail
+          CLEAR(lBigText);
+          lBigText.ADDTEXT(lTextSujet001 + lCRLF);
+          lBigText.ADDTEXT(STRSUBSTNO(lTextSujet002, pProvider.Name, pProvider."No.") + lCRLF);
+          lBigText.ADDTEXT(lTextSujet003  + lCRLF);
+          REPEAT
+            lTempIntervLine.CALCFIELDS("Building Trade Description","Main Speciality Description");
+            lLine :=
+              COPYSTR(
+                STRSUBSTNO(lTextSujet005,
+                  lTempIntervLine."Service Header No.",
+                  lTempIntervLine."Contact Name",
+                  lTempIntervLine."Post Code",
+                  lTempIntervLine.City,
+                  lTempIntervLine."Assigned Date",
+                  lTempIntervLine."Corporate No.",
+                  lTempIntervLine."Building Trade Description",
+                  lTempIntervLine."Main Speciality Description",
+                  FORMAT(lTempIntervLine."Mission Status")),1,MAXSTRLEN(lLine));
+            lBigText.ADDTEXT(lLine + lCRLF);
+          UNTIL lTempIntervLine.NEXT = 0;
+      // fin de mail
+          lTempIntervLine.DELETEALL;
+          lBigText.ADDTEXT(lTextSujet007 + lCRLF);
+          lBigText.ADDTEXT(lTextSujet004 + lCRLF);
+          lBigText.ADDTEXT(lSalespersonPurchaser2.Name + lCRLF);
+          //lSalespersonPurchaser2."Job Title" + FORMAT(lLR) + FORMAT(lCF));
+
+          lNAVSendMail.SendMail(lTempSegLine, lSalespersonPurchaser2."E-Mail", lTextSujet006, lBigText,
+                                lTempToContact, lTempCCContact, lTempCCiContact, lTempAttach);
+        END;
+      UNTIL lTempSalesPerson.NEXT = 0;
+    END;
+
+    PROCEDURE ProviderDuplicate@1100281016(pProvider@1100281000 : Record 50000;CreateErrorMessage@1100281001 : Boolean);
+    VAR
+      lProvider@1100281002 : Record 50000;
+    BEGIN
+
+      IF (pProvider."Search Name" <> '') THEN
+      BEGIN
+        lProvider.RESET;
+        lProvider.SETCURRENTKEY("Search Name");
+        lProvider.SETFILTER("No.",'<>%1',pProvider."No.");
+        lProvider.SETRANGE("Search Name",pProvider."Search Name");
+        IF lProvider.FINDFIRST THEN
+        BEGIN
+          IF (CreateErrorMessage) THEN
+            ERROR(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("Search Name"),pProvider."Search Name",lProvider."No."))
+          ELSE
+            MESSAGE(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("Search Name"),pProvider."Search Name",lProvider."No."));
+          EXIT;
+        END;
+      END;
+
+      IF (pProvider."Phone No." <> '') THEN
+      BEGIN
+        lProvider.RESET;
+        lProvider.SETCURRENTKEY("Phone No.");
+        lProvider.SETFILTER("No.",'<>%1',pProvider."No.");
+        lProvider.SETRANGE("Phone No.",pProvider."Phone No.");
+        IF lProvider.FINDFIRST THEN
+        BEGIN
+          IF (CreateErrorMessage) THEN
+            ERROR(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("Phone No."),pProvider."Phone No.",lProvider."No."))
+          ELSE
+            MESSAGE(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("Phone No."),pProvider."Phone No.",lProvider."No."));
+          EXIT;
+        END;
+      END;
+
+      IF (pProvider."Fax No." <> '') THEN
+      BEGIN
+        lProvider.RESET;
+        lProvider.SETCURRENTKEY("Fax No.");
+        lProvider.SETFILTER("No.",'<>%1',pProvider."No.");
+        lProvider.SETRANGE("Fax No.",pProvider."Fax No.");
+        IF lProvider.FINDFIRST THEN
+        BEGIN
+          IF (CreateErrorMessage) THEN
+            ERROR(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("Fax No."),pProvider."Fax No.",lProvider."No."))
+          ELSE
+            MESSAGE(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("Fax No."),pProvider."Fax No.",lProvider."No."));
+          EXIT;
+        END;
+      END;
+
+      IF (pProvider."E-Mail" <> '') THEN
+      BEGIN
+        lProvider.RESET;
+        lProvider.SETCURRENTKEY("E-Mail");
+        lProvider.SETFILTER("No.",'<>%1',pProvider."No.");
+        lProvider.SETRANGE("E-Mail",pProvider."E-Mail");
+        IF lProvider.FINDFIRST THEN
+        BEGIN
+          IF (CreateErrorMessage) THEN
+            ERROR(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("E-Mail"),pProvider."E-Mail",lProvider."No."))
+          ELSE
+            MESSAGE(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("E-Mail"),pProvider."E-Mail",lProvider."No."));
+          EXIT;
+        END;
+      END;
+
+      IF (pProvider."Registration No." <> '') THEN
+      BEGIN
+        lProvider.RESET;
+        lProvider.SETCURRENTKEY("Registration No.");
+        lProvider.SETFILTER("No.",'<>%1',pProvider."No.");
+        lProvider.SETRANGE("Registration No.",pProvider."Registration No.");
+        IF lProvider.FINDFIRST THEN
+        BEGIN
+          IF (CreateErrorMessage) THEN
+            ERROR(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("Registration No."),pProvider."Registration No.",lProvider."No."))
+          ELSE
+            MESSAGE(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("Registration No."),pProvider."Registration No.",lProvider."No."));
+          EXIT;
+        END;
+      END;
+
+      IF (pProvider."VAT Registration No." <> '') THEN
+      BEGIN
+        lProvider.RESET;
+        lProvider.SETCURRENTKEY("VAT Registration No.");
+        lProvider.SETFILTER("No.",'<>%1',pProvider."No.");
+        lProvider.SETRANGE("VAT Registration No.",pProvider."VAT Registration No.");
+        IF lProvider.FINDFIRST THEN
+        BEGIN
+          IF (CreateErrorMessage) THEN
+            ERROR(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("VAT Registration No."),pProvider."VAT Registration No.",lProvider."No."))
+          ELSE
+            MESSAGE(STRSUBSTNO(Text005,pProvider.FIELDCAPTION("VAT Registration No."),pProvider."VAT Registration No.",lProvider."No."))
+      ;
+          EXIT;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetQualificationCodeList@1100281022(pProviderNo@1100281001 : Code[20]) : Text[1024];
+    VAR
+      lProviderQualification@1100281000 : Record 50008;
+      lCodes@1100281002 : Text[1024];
+    BEGIN
+      lProviderQualification.SETRANGE("Provider No.", pProviderNo);
+      IF lProviderQualification.FINDSET THEN
+        REPEAT
+          IF (STRLEN(lCodes) + STRLEN(lProviderQualification."Qualification Code")) <= 1023 THEN
+            lCodes := lCodes + lProviderQualification."Qualification Code" + '/'
+          ELSE
+            EXIT(lCodes);
+        UNTIL lProviderQualification.NEXT = 0;
+      EXIT(lCodes);
+    END;
+
+    PROCEDURE GetQualificationList@1000000000(pProviderNo@1100281001 : Code[20]) : Text[1024];
+    VAR
+      lProviderQualification@1100281000 : Record 50008;
+      lCodes@1100281002 : Text[1024];
+    BEGIN
+      //IMH18
+      lProviderQualification.SETRANGE("Provider No.", pProviderNo);
+      IF lProviderQualification.FINDSET THEN
+        REPEAT
+          IF (STRLEN(lCodes) + STRLEN(lProviderQualification."Qualification Code")) <= 1023 THEN BEGIN
+            lCodes := lCodes + lProviderQualification."Qualification Code" ;
+            IF lProviderQualification."Qualification Description" <> '' THEN
+              lCodes := lCodes + '-' + lProviderQualification."Qualification Description";
+            IF  lProviderQualification."Certificate Institution Code" <> '' THEN
+              lCodes := lCodes + '-' +  lProviderQualification."Certificate Institution Code";
+            IF lProviderQualification."Certif. Institution Descrip." <> '' THEN
+              lCodes := lCodes + '-' +lProviderQualification."Certif. Institution Descrip.";
+            IF lProviderQualification."Start Date" <> 0D THEN
+              lCodes := lCodes + '-' + FORMAT(lProviderQualification."Start Date");
+            IF lProviderQualification."End Date" <> 0D THEN
+              lCodes := lCodes + '-' + FORMAT(lProviderQualification."End Date");
+            lCodes := lCodes +  '/';
+        END
+          ELSE
+            EXIT(lCodes);
+        UNTIL lProviderQualification.NEXT = 0;
+      EXIT(lCodes);
+    END;
+
+    PROCEDURE SendReminderProvider@1100281020(pProvider@1100281012 : Record 50000;pInteracTempCode@1100281005 : Code[20];pSubject@1100281014 : Text[80];pBodyArray@1100281016 : ARRAY [10] OF Text[1024];VAR pFileName@1100281004 : Text[1024];pCorrespondenceType@1100281015 : ' ,Hard Copy,E-Mail,Fax';VAR pBodyText@1100281021 : BigText);
+    VAR
+      lMail@1100281008 : Codeunit 397;
+      lSegMgt@1100281002 : Codeunit 5051;
+      lFolderMgt@1100281007 : Codeunit 50004;
+      lSourceAttchMgt@1100281011 : Codeunit 50003;
+      lAttachmentManagement@1100281018 : Codeunit 5052;
+      lSegLineTmp@1100281001 : TEMPORARY Record 5077;
+      lInteractionLogEntry@1100281019 : Record 5065;
+      lInteractionLogEntry2@1100281003 : Record 5065;
+      lDocAttachment@1100281009 : Record 50021;
+      lAttachTemp@1100281010 : TEMPORARY Record 5062;
+      lInteractionTemp@1100281006 : Record 5064;
+      lCompanyInformation@1100281022 : Record 79;
+      i@1100281017 : Integer;
+      lBody@1100281000 : Text[1024];
+      lChar10@1100281013 : Char;
+      lChar13@1100281020 : Char;
+    BEGIN
+      //IMH13
+      lInteractionTemp.GET(pInteracTempCode);
+      lSegLineTmp.INSERT;
+      lSegLineTmp.VALIDATE("Contact No.", pProvider."No.");
+      lSegLineTmp.VALIDATE("Interaction Template Code", pInteracTempCode);
+      lCompanyInformation.GET;
+
+      lInteractionLogEntry.INIT;
+      lSegMgt.CopyFieldsToInteractLogEntry(lInteractionLogEntry,lSegLineTmp);
+
+      lInteractionLogEntry2.LOCKTABLE;
+      IF lInteractionLogEntry2.FINDLAST THEN
+        lInteractionLogEntry."Entry No." := lInteractionLogEntry2."Entry No." + 1
+      ELSE
+        lInteractionLogEntry."Entry No." := 1;
+
+      lInteractionLogEntry.Date := WORKDATE;
+      //pInteractionLogEntry.Description := pDescripInteraction;
+      //pInteractionLogEntry.Subject := pSubject;
+      lInteractionLogEntry.INSERT(TRUE);
+
+      CASE pCorrespondenceType OF
+        pCorrespondenceType::"Hard Copy" : BEGIN
+        END;
+        pCorrespondenceType::"E-Mail" : BEGIN
+          lMail.NewOutlookMsgBigText2(lCompanyInformation."DPR E-Mail", lAttachmentManagement.InteractionEMail(lInteractionLogEntry),
+            '',pSubject,lBody,pBodyText, '',FALSE, pFileName);
+        END;
+        pCorrespondenceType::Fax : BEGIN
+          lMail.NewOutlookMsgBigText2(lCompanyInformation."DPR E-Mail", lAttachmentManagement.InteractionFax(lInteractionLogEntry),
+            '',pSubject,lBody,pBodyText, '',FALSE, pFileName);
+        END;
+      END;
+
+      //Creation Document joint
+      lAttachTemp.INIT;
+      lAttachTemp.Attachment.IMPORT(pFileName);
+      //<<IMH17
+      lAttachTemp."File Extension" := lFolderMgt.GetFileExtension(pFileName);
+      //>>IMH17
+      lSourceAttchMgt.CreateAttachFromInteraction(lDocAttachment, lInteractionLogEntry, lAttachTemp);
+      lDocAttachment.Description := lInteractionLogEntry.Description;
+      lDocAttachment.Modifiable := FALSE;
+      lDocAttachment.MODIFY(FALSE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH21 @d 14/10/13 @a ISAT.ST @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR */
+      /** @r IHM20 @d 22/08/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 3477
+          @c Ajout champ 50722 - 50726 Mail CC exclusion prestataire */
+      /** @r IMH19 @d 07/07/12 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management @h mantis 3338
+          @c Relancer prestataire */
+      /** @r IMH18 @d 03/05/12 @a ISAT.LLT @v IMH6.01.115 @s Reporting @h mantis 1319 @c Ajout donnees qualification **/
+      /** @r IMH17 @d 20/04/12 @a ISAT.ZW @v IMH6.01.115 @s Reporting @h mantis 3338 @c Correction **/
+      /** @r IMH16 @d 24/02/12 @a ISAT.ST @v IMH6.01.020 @s Prestataire @c Envoie mail exclusion prestataire */
+      /** @r IMH16 @d 24/02/12 @a ISAT.ST @v IMH6.01.020 @s Prestataire @c Envoie mail exclusion prestataire */
+      /** @r IMH15 @d 01/02/12 @a ISAT.ZW @v IMH6.01.020 @s Prestataire @h mantis 2797 @c calcul nb limite d'interventions th‚orique */
+      /** @r IMH14 @d 17/10/11 @a ISAT.EBA @v IMH6.01.020 @s Prestataire @c Envoie mail exclusion prestataire */
+      /** @r IMH13 @d 05/10/11 @a ISAT.ZW @v IMH6.01.020 @s Gestion prestataire @c Ajout fonction SendReminderProvider */
+      /** @r IMH12 @d 17/06/11 @a ISAT.ZW @v IMH6.01.020 @s Gestion prestataire @c Ajout fonction CreateProvPriorityEntry */
+      /** @r IMH11 @d 12/06/11 @a ISAT.MA @v IMH6.01.020 @s Gestion prestataire @c Modifications MANTIS */
+      /** @r IMH10 @d 06/05/11 @a ISAT.ZW @v IMH6.01.020 @s Gestion prestataire
+          @c ajout fonction contrle limite max. d'intervention Prestataire */
+      /** @r IMH09 @d 09/03/11 @a ISAT.PC @v IMH6.01.020 @s Gestion prestataire @c ajout fonction SetDisableIsEditable */
+      /** @r IMH08 @d 02/03/11 @a ISAT.PC @v IMH6.01.020 @s Gestion prestataire @c ajout fonction CheckInterventionLimit */
+      /** @r IMH07 @d 23/02/11 @a ISAT.ZW @v IMH6.01.020 @s Gestion prestataire
+          @c parametre d‚sactiver la s‚curisation des fiches prestataires */
+      /** @r IMH06 @d 15/02/11 @a ISAT.ZW @v IMH6.01.020 @s Gestion prestataire @c Contr“le de la saisie SIRET - SIREN  */
+      /** @r IMH05 @d 25/11/10 @a ISAT.LLT @v IMH6.01.020 @s Gestion prestataire @c Fonction CreateContactOnSpeciality
+      /** @r IMH04 @d 24/11/10 @a ISAT.NFO @v IMH6.01.020 @s Gestion prestataire @c Fonction CalcIntervMaximum() */
+      /** @r IMH03 @d 28/10/10 @a ISAT.MA @v IMH6.01.027 @s Liens entre prestataires @c Fonction LinkProvider() */
+      /** @r IMH01 @d 26/10/10 @a ISAT.MA @v IMH6.01.020 @s Gestion prestataire @c Creation */
+    }
+    END.
+  }
+}

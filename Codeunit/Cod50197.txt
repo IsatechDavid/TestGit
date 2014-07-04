@@ -1,0 +1,1497 @@
+OBJECT Codeunit 50197 Extranet Provider Web Serv.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=29/01/13;
+    Time=14:04:06;
+    Modified=Yes;
+    Version List=IMH6.01,LogWS;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 225=rimd,
+                TableData 5051=rimd,
+                TableData 50000=rimd,
+                TableData 50005=rimd,
+                TableData 50006=rimd,
+                TableData 50007=rimd,
+                TableData 50011=rimd,
+                TableData 50028=rimd,
+                TableData 50048=rimd,
+                TableData 50055=rimd,
+                TableData 50139=rimd,
+                TableData 50147=rimd,
+                TableData 50150=rimd,
+                TableData 50156=rimd,
+                TableData 50189=rimd;
+    OnRun=BEGIN
+            GLOBALLANGUAGE(1036);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text000@1100281000 : TextConst 'ENU=Provider %1 not found.;FRA=Prestataire %1 inexistant.';
+      Text001@1100281002 : TextConst 'ENU=Same Phones.;FRA=T‚l‚phones identiques.';
+      Text002@1100281001 : TextConst 'ENU=Same address.;FRA=Adresse identique.';
+      Text003@1100281003 : TextConst 'ENU=Provider —1 : Operationnal Address not found.;FRA=Prestataire %1 : adresse op‚rationnelle non trouv‚e.';
+      Text004@1100281004 : TextConst 'ENU=Post Code and City %1 %2 not valid;FRA=Code postal et ville %1 %2 invalides.';
+      Text005@1100281006 : TextConst 'ENU=Unable to find the Absence Period %1 %2 for the Provider %3 (Emergency %4 - Specialization %5).;FRA=Impossible de retrouver la p‚riode d''absence %1 %2 pour le prestataire %3 (urgence %4 - sp‚cialit‚ %5).';
+      Text006@1100281005 : TextConst 'ENU=There is already an Absence Period for %1 %2 for the Provider %3 (Emergency %4 - Specialization %5).;FRA=Il existe d‚j… une p‚riode d''absence sur %1 %2 pour le prestataire %3 (urgence %4 - sp‚cialit‚ %5).';
+      Text007@1100281007 : TextConst 'ENU=Specialization %1 not found.;FRA=Sp‚cialit‚ %1 non trouv‚e.';
+      Text008@1100281008 : TextConst 'ENU=Specialization %1 not found for the Provider %2.;FRA=Sp‚cialit‚ %1 non trouv‚e pour le prestataire %2.';
+      Text009@1100281009 : TextConst 'ENU=You can''t delete an Absence Period of type %1.;FRA=Vous ne pouvez pas supprimer une p‚riode d''absence de type %1.';
+      Text010@1100281010 : TextConst 'ENU=Error to generate Temporary File.;FRA=Erreur g‚n‚ration fichier temporaire.';
+      Text011@1100281011 : TextConst 'ENU=Modify Recorded;FRA=Modification enregistr‚e';
+      Text012@1100281012 : TextConst 'ENU=Start date mandatory;FRA=Date de d‚but obligatoire';
+      Text013@1100281013 : TextConst 'ENU=Specialization %1 not emergency for the Provider %2.;FRA=Sp‚cialit‚ %1 non urgente pour le prestataire %2.';
+      Text014@1100281014 : TextConst 'ENU=Any specialization is emergency for the Provider %1.;FRA=Aucune sp‚cialit‚ n''est urgente pour le prestataire %1.';
+      Text015@1100281019 : TextConst 'FRA=Modification de l''adresse du siŠge social.';
+      Text016@1100281018 : TextConst 'FRA=Modification de l''adresse op‚rationnelle.';
+      Text017@1100281017 : TextConst 'FRA=Modification des num‚ros de t‚l‚phone.';
+      Text018@1100281016 : TextConst 'FRA=D‚claration d''une p‚riode d''absence.';
+      Text019@1100281015 : TextConst 'FRA=Suppression d''une p‚riode d''absence.';
+      lExtranetCommonFunctions@1000000000 : Codeunit 50204;
+
+    PROCEDURE UpdatePhones@1100281000(pProviderNo@1100281007 : Code[20];pPhoneNo@1100281008 : Text[30];pMobilePhoneNo@1100281009 : Text[30];pMobilePhone2No@1100281010 : Text[30];pFaxNo@1100281011 : Text[30];pBusinessPhoneNo@1100281012 : Text[30];pConstraintPhoneNo@1100281013 : Text[30];pExtranetContactNo@1100281016 : Code[20];pExtranetContactName@1100281015 : Text[50];pExtranetContactFirstName@1100281014 : Text[30]) : Boolean;
+    VAR
+      lProvider@1100281006 : Record 50000;
+      lPhonoNoList@1100281000 : Record 50055;
+      lExtranetModifJournalLine@1100281005 : Record 50150;
+      lRecref@1100281004 : RecordRef;
+      lToolsMgt@1100281003 : Codeunit 8016602;
+      lExtranetModifJournalMgt@1100281002 : Codeunit 50147;
+      lChangeLogMgt@1100281001 : Codeunit 423;
+      lPhoneStandardization@1100281017 : Codeunit 50099;
+      lGUID@1000000000 : GUID;
+    BEGIN
+      // IMH01 ISAT.EB --> A tester 24/08/2011
+      {
+      Rubrique 11.18
+      0000749: Web Service SOAP : Modification des num‚ros de t‚l‚phone d'un prestataire
+
+      Colonnes attendues :
+      - Retour de confirmation du succŠs de l'op‚ration
+
+      ParamŠtres :
+      - Identifiant systŠme Dynamics NAV du prestataire
+      - Num‚ros de t‚l‚phone du prestataire
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo : Nø prestataire
+        - pPhoneNo : Nø t‚l‚phone
+        - pMobilePhoneNo : Nø mobile
+        - pMobilePhone2No : Nø mobile 2
+        - pFaxNo : Nø fax
+        - pBusinessPhoneNo : Nø t‚l‚phone pro
+        - pConstraintPhoneNo : Nø t‚l‚phone astreinte
+        - pExtranetUserNo
+        - pExtranetUserName
+        - pExtranetUserFirstName
+      - En sortie
+        - Retourne vrai si tout est ok
+      }
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Initial(
+        1,'UpdatePhones',
+        STRSUBSTNO(
+          '%1-%2-%3-%4-%5-%6-%7-%8-%9',
+          pProviderNo,pPhoneNo,pMobilePhoneNo,pMobilePhone2No,
+          pFaxNo,pConstraintPhoneNo),
+        lGUID);
+      //>>IMH15.PC
+
+      GLOBALLANGUAGE(1036);
+      IF NOT lProvider.GET(pProviderNo) THEN
+        ERROR(Text000,pProviderNo);
+
+      IF pPhoneNo <> '' THEN BEGIN
+        lPhoneStandardization.ValidatePhoneNo(
+          DATABASE::Provider,lProvider.FIELDNO("Phone No."),lProvider."Country/Region Code",pPhoneNo);
+      END;
+      IF pMobilePhone2No <> '' THEN BEGIN
+        lPhoneStandardization.ValidatePhoneNo(
+          DATABASE::Provider,lProvider.FIELDNO("Mobile Phone No. 2"),lProvider."Country/Region Code",pMobilePhone2No);
+      END;
+      IF pFaxNo <> '' THEN BEGIN
+        lPhoneStandardization.ValidatePhoneNo(
+          DATABASE::Provider,lProvider.FIELDNO("Fax No."),lProvider."Country/Region Code",pFaxNo);
+      END;
+      IF pBusinessPhoneNo <> '' THEN BEGIN
+        lPhoneStandardization.ValidatePhoneNo(
+          DATABASE::Provider,lProvider.FIELDNO("Business Phone No."),lProvider."Country/Region Code",pBusinessPhoneNo);
+      END;
+      IF pMobilePhoneNo <> '' THEN BEGIN
+        lPhoneStandardization.ValidatePhoneNo(
+          DATABASE::Provider,lProvider.FIELDNO("Mobile Phone No."),lProvider."Country/Region Code",pMobilePhoneNo);
+      END;
+      IF pConstraintPhoneNo <> '' THEN BEGIN
+        lPhoneStandardization.ValidatePhoneNo(
+          DATABASE::Provider,lProvider.FIELDNO("Constraint Phone No."),lProvider."Country/Region Code",pConstraintPhoneNo);
+      END;
+
+      IF (lProvider."Phone No." = pPhoneNo) AND
+         (lProvider."Mobile Phone No." = pMobilePhoneNo) AND
+         (lProvider."Mobile Phone No. 2" = pMobilePhone2No) AND
+         (lProvider."Fax No." = pFaxNo) AND
+         (lProvider."Business Phone No." = pBusinessPhoneNo) AND
+         (lProvider."Constraint Phone No." = pConstraintPhoneNo)
+      THEN
+        EXIT(TRUE);
+
+      CLEAR(lExtranetModifJournalLine);
+      lExtranetModifJournalMgt.CreateModifJrnlFromProvider(
+        lProvider, 0, 1, pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+        lExtranetModifJournalLine);
+
+      IF lProvider."Phone No." <> pPhoneNo THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProvider.FIELDNO("Phone No."),pPhoneNo,0D,0DT,0,'',0);
+      END;
+      IF lProvider."Mobile Phone No." <> pMobilePhoneNo THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProvider.FIELDNO("Mobile Phone No."),pMobilePhoneNo,0D,0DT,0,'',0);
+      END;
+      IF lProvider."Mobile Phone No. 2" <> pMobilePhone2No THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProvider.FIELDNO("Mobile Phone No. 2"),pMobilePhone2No,0D,0DT,0,'',0);
+      END;
+      IF lProvider."Fax No." <> pFaxNo THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProvider.FIELDNO("Fax No."),pFaxNo,0D,0DT,0,'',0);
+      END;
+      IF lProvider."Business Phone No." <> pBusinessPhoneNo THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProvider.FIELDNO("Business Phone No."),pBusinessPhoneNo,0D,0DT,0,'',0);
+      END;
+      IF lProvider."Constraint Phone No." <> pConstraintPhoneNo THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProvider.FIELDNO("Constraint Phone No."),pConstraintPhoneNo,0D,0DT,0,'',0);
+      END;
+
+      OnProviderChange(lProvider,Text017); //IMH12.ST
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Finish(lGUID);
+      //>>IMH15.PC
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE UpdateOperationnalAddress@1100281001(pProviderNo@1100281011 : Code[20];pAddress1@1100281009 : Text[50];pAddress2@1100281008 : Text[50];pPostCode@1100281007 : Code[20];pCity@1100281006 : Text[30];pExtranetContactNo@1100281002 : Code[20];pExtranetContactName@1100281001 : Text[30];pExtranetContactFirstName@1100281000 : Text[30]) : Boolean;
+    VAR
+      lProvider@1100281015 : Record 50000;
+      lExtranetModifJournalLine@1100281014 : Record 50150;
+      lContactAltAddress@1100281013 : Record 5051;
+      lPostCode@1100281012 : Record 225;
+      lRecref@1100281010 : RecordRef;
+      lToolsMgt@1100281018 : Codeunit 8016602;
+      lExtranetModifJournalMgt@1100281017 : Codeunit 50147;
+      lChangeLogMgt@1100281016 : Codeunit 423;
+      lGUID@1000000000 : GUID;
+    BEGIN
+      // IMH02 ISAT.EB --> A tester 24/08/2011
+      {
+      Rubrique 11.18
+      0000746: Web Service SOAP : Modification de l'adresse op‚rationnelle
+
+      Colonnes attendues :
+      - Retour de confirmation du succŠs de l'op‚ration
+
+       ParamŠtres :
+      - Identifiant systŠme Dynamics NAV du prestataire
+       - Nom indiqu‚ dans lÉadresse
+       - Num‚ro, type de voie et nom de la rue
+       - Information compl‚mentaire dÉadresse
+       - Code postal
+       - Ville
+       - Boite postale
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo : Nø prestataire
+        - pAddress1
+        - pAddress2
+        - pPostCode
+        - pCity
+        - pExtranetUserNo
+        - pExtranetUserName
+        - pExtranetUserFirstName
+      - En sortie
+        - Retourne vrai si tout est ok
+      }
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Initial(
+        1,'UpdateOperationnalAddress',
+        STRSUBSTNO(
+          '%1-%2-%3-%4-%5',
+          pProviderNo,pAddress1,pAddress2,pPostCode,pCity),
+        lGUID);
+      //>>IMH15.PC
+
+      GLOBALLANGUAGE(1036);
+      IF NOT lProvider.GET(pProviderNo) THEN
+        ERROR(Text000,pProviderNo);
+
+      IF (pPostCode <> '') AND
+         (pCity <> '')
+      THEN BEGIN
+        IF NOT lToolsMgt.CheckCity2(pPostCode,pCity) THEN
+          ERROR(Text004,pPostCode,pCity);
+      END;
+
+      lPostCode.SETRANGE(Code,pPostCode);
+      lPostCode.SETRANGE("City (Without Accent)",pCity);
+      IF lPostCode.FINDFIRST THEN BEGIN
+        pCity := lPostCode.City;
+      END;
+
+      lContactAltAddress.RESET;
+      lContactAltAddress.SETRANGE("Contact No.", pProviderNo);
+      lContactAltAddress.SETRANGE("Geo. Reference Address", TRUE);
+      IF NOT lContactAltAddress.FINDFIRST THEN
+        ERROR(Text003,pProviderNo);
+
+      IF (lContactAltAddress.Address = pAddress1) AND
+         (lContactAltAddress."Address 2" = pAddress2) AND
+         (lContactAltAddress."Post Code" = pPostCode) AND
+         (lContactAltAddress.City = pCity)
+      THEN
+        EXIT(TRUE);
+
+      CLEAR(lExtranetModifJournalLine);
+      lExtranetModifJournalMgt.CreateModifJrnlFromContAltAdd(
+        lContactAltAddress,0,1,pExtranetContactNo,pExtranetContactName,pExtranetContactFirstName,
+        lExtranetModifJournalLine);
+
+      IF lContactAltAddress.Address <> pAddress1 THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(
+          lExtranetModifJournalLine,
+          lContactAltAddress.FIELDNO(Address),
+          pAddress1,0D,0DT,0,'',0);
+      END;
+
+      IF lContactAltAddress."Address 2" <> pAddress2 THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(
+          lExtranetModifJournalLine,
+          lContactAltAddress.FIELDNO("Address 2"),
+          pAddress2,0D,0DT,0,'',0);
+      END;
+
+      IF (lContactAltAddress."Post Code" <> pPostCode) OR
+         (lContactAltAddress.City <> pCity)
+      THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(
+          lExtranetModifJournalLine,
+          lContactAltAddress.FIELDNO("Post Code"),pPostCode,
+          0D,0DT,lContactAltAddress.FIELDNO(City),pCity,0);
+      END;
+
+      OnProviderChange(lProvider,Text016); //IMH12.ST
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Finish(lGUID);
+      //>>IMH15.PC
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE UpdateAdministrativeAddress@1100281002(pProviderNo@1100281010 : Code[20];pAddress1@1100281009 : Text[50];pAddress2@1100281008 : Text[50];pPostCode@1100281007 : Code[20];pCity@1100281006 : Text[30];pExtranetContactNo@1100281002 : Code[20];pExtranetContactName@1100281001 : Text[30];pExtranetContactFirstName@1100281000 : Text[30]) : Boolean;
+    VAR
+      lProvider@1100281018 : Record 50000;
+      lExtranetModifJournalLine@1100281017 : Record 50150;
+      lContactAltAddress@1100281016 : Record 5051;
+      lPostCode@1100281015 : Record 225;
+      lRecref@1100281014 : RecordRef;
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lExtranetModifJournalMgt@1100281012 : Codeunit 50147;
+      lChangeLogMgt@1100281011 : Codeunit 423;
+      lGUID@1000000000 : GUID;
+    BEGIN
+      // IMH03 ISAT.EB --> A tester 24/08/2011
+      {
+      Rubrique 11.18
+      0000745: Web Service SOAP : Modification de l'adresse du siŠge sociale
+
+      Colonnes attendues :
+      - Retour de confirmation du succŠs de l'op‚ration
+
+      ParamŠtres :
+      - Identifiant systŠme Dynamics NAV du prestataire
+      - Nom indiqu‚ dans lÉadresse
+      - Num‚ro, type de voie et nom de la rue
+      - Information compl‚mentaire dÉadresse
+      - Code postal
+      - Ville
+      - Boite postale
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo : Nø prestataire
+        - pAddress1
+        - pAddress2
+        - pPostCode
+        - pCity
+        - pExtranetUserNo
+        - pExtranetUserName
+        - pExtranetUserFirstName
+      - En sortie
+        - Retourne vrai si tout est ok
+
+      }
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Initial(
+        1,'UpdateAdministrativeAddress',
+        STRSUBSTNO(
+          '%1-%2-%3-%4-%5',
+          pProviderNo,pAddress1,pAddress2,pPostCode,pCity),
+        lGUID);
+      //>>IMH15.PC
+
+      GLOBALLANGUAGE(1036);
+      IF NOT lProvider.GET(pProviderNo) THEN
+        ERROR(Text000,pProviderNo);
+
+      IF (pPostCode <> '') AND
+         (pCity <> '')
+      THEN BEGIN
+        IF NOT lToolsMgt.CheckCity2(pPostCode,pCity) THEN
+          ERROR(Text004,pPostCode,pCity);
+      END;
+
+      lPostCode.SETRANGE(Code,pPostCode);
+      lPostCode.SETRANGE("City (Without Accent)",pCity);
+      IF lPostCode.FINDFIRST THEN BEGIN
+        pCity := lPostCode.City;
+      END;
+
+      IF (lProvider.Address = pAddress1) AND
+         (lProvider."Address 2" = pAddress2) AND
+         (lProvider."Post Code" = pPostCode) AND
+         (lProvider.City = pCity)
+      THEN BEGIN
+        EXIT(TRUE);
+      END;
+
+      lExtranetModifJournalMgt.CreateModifJrnlFromProvider(
+        lProvider,0,1,pExtranetContactNo,pExtranetContactName,pExtranetContactFirstName,
+        lExtranetModifJournalLine);
+
+      IF lProvider.Address <> pAddress1 THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(
+          lExtranetModifJournalLine,
+          lProvider.FIELDNO(Address),pAddress1,0D,0DT,0,'',0);
+      END;
+
+      IF lProvider."Address 2" <> pAddress2 THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(
+          lExtranetModifJournalLine,
+          lProvider.FIELDNO("Address 2"),pAddress2,0D,0DT,0,'',0);
+      END;
+
+      IF (lProvider."Post Code" <> pPostCode) OR
+         (lProvider.City <> pCity)
+      THEN BEGIN
+        lExtranetModifJournalMgt.CreateModifJrnlField(
+          lExtranetModifJournalLine,
+          lProvider.FIELDNO("Post Code"),pPostCode,0D,0DT,lProvider.FIELDNO(City),pCity,0);
+      END;
+
+      OnProviderChange(lProvider,Text015); //IMH12.ST
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Finish(lGUID);
+      //>>IMH15.PC
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetDaySchedule@1100281003(pProviderNo@1100281001 : Code[20];pEmergency@1100281000 : Boolean;VAR pDayScheduleList@1100281003 : BigText);
+    VAR
+      lProvider@1100281002 : Record 50000;
+      lProviderBusinessHours@1100281004 : Record 50028;
+      lProviderSetup@1100281005 : Record 50011;
+      lXMLDoc@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNode1@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode2@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode3@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLMgt@1100281009 : Codeunit 8016710;
+      linStream@1100281008 : InStream;
+      lFileName@1100281007 : Text[1024];
+      lFile@1100281006 : File;
+      lGUID@1000000000 : GUID;
+    BEGIN
+      // IMH04 ISAT.EB --> A tester 25/08/2011
+      {
+      Rubrique 11.20
+      0000754: R‚cup‚ration pour un couple ® corps de m‚tier ¯ - ® niveau dÉurgence ¯ des horaires journaliers
+
+      ParamŠtres dÉentr‚e :
+      - Identifiant systŠme Dynamics NAV du prestataire
+      - Identifiant corps de m‚tier ( ?)
+      - Niveau dÉurgence (urgent / non urgent)
+
+      R‚sultat :
+      - Libell‚ du jour (ex : ® lundi ¯)
+      - Cr‚neau horaire (® matin ¯, ® aprŠs-midi ¯)
+      - Horaire de d‚but (ex : ® 9h15 ¯)
+      - Horaire de fin (ex : ® 12h ¯)
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo (string 20) : Nø prestataire
+        - pEmergency (Bool‚en) : urgent ou pas
+        - pDayScheduleList (string) : mettre vide
+      - En sortie
+        - pDayScheduleList (string) : liste des horaires journaliers dans un xml
+          - <DayScheduleList>
+              <Monday>
+                <TimeBegin>Heure d‚but</TimeBegin>
+                <TimeEnd>Heure fin</TimeEnd>
+              </Monday>
+              ...
+            </DayScheduleList>
+      }
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Initial(1,'GetDaySchedule',STRSUBSTNO('%1-%2',pProviderNo,pEmergency),lGUID);
+      //>>IMH15.PC
+
+      GLOBALLANGUAGE(1036);
+      // Recherche du prestataire
+      IF NOT lProvider.GET(pProviderNo) THEN
+        ERROR(Text000,pProviderNo);
+
+      // Cr‚ation du fichier XML
+      lXMLMgt.CreateXml(lXMLDoc,'<DayScheduleList />',lXMLNode1);
+
+      lProviderBusinessHours.RESET;
+      lProviderBusinessHours.SETRANGE("Provider No.",pProviderNo);
+      lProviderBusinessHours.SETRANGE(Emergency,pEmergency);
+      IF NOT lProviderBusinessHours.ISEMPTY THEN BEGIN
+        lProviderBusinessHours.FINDSET;
+        REPEAT
+          lXMLMgt.AddElement(lXMLNode1,FORMAT(lProviderBusinessHours.Day),'','',lXMLNode2);
+          lXMLMgt.AddElement(lXMLNode2,'TimeBegin',FORMAT(lProviderBusinessHours."Start Time",0,9),'',lXMLNode3);
+          lXMLMgt.AddElement(lXMLNode2,'TimeEnd',FORMAT(lProviderBusinessHours."End Time",0,9),'',lXMLNode3);
+        UNTIL lProviderBusinessHours.NEXT = 0;
+      END ELSE BEGIN
+      //  IF NOT pEmergency THEN BEGIN //IMH12.ST
+          IF lProviderSetup.GET THEN BEGIN
+            lXMLMgt.AddElement(lXMLNode1,'Monday','','',lXMLNode2);
+            lXMLMgt.AddElement(lXMLNode2,'TimeBegin',FORMAT(lProviderSetup."Start Monday Business Hours",0,9),'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'TimeEnd',FORMAT(lProviderSetup."End Monday Business Hours",0,9),'',lXMLNode3);
+
+            lXMLMgt.AddElement(lXMLNode1,'Tuesday','','',lXMLNode2);
+            lXMLMgt.AddElement(lXMLNode2,'TimeBegin',FORMAT(lProviderSetup."Start Tuesday Business Hours",0,9),'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'TimeEnd',FORMAT(lProviderSetup."End Tuesday Business Hours",0,9),'',lXMLNode3);
+
+            lXMLMgt.AddElement(lXMLNode1,'Wednesday','','',lXMLNode2);
+            lXMLMgt.AddElement(lXMLNode2,'TimeBegin',FORMAT(lProviderSetup."Start Wednes. Business Hours",0,9),'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'TimeEnd',FORMAT(lProviderSetup."End Wednes. Business Hours",0,9),'',lXMLNode3);
+
+            lXMLMgt.AddElement(lXMLNode1,'Thursday','','',lXMLNode2);
+            lXMLMgt.AddElement(lXMLNode2,'TimeBegin',FORMAT(lProviderSetup."Start Thursday Business Hours",0,9),'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'TimeEnd',FORMAT(lProviderSetup."End Thursday Business Hours",0,9),'',lXMLNode3);
+
+            lXMLMgt.AddElement(lXMLNode1,'Friday','','',lXMLNode2);
+            lXMLMgt.AddElement(lXMLNode2,'TimeBegin',FORMAT(lProviderSetup."Start Friday Business Hours",0,9),'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'TimeEnd',FORMAT(lProviderSetup."End Friday Business Hours",0,9),'',lXMLNode3);
+
+            lXMLMgt.AddElement(lXMLNode1,'Saturday','','',lXMLNode2);
+            lXMLMgt.AddElement(lXMLNode2,'TimeBegin',FORMAT(lProviderSetup."Start Satur. Business Hours",0,9),'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'TimeEnd',FORMAT(lProviderSetup."End Satur. Business Hours",0,9),'',lXMLNode3);
+
+            lXMLMgt.AddElement(lXMLNode1,'Sunday','','',lXMLNode2);
+            lXMLMgt.AddElement(lXMLNode2,'TimeBegin',FORMAT(lProviderSetup."Start Sunday Business Hours",0,9),'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'TimeEnd',FORMAT(lProviderSetup."End Sunday Business Hours",0,9),'',lXMLNode3);
+          END;
+      //  END;
+      END;
+
+      lFileName := GetTempFilename;
+      lXMLDoc.save(lFileName);
+      IF lFile.OPEN(lFileName) THEN BEGIN
+        lFile.CREATEINSTREAM(linStream);
+        pDayScheduleList.READ(linStream);
+        lFile.CLOSE;
+        ERASE(lFileName);
+      END ELSE BEGIN
+        ERROR(Text010);
+      END;
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Finish(lGUID);
+      //>>IMH15.PC
+    END;
+
+    PROCEDURE ListUnavailabilityPeriod@1100281004(pProviderNo@1100281005 : Code[20];pEmergency@1100281004 : Boolean;pSpecializationCode@1100281003 : Code[10];VAR pAbsencePeriods@1100281015 : BigText);
+    VAR
+      lInterfaceSetup@1100281016 : Record 50139;
+      lProvider@1100281002 : Record 50000;
+      lSpecialization@1100281001 : Record 50005;
+      lProviderSpecialization@1100281000 : Record 50006;
+      lProviderCalendar@1100281014 : Record 50007;
+      lTempProviderCalendar@1100281019 : TEMPORARY Record 50007;
+      lExtranetModifJournalField@1100281020 : Record 50156;
+      lExtranetModifJournalField2@1100281021 : Record 50156;
+      lXMLDoc@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNode1@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode2@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode3@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLMgt@1100281009 : Codeunit 8016710;
+      linStream@1100281008 : InStream;
+      lFileName@1100281007 : Text[1024];
+      lFile@1100281006 : File;
+      lStartDate@1100281017 : Date;
+      lEndDate@1100281018 : Date;
+      lTempDate@1100281022 : Date;
+      lBool@1100281023 : Boolean;
+      lCurrentLanguage@1100281024 : Integer;
+      lTempDateBuffer@1100281025 : Text[1024];
+      lGUID@1000000000 : GUID;
+    BEGIN
+      // IMH05 ISAT.EB --> A tester 25/08/2011
+      {
+      Rubrique 11.20
+      0000756: Requˆte SQL : P‚riodes dÉabsence dÉun prestataire pour un couple ® corps de m‚tier ¯-® niveau dÉurgence ¯
+      Description  ParamŠtres dÉentr‚e :
+      - Identifiant systŠme Dynamics NAV du prestataire
+      - Identifiant corps de m‚tier ( ?)
+      - Niveau dÉurgence (urgent / non urgent)
+
+      R‚sultat :
+      - Identifiant systŠme Dynamics NAV de la p‚riode dÉabsence
+      - Libell‚ du motif de lÉabsence
+      - Date de d‚but
+      - Date de fin
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo
+        - pEmergency
+        - pSpecializationCode (string 10) : code sp‚cialit‚ (corps de m‚tier)
+        - pAbsencePeriods (string) : mettre vide
+      - En sortie
+        - pAbsencePeriods (string) : liste des p‚riodes d'absence en xml
+          - <AbsencePeriodList>
+              <AbsencePeriod>
+                <pBuildingTradeNo>Corps de m‚tier</pBuildingTradeNo>
+                <pSpecializationCode>Code sp‚cialit‚</pSpecializationCode>
+                <pStartDate>date de d‚but</pStartDate>
+                <pEndDate>date de fin</pEndDate>
+                <pReasonDescription>string avec le code motif d'absence</pReasonDescription>
+                <pUnavailable>oui = indisponible; non = disponible</pUnavailable>
+                <pEmergency>si sp‚cialit‚ d‚fini alors indique l'urgence ou non</pEmergency>
+                <pWaiting>Absence en attente de validation</Wainting>
+              </AbsencePeriod>
+            </AbsencePeriodList>
+      }
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Initial(
+        1,'ListUnavailabilityPeriod',STRSUBSTNO('%1-%2-%3',pProviderNo,pEmergency,pSpecializationCode),lGUID);
+      //>>IMH15.PC
+
+      lCurrentLanguage := GLOBALLANGUAGE;
+      GLOBALLANGUAGE(1036);
+      // Recherche du prestataire
+      IF NOT lProvider.GET(pProviderNo) THEN
+        ERROR(Text000,pProviderNo);
+
+      // Recherche de la sp‚cialit‚
+      IF pSpecializationCode <> '' THEN BEGIN
+        IF NOT lSpecialization.GET(pSpecializationCode) THEN
+          ERROR(Text007,pSpecializationCode);
+      END;
+
+      // Recherche de la sp‚cialit‚ sur le prestataire
+      IF pSpecializationCode <> '' THEN BEGIN
+        IF NOT lProviderSpecialization.GET(pProviderNo,pSpecializationCode) THEN
+          ERROR(Text008,pProviderNo,pSpecializationCode);
+      END;
+
+      lInterfaceSetup.GET;
+      lStartDate := CALCDATE(lInterfaceSetup."Absence Period Begin Delay",WORKDATE);
+      lEndDate := CALCDATE(lInterfaceSetup."Absence Period End Delay",WORKDATE);
+
+      // Cr‚ation du fichier XML
+      lXMLMgt.CreateXml(lXMLDoc,'<AbsencePeriodList />',lXMLNode1);
+
+      // S‚lection des lignes en temporaire
+      lProviderCalendar.RESET;
+      lProviderCalendar.SETRANGE("Provider No.",pProviderNo);
+      lProviderCalendar.SETRANGE(Emergency,pEmergency);
+      IF pSpecializationCode <> '' THEN BEGIN
+        lProviderCalendar.SETRANGE("Specialization Code",pSpecializationCode);
+      END;
+      lProviderCalendar.SETFILTER("Start Date",'%1..%2|%3',lStartDate,lEndDate,0D);
+      lProviderCalendar.SETRANGE("End Date");
+      lProviderCalendar.SETRANGE(Unavailability,TRUE);
+      IF NOT lProviderCalendar.ISEMPTY THEN BEGIN
+        lProviderCalendar.FINDSET;
+        REPEAT
+          //IF (lProviderCalendar."Recurring System" = lProviderCalendar."Recurring System"::Weekly) OR
+          //   (lProviderCalendar."Start Date" <> 0D)
+          //THEN BEGIN
+            lTempProviderCalendar := lProviderCalendar;
+            IF lTempProviderCalendar.INSERT THEN;
+          //END;
+        UNTIL lProviderCalendar.NEXT = 0;
+      END;
+      lProviderCalendar.SETRANGE("Start Date");
+      lProviderCalendar.SETFILTER("End Date",'%1..%2',lStartDate,lEndDate,0D);
+      IF NOT lProviderCalendar.ISEMPTY THEN BEGIN
+        lProviderCalendar.FINDSET;
+        REPEAT
+          lTempProviderCalendar := lProviderCalendar;
+          IF lTempProviderCalendar.INSERT THEN;
+        UNTIL lProviderCalendar.NEXT = 0;
+      END;
+
+      // Lecture de la temporaire pour faire le fichier
+      lTempProviderCalendar.RESET;
+      IF NOT lTempProviderCalendar.ISEMPTY THEN BEGIN
+        lTempProviderCalendar.FINDSET;
+        lTempProviderCalendar.SETFILTER("Start Date",'<>%1',0D);
+        REPEAT
+
+          lXMLMgt.AddElement(lXMLNode1,'AbsencePeriod','','',lXMLNode2);
+          IF lTempProviderCalendar."Specialization Code" <> '' THEN BEGIN
+            IF lProviderSpecialization.GET(pProviderNo,lTempProviderCalendar."Specialization Code") THEN BEGIN
+              lXMLMgt.AddElement(lXMLNode2,'pBuildingTradeNo',lProviderSpecialization."Building Trade No.",'',lXMLNode3);
+              lXMLMgt.AddElement(lXMLNode2,'pSpecializationCode',lProviderSpecialization."Specialization Code",'',lXMLNode3);
+            END;
+          END;
+          lXMLMgt.AddElement(lXMLNode2,'pEmergency',FORMATBool(lTempProviderCalendar.Emergency),'',lXMLNode3);
+          IF lTempProviderCalendar."Start Date" <> 0D THEN BEGIN
+            lXMLMgt.AddElement(lXMLNode2,'pStartDate',FORMAT(lTempProviderCalendar."Start Date",0,9),'',lXMLNode3);
+          END;
+          IF lTempProviderCalendar."End Date" <> 0D THEN BEGIN
+            lXMLMgt.AddElement(lXMLNode2,'pEndDate',FORMAT(lTempProviderCalendar."End Date",0,9),'',lXMLNode3);
+          END;
+          IF lTempProviderCalendar."Unavailability Reason Code" <> '' THEN BEGIN
+            lXMLMgt.AddElement(lXMLNode2,'pReasonDescription',lTempProviderCalendar."Unavailability Reason Code",'',lXMLNode3);
+          END;
+          lXMLMgt.AddElement(lXMLNode2,'pUnavailable',FORMATBool(lTempProviderCalendar.Unavailability),'',lXMLNode3);
+          lXMLMgt.AddElement(lXMLNode2,'pWaiting',FORMATBool(FALSE),'',lXMLNode3);
+          lXMLMgt.AddElement(lXMLNode2,'pWaitingEntryNo',FORMAT(0,0,9),'',lXMLNode3);
+        UNTIL lTempProviderCalendar.NEXT = 0;
+      END;
+
+      lExtranetModifJournalField.RESET;
+      WITH lExtranetModifJournalField DO BEGIN
+        SETRANGE("Source Table ID",DATABASE::"Provider Change Calendar");
+        SETRANGE("Source No.",pProviderNo);
+        SETRANGE("Field No.",2); // champ urgence
+        SETRANGE("New Value",FORMAT(pEmergency));
+        IF NOT ISEMPTY THEN BEGIN
+          FINDSET;
+          REPEAT
+            lExtranetModifJournalField2.SETRANGE("Source Table ID",DATABASE::"Provider Change Calendar");
+            lExtranetModifJournalField2.SETRANGE("Source No.","Source No.");
+            lExtranetModifJournalField2.SETRANGE("Source No. 2","Source No. 2");
+            lExtranetModifJournalField2.SETRANGE("Source No. 3","Source No. 3");
+            lExtranetModifJournalField2.SETRANGE("Source No. 4","Source No. 4");
+            lExtranetModifJournalField2.SETRANGE("Source No. 5","Source No. 5");
+            lExtranetModifJournalField2.SETRANGE("Source Boolean","Source Boolean");
+            lExtranetModifJournalField2.SETRANGE("Source Date","Source Date");
+            lExtranetModifJournalField2.SETRANGE("Entry No.","Entry No.");
+
+            lXMLMgt.AddElement(lXMLNode1,'AbsencePeriod','','',lXMLNode2);
+
+            // Sp‚cialit‚
+            lExtranetModifJournalField2.SETRANGE("Field No.",3);
+            IF lExtranetModifJournalField2.FINDFIRST THEN BEGIN
+              IF lExtranetModifJournalField2."New Value" <> '' THEN BEGIN
+                IF lProviderSpecialization.GET(pProviderNo,lExtranetModifJournalField2."New Value") THEN BEGIN
+                  lXMLMgt.AddElement(lXMLNode2,'pBuildingTradeNo',lProviderSpecialization."Building Trade No.",'',lXMLNode3);
+                  lXMLMgt.AddElement(lXMLNode2,'pSpecializationCode',lProviderSpecialization."Specialization Code",'',lXMLNode3);
+                END;
+              END;
+            END;
+
+            // Urgence
+            lExtranetModifJournalField2.SETRANGE("Field No.",2);
+            IF lExtranetModifJournalField2.FINDFIRST THEN BEGIN
+              IF UPPERCASE(lExtranetModifJournalField2."New Value") IN ['NON','FALSE'] THEN BEGIN
+                lXMLMgt.AddElement(lXMLNode2,'pEmergency','false','',lXMLNode3);
+              END ELSE BEGIN
+                IF UPPERCASE(lExtranetModifJournalField2."New Value") IN ['OUI','TRUE'] THEN BEGIN
+                  lXMLMgt.AddElement(lXMLNode2,'pEmergency','true','',lXMLNode3);
+                END;
+              END;
+            END;
+
+            // Date d‚but
+            lExtranetModifJournalField2.SETRANGE("Field No.",6);
+            IF lExtranetModifJournalField2.FINDFIRST THEN BEGIN
+              lXMLMgt.AddElement(lXMLNode2,'pStartDate',FORMAT(lExtranetModifJournalField2."New Date Value",0,9),'',lXMLNode3);
+            END;
+
+            // Date fin
+            lExtranetModifJournalField2.SETRANGE("Field No.",10);
+            IF lExtranetModifJournalField2.FINDFIRST THEN BEGIN
+              lXMLMgt.AddElement(lXMLNode2,'pEndDate',FORMAT(lExtranetModifJournalField2."New Date Value",0,9),'',lXMLNode3);
+            END;
+
+            // Code motif
+            lExtranetModifJournalField2.SETRANGE("Field No.",40);
+            IF lExtranetModifJournalField2.FINDFIRST THEN BEGIN
+              lXMLMgt.AddElement(lXMLNode2,'pReasonDescription',lExtranetModifJournalField2."New Value",'',lXMLNode3);
+            END;
+
+            // Indisponible
+            lExtranetModifJournalField2.SETRANGE("Field No.",20);
+            IF lExtranetModifJournalField2.FINDFIRST THEN BEGIN
+              IF EVALUATE(lBool, lExtranetModifJournalField2."New Value") THEN
+                lXMLMgt.AddElement(lXMLNode2,'pUnavailable',FORMATBool(lBool),'',lXMLNode3);
+            END;
+
+            lXMLMgt.AddElement(lXMLNode2,'pWaiting',FORMATBool(TRUE),'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'pWaitingEntryNo',FORMAT("Entry No.",0,9),'',lXMLNode3);
+          UNTIL NEXT = 0;
+        END;
+      END;
+
+      lFileName := GetTempFilename;
+      lXMLDoc.save(lFileName);
+      IF lFile.OPEN(lFileName) THEN BEGIN
+        lFile.CREATEINSTREAM(linStream);
+        pAbsencePeriods.READ(linStream);
+        lFile.CLOSE;
+        ERASE(lFileName);
+      END ELSE BEGIN
+        ERROR(Text010);
+      END;
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Finish(lGUID);
+      //>>IMH15.PC
+    END;
+
+    PROCEDURE DeclareAbsencePeriod@1100281008(pProviderNo@1100281007 : Code[20];pEmergency@1100281005 : Boolean;pSpecializationCode@1100281006 : Code[10];pStartDate@1100281004 : DateTime;pEndDate@1100281003 : DateTime;pAbsenceReasonCode@1100281012 : Code[10];pExtranetContactNo@1100281002 : Code[20];pExtranetContactName@1100281001 : Text[30];pExtranetContactFirstName@1100281000 : Text[30]) : Boolean;
+    VAR
+      lDate@1100281013 : Record 2000000007;
+      lProvider@1100281011 : Record 50000;
+      lSpecialization@1100281015 : Record 50005;
+      lProviderSpecialization@1100281016 : Record 50006;
+      lExtranetModifJournalLine@1100281009 : Record 50150;
+      lProviderChangeCalendar@1100281010 : Record 50007;
+      lProviderCalendarMgt@1100281019 : Codeunit 50007;
+      lExtranetModifJournalMgt@1100281008 : Codeunit 50147;
+      lReasonCode@1100281014 : Code[10];
+      lDescription@1100281017 : Text[80];
+      lUnavailability@1100281018 : Boolean;
+      lExitLoop@1100281021 : Boolean;
+      lDateTime@1100281020 : DateTime;
+      lGUID@1000000000 : GUID;
+    BEGIN
+      // IMH06 ISAT.EB --> A tester 25/08/2011
+      {
+      Rubrique11.20
+      0000757: Web Service SOAP : D‚claration d'une p‚riode d'absence
+
+      Colonnes attendues :
+      - Retour de confirmation du succŠs de l'op‚ration
+
+       ParamŠtres :
+      - Identifiant systŠme Dynamics NAV du prestataire
+      - Code motif de lÉabsence
+      - Date de d‚but
+      - Date de fin
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo (string 20) : Nø prestataire
+        - pEmergency (bool‚en) : urgence ou non
+        - pSpecializationCode (string 10) : code sp‚cialit‚ (corps de m‚tier)
+        - pStartDate (datetime) : date de d‚but
+        - pEndDate (datetime) : date fin
+        - pAbsenceReasonCode (string 10) : code motif absence
+        - pExtranetContactNo (string 20)
+        - pExtranetContactName (string 30)
+        - pExtranetContactFirstName (string 30)
+      - En sortie
+        - Retourne vrai si tout est ok
+      }
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Initial(
+        1,'DeclareAbsencePeriod',
+        STRSUBSTNO(
+          '%1-%2-%3-%4-%5-%6',
+          pProviderNo,pEmergency,pSpecializationCode,pStartDate,pEndDate,pAbsenceReasonCode),
+        lGUID);
+      //>>IMH15.PC
+
+      GLOBALLANGUAGE(1036);
+
+      // Recherche du prestataire
+      IF NOT lProvider.GET(pProviderNo) THEN
+        ERROR(Text000,pProviderNo);
+
+      // Recherche de la sp‚cialit‚ sur le prestataire
+      IF pSpecializationCode <> '' THEN BEGIN
+        // Recherche de la sp‚cialit‚
+        IF NOT lSpecialization.GET(pSpecializationCode) THEN BEGIN
+          ERROR(Text007,pSpecializationCode);
+        END;
+        IF NOT lProviderSpecialization.GET(pProviderNo,pSpecializationCode) THEN BEGIN
+          ERROR(Text008,pProviderNo,pSpecializationCode);
+        END;
+        // Test de l'urgence sur les sp‚cialit‚s
+        IF pEmergency AND NOT lProviderSpecialization.Emergency THEN BEGIN
+          ERROR(Text013,pProviderNo,pSpecializationCode);
+        END;
+      END ELSE BEGIN
+        // Test de l'urgence sur les sp‚cialit‚s
+        IF pEmergency THEN BEGIN
+          lProviderSpecialization.SETRANGE("Provider No.",pProviderNo);
+          lProviderSpecialization.SETRANGE(Emergency,TRUE);
+          IF lProviderSpecialization.ISEMPTY THEN BEGIN
+            ERROR(Text014,pProviderNo);
+          END;
+        END;
+      END;
+
+      IF pStartDate = 0DT THEN BEGIN
+        ERROR(Text012);
+      END;
+
+      // on regarde si pour l'intervalle entre pStartDate et pEndDate
+      lDate.SETRANGE("Period Type",lDate."Period Type"::Date);
+      IF pEndDate <> 0DT THEN BEGIN
+        lDate.SETRANGE("Period Start",DT2DATE(pStartDate),DT2DATE(pEndDate));
+      END ELSE BEGIN
+        lDate.SETRANGE("Period Start",DT2DATE(pStartDate));
+      END;
+      lExitLoop := FALSE;
+      IF lDate.FINDSET THEN BEGIN
+        REPEAT
+          lUnavailability := FALSE;
+          lReasonCode := '';
+          lProviderCalendarMgt.CheckProviderDateStatus(
+            pProviderNo,
+            pEmergency,
+            pSpecializationCode,
+            lDate."Period Start",
+            lReasonCode,
+            lDescription,
+            lUnavailability);
+          //ERROR('lUnavailability ' + FORMAT(lUnavailability) + ' - Absence raison ' + lReasonCode);
+          lExitLoop := NOT lUnavailability OR (lUnavailability AND (lReasonCode <> pAbsenceReasonCode));
+        UNTIL lExitLoop OR (lDate.NEXT = 0);
+      END;
+
+      IF NOT lExitLoop THEN BEGIN
+        EXIT(TRUE);
+      END;
+
+      WITH lProviderChangeCalendar DO BEGIN
+        INIT;
+        "Provider No." := pProviderNo;
+        Emergency := pEmergency;
+        "Specialization Code" := pSpecializationCode;
+        IF (pStartDate = pEndDate) OR (pEndDate = 0DT) THEN BEGIN
+          "Recurring System" := "Recurring System"::" ";
+        END ELSE BEGIN
+          "Recurring System" := "Recurring System"::Interval;
+        END;
+        VALIDATE("Start Date",DT2DATE(pStartDate));
+        IF (pEndDate <> 0DT) AND (pStartDate <> pEndDate) THEN BEGIN
+          VALIDATE("End Date",DT2DATE(pEndDate));
+        END;
+        Unavailability := TRUE;
+        "Unavailability Reason Code" := pAbsenceReasonCode;
+      END;
+
+      // Passage par le journal des modifications extranet
+      WITH lExtranetModifJournalMgt DO BEGIN
+        CreateModifJrnlFromCalendar(
+          lProviderChangeCalendar, 0, 1,
+          pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+          lExtranetModifJournalLine);
+
+        CreateModifJrnlField(lExtranetModifJournalLine,
+          lProviderChangeCalendar.FIELDNO("Provider No."),lProviderChangeCalendar."Provider No.",0D,0DT,0,'',0);
+        CreateModifJrnlField(lExtranetModifJournalLine,
+          lProviderChangeCalendar.FIELDNO(Emergency),FORMAT(lProviderChangeCalendar.Emergency),0D,0DT,0,'',0);
+        IF pSpecializationCode <> '' THEN BEGIN
+          CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("Specialization Code"),lProviderChangeCalendar."Specialization Code",0D,0DT,0,'',0);
+        END;
+        CreateModifJrnlField(lExtranetModifJournalLine,
+          lProviderChangeCalendar.FIELDNO("Recurring System"),FORMAT(lProviderChangeCalendar."Recurring System",0,9),0D,0DT,0,'',0);
+        //<<IMH10 ISAT.EB
+        //<<IMH16.PC
+        {
+        CreateModifJrnlField(
+          lExtranetModifJournalLine,
+          lProviderChangeCalendar.FIELDNO("Start Date"),FormatDate(DT2DATE(pStartDate)),0,'',0);  //IMH14
+        }
+        CreateModifJrnlField(
+          lExtranetModifJournalLine,
+          lProviderChangeCalendar.FIELDNO("Start Date"),FormatDateTime(pStartDate),DT2DATE(pStartDate),0DT,0,'',0);  //IMH14
+        //>>IMH16.PC
+        IF pEndDate <> 0DT THEN BEGIN
+          //<<IMH16.PC
+          {
+          lExtranetModifJournalMgt.CreateModifJrnlField(
+            lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("End Date"),FormatDate(DT2DATE(pEndDate)),0,'',0);    //IMH14
+          }
+          lExtranetModifJournalMgt.CreateModifJrnlField(
+            lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("End Date"),FormatDateTime(pEndDate),DT2DATE(pEndDate),0DT,0,'',0);
+          //>>IMH16.PC
+        END;
+        //>>IMH10 ISAT.EB
+        CreateModifJrnlField(lExtranetModifJournalLine,
+          lProviderChangeCalendar.FIELDNO(Unavailability),FORMAT(lProviderChangeCalendar.Unavailability),0D,0DT,0,'',0);
+        CreateModifJrnlField(lExtranetModifJournalLine,
+          lProviderChangeCalendar.FIELDNO("Unavailability Reason Code"),
+          lProviderChangeCalendar."Unavailability Reason Code",0D,0DT,0,'',0);
+      END;
+
+      OnProviderChange(lProvider,Text018); //IMH12.ST
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Finish(lGUID);
+      //>>IMH15.PC
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE _DeleteAbsencePeriod@1100281009(pProviderNo@1100281012 : Code[20];pEmergency@1100281010 : Boolean;pSpecializationCode@1100281011 : Code[10];pPeriodType@1100281014 : ' ,Annual,Weekly,Interval';pStartDate@1100281006 : DateTime;pEndDate@1100281003 : DateTime;pAbsenceReasonCode@1100281009 : Code[10];pExtranetContactNo@1100281002 : Code[20];pExtranetContactName@1100281001 : Text[30];pExtranetContactFirstName@1100281000 : Text[30]) : Boolean;
+    VAR
+      lProvider@1100281008 : Record 50000;
+      lSpecialization@1100281015 : Record 50005;
+      lProviderSpecialization@1100281013 : Record 50006;
+      lProviderChangeCalendar@1100281005 : Record 50007;
+      lExtranetModifJournalLine@1100281004 : Record 50150;
+      lExtranetModifJournalMgt@1100281007 : Codeunit 50147;
+      lRemovePending@1100281016 : Boolean;
+    BEGIN
+      // IMH07 ISAT.EB --> A tester 25/08/2011
+      {
+      Rubrique11.20
+      0000758: Web Service SOAP : Suppression d'une p‚riode d'absence
+
+      Colonnes attendues :
+      - Retour de confirmation du succŠs de l'op‚ration
+
+       ParamŠtres :
+      - Identifiant systŠme Dynamics NAV de la p‚riode dÉabsence
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo (string 20) : Nø prestataire
+        - pEmergency (bool‚en) : urgence ou non
+        - pSpecializationCode (string 10) : code sp‚cialit‚ (corps de m‚tier)
+        - pPeriodType (integer) : Type p‚riode (0=date, 1=annuel, 2=hebdomadaire, 3=intervalle de dates)
+        - pStartDate (datetime) : date de d‚but
+        - pEndDate (datetime) : date fin
+        - pAbsenceReasonCode : code motif absence
+        - pExtranetContactNo
+        - pExtranetContactName
+        - pExtranetContactFirstName
+      - En sortie
+        - Retourne vrai si tout est ok
+      }
+      EXIT(DeleteAbsencePeriod(pProviderNo, pEmergency, pSpecializationCode, pPeriodType, pStartDate, pEndDate, pAbsenceReasonCode,
+                               0, pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName));
+      //IMH12.ST Code d‚plac‚ dans DeleteAbsencePeriod2
+    END;
+
+    PROCEDURE DeleteAbsencePeriod@1100281014(pProviderNo@1100281012 : Code[20];pEmergency@1100281010 : Boolean;pSpecializationCode@1100281011 : Code[10];pPeriodType@1100281014 : ' ,Annual,Weekly,Interval';pStartDate@1100281006 : DateTime;pEndDate@1100281003 : DateTime;pAbsenceReasonCode@1100281009 : Code[10];pWaitingEntryNo@1100281017 : Integer;pExtranetContactNo@1100281002 : Code[20];pExtranetContactName@1100281001 : Text[30];pExtranetContactFirstName@1100281000 : Text[30]) : Boolean;
+    VAR
+      lProvider@1100281008 : Record 50000;
+      lSpecialization@1100281015 : Record 50005;
+      lProviderSpecialization@1100281013 : Record 50006;
+      lProviderChangeCalendar@1100281005 : Record 50007;
+      lExtranetModifJournalLine@1100281004 : Record 50150;
+      lExtranetModifJournalMgt@1100281007 : Codeunit 50147;
+      lRemovePending@1100281016 : Boolean;
+      lExtranetModifJnlField@1100281018 : Record 50156;
+      lGUID@1000000000 : GUID;
+    BEGIN
+      // IMH07 ISAT.EB --> A tester 25/08/2011
+      {
+      Rubrique11.20
+      0000758: Web Service SOAP : Suppression d'une p‚riode d'absence
+
+      Colonnes attendues :
+      - Retour de confirmation du succŠs de l'op‚ration
+
+       ParamŠtres :
+      - Identifiant systŠme Dynamics NAV de la p‚riode dÉabsence
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo (string 20) : Nø prestataire
+        - pEmergency (bool‚en) : urgence ou non
+        - pSpecializationCode (string 10) : code sp‚cialit‚ (corps de m‚tier)
+        - pPeriodType (integer) : Type p‚riode (0=date, 1=annuel, 2=hebdomadaire, 3=intervalle de dates)
+        - pStartDate (datetime) : date de d‚but
+        - pEndDate (datetime) : date fin
+        - pAbsenceReasonCode : code motif absence
+        - pWaitingEntryNo : nø s‚quence temporaire
+        - pExtranetContactNo
+        - pExtranetContactName
+        - pExtranetContactFirstName
+      - En sortie
+        - Retourne vrai si tout est ok
+      }
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Initial(
+        1,'DeleteAbsencePeriod',
+        STRSUBSTNO(
+          '%1-%2-%3-%4-%5-%6-%7-%8',
+          pProviderNo,pEmergency,pSpecializationCode,pPeriodType,pStartDate,pEndDate,pAbsenceReasonCode,pWaitingEntryNo),
+        lGUID);
+      //>>IMH15.PC
+
+      GLOBALLANGUAGE(1036);
+      // Recherche du prestataire
+      IF NOT lProvider.GET(pProviderNo) THEN
+        ERROR(Text000,pProviderNo);
+
+      // Recherche de la sp‚cialit‚
+      IF pSpecializationCode <> '' THEN BEGIN
+        IF NOT lSpecialization.GET(pSpecializationCode) THEN
+          ERROR(Text007,pSpecializationCode);
+
+        // Recherche de la sp‚cialit‚ sur le prestataire
+        IF NOT lProviderSpecialization.GET(pProviderNo,pSpecializationCode) THEN
+          ERROR(Text008,pProviderNo,pSpecializationCode);
+      END;
+
+      // Pas de suppression de p‚riode annuel ou hebdomadaire
+      IF (pPeriodType = pPeriodType::Annual) OR
+         (pPeriodType = pPeriodType::Weekly) THEN
+        ERROR(Text009,FORMAT(pPeriodType));
+
+      IF (pPeriodType = pPeriodType::Interval) AND
+         (pStartDate = pEndDate) THEN
+        pPeriodType := pPeriodType::" ";
+
+      IF pWaitingEntryNo = 0 THEN BEGIN //IMH12.ST
+        // Recherche de la p‚riode d'absence
+        lProviderChangeCalendar.RESET;
+        lProviderChangeCalendar.SETRANGE("Provider No.",pProviderNo);
+        lProviderChangeCalendar.SETRANGE(Emergency,pEmergency);
+        lProviderChangeCalendar.SETRANGE("Specialization Code",pSpecializationCode);
+        lProviderChangeCalendar.SETRANGE(Unavailability,TRUE);
+        lProviderChangeCalendar.SETRANGE("Recurring System",pPeriodType);
+        lProviderChangeCalendar.SETRANGE("Start Date", DT2DATE(pStartDate));
+        lProviderChangeCalendar.SETRANGE("Unavailability Reason Code",pAbsenceReasonCode);
+        IF pPeriodType = pPeriodType::Interval THEN
+          lProviderChangeCalendar.SETRANGE("End Date", DT2DATE(pEndDate));
+
+        IF lProviderChangeCalendar.ISEMPTY THEN
+          ERROR(Text005,pStartDate,pEndDate,pProviderNo,FORMAT(pEmergency),pSpecializationCode);
+
+        // Passage par le journal des modifications extranet
+        lProviderChangeCalendar.FINDFIRST;
+        lExtranetModifJournalMgt.CreateModifJrnlFromCalendar(
+          lProviderChangeCalendar,0,2,
+          pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+          lExtranetModifJournalLine);
+        //<<IMH14
+        WITH lExtranetModifJournalMgt DO BEGIN
+          CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("Provider No."),lProviderChangeCalendar."Provider No.",0D,0DT,0,'',0);
+          CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO(Emergency),FORMAT(lProviderChangeCalendar.Emergency),0D,0DT,0,'',0);
+          IF pSpecializationCode <> '' THEN BEGIN
+            CreateModifJrnlField(lExtranetModifJournalLine,
+              lProviderChangeCalendar.FIELDNO("Specialization Code"),lProviderChangeCalendar."Specialization Code",0D,0DT,0,'',0);
+          END;
+          CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("Recurring System"),FORMAT(lProviderChangeCalendar."Recurring System",0,9),0D,0DT,0,'',0);
+          //<<IMH10 ISAT.EB
+          //<<IMH16.PC
+          {
+          CreateModifJrnlField(
+            lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("Start Date"),'',0D,pStartDate,0,'',0);  //IMH14
+          }
+          lExtranetModifJournalMgt.CreateModifJrnlField(
+            lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("Start Date"),FormatDateTime(pStartDate),DT2DATE(pStartDate),0DT,0,'',0);
+          //>>IMH16.PC
+          IF pEndDate <> 0DT THEN BEGIN
+            //<<IMH16.PC
+            {
+            lExtranetModifJournalMgt.CreateModifJrnlField(
+              lExtranetModifJournalLine,
+              lProviderChangeCalendar.FIELDNO("End Date"),'',0D,pEndDate,0,'',0);     //IMH14
+            }
+            lExtranetModifJournalMgt.CreateModifJrnlField(
+              lExtranetModifJournalLine,
+              lProviderChangeCalendar.FIELDNO("End Date"),FormatDateTime(pEndDate),DT2DATE(pEndDate),0DT,0,'',0);
+          //>>IMH16.PC
+          END;
+          //>>IMH10 ISAT.EB
+          CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO(Unavailability),FORMAT(lProviderChangeCalendar.Unavailability),0D,0DT,0,'',0);
+          CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("Unavailability Reason Code"),
+            lProviderChangeCalendar."Unavailability Reason Code",0D,0DT,0,'',0);
+        END;
+        //>>IMH14
+      //<<IMH12.ST
+      END ELSE BEGIN
+        WITH lExtranetModifJnlField DO BEGIN
+          SETRANGE("Source Table ID", DATABASE::"Provider Change Calendar");
+          SETRANGE("Source No.", pProviderNo);
+          SETRANGE("Source Boolean", pEmergency);
+          SETRANGE("Source No. 2", pSpecializationCode);
+          SETRANGE("Source No. 3", pPeriodType);
+          SETRANGE("Source Date", DT2DATE(pStartDate));
+          SETRANGE("Entry No.", pWaitingEntryNo);
+          IF ISEMPTY THEN
+            ERROR(Text005,pStartDate,pEndDate,pProviderNo,FORMAT(pEmergency),pSpecializationCode)
+          ELSE
+            DELETEALL;
+        END;
+      END;
+      //>>IMH12.ST
+      OnProviderChange(lProvider,Text019); //IMH12.ST
+
+      //<<IMH15.PC
+      lExtranetCommonFunctions.Finish(lGUID);
+      //>>IMH15.PC
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SendDocument@1100281005();
+    BEGIN
+      // IMH08 ISAT.EB
+      {
+      Rubrique 11.19
+      0000752: Web Service SOAP : Transmission d'un document
+
+      Colonnes attendues :
+      - Retour de confirmation du succŠs de l'op‚ration
+
+      ParamŠtres :
+      - Identifiant systŠme Dynamics NAV du prestataire
+      - El‚ments n‚cessaires … l'envoi d'un fichier
+
+      --> Idem que demande Mantys 653
+      }
+    END;
+
+    LOCAL PROCEDURE GetTempFilename@9() FileName@1000 : Text[260];
+    VAR
+      I@1001 : Integer;
+      DocNo@1002 : Text[30];
+      TempFile@1100281000 : File;
+      lText001@1100281001 : TextConst 'ENU=\Doc;FRA=\Doc';
+    BEGIN
+      REPEAT
+        IF I <> 0 THEN
+          DocNo := FORMAT(I);
+        IF NOT ISSERVICETIER THEN BEGIN
+          FileName := ENVIRON('TEMP') + lText001 + DocNo + '.xml';
+        END ELSE BEGIN
+          TempFile.CREATETEMPFILE;
+          FileName := TempFile.NAME + '.' + '.xml';
+          TempFile.CLOSE;
+        END;
+
+        IF NOT EXISTS(FileName) THEN
+          EXIT;
+        I := I +1;
+      UNTIL I=999;
+    END;
+
+    LOCAL PROCEDURE SetFrenchDate@1100281007(pDateTime@1100281000 : DateTime) rValue : DateTime;
+    VAR
+      lDate@1100281001 : Date;
+    BEGIN
+      // IMH.13.PC
+      // Transforme une date US en date FR
+      rValue := 0DT;
+
+      lDate := DT2DATE(pDateTime);
+      ERROR(FORMAT(lDate));
+      //dmy2date(date2dmy(pdatetime
+    END;
+
+    LOCAL PROCEDURE GetAbsenceSpecialization_Old@1100281006(pProviderNo@1100281005 : Code[20];pSpecializationCode@1100281003 : Code[10];pEmergency@1100281004 : Integer;pDate@1100281020 : DateTime;VAR pSpecializationList@1100281015 : BigText);
+    VAR
+      lInterfaceSetup@1100281016 : Record 50139;
+      lProviderSpecialization@1100281000 : Record 50006;
+      lProviderChangeCalendar@1100281014 : Record 50007;
+      lProviderSpecializationBuffer@1100281019 : TEMPORARY Record 50006;
+      lXMLMgt@1100281009 : Codeunit 8016710;
+      lXMLDoc@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNode1@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode2@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode3@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      linStream@1100281008 : InStream;
+      lFileName@1100281007 : Text[1024];
+      lFile@1100281006 : File;
+      lStartDate@1100281017 : Date;
+      lEndDate@1100281018 : Date;
+    BEGIN
+      {
+
+      0001756: Requˆte SQL : P‚riodes dÉabsence dÉun prestataire pour un couple ® corps de m‚tier ¯-® niveau dÉurgence ¯
+      - En entr‚e
+        - pProviderNo (string 20) : nø prestataire
+        - pSpecializationCode (string 10) : code sp‚cialit‚ (si vide tous les sp‚cialit‚s du prestataire)
+        - pEmergency integer : 0 tous, 1 urgent, 2 non urgent
+        - pDate (datetime) : date servant pour v‚rifier la pr‚sence d'absence
+        - plist (string) : mettre vide
+
+      - En sortie
+        - pList (string) : liste des corps de m‚tiers / sp‚cialit‚s poss‚dant une absence
+        - Utilisation du sch‚ma SpecializationList.xsd
+      }
+      GLOBALLANGUAGE(1036);
+      lXMLMgt.CreateXml(lXMLDoc,'<SpecializationList />',lXMLNode1);
+
+      lProviderSpecialization.SETRANGE("Provider No.",pProviderNo);
+      IF pSpecializationCode <> '' THEN BEGIN
+        lProviderSpecialization.SETRANGE("Specialization Code",pSpecializationCode);
+      END;
+      CASE pEmergency OF
+        1 : lProviderSpecialization.SETRANGE(Emergency,TRUE);
+        2 : lProviderSpecialization.SETRANGE(Emergency,FALSE);
+      END;
+      IF lProviderSpecialization.FINDSET THEN BEGIN
+        REPEAT
+          lProviderChangeCalendar.SETRANGE("Provider No.",pProviderNo);
+          lProviderChangeCalendar.SETRANGE("Specialization Code",lProviderSpecialization."Specialization Code");
+          CASE pEmergency OF
+            1 : lProviderChangeCalendar.SETRANGE(Emergency,TRUE);
+            2 : lProviderChangeCalendar.SETRANGE(Emergency,FALSE);
+          END;
+          lProviderChangeCalendar.SETFILTER("Start Date",'>=%1',DT2DATE(pDate));
+          lProviderChangeCalendar.SETRANGE(Unavailability,TRUE);
+          //ERROR('Filtre chg date : ' + lProviderChangeCalendar.GETFILTERS + ' Count : ' + FORMAT(lProviderChangeCalendar.COUNT));
+          IF NOT lProviderChangeCalendar.ISEMPTY THEN BEGIN
+            lProviderSpecializationBuffer := lProviderSpecialization;
+            lProviderSpecializationBuffer.INSERT;
+          END;
+        UNTIL lProviderSpecialization.NEXT = 0;
+
+        lProviderSpecializationBuffer.RESET;
+        IF NOT lProviderSpecializationBuffer.ISEMPTY THEN BEGIN
+          lProviderSpecializationBuffer.FINDSET;
+          REPEAT
+            lXMLMgt.AddElement(lXMLNode1,'Specialization','','',lXMLNode2);
+            lXMLMgt.AddElement(lXMLNode2,'pBuildingTradeNo',lProviderSpecializationBuffer."Building Trade No.",'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'pSpecializationCode',lProviderSpecializationBuffer."Specialization Code",'',lXMLNode3);
+            lXMLMgt.AddElement(lXMLNode2,'pEmergency',FORMAT(lProviderSpecializationBuffer.Emergency,0,9),'',lXMLNode3);
+          UNTIL lProviderSpecializationBuffer.NEXT = 0;
+        END;
+      END;
+
+      lFileName := GetTempFilename;
+      lXMLDoc.save(lFileName);
+      IF lFile.OPEN(lFileName) THEN BEGIN
+        lFile.CREATEINSTREAM(linStream);
+        pSpecializationList.READ(linStream);
+        lFile.CLOSE;
+        ERASE(lFileName);
+      END ELSE BEGIN
+        ERROR(Text010);
+      END;
+    END;
+
+    LOCAL PROCEDURE FORMATBool@1100281010(pBoolean@1100281000 : Boolean) : Text[30];
+    BEGIN
+      IF pBoolean THEN BEGIN
+        EXIT('true');
+      END ELSE BEGIN
+        EXIT('false');
+      END;
+    END;
+
+    LOCAL PROCEDURE ManageDate@1100281011(pCurrentLanguage@1100281000 : Integer;pDateToEvaluate@1100281001 : Text[250]) : Text[250];
+    BEGIN
+      CASE pCurrentLanguage OF
+        1033 : BEGIN
+          EXIT(COPYSTR(pDateToEvaluate,7,4) + '-' + COPYSTR(pDateToEvaluate,4,2) + '-' + COPYSTR(pDateToEvaluate,1,2));
+        END;
+      END;
+    END;
+
+    PROCEDURE HasPendingUpdates@1100281012(pProviderNo@1100281005 : Code[20];pForValue@1100281003 : Integer) rValue : Boolean;
+    VAR
+      lProvider@1100281002 : Record 50000;
+      lExtranetModifJournalField@1100281020 : Record 50156;
+      lCurrentLanguage@1100281024 : Integer;
+      lTableFilter@1100281000 : Text[1024];
+      lFieldFIlter@1100281001 : Text[1024];
+      lContAltAddr@1100281004 : Record 5051;
+    BEGIN
+      // IMH05 ISAT.EB --> A tester 25/08/2011
+      {
+      Description  ParamŠtres dÉentr‚e :
+      - Identifiant systŠme Dynamics NAV du prestataire
+      - Identifiant corps de m‚tier ( ?)
+      - Niveau dÉurgence (urgent / non urgent)
+
+      R‚sultat :
+      - Identifiant systŠme Dynamics NAV de la p‚riode dÉabsence
+      - Libell‚ du motif de lÉabsence
+      - Date de d‚but
+      - Date de fin
+
+      ParamŠtres d‚finitifs :
+      - En entr‚e
+        - pProviderNo
+        - pEmergency
+        - pSpecializationCode (string 10) : code sp‚cialit‚ (corps de m‚tier)
+        - pAbsencePeriods (string) : mettre vide
+      - En sortie
+        - pAbsencePeriods (string) : liste des p‚riodes d'absence en xml
+          - <AbsencePeriodList>
+              <AbsencePeriod>
+                <pBuildingTradeNo>Corps de m‚tier</pBuildingTradeNo>
+                <pSpecializationCode>Code sp‚cialit‚</pSpecializationCode>
+                <pStartDate>date de d‚but</pStartDate>
+                <pEndDate>date de fin</pEndDate>
+                <pReasonDescription>string avec le code motif d'absence</pReasonDescription>
+                <pUnavailable>oui = indisponible; non = disponible</pUnavailable>
+                <pEmergency>si sp‚cialit‚ d‚fini alors indique l'urgence ou non</pEmergency>
+                <pWaiting>Absence en attente de validation</Wainting>
+              </AbsencePeriod>
+            </AbsencePeriodList>
+      }
+      lCurrentLanguage := GLOBALLANGUAGE;
+      GLOBALLANGUAGE(1036);
+      // Recherche du prestataire
+      IF NOT lProvider.GET(pProviderNo) THEN
+        ERROR(Text000,pProviderNo);
+
+      CASE pForValue OF
+        1 : BEGIN // Adresse prestataire
+          lTableFilter := FORMAT(DATABASE::Provider);
+          lFieldFIlter := STRSUBSTNO('%1|%2|%3|%4',
+                                     lProvider.FIELDNO(Address),
+                                     lProvider.FIELDNO("Address 2"),
+                                     lProvider.FIELDNO("Post Code"),
+                                     lProvider.FIELDNO(City)
+                                    );
+        END;
+        2 : BEGIN // Adresse op‚rationnelle
+          lTableFilter := FORMAT(DATABASE::"Contact Alt. Address");
+          lFieldFIlter := STRSUBSTNO('%1|%2|%3|%4',
+                                     lContAltAddr.FIELDNO(Address),
+                                     lContAltAddr.FIELDNO("Address 2"),
+                                     lContAltAddr.FIELDNO("Post Code"),
+                                     lContAltAddr.FIELDNO(City)
+                                    );
+        END;
+      END;
+      IF lTableFilter = '' THEN
+        EXIT(FALSE);
+      lExtranetModifJournalField.RESET;
+      WITH lExtranetModifJournalField DO BEGIN
+        SETFILTER("Source Table ID",lTableFilter);
+        SETRANGE("Source No.",pProviderNo);
+        SETFILTER("Field No.",lFieldFIlter);
+      // non n‚cessaire  SETFILTER(Status, '%1|%2', Status::" ", Status::"TO Post");
+        EXIT(NOT ISEMPTY);
+      END;
+    END;
+
+    LOCAL PROCEDURE OnProviderChange@1100281016(pProvider@1100281000 : Record 50000;pDescription@1100281002 : Text[80]);
+    VAR
+      lInterfaceSetup@1100281001 : Record 50139;
+    BEGIN
+      //IMH12.ST
+      lInterfaceSetup.GET;
+      IF lInterfaceSetup."Provider Modify Team Code" <> '' THEN
+        CreateTrayLine(pProvider, lInterfaceSetup."Provider Modify Team Code", lInterfaceSetup."Provider Modify Task Code",pDescription)
+      ;
+    END;
+
+    LOCAL PROCEDURE CreateTrayLine@1100281025(pProvider@1100281001 : Record 50000;pTeamCode@1100281004 : Code[10];pTaskCode@1100281002 : Code[10];pDescription@1100281006 : Text[80]);
+    VAR
+      lTrayLineMgt@1100281000 : Codeunit 50050;
+      lContact@1100281003 : Record 5050;
+      lTempTrayLine@1100281005 : Record 50048;
+    BEGIN
+      //IMH12.ST
+      IF NOT lContact.GET(pProvider."No.") THEN
+        EXIT;
+
+      //<<IMH13.ISAT.EBA
+      //lTrayLineMgt.CreateTLFromContact(lContact,pTeamCode,pTaskCode,FALSE);
+
+      lTempTrayLine.SETRANGE("Linked To Table", lTempTrayLine."Linked To Table"::Contact);
+      lTempTrayLine.SETRANGE("Contact No.", lContact."No.");
+      lTempTrayLine.Description := pDescription;
+
+      lTrayLineMgt.CreateTLFromTL(lTempTrayLine, pTeamCode, pTaskCode,FALSE);
+      //>>IMH13.ISAT.EBA
+    END;
+
+    PROCEDURE FormatDate@1100281013(pDate@1100281000 : Date) : Text[30];
+    BEGIN
+      //IHM14
+      EXIT(FORMAT(pDate, 0, '<Day,2>/<Month,2>/<Year>'));
+    END;
+
+    PROCEDURE FormatDateTime@1000000000(pDateTime@1100281000 : DateTime) : Text[30];
+    BEGIN
+      //IHM14
+      EXIT(FORMAT(pDateTime, 0, '<Day,2>/<Month,2>/<Year>'));
+    END;
+
+    BEGIN
+    {
+      /** @r IMH16 @d 25/01/13 @a ISAT.PC @v IMH6.01.215 @s NEP00006 @h 3757 */
+      /** @r IMH15 @a 09/10/12 @a ISAT.PC @v IMH6.01.P003 @s Log Web Service @c Ajout de la fonctionnalit‚ */
+      /** @r IHM14 @d 05/09/12 @a ISAT.ZW @v IMH6.01.223 @s NEP000003 @c Extranet @h 2096 @c Gestion MAJ calendrier  */
+      /** @r IMH13 @d 15/03/12 @a ISAT.EBA @v IMH6.01.165 @s Interface Extranet Prestataire @c Gestion activit‚ corbeille */
+      /** @r IMH12 @d 02/11/11 @a ISAT.ST @v IMH6.01.165 @s Interface Extranet Prestataire
+          @c Correction horaires prestataires
+          @c Ajout CreateTrayLine */
+      /** @r IMH11 @d 20/10/11 @a ISAT.NFO @v IMH6.01.165 @s Interface Extranet Prestataire
+          @c Ajout de GLOBALLANGUAGE(1036); en d‚but de fonctions webservice pour avoir les valeurs en fr  */
+      /** @r IMH10 @d 19/10/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire
+          @c Fonction DeclareAbsencePeriod : enregistrement des dates de d‚but et de fin dans le journal */
+      /** @r IMH09 @d 13/10/11 @a ISAT.PC @v IMH6.01.165 @s Interface Extranet Prestataire @h 1756
+          @c Fonction GetAbsenceSpecialization */
+      /** @r IMH07 @d 25/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire @h 758
+          @c Fonction DeleteAbsencePeriod
+          @c Suppression d'une p‚riode d'absence */
+      /** @r IMH06 @d 25/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire @h 757
+          @c Fonction DeclareAbsencePeriod
+          @c D‚claration d'une p‚riode d'absence */
+      /** @r IMH05 @d 25/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire @h 756
+          @c Fonction ListUnavailabilityPeriod
+          @c D‚claration d'une p‚riode d'absence */
+      /** @r IMH04 @d 25/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire @h 754
+          @c Fonction GetDaySchedule
+          @c R‚cup‚ration pour un couple ® corps de m‚tier ¯/® niveau dÉurgence ¯ les horaires journaliers */
+      /** @r IMH03 @d 24/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire @h 745
+          @c Fonction UpdateAdministrativeAddress
+          @c Modification de l'adresse du siŠge sociale */
+      /** @r IMH02 @d 24/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire @h 746
+          @c Fonction UpdateOperationnalAddress
+          @c Modifier l'adresse op‚rationnelle  */
+      /** @r IMH01 @d 24/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire @h 749
+          @c Fonction UpdatePhones
+          @c Modifier les num‚ros de t‚l‚phone d'un prestataire  */
+      /** @r IMH00 @d 24/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface Extranet Prestataire
+          @c cr‚ation */
+    }
+    END.
+  }
+}

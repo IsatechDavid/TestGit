@@ -1,0 +1,240 @@
+OBJECT Codeunit 50026 SQL Stored Procedure Geo.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=04/08/11;
+    Time=10:39:29;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+            IF GUIALLOWED THEN BEGIN
+              IF CONFIRM(Text004) THEN BEGIN
+                CreateTableInsee();
+                UpdateTableInsee();
+              END;
+              IF CONFIRM(Text001) THEN BEGIN
+                CreateProc();
+              END;
+            END;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Do you want to launch SQL stored procedure generation to manage geo. skill ?;FRA=Souhaitez-vous lancer la g‚n‚ration des proc‚dures stock‚es concernant la comp‚tence g‚o. dans SQL ?';
+      Text003@1100281002 : TextConst 'ENU=Update geo. reference @1@@@@@@@@@@@@@@;FRA=Mise … jour r‚f‚rence geo.  @1@@@@@@@@@@@@@@';
+      Text004@1100281003 : TextConst 'FRA=Souhaitez-vous (re)cr‚er la table INSEE ?';
+
+    PROCEDURE GetConnectionString@1100281005() : Text[250];
+    VAR
+      lDatabase@1100281001 : Record 2000000048;
+      lServer@1100281000 : Record 2000000047;
+      lProviderSetup@1100281002 : Record 50011;
+    BEGIN
+      lProviderSetup.GET;
+      lProviderSetup.TESTFIELD("Server Name");
+      lProviderSetup.TESTFIELD("Database Name");
+      EXIT(
+        'Provider=SQLOLEDB.1;Integrated Security=SSPI;Persist Security Info=False;Initial Catalog=' +
+        lProviderSetup."Database Name" + ';Data Source=' +
+        lProviderSetup."Server Name" );
+    END;
+
+    PROCEDURE ExecuteScript@1100281003(pSQL@1100281000 : Text[1024]);
+    VAR
+      lADOConn@1100281008 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000514-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Connection";
+      lADORs@1100281007 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000535-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Recordset";
+      lConnexion@1100281006 : Text[250];
+      lInteger@1100281001 : Integer;
+    BEGIN
+      IF NOT CREATE(lADOConn) THEN
+        EXIT;
+      IF NOT CREATE(lADORs) THEN
+        EXIT;
+
+      lConnexion := GetConnectionString;
+      lADOConn.Open(lConnexion);
+      lADORs := lADOConn.Execute(pSQL,lInteger,lInteger);
+      lADOConn.Close;
+      CLEAR(lADOConn);
+      CLEAR(lADORs);
+    END;
+
+    PROCEDURE CreateProc@1100281018();
+    VAR
+      lSQL@1100281000 : Text[1024];
+      lCRLF@1100281001 : ARRAY [2] OF Char;
+    BEGIN
+      lCRLF[1] := 10;
+
+      // Calcul de la distance entre deux code INSEE
+      // Suppression proc‚dure stock‚e
+      lSQL := 'IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(''[dbo].[GetDistance]'') AND type in (''P'',''PC'')) ';
+      lSQL += 'DROP PROCEDURE [dbo].[GetDistance]';
+      ExecuteScript(lSQL);
+      // Cr‚ation proc‚dure stock‚e
+      lSQL := 'CREATE PROCEDURE [dbo].[GetDistance] @InseeCode1 char(10),@InseeCode2 char(10)' + FORMAT(FORMAT(lCRLF[1])[1]);
+      lSQL += 'AS' + FORMAT(lCRLF[1]);
+      lSQL += 'BEGIN' + FORMAT(lCRLF[1]);
+      lSQL += '--' + FORMAT(CURRENTDATETIME) + FORMAT(lCRLF[1]);
+      lSQL += 'SET NOCOUNT ON;' + FORMAT(lCRLF[1]);
+      lSQL += 'DECLARE @loc geography;' + FORMAT(lCRLF[1]);
+      lSQL += 'SELECT @loc = Position from Insee where [Insee Code] = @InseeCode1;' + FORMAT(lCRLF[1]);
+      lSQL += 'SELECT [Insee Code],CAST(Position.STDistance(@loc) as integer) AS Distance' + FORMAT(lCRLF[1]);
+      lSQL += 'FROM INsee WHERE [Insee Code] = @InseeCode2' + FORMAT(lCRLF[1]);
+      lSQL += 'ORDER BY Distance;' + FORMAT(lCRLF[1]);
+      lSQL += 'SET NOCOUNT OFF;' + FORMAT(lCRLF[1]);
+      lSQL += 'END; ';
+      ExecuteScript(lSQL);
+
+      lSQL := 'GRANT EXECUTE ON [dbo].[GetDistance] TO [public]';
+      ExecuteScript(lSQL);
+
+      // Calcul des coordonn‚es g‚ographique dans SQL Server
+      // Suppression proc‚dure stock‚e
+      lSQL := 'IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(''[dbo].[UpdateInsee]'') AND type in (''P'',''PC'')) ';
+      lSQL += 'DROP PROCEDURE [dbo].[UpdateInsee]';
+      ExecuteScript(lSQL);
+      // Cr‚ation proc‚dure stock‚e
+      lSQL := 'CREATE PROCEDURE [dbo].[UpdateInsee] @InseeCode char(10),@latitude decimal(38,8), ';
+      lSQL += '  @longitude decimal(38,8)' + FORMAT(lCRLF[1]);
+      lSQL += 'AS' + FORMAT(lCRLF[1]);
+      lSQL += 'BEGIN' + FORMAT(lCRLF[1]);
+      lSQL += '--' + FORMAT(CURRENTDATETIME) + '' + FORMAT(lCRLF[1]);
+      lSQL += 'SET NOCOUNT ON' + FORMAT(lCRLF[1]);
+      lSQL += 'DECLARE @loc geography;' + FORMAT(lCRLF[1]);
+      lSQL += 'DECLARE @str varchar(250);' + FORMAT(lCRLF[1]);
+      lSQL += 'SET @str = ''POINT('' + CAST(@latitude as VARCHAR) + '' '' + CAST(@longitude as VARCHAR) + '')'';' + FORMAT(lCRLF[1]);
+      lSQL += 'SET @loc = geography::STGeomFromText(@str, 4326);' + FORMAT(lCRLF[1]);
+      lSQL += 'DELETE FROM Insee WHERE [Insee Code] = @InseeCode;' + FORMAT(lCRLF[1]);
+      lSQL += 'INSERT INTO [Insee] values (@InseeCode, @loc)' + FORMAT(lCRLF[1]);
+      lSQL += 'SET NOCOUNT OFF;' + FORMAT(lCRLF[1]);
+      lSQL += 'END; ';
+      ExecuteScript(lSQL);
+
+      lSQL := 'GRANT EXECUTE ON [dbo].[UpdateInsee] TO [public]';
+      ExecuteScript(lSQL);
+
+      // Renvoi de x codes INSEE pr‚sent dans un rayon x km (recherche invers‚e
+      // Suppression proc‚dure stock‚e
+      lSQL := 'IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(''[dbo].[GetInsee]'') AND type in (''P'',''PC'')) ';
+      lSQL += 'DROP PROCEDURE [dbo].[GetInsee]';
+      ExecuteScript(lSQL);
+      // Cr‚ation proc‚dure stock‚e
+      lSQL := 'CREATE PROCEDURE [dbo].[GetInsee] @InseeCode char(10),@Distance int' + FORMAT(lCRLF[1]);
+      lSQL += 'AS' + FORMAT(lCRLF[1]);
+      lSQL += 'BEGIN' + FORMAT(lCRLF[1]);
+      lSQL += '--' + FORMAT(CURRENTDATETIME) + ' ' + FORMAT(lCRLF[1]);
+      lSQL += 'SET NOCOUNT ON; ' + FORMAT(lCRLF[1]);
+      lSQL += 'DECLARE @loc geography;' + FORMAT(lCRLF[1]);
+      lSQL += 'SELECT @loc = Position FROM Insee WHERE [Insee Code] = @InseeCode;' + FORMAT(lCRLF[1]);
+      lSQL += 'SELECT [Insee Code], Position.STDistance(@loc) AS Distance' + FORMAT(lCRLF[1]);
+      lSQL += 'FROM Insee WHERE Position.STDistance(@loc) <= @Distance' + FORMAT(lCRLF[1]);
+      lSQL += 'ORDER BY Distance;' + FORMAT(lCRLF[1]);
+      lSQL += 'SET NOCOUNT OFF;' + FORMAT(lCRLF[1]);
+      lSQL += 'END; ';
+      ExecuteScript(lSQL);
+
+      lSQL := 'GRANT EXECUTE ON [dbo].[GetInsee] TO [public]';
+      ExecuteScript(lSQL);
+    END;
+
+    PROCEDURE CreateTableInsee@1100281000();
+    VAR
+      lSQL@1100281000 : Text[1024];
+      lCRLF@1100281001 : ARRAY [2] OF Char;
+    BEGIN
+      lCRLF[1] := 10;
+      // suprression de la table Insee
+      lSQL := 'IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(''[dbo].[Insee]'')' + FORMAT(lCRLF[1]);
+      lSQL += 'AND type in (''U''))' + FORMAT(lCRLF[1]);
+      lSQL += 'DROP TABLE [dbo].[Insee]';
+      ExecuteScript(lSQL);
+      // Cr‚ation de la table insee
+      lSQL := 'CREATE TABLE [dbo].[Insee] (' + FORMAT(lCRLF[1]);
+      lSQL += '[Insee Code] CHAR(10) NOT NULL,' + FORMAT(lCRLF[1]);
+      lSQL += '[Position] geography NULL,' + FORMAT(lCRLF[1]);
+      lSQL += 'CONSTRAINT [PK_Insee] PRIMARY KEY CLUSTERED (' + FORMAT(lCRLF[1]);
+      lSQL += '[Insee Code] ASC ) WITH (PAD_INDEX = OFF,STATISTICS_NORECOMPUTE = OFF,' + FORMAT(lCRLF[1]);
+      lSQL += 'IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON,ALLOW_PAGE_LOCKS = ON))' + FORMAT(lCRLF[1]);
+      ExecuteScript(lSQL);
+      // Cr‚ation de l'index spacial
+      lSQL := 'CREATE SPATIAL INDEX [SI_Position] ON [dbo].[Insee] (' + FORMAT(lCRLF[1]);
+      lSQL += '[Position]' + FORMAT(lCRLF[1]);
+      lSQL += ') USING GEOGRAPHY_GRID'+ FORMAT(lCRLF[1]);
+      lSQL += 'WITH (' + FORMAT(lCRLF[1]);
+      lSQL += 'GRIDS =(LEVEL_1 = MEDIUM,LEVEL_2 = MEDIUM,LEVEL_3 = MEDIUM,LEVEL_4 = MEDIUM),' + FORMAT(lCRLF[1]);
+      lSQL += 'CELLS_PER_OBJECT = 16, PAD_INDEX = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF,' + FORMAT(lCRLF[1]);
+      lSQL += 'ALLOW_ROW_LOCKS = ON,ALLOW_PAGE_LOCKS = ON)' + FORMAT(lCRLF[1]);
+      ExecuteScript(lSQL);
+    END;
+
+    PROCEDURE UpdateTableInsee@1100281004();
+    VAR
+      lGeographicalReference@1100281005 : Record 50013;
+      lADOConn@1100281009 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000514-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Connection";
+      lADORs@1100281008 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000535-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Recordset";
+      lDialog@1100281003 : Dialog;
+      lTotalCounter@1100281002 : Integer;
+      lCurrentCounter@1100281001 : Integer;
+      lModuloCounter@1100281000 : Integer;
+      lRecordsAffected@1100281013 : Integer;
+      lOptions@1100281012 : Integer;
+      lConnexion@1100281007 : Text[200];
+      lPsSQL@1100281006 : Text[250];
+      lLongitude@1100281011 : Text[250];
+      lLatitude@1100281010 : Text[250];
+    BEGIN
+      lGeographicalReference.RESET;
+      IF GUIALLOWED THEN BEGIN
+        lDialog.OPEN(Text003);
+        lCurrentCounter := 0;
+        lTotalCounter := lGeographicalReference.COUNT;
+        lModuloCounter := ROUND(lTotalCounter * 1 / 100,1,'>');
+      END;
+
+      IF NOT CREATE(lADOConn) THEN EXIT;
+      IF NOT CREATE(lADORs) THEN EXIT;
+      lConnexion := GetConnectionString();
+      lADOConn.Open(lConnexion);
+
+      IF lGeographicalReference.FINDSET THEN BEGIN
+        REPEAT
+          IF GUIALLOWED THEN BEGIN
+            lCurrentCounter += 1;
+            IF lCurrentCounter MOD lModuloCounter = 1 THEN BEGIN
+              lDialog.UPDATE(1,ROUND(lCurrentCounter / lTotalCounter * 9999,1));
+            END;
+          END;
+
+          lLatitude := CONVERTSTR(FORMAT(lGeographicalReference."Latitude WGS64"), ',', '.');
+          lLongitude := CONVERTSTR(FORMAT(lGeographicalReference."Longitude WGS64"), ',', '.');
+          lPsSQL :=
+            STRSUBSTNO('EXEC UpdateInsee ''%1'',%2,%3', lGeographicalReference.Code,lLatitude,lLongitude);
+          lADORs := lADOConn.Execute(lPsSQL,lRecordsAffected,lOptions);
+        UNTIL lGeographicalReference.NEXT = 0;
+      END;
+
+      lADOConn.Close();
+      CLEAR(lADOConn);
+      CLEAR(lADORs);
+
+      IF GUIALLOWED THEN BEGIN
+        lDialog.CLOSE;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 23/02/11 @a ISAT.NFO @v IMH6.01.005 @s Recherche g‚ographique
+          @c Ajout de grant execute to public sur les procs */
+      /** @r IMH01 @d 11/01/11 @a ISAT.NFO @v IMH6.01.005 @s Recherche g‚ographique
+          @c Cr‚ation */
+    }
+    END.
+  }
+}

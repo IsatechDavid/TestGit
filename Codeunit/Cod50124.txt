@@ -1,0 +1,92 @@
+OBJECT Codeunit 50124 Doc. Flow Header-Post
+{
+  OBJECT-PROPERTIES
+  {
+    Date=16/11/11;
+    Time=11:25:46;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=50107;
+    OnRun=BEGIN
+            RunWithCheck(Rec);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      DocFlowMgt@1100281001 : Codeunit 50006;
+      DocumentFlowHeader@1100281000 : Record 50107;
+      Text001@1100281002 : TextConst 'ENU=There is nothing to post.;FRA=Il n''y a rien … valider.';
+      DocumentQueue@1100281003 : Record 50054;
+      Text002@1100281004 : TextConst 'ENU=The document has been posted.;FRA=Le document a ‚t‚ valid‚.';
+
+    PROCEDURE RunWithCheck@1100281000(VAR pDocumentFlowHeader@1100281000 : Record 50107);
+    BEGIN
+      //Valitation file de document
+      DocumentFlowHeader.COPY(pDocumentFlowHeader);
+      Code(TRUE);
+      pDocumentFlowHeader := DocumentFlowHeader;
+    END;
+
+    PROCEDURE Code@1100281002(pCheckLine@1100281000 : Boolean);
+    BEGIN
+      //traiter la liste des files de document de statut trait‚
+
+      DocumentQueue.SETCURRENTKEY("Document Flow Header No.");
+      DocumentQueue.SETRANGE("Document Flow Header No.", DocumentFlowHeader."No.");
+      IF DocumentQueue.ISEMPTY THEN
+        ERROR(Text001);
+
+      DocumentQueue.SETFILTER(Status, '<>%1&<>%2&<>%3&<>%4', DocumentQueue.Status::Rejected, DocumentQueue.Status::Posted,
+        DocumentQueue.Status::"Create Service", DocumentQueue.Status::"To Qualify");
+      //DocumentQueue.SETRANGE("Linked Entry No.", 0);
+
+      CheckLines;
+      //DocumentQueue.SETRANGE("Linked Entry No.");
+      IF NOT DocumentQueue.ISEMPTY THEN BEGIN
+        DocumentQueue.MODIFYALL(Status, DocumentQueue.Status::Done, FALSE);
+        CODEUNIT.RUN(CODEUNIT::"Doc. Queue-Post",DocumentQueue);
+      END;
+
+      DocumentQueue.RESET;
+      DocumentQueue.SETCURRENTKEY("Document Flow Header No.");
+
+      DocumentQueue.SETRANGE("Document Flow Header No.", DocumentFlowHeader."No.");
+      DocumentQueue.SETFILTER(Status, '<>%1&<>%2&<>%3&<>%4', DocumentQueue.Status::Rejected, DocumentQueue.Status::Posted,
+        DocumentQueue.Status::"Create Service",DocumentQueue.Status::"To Qualify");
+
+      IF DocumentQueue.ISEMPTY THEN BEGIN
+        DocumentQueue.SETRANGE(Status);
+        DocFlowMgt.CreateDocQueueHistory(DocumentQueue);
+        DocumentQueue.SETFILTER(Status, '<>%1&<>%2',DocumentQueue.Status::"Create Service", DocumentQueue.Status::"To Qualify");
+        DocumentQueue.DELETEALL(FALSE);
+        DocFlowMgt.CreateDocFlowHeaderHistory(DocumentFlowHeader);
+        DocumentFlowHeader.DELETE(TRUE);
+      END;
+
+      MESSAGE(Text002);
+    END;
+
+    PROCEDURE CheckLines@1100281004();
+    VAR
+      lDocQueuePost@1100281001 : Codeunit 50008;
+    BEGIN
+      IF DocumentQueue.FINDFIRST THEN
+        REPEAT
+          lDocQueuePost.CheckLine(DocumentQueue);
+        UNTIL DocumentQueue.NEXT = 0;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 25/02/11 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management
+          @c Cr‚er une interaction automatique lors de la validation des flux entrants */
+      /** @r IMH01 @d 05/10/10 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

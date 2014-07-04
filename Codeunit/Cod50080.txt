@@ -1,0 +1,1504 @@
+OBJECT Codeunit 50080 Purchase Invoicing Managment
+{
+  OBJECT-PROPERTIES
+  {
+    Date=02/12/13;
+    Time=11:28:57;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 23=r,
+                TableData 24=r,
+                TableData 27=r,
+                TableData 38=rimd,
+                TableData 39=rimd,
+                TableData 79=r,
+                TableData 98=r,
+                TableData 120=r,
+                TableData 121=r,
+                TableData 122=r,
+                TableData 123=r,
+                TableData 284=r,
+                TableData 325=rimd,
+                TableData 5050=r,
+                TableData 5079=r,
+                TableData 5900=rimd,
+                TableData 5903=r,
+                TableData 5911=r,
+                TableData 7601=r,
+                TableData 50000=rim,
+                TableData 50005=r,
+                TableData 50012=r,
+                TableData 50040=r,
+                TableData 50058=r,
+                TableData 50060=r,
+                TableData 50062=r,
+                TableData 50066=rimd,
+                TableData 50076=rimd,
+                TableData 50084=rimd,
+                TableData 50103=rimd,
+                TableData 50137=r,
+                TableData 50138=ri;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Incorrect amount (difference betwenn Excl VAT, Incl VAT and VAT rate);FRA=Montants saisis erron‚s (diff‚rence entre le HT, TTC et taux TVA';
+      Text100@1000000001 : TextConst 'ENU=No posted minute uninvoiced.;FRA=Pas de PV au statut valid‚ non factur‚.';
+      Text101@1000000000 : TextConst 'ENU=No posted voucher uninvoiced.;FRA=Pas de justificatif valid‚ non factur‚.';
+
+    PROCEDURE CreatePurchOrderFromQuote@1100281002(VAR pServiceInterventionQuote@1100281000 : Record 50076) rValue : Boolean;
+    VAR
+      lService@1100281002 : Record 50066;
+      lInvoicingMatrixSetup@1100281001 : Record 50137;
+      lServiceInterventionLine@1100281003 : Record 50075;
+      lServiceQuoteCodes@1100281005 : Record 50062;
+      lServiceHeader@1100281008 : Record 5900;
+      lVendorNo@1100281004 : Code[20];
+      lDeductibleAmt@1100281006 : Decimal;
+      lDepreciationAmt@1100281007 : Decimal;
+    BEGIN
+      // Cr‚ation de la commande d'achat depuis un devis d'intervention
+
+      rValue := FALSE;
+
+      IF pServiceInterventionQuote.Acceptance <> pServiceInterventionQuote.Acceptance::Yes
+      THEN BEGIN
+        EXIT;
+      END;
+
+      pServiceInterventionQuote.CALCFIELDS("Service No.");
+      IF NOT GetService(lService,pServiceInterventionQuote."Service No.") THEN BEGIN
+        EXIT;
+      END;
+
+      pServiceInterventionQuote.CALCFIELDS("Provider No.");
+
+      //<<IMH19.ISAT.RC
+      //IF NOT CheckCreationAvailable(lInvoicingMatrixSetup
+      //         ,pServiceInterventionQuote."Corporate No."
+      //         ,pServiceInterventionQuote."Service Order Type"
+      //         ,lService."Corporate Region Code"
+      //         ,lService."Service No."
+      //         ,pServiceInterventionQuote."Provider No.")
+      //THEN BEGIN
+      //  EXIT;
+      //END;
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServiceInterventionQuote."Service Header No.") THEN
+        EXIT;
+      IF NOT CheckCreationAvailable(lInvoicingMatrixSetup
+               ,pServiceInterventionQuote."Corporate No."
+               ,pServiceInterventionQuote."Service Order Type"
+               ,lService."Corporate Region Code"
+               ,lService."Service No."
+               ,pServiceInterventionQuote."Provider No.",
+               lServiceHeader)
+      THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH19.ISAT.RC
+
+      //>>IMH19.ISAT.RC
+
+      IF NOT lServiceInterventionLine.GET(pServiceInterventionQuote."Service Header No."
+               ,pServiceInterventionQuote."Intervention Line No.")
+      THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT CheckProvider(lServiceInterventionLine."Provider No.",lVendorNo) THEN BEGIN
+        EXIT;
+      END;
+
+      // V‚rification des montants
+      IF NOT CheckAmount(lVendorNo
+              ,pServiceInterventionQuote."Order VAT Prod. Posting Group"
+              ,pServiceInterventionQuote."Order Amount Excl. VAT"
+              ,pServiceInterventionQuote."Order Amount Incl. VAT")
+      THEN BEGIN
+        ERROR(Text001);
+      END;
+
+      //<<IMH10.ISAT.EBA
+      lDeductibleAmt := 0;
+      lDepreciationAmt := 0;
+
+      IF lServiceQuoteCodes.GET(
+        pServiceInterventionQuote."Service Order Type",
+        pServiceInterventionQuote."Service Quote Type",
+        lServiceQuoteCodes.Type::QuoteType)
+      THEN BEGIN
+        IF (lServiceQuoteCodes."Service Quote Type" = lServiceQuoteCodes."Service Quote Type"::" " ) OR
+           (lServiceQuoteCodes."Service Quote Type" = lServiceQuoteCodes."Service Quote Type"::Contradictory)
+        THEN BEGIN
+          lDeductibleAmt := lServiceInterventionLine."Deductible Amount";
+          lDepreciationAmt := lServiceInterventionLine."Unsecured Depreciation Amount";
+        END;
+      END;
+      //>>IMH10.ISAT.EBA
+
+      lInvoicingMatrixSetup.FINDSET;
+      REPEAT
+        CreatePurchaseOrder(lService."Service No."
+          ,pServiceInterventionQuote."Service Header No."
+          ,pServiceInterventionQuote."Intervention Line No."
+          ,pServiceInterventionQuote."Line No."
+          ,pServiceInterventionQuote."Order VAT Prod. Posting Group"
+          ,pServiceInterventionQuote."Order Amount Excl. VAT"
+          //<<IMH10.ISAT.EBA
+          //,pServiceInterventionQuote."Deductible Amount (LCY)"
+          //,pServiceInterventionQuote."Depreciation Amount"
+          ,lDeductibleAmt
+          ,lDepreciationAmt
+          //>>IMH10.ISAT.EBA
+          ,0)
+      UNTIL lInvoicingMatrixSetup.NEXT = 0;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CreateOrderFromIntervention@1100281013(VAR pServiceInterventionLine@1100281000 : Record 50075;pAmount@1100281003 : Decimal;pVATProdPostingGroup@1100281004 : Code[10]) rValue : Boolean;
+    VAR
+      lService@1100281002 : Record 50066;
+      lInvoicingMatrixSetup@1100281001 : Record 50137;
+      lServiceHeader@1100281005 : Record 5900;
+    BEGIN
+      // Cr‚ation d'une commande d'achat … partir d'une intervention
+
+      rValue := FALSE;
+
+
+      IF NOT GetService(lService,pServiceInterventionLine."Service No.") THEN BEGIN
+        EXIT;
+      END;
+      //<<IMH19.ISAT.RC
+      //IF NOT CheckCreationAvailable(
+      //         lInvoicingMatrixSetup,
+      //         pServiceInterventionLine."Corporate No.",
+      //         pServiceInterventionLine."Service Order Type",
+      //         lService."Corporate Region Code",
+      //         lService."Service No.",
+      //         pServiceInterventionLine."Provider No.")
+      //THEN BEGIN
+      //  EXIT;
+      //END;
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServiceInterventionLine."Service Header No.") THEN
+        EXIT;
+      IF NOT CheckCreationAvailable(
+               lInvoicingMatrixSetup,
+               pServiceInterventionLine."Corporate No.",
+               pServiceInterventionLine."Service Order Type",
+               lService."Corporate Region Code",
+               lService."Service No.",
+               pServiceInterventionLine."Provider No.",lServiceHeader)
+      THEN BEGIN
+        EXIT;
+      END;
+
+      //>>IMH19.ISAT.RC
+
+      lInvoicingMatrixSetup.FINDSET;
+      REPEAT
+        CreatePurchaseOrder(lService."Service No."
+          ,pServiceInterventionLine."Service Header No."
+          ,pServiceInterventionLine."Line No."
+          ,0
+          ,pVATProdPostingGroup // VAT Prod. Posting Group
+          ,pAmount  // Amount Excl. VAT
+          //<<IMH10.ISAT.EBA
+          //,0  // "Deductible Amount (LCY)
+          //,0  // "Depreciation Amount
+          ,pServiceInterventionLine."Deductible Amount"
+          ,pServiceInterventionLine."Unsecured Depreciation Amount"
+          //>>IMH10.ISAT.EBA
+          ,0)
+      UNTIL lInvoicingMatrixSetup.NEXT = 0;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CreateOrderFromVoucher@1100281001(VAR pServiceHeaderVoucher@1100281000 : Record 50103) rValue : Boolean;
+    VAR
+      lService@1100281002 : Record 50066;
+      lServiceHeader@1100281003 : Record 5900;
+      lInvoicingMatrixSetup@1100281001 : Record 50137;
+    BEGIN
+      // Cr‚ation d'une commande d'achat … partir d'une intervention
+
+      rValue := FALSE;
+
+
+      IF NOT GetService(lService,pServiceHeaderVoucher."Service No.") THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServiceHeaderVoucher."Service Header No.") THEN
+         EXIT;
+
+      //<<IMH19.ISAT.RC
+      //IF NOT CheckCreationAvailable(
+      //         lInvoicingMatrixSetup,
+      //         lService."Corporate No.",
+      //         lServiceHeader."Service Order Type",
+      //         lService."Corporate Region Code",
+      //         lService."Service No.",'')
+      //THEN BEGIN
+      //  EXIT;
+      //END;
+
+      IF NOT CheckCreationAvailable(
+               lInvoicingMatrixSetup,
+               lService."Corporate No.",
+               lServiceHeader."Service Order Type",
+               lService."Corporate Region Code",
+               lService."Service No.",'',lServiceHeader)
+      THEN BEGIN
+        EXIT;
+      END;
+
+      //>>IMH19.ISAT.RC
+
+      lInvoicingMatrixSetup.FINDSET;
+      REPEAT
+        CreatePurchaseOrder(lService."Service No."
+          ,lServiceHeader."No."
+          ,0
+          ,0
+          ,pServiceHeaderVoucher."VAT Prod. Posting Group"
+          ,pServiceHeaderVoucher."Amount To Pay Excl. VAT"
+          ,0  // "Deductible Amount (LCY)
+          ,0  // "Depreciation Amount
+          ,pServiceHeaderVoucher."Line No.")
+      UNTIL lInvoicingMatrixSetup.NEXT = 0;
+
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CreatePurchaseOrder@1100281004(pServiceNo@1100281001 : Code[20];pServiceHeaderNo@1100281004 : Code[20];pInterventionLineNo@1100281012 : Integer;pInterventionQuoteLineNo@1100281014 : Integer;pVATProdPostingGroup@1100281016 : Code[10];pAmountExclVAT@1100281017 : Decimal;pDeductibleAmount@1100281015 : Decimal;pDepreciationAmount@1100281018 : Decimal;pVoucherLineNo@1100281013 : Integer) rValue : Boolean;
+    VAR
+      lServiceInterventionLine@1100281005 : Record 50075;
+      lServiceHeaderVoucher@1100281019 : Record 50103;
+      lContact@1100281006 : Record 5050;
+      lPurchaseHeader@1100281002 : Record 38;
+      lPurchaseLine@1100281003 : Record 39;
+      lVendor@1100281008 : Record 23;
+      lVendorNo@1100281007 : Code[20];
+      lItemNo@1100281009 : Code[20];
+      lUnitCost@1100281010 : Decimal;
+      lLastLineNo@1100281011 : Integer;
+      lInvoicingMatrixSetup@1100281000 : Record 50137;
+      lServiceHeader@1100281020 : Record 5900;
+      lGeneralLedgerSetup@1100281021 : Record 98;
+      lReleasePurch@1100281022 : Codeunit 415;
+    BEGIN
+      // Cr‚ation d'une facture d'achat … partir d'un devis
+
+      rValue := FALSE;
+
+
+      IF (pInterventionLineNo <> 0) THEN BEGIN
+        IF NOT lServiceInterventionLine.GET(pServiceHeaderNo,pInterventionLineNo) THEN
+          EXIT;
+        // V‚rifie si le prestataire … un fournisseur de param‚tr‚
+        IF NOT CheckProvider(lServiceInterventionLine."Provider No.",lVendorNo) THEN
+          EXIT;
+      END;
+
+      IF (pVoucherLineNo <> 0) THEN BEGIN
+        IF NOT  lServiceHeaderVoucher.GET(pServiceHeaderNo,pVoucherLineNo) THEN
+          EXIT;
+        // V‚rifie si le prestataire … un fournisseur de param‚tr‚
+        lServiceHeaderVoucher.TESTFIELD("Reimbursement Contact No.");
+        lContact.GET(lServiceHeaderVoucher."Reimbursement Contact No.");
+        IF NOT lContact.GetVendor(lVendorNo) THEN
+          CreateBeneficiaryVendor(lServiceHeaderVoucher."Reimbursement Contact No.",lVendorNo);
+        lContact.GetVendor(lVendorNo);
+      END;
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServiceHeaderNo) THEN BEGIN
+        EXIT;
+      END;
+
+
+      WITH lPurchaseHeader DO BEGIN
+        RESET;
+        SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+        SETRANGE("Service No.",pServiceNo);
+        SETRANGE("Service Header No.",pServiceHeaderNo);
+        IF (pInterventionLineNo <> 0) THEN
+        BEGIN
+          SETRANGE("Intervention Line No.",pInterventionLineNo);
+          SETRANGE("Quote Line No.",pInterventionQuoteLineNo);
+        END;
+        IF (pVoucherLineNo <> 0) THEN
+          SETRANGE("Service Header Voucher No.",pVoucherLineNo);
+        //<<IMH13.ISAT.EBA
+        SETRANGE("Document Type","Document Type"::Order);
+        //>>IMH13.ISAT.EBA
+
+        // Si non existant alors cr‚ation de la commande d'achat
+        IF ISEMPTY THEN BEGIN
+          INIT;
+          VALIDATE("Document Type","Document Type"::Order);
+          VALIDATE("Document Date",WORKDATE);
+          VALIDATE("Service No.",pServiceNo);
+          VALIDATE("Service Header No.",pServiceHeaderNo);
+          IF (pInterventionLineNo <> 0) THEN
+          BEGIN
+            VALIDATE("Intervention Line No.",pInterventionLineNo);
+            VALIDATE("Quote Line No.",pInterventionQuoteLineNo);
+            VALIDATE("Buy-from Vendor No.",lVendorNo);
+            //<<IMH19.ISAT.RC
+            //IF CheckCreationAvailable(
+            //   lInvoicingMatrixSetup,
+            //   lServiceInterventionLine."Corporate No.",
+            //   lServiceInterventionLine."Service Order Type",
+            //   lServiceInterventionLine."Corporate Region Code",
+            //   lServiceInterventionLine."Service No.",
+           //    lServiceInterventionLine."Provider No.") THEN
+           // BEGIN
+           //   IF (lInvoicingMatrixSetup."Purchase Payment Method" <> '') THEN
+           //     VALIDATE("Payment Method Code",lInvoicingMatrixSetup."Purchase Payment Method");
+           // END;
+            IF CheckCreationAvailable(
+               lInvoicingMatrixSetup,
+               lServiceInterventionLine."Corporate No.",
+               lServiceInterventionLine."Service Order Type",
+               lServiceInterventionLine."Corporate Region Code",
+               lServiceInterventionLine."Service No.",
+               lServiceInterventionLine."Provider No.",lServiceHeader) THEN
+            BEGIN
+              IF (lInvoicingMatrixSetup."Purchase Payment Method" <> '') THEN
+                VALIDATE("Payment Method Code",lInvoicingMatrixSetup."Purchase Payment Method");
+            END;
+            //>>IMH19.ISAT.RC
+          END;
+          IF (pVoucherLineNo <> 0) THEN
+          BEGIN
+            VALIDATE("Service Header Voucher No.",pVoucherLineNo);
+            VALIDATE("Buy-from Vendor No.",lVendorNo);
+            //<<IMH19.ISAT.RC
+            //IF CheckCreationAvailable(
+            //   lInvoicingMatrixSetup,
+            //   lServiceHeader."Corporate No.",
+            //   lServiceHeader."Service Order Type",
+            //   lServiceHeader."Corporate Region Code",
+            //   lServiceHeader."Service No.",'') THEN
+            IF CheckCreationAvailable(
+               lInvoicingMatrixSetup,
+               lServiceHeader."Corporate No.",
+               lServiceHeader."Service Order Type",
+               lServiceHeader."Corporate Region Code",
+               lServiceHeader."Service No.",'',lServiceHeader) THEN
+
+            BEGIN
+              IF (lInvoicingMatrixSetup."Purchase Payment Method" <> '') THEN
+                VALIDATE("Payment Method Code",lInvoicingMatrixSetup."Purchase Payment Method");
+            END;
+          END;
+          UpdateByInvoicingMatrice;
+          INSERT(TRUE);
+        END ELSE BEGIN
+          FINDFIRST;
+      //<<IMH14.ST
+          IF Status = Status::Released THEN
+            lReleasePurch.Reopen(lPurchaseHeader);
+      //>>IMH14.ST
+        END;
+      END;
+
+      // R‚cup‚ration de la derniŠre ligne sur la commande
+      WITH lPurchaseLine DO BEGIN
+        lLastLineNo := 0;
+        "Document Type" := lPurchaseHeader."Document Type";
+        "Document No." := lPurchaseHeader."No.";
+        LOCKTABLE;
+        IF FINDLAST THEN BEGIN
+          lLastLineNo := "Line No.";
+          CLEAR(lPurchaseLine);
+        END;
+        lLastLineNo += 10000;
+
+        IF (pInterventionLineNo <> 0) THEN
+          GetPurchItemNo(pServiceNo
+            ,pServiceHeaderNo
+            ,pInterventionLineNo
+            ,lServiceInterventionLine."Corporate No."
+            ,lServiceInterventionLine."Service Order Type"
+            ,lServiceInterventionLine.Urgent
+            ,lItemNo);
+        IF (pVoucherLineNo <> 0) THEN
+        BEGIN
+          lGeneralLedgerSetup.GET;
+          lItemNo := lGeneralLedgerSetup."Item No. For Voucher";
+        END;
+
+        SETRANGE("Document Type",lPurchaseLine."Document Type"::Order);
+        SETRANGE("Document No.",lPurchaseHeader."No.");
+        SETRANGE(Type,lPurchaseLine.Type::Item);
+        SETRANGE("No.",lItemNo);
+        SETRANGE("Service No.",pServiceNo);
+        SETRANGE("Service Header No.",pServiceHeaderNo);
+        IF (pInterventionLineNo <> 0) THEN
+          SETRANGE("Intervention Line No.",pInterventionLineNo);
+        IF (pVoucherLineNo <> 0) THEN
+          SETRANGE("Service Header Voucher No.",pVoucherLineNo);
+        IF ISEMPTY THEN BEGIN
+          INIT;
+          VALIDATE("Document Type",lPurchaseHeader."Document Type");
+          VALIDATE("Document No.",lPurchaseHeader."No.");
+          VALIDATE("Line No.",lLastLineNo);
+          VALIDATE(Type,lPurchaseLine.Type::Item);
+          VALIDATE("No.",lItemNo);
+          VALIDATE(Quantity,1);
+          VALIDATE("Qty. to Invoice",0);
+          VALIDATE("Service No.",pServiceNo);
+          VALIDATE("Service Header No.",pServiceHeaderNo);
+          VALIDATE("Intervention Line No.",pInterventionLineNo);
+          VALIDATE("Quote Line No.",pInterventionQuoteLineNo);
+          VALIDATE("Service Header Voucher No.",pVoucherLineNo);
+          VALIDATE("Corporate No.",lServiceInterventionLine."Corporate No.");
+          VALIDATE("Corporate Region Code",lServiceInterventionLine."Corporate Region Code");
+          VALIDATE("Service Order Type",lServiceInterventionLine."Service Order Type");
+          VALIDATE("VAT Prod. Posting Group",pVATProdPostingGroup);
+          VALIDATE("Direct Unit Cost",pAmountExclVAT);
+          VALIDATE("Depreciation Amount",pDepreciationAmount);
+          VALIDATE("Deductible Amount",pDeductibleAmount);
+          INSERT(TRUE);
+        END ELSE BEGIN
+          FINDFIRST;
+          VALIDATE("VAT Prod. Posting Group",pVATProdPostingGroup);
+          VALIDATE("Direct Unit Cost",pAmountExclVAT);
+          VALIDATE("Depreciation Amount",pDepreciationAmount);
+          VALIDATE("Deductible Amount",pDeductibleAmount);
+          MODIFY(TRUE);
+        END;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE ReceiptPurchaseOrder@1100281005(pServiceNo@1100281007 : Code[20];pServiceHeaderNo@1100281006 : Code[20];pInterventionLineNo@1100281005 : Integer;pDocumentNo@1100281009 : Integer;pLineNo@1100281010 : Integer) rValue : Boolean;
+    VAR
+      lServInterventionMinute@1100281011 : Record 50084;
+      lServiceInterventionQuote@1100281004 : Record 50076;
+      lPurchaseHeader@1100281001 : Record 38;
+      lPurchaseLine@1100281012 : Record 39;
+      lReleasePurchaseDocument@1100281002 : Codeunit 415;
+      lPurchPost@1100281003 : Codeunit 90;
+      lServiceInterventionLine@1100281000 : Record 50075;
+      lFinish@1100281008 : Boolean;
+      lAmountToReceiptExclVAT@1100281013 : Decimal;
+      lToReceipt@1100281014 : Boolean;
+      lAmountInOrderExclVAT@1100281015 : Decimal;
+      lServOrderType@1100281016 : Record 5903;
+      lApplyEmergencyPrice@1100281017 : Boolean;
+      lQtyToReceive@1100281018 : Decimal;
+      lQuoteOK@1100281019 : Boolean;
+      lRemainingAmt@1100281020 : Decimal;
+    BEGIN
+      EXIT; //IMH18.ST
+      // Reception depuis une intervention
+      rValue := FALSE;
+
+      IF NOT lServiceInterventionLine.GET(pServiceHeaderNo,pInterventionLineNo) THEN
+        EXIT(FALSE);
+      IF NOT lServInterventionMinute.GET(pServiceHeaderNo,pInterventionLineNo,pDocumentNo,pLineNo) THEN
+        EXIT(FALSE);
+      IF lServInterventionMinute."Receipt Date" = 0D THEN
+        EXIT(FALSE);
+
+      //<<IMH08.ST
+      lApplyEmergencyPrice := FALSE;
+      IF lServInterventionMinute.Type = lServInterventionMinute.Type::Urgent THEN BEGIN
+        lServInterventionMinute.CALCFIELDS("Service Order Type");
+        lServOrderType.GET(lServInterventionMinute."Service Order Type");
+        lApplyEmergencyPrice := lServOrderType."Apply Emergency Price";
+      END;
+      IF NOT lApplyEmergencyPrice THEN BEGIN
+      //>>IMH08.ST
+
+        //<<IMH12.ISAT.EBA
+        //// Retrouve le devis associ‚ … l'intervention
+        //lServiceInterventionQuote.SETRANGE("Service No.",pServiceNo);
+        //lServiceInterventionQuote.SETRANGE("Service Header No.",pServiceHeaderNo);
+        //lServiceInterventionQuote.SETRANGE("Intervention Line No.",pInterventionLineNo);
+        //lServiceInterventionQuote.SETRANGE(Active,TRUE);
+        //IF lServiceInterventionQuote.ISEMPTY THEN  BEGIN
+        //  EXIT(FALSE);
+        //END;
+        //>>IMH12.ISAT.EBA
+
+      END; //IMH08.ST
+
+      IF (lServInterventionMinute.Type = lServInterventionMinute.Type::Intermediate) THEN
+        lAmountToReceiptExclVAT := lServInterventionMinute.Amount;
+
+      //<<IMH08.ST
+      IF lApplyEmergencyPrice THEN BEGIN
+        lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+        lPurchaseHeader.SETRANGE("Service No.",pServiceNo);
+        lPurchaseHeader.SETRANGE("Service Header No.",pServiceHeaderNo);
+        lPurchaseHeader.SETRANGE("Intervention Line No.",pInterventionLineNo);
+      //  lPurchaseHeader.SETRANGE("Quote Line No.",lServiceInterventionQuote."Line No.");
+        //<<IMH13.ISAT.EBA
+        lPurchaseHeader.SETRANGE("Document Type",lPurchaseHeader."Document Type"::Order);
+        //>>IMH13.ISAT.EBA
+        IF lPurchaseHeader.ISEMPTY THEN
+          EXIT;
+        lPurchaseHeader.FINDSET;
+        REPEAT
+          lPurchaseLine.RESET;
+          lPurchaseLine.SETRANGE("Document Type",lPurchaseHeader."Document Type");
+          lPurchaseLine.SETRANGE("Document No.",lPurchaseHeader."No.");
+          lPurchaseLine.SETFILTER(Type,'<>%1', lPurchaseLine.Type::" ");
+          lPurchaseLine.SETFILTER("No.",'<>%1','');
+          lPurchaseLine.SETFILTER("Outstanding Quantity", '<>%1', 0);
+          IF lPurchaseLine.FINDSET THEN BEGIN
+            REPEAT
+              lPurchaseLine.VALIDATE("Qty. to Receive", lPurchaseLine.Quantity - lPurchaseLine."Quantity Received");
+              IF lPurchaseLine."Qty. to Invoice" <> 0 THEN
+                lPurchaseLine.VALIDATE("Qty. to Invoice", 0);
+              lPurchaseLine.MODIFY;
+            UNTIL lPurchaseLine.NEXT=0;
+            lPurchaseHeader.Receive := TRUE;
+            lPurchaseHeader.Invoice := FALSE;
+            lPurchaseHeader."Document Date" := lServInterventionMinute."Receipt Date";
+            lPurchaseHeader."Posting Date" := lServInterventionMinute."Receipt Date";
+            lPurchPost.RUN(lPurchaseHeader);
+          END;
+        UNTIL lPurchaseHeader.NEXT=0;
+        EXIT;
+      END;
+      //>>IMH08.ST
+
+      //lFinish := TRUE;
+
+      //<<IMH12.ISAT.EBA
+      lRemainingAmt := lServInterventionMinute.Amount;
+      //>>IMH12.ISAT.EBA
+
+      lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+      lPurchaseHeader.SETRANGE("Service No.",pServiceNo);
+      lPurchaseHeader.SETRANGE("Service Header No.",pServiceHeaderNo);
+      lPurchaseHeader.SETRANGE("Intervention Line No.",pInterventionLineNo);
+      //<<IMH12.ISAT.EBA
+      //lPurchaseHeader.SETRANGE("Quote Line No.",lServiceInterventionQuote."Line No.");
+      //>>IMH12.ISAT.EBA
+      //<<IMH13.ISAT.EBA
+      lPurchaseHeader.SETRANGE("Document Type",lPurchaseHeader."Document Type"::Order);
+      //>>IMH13.ISAT.EBA
+      IF NOT lPurchaseHeader.ISEMPTY THEN BEGIN
+        lPurchaseHeader.FINDFIRST;
+        REPEAT
+          //<<IMH12.ISAT.EBA
+          lQuoteOK := TRUE;
+
+          CLEAR(lServiceInterventionQuote);
+          IF lPurchaseHeader."Quote Line No." <> 0 THEN BEGIN
+            lServiceInterventionQuote.GET(
+              lPurchaseHeader."Service Header No.",
+              lPurchaseHeader."Intervention Line No.",
+              lPurchaseHeader."Quote Line No.");
+
+            UpdateAmountExpected(lServiceInterventionQuote);
+            lQuoteOK := lServiceInterventionQuote."Transfered Amount" < lServiceInterventionQuote."Amount Excl. VAT";
+            IF NOT lServiceInterventionQuote.Active THEN
+              lQuoteOK := FALSE;
+          END;
+          //<<IMH12.ISAT.EBA
+
+          IF lQuoteOK THEN BEGIN
+            //<<IMH11.ISAT.EBA
+            IF lPurchaseHeader.Status < lPurchaseHeader.Status::Released THEN
+              lReleasePurchaseDocument.RUN(lPurchaseHeader);
+            //>>IMH11.ISAT.EBA
+
+            lToReceipt := FALSE;
+            lPurchaseLine.RESET;
+            lPurchaseLine.SETRANGE("Document Type",lPurchaseHeader."Document Type");
+            lPurchaseLine.SETRANGE("Document No.",lPurchaseHeader."No.");
+            lPurchaseLine.SETRANGE(Type,1,99);
+            lPurchaseLine.SETFILTER("No.",'<>%1','');
+            IF lPurchaseLine.FINDSET THEN
+              REPEAT
+                IF (lServInterventionMinute.Type = lServInterventionMinute.Type::Intermediate) THEN BEGIN
+                  lQtyToReceive := 0;
+                  IF (lPurchaseLine."Quantity Received" <> lPurchaseLine.Quantity) THEN BEGIN
+
+                    lAmountInOrderExclVAT := ROUND((lPurchaseLine."Line Amount" / lPurchaseLine.Quantity) *
+                                                   lPurchaseLine."Outstanding Quantity",0.01);
+
+                    IF (lAmountInOrderExclVAT < lRemainingAmt) OR (lPurchaseLine."Line Amount" = 0) THEN
+                      lQtyToReceive := lPurchaseLine."Outstanding Quantity"
+                    ELSE BEGIN
+                      //<<IMH12.ISAT.EBA
+                      //lQtyToReceive := ROUND(lRemainingAmt / lPurchaseLine."Line Amount", 0.00001);
+                      lQtyToReceive := ROUND(lRemainingAmt * lPurchaseLine.Quantity / lPurchaseLine."Line Amount", 0.00001);
+                      //>>IMH12.ISAT.EBA
+
+                      IF lQtyToReceive > lPurchaseLine."Outstanding Quantity" THEN
+                        lQtyToReceive := lPurchaseLine."Outstanding Quantity";
+                    END;
+                  END;
+                  //<<IMH11.ISAT.EBA
+                  IF lPurchaseLine."Depreciation Line" OR lPurchaseLine."Deductible Line" THEN
+                    lQtyToReceive := 0;
+                  //>>IMH11.ISAT.EBA
+
+                  //<<IMH12.ISAT.EBA
+                  lRemainingAmt :=
+                    lRemainingAmt -
+                    ROUND(lQtyToReceive * (lPurchaseLine."Line Amount" / lPurchaseLine.Quantity),0.01);
+                  //>>IMH12.ISAT.EBA
+                END ELSE
+                  lQtyToReceive := lPurchaseLine."Outstanding Quantity";
+
+                IF lQtyToReceive <> 0 THEN
+                  lToReceipt := TRUE;
+                IF lQtyToReceive <> lPurchaseLine."Qty. to Receive" THEN BEGIN
+                  lPurchaseLine.VALIDATE("Qty. to Receive", lQtyToReceive);
+                  lPurchaseLine.MODIFY;
+                END;
+              UNTIL(lPurchaseLine.NEXT = 0);
+
+            IF lToReceipt THEN BEGIN
+              //<<IMH11.ISAT.EBA
+              //IF lPurchaseHeader.Status < lPurchaseHeader.Status::Released THEN
+              //  lReleasePurchaseDocument.RUN(lPurchaseHeader);
+              //>>IMH11.ISAT.EBA
+              lPurchaseHeader.Receive := TRUE;
+              lPurchaseHeader.Invoice := FALSE;
+              lPurchaseHeader."Document Date" := lServInterventionMinute."Receipt Date";
+              lPurchaseHeader."Posting Date" := lServInterventionMinute."Receipt Date";
+              lPurchPost.RUN(lPurchaseHeader);
+            END;
+          END;
+        UNTIL (lPurchaseHeader.NEXT = 0) OR (lRemainingAmt <= 0);
+      END;
+
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE ReceiptPurchaseOrderBAK@1100281014(pServiceNo@1100281007 : Code[20];pServiceHeaderNo@1100281006 : Code[20];pInterventionLineNo@1100281005 : Integer;pDocumentNo@1100281009 : Integer;pLineNo@1100281010 : Integer) rValue : Boolean;
+    VAR
+      LservInterventionMinute@1100281011 : Record 50084;
+      lServiceInterventionQuote@1100281004 : Record 50076;
+      lPurchaseHeader@1100281001 : Record 38;
+      lPurchaseLine@1100281012 : Record 39;
+      lReleasePurchaseDocument@1100281002 : Codeunit 415;
+      lPurchPost@1100281003 : Codeunit 90;
+      lServiceInterventionLine@1100281000 : Record 50075;
+      lFinish@1100281008 : Boolean;
+      lAmountToReceiptExclVAT@1100281013 : Decimal;
+      lToReceipt@1100281014 : Boolean;
+      lAmountInOrderExclVAT@1100281015 : Decimal;
+      lServOrderType@1100281016 : Record 5903;
+      lApplyEmergencyPrice@1100281017 : Boolean;
+      lQtyToReceive@1100281018 : Decimal;
+    BEGIN
+      EXIT; //IMH18.ST
+      // Reception depuis une intervention
+      rValue := FALSE;
+
+      IF NOT lServiceInterventionLine.GET(pServiceHeaderNo,pInterventionLineNo) THEN
+        EXIT(FALSE);
+      IF NOT LservInterventionMinute.GET(pServiceHeaderNo,pInterventionLineNo,pDocumentNo,pLineNo) THEN
+        EXIT(FALSE);
+      IF LservInterventionMinute."Receipt Date" = 0D THEN
+        EXIT(FALSE);
+
+      //<<IMH08.ST
+      lApplyEmergencyPrice := FALSE;
+      IF LservInterventionMinute.Type = LservInterventionMinute.Type::Urgent THEN BEGIN
+        LservInterventionMinute.CALCFIELDS("Service Order Type");
+        lServOrderType.GET(LservInterventionMinute."Service Order Type");
+        lApplyEmergencyPrice := lServOrderType."Apply Emergency Price";
+      END;
+      IF NOT lApplyEmergencyPrice THEN BEGIN
+      //>>IMH08.ST
+        // Retrouve le devis associ‚ … l'intervention
+        lServiceInterventionQuote.SETRANGE("Service No.",pServiceNo);
+        lServiceInterventionQuote.SETRANGE("Service Header No.",pServiceHeaderNo);
+        lServiceInterventionQuote.SETRANGE("Intervention Line No.",pInterventionLineNo);
+        lServiceInterventionQuote.SETRANGE(Active,TRUE);
+        IF lServiceInterventionQuote.ISEMPTY THEN  BEGIN
+          EXIT(FALSE);
+        END;
+      END; //IMH08.ST
+
+      IF (LservInterventionMinute.Type = LservInterventionMinute.Type::Intermediate) THEN
+        lAmountToReceiptExclVAT := LservInterventionMinute.Amount;
+
+      //<<IMH08.ST
+      IF lApplyEmergencyPrice THEN BEGIN
+        lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+        lPurchaseHeader.SETRANGE("Service No.",pServiceNo);
+        lPurchaseHeader.SETRANGE("Service Header No.",pServiceHeaderNo);
+        lPurchaseHeader.SETRANGE("Intervention Line No.",pInterventionLineNo);
+      //  lPurchaseHeader.SETRANGE("Quote Line No.",lServiceInterventionQuote."Line No.");
+        IF lPurchaseHeader.ISEMPTY THEN
+          EXIT;
+        lPurchaseHeader.FINDSET;
+        REPEAT
+          lPurchaseLine.RESET;
+          lPurchaseLine.SETRANGE("Document Type",lPurchaseHeader."Document Type");
+          lPurchaseLine.SETRANGE("Document No.",lPurchaseHeader."No.");
+          lPurchaseLine.SETFILTER(Type,'<>%1', lPurchaseLine.Type::" ");
+          lPurchaseLine.SETFILTER("No.",'<>%1','');
+          lPurchaseLine.SETFILTER("Outstanding Quantity", '<>%1', 0);
+          IF lPurchaseLine.FINDSET THEN BEGIN
+            REPEAT
+              lPurchaseLine.VALIDATE("Qty. to Receive", lPurchaseLine.Quantity - lPurchaseLine."Quantity Received");
+              IF lPurchaseLine."Qty. to Invoice" <> 0 THEN
+                lPurchaseLine.VALIDATE("Qty. to Invoice", 0);
+              lPurchaseLine.MODIFY;
+            UNTIL lPurchaseLine.NEXT=0;
+            lPurchaseHeader.Receive := TRUE;
+            lPurchaseHeader.Invoice := FALSE;
+            lPurchaseHeader."Document Date" := LservInterventionMinute."Receipt Date";
+            lPurchaseHeader."Posting Date" := LservInterventionMinute."Receipt Date";
+            lPurchPost.RUN(lPurchaseHeader);
+          END;
+        UNTIL lPurchaseHeader.NEXT=0;
+        EXIT;
+      END;
+      //>>IMH08.ST
+
+      //lFinish := TRUE;
+      lServiceInterventionQuote.FINDSET;
+      REPEAT
+        UpdateAmountExpected(lServiceInterventionQuote);
+      //<<IMH08.ST
+      //  IF (lServiceInterventionQuote."Transfered Amount Incl. VAT" < lServiceInterventionQuote."Amount Incl. VAT") THEN BEGIN
+        IF (lServiceInterventionQuote."Transfered Amount" < lServiceInterventionQuote."Amount Excl. VAT") THEN BEGIN
+      //>>IMH08.ST
+          lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+          lPurchaseHeader.SETRANGE("Service No.",pServiceNo);
+          lPurchaseHeader.SETRANGE("Service Header No.",pServiceHeaderNo);
+          lPurchaseHeader.SETRANGE("Intervention Line No.",pInterventionLineNo);
+          lPurchaseHeader.SETRANGE("Quote Line No.",lServiceInterventionQuote."Line No.");
+          IF NOT lPurchaseHeader.ISEMPTY THEN BEGIN
+            lPurchaseHeader.FINDFIRST;
+            REPEAT
+              //<<IMH11.ISAT.EBA
+              IF lPurchaseHeader.Status < lPurchaseHeader.Status::Released THEN
+                lReleasePurchaseDocument.RUN(lPurchaseHeader);
+              //>>IMH11.ISAT.EBA
+
+              lToReceipt := FALSE;
+              lPurchaseLine.RESET;
+              lPurchaseLine.SETRANGE("Document Type",lPurchaseHeader."Document Type");
+              lPurchaseLine.SETRANGE("Document No.",lPurchaseHeader."No.");
+              lPurchaseLine.SETRANGE(Type,1,99);
+              lPurchaseLine.SETFILTER("No.",'<>%1','');
+              IF lPurchaseLine.FINDSET THEN
+                REPEAT
+                  IF (LservInterventionMinute.Type = LservInterventionMinute.Type::Intermediate) THEN BEGIN
+                    lQtyToReceive := 0;
+                    IF (lPurchaseLine."Quantity Received" <> lPurchaseLine.Quantity) THEN BEGIN
+                      lAmountInOrderExclVAT := ROUND((lPurchaseLine."Line Amount" / lPurchaseLine.Quantity) *
+                                                     lPurchaseLine."Outstanding Quantity",0.01);
+                      IF (lAmountInOrderExclVAT < lAmountToReceiptExclVAT) OR (lPurchaseLine."Line Amount" = 0) THEN
+                        lQtyToReceive := lPurchaseLine."Outstanding Quantity"
+                      ELSE BEGIN
+                        lQtyToReceive := ROUND(lAmountToReceiptExclVAT / lPurchaseLine."Line Amount", 0.00001);
+                        IF lQtyToReceive > lPurchaseLine."Outstanding Quantity" THEN
+                          lQtyToReceive := lPurchaseLine."Outstanding Quantity";
+                      END;
+                    END;
+                    //<<IMH11.ISAT.EBA
+                    IF lPurchaseLine."Depreciation Line" OR lPurchaseLine."Deductible Line" THEN
+                      lQtyToReceive := 0;
+                    //>>IMH11.ISAT.EBA
+                  END ELSE
+                    lQtyToReceive := lPurchaseLine."Outstanding Quantity";
+
+                  IF lQtyToReceive <> 0 THEN
+                    lToReceipt := TRUE;
+                  IF lQtyToReceive <> lPurchaseLine."Qty. to Receive" THEN BEGIN
+                    lPurchaseLine.VALIDATE("Qty. to Receive", lQtyToReceive);
+                    lPurchaseLine.MODIFY;
+                  END;
+                UNTIL(lPurchaseLine.NEXT = 0);
+
+              IF lToReceipt THEN BEGIN
+                //<<IMH11.ISAT.EBA
+                //IF lPurchaseHeader.Status < lPurchaseHeader.Status::Released THEN
+                //  lReleasePurchaseDocument.RUN(lPurchaseHeader);
+                //>>IMH11.ISAT.EBA
+                lPurchaseHeader.Receive := TRUE;
+                lPurchaseHeader.Invoice := FALSE;
+                lPurchaseHeader."Document Date" := LservInterventionMinute."Receipt Date";
+                lPurchaseHeader."Posting Date" := LservInterventionMinute."Receipt Date";
+                lPurchPost.RUN(lPurchaseHeader);
+              END;
+            UNTIL lPurchaseHeader.NEXT = 0;
+          END;
+        END;
+      UNTIL (lServiceInterventionQuote.NEXT = 0) OR lFinish;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE ReceiptPurchaseVoucher@1100281010(pServiceNo@1100281007 : Code[20];pServiceHeaderNo@1100281006 : Code[20];pvoucherLineNo@1100281005 : Integer) rValue : Boolean;
+    VAR
+      lServiceHeaderVoucher@1100281004 : Record 50103;
+      lPurchaseHeader@1100281001 : Record 38;
+      lReleasePurchaseDocument@1100281002 : Codeunit 415;
+      lPurchPost@1100281003 : Codeunit 90;
+    BEGIN
+      EXIT; //IMH18.ST
+      // Reception depuis une intervention
+      rValue := FALSE;
+
+      // Retrouve le devis associ‚ … l'intervention
+      lServiceHeaderVoucher.SETRANGE("Service No.",pServiceNo);
+      lServiceHeaderVoucher.SETRANGE("Service Header No.",pServiceHeaderNo);
+      lServiceHeaderVoucher.SETRANGE("Line No.",pvoucherLineNo);
+      IF lServiceHeaderVoucher.ISEMPTY THEN  BEGIN
+        EXIT;
+      END;
+
+      lServiceHeaderVoucher.FINDFIRST;
+      REPEAT
+        lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+        lPurchaseHeader.SETRANGE("Service No.",pServiceNo);
+        lPurchaseHeader.SETRANGE("Service Header No.",pServiceHeaderNo);
+        lPurchaseHeader.SETRANGE("Service Header Voucher No.",lServiceHeaderVoucher."Line No.");
+        IF NOT lPurchaseHeader.ISEMPTY THEN BEGIN
+          lPurchaseHeader.FINDFIRST;
+          REPEAT
+            IF lPurchaseHeader.Status < lPurchaseHeader.Status::Released THEN BEGIN
+              lReleasePurchaseDocument.RUN(lPurchaseHeader);
+            END;
+            lPurchaseHeader.Receive := TRUE;
+            lPurchaseHeader.Invoice := FALSE;
+            lPurchPost.RUN(lPurchaseHeader);
+          UNTIL lPurchaseHeader.NEXT = 0;
+        END;
+      UNTIL lServiceHeaderVoucher.NEXT = 0;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CheckCreationAvailable@1100281003(VAR pInvoicingMatrixSetup@1100281000 : Record 50137;pCorporateNo@1100281001 : Code[20];pServiceOrderType@1100281002 : Code[10];pCorporateRegionCode@1100281003 : Code[10];pServiceNo@1100281005 : Code[20];pProviderNo@1100281007 : Code[20];pServiceHeader@1100281011 : Record 5900) rValue : Boolean;
+    VAR
+      lService@1100281004 : Record 50066;
+      lProviderAgreement@1100281006 : Record 50012;
+      lCorporateRegion@1100281008 : Record 50058;
+      lProvider@1100281010 : Record 50000;
+      lRecordRef@1100281014 : RecordRef;
+      lAgreementOK@1100281009 : Boolean;
+      lPurchaseReferenceDate@1100281012 : Date;
+      lFindRecord@1100281013 : Boolean;
+    BEGIN
+      // V‚rification si la cr‚ation est autoris‚e
+      rValue := FALSE;
+
+
+      WITH pInvoicingMatrixSetup DO BEGIN
+        SETRANGE("Corporate No.",pCorporateNo);
+        SETRANGE("Service Order Type",pServiceOrderType);
+        SETRANGE("Corporate Region Code",pCorporateRegionCode);
+        SETRANGE(Enable,TRUE);
+        SETRANGE("Purchase Order Creation",TRUE);
+        IF NOT lService.GET(pServiceNo) THEN
+          EXIT;
+        //<<IMH19.ISAT.RC
+        IF pServiceHeader."No." ='' THEN
+          EXIT;
+        //SETFILTER("Starting Date",'''''|<=%1',DT2DATE(lService."Creation Date"));
+        //SETFILTER("Ending Date",'''''|>=%1',DT2DATE(lService."Creation Date"));
+        //>>IMH19.ISAT.RC
+
+          //<<IMH15.ISAT.EBA
+        //lProviderAgreement.RESET;
+        //lProviderAgreement.SETRANGE("Provider No.",pProviderNo);
+        ////lProviderAgreement.SETFILTER("Corporate No.",'%1|%2', pCorporateNo, '');
+        //IF pCorporateRegionCode = '' THEN
+        //  lProviderAgreement.SETFILTER("Corporate No.",'%1|%2', pCorporateNo, '')
+        //ELSE BEGIN
+        //  IF lCorporateRegion.GET(pCorporateNo, pCorporateRegionCode) THEN
+        //    lProviderAgreement.SETFILTER("Corporate No.",'%1|%2|%3', lCorporateRegion."Sell-to Customer No.", pCorporateNo, '')
+        //END;
+
+        //lProviderAgreement.SETFILTER("Service Order Type",'%1|%2', pServiceOrderType, '');
+        //IF lProviderAgreement.FINDFIRST THEN
+        lAgreementOK := FALSE;
+        IF lProvider.GET(pProviderNo) THEN
+          lAgreementOK := lProvider.AgreementExists(pCorporateNo,pCorporateRegionCode,pServiceOrderType);
+
+        IF lAgreementOK THEN
+        //>>IMH15.ISAT.EBA
+          SETFILTER("Accredited Provider Filter",'%1|%2',"Accredited Provider Filter"::" ","Accredited Provider Filter"::Yes)
+        ELSE
+          SETFILTER("Accredited Provider Filter",'%1|%2',"Accredited Provider Filter"::" ","Accredited Provider Filter"::No);
+
+
+        //<<IMH19.ISAT.RC
+        lPurchaseReferenceDate:=0D ;
+        lFindRecord:=FALSE;
+        lRecordRef.GETTABLE(pServiceHeader);
+        IF  pInvoicingMatrixSetup.FINDSET THEN
+        REPEAT
+          lPurchaseReferenceDate:=pInvoicingMatrixSetup.GetPurchaseReferenceDate(lRecordRef);
+          IF ((pInvoicingMatrixSetup."Starting Date" = 0D ) OR  (pInvoicingMatrixSetup."Starting Date" <= lPurchaseReferenceDate )) AND
+             ((pInvoicingMatrixSetup."Ending Date" = 0D ) OR  (pInvoicingMatrixSetup."Ending Date" >= lPurchaseReferenceDate )) THEN BEGIN
+            pInvoicingMatrixSetup.SETRANGE("Line No.",pInvoicingMatrixSetup."Line No.");
+            lFindRecord:= TRUE
+          END;
+        UNTIL (lFindRecord=TRUE) OR (pInvoicingMatrixSetup.NEXT=0);
+        IF NOT lFindRecord THEN BEGIN
+       //  IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+        //<<IMH19.ISAT.RC
+        SETFILTER("Starting Date",'''''|<=%1',lPurchaseReferenceDate);
+        SETFILTER("Ending Date",'''''|>=%1',lPurchaseReferenceDate);
+        //>>IMH19.ISAT.RC
+
+
+      END;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CheckProvider@1100281006(pProviderNo@1100281000 : Code[20];VAR pVendorNo@1100281003 : Code[20]) rValue : Boolean;
+    VAR
+      lProvider@1100281001 : Record 50000;
+      lVendor@1100281002 : Record 23;
+    BEGIN
+
+      rValue := FALSE;
+      pVendorNo := '';
+
+      // V‚rifie si le prestataire … un fournisseur de param‚tr‚
+      IF NOT lProvider.GET(pProviderNo) THEN BEGIN
+        EXIT;
+      END;
+
+      // Cr‚ation du prestataire en tant que fournisseur
+      pVendorNo := lProvider.GetVendorNo(pProviderNo);
+      IF pVendorNo = '' THEN BEGIN
+        lProvider.CreateVendor;
+        pVendorNo := lProvider.GetVendorNo(pProviderNo);
+      END;
+
+      IF NOT lVendor.GET(pVendorNo) THEN BEGIN
+        EXIT;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CheckAmount@1100281008(pVendorNo@1100281002 : Code[20];pVATProdPostingGroup@1100281001 : Code[10];pAmountExclVAT@1100281004 : Decimal;pAmountInclVAT@1100281005 : Decimal) rValue : Boolean;
+    VAR
+      lVATPostingSetup@1100281000 : Record 325;
+      lVendor@1100281003 : Record 23;
+    BEGIN
+      // V‚rification de la coh‚rence des montants
+
+      rValue := FALSE;
+
+      lVendor.GET(pVendorNo);
+      lVATPostingSetup.GET(lVendor."VAT Bus. Posting Group",pVATProdPostingGroup);
+
+      IF ROUND(pAmountExclVAT + (pAmountExclVAT * lVATPostingSetup."VAT %" / 100),0.01) <> pAmountInclVAT THEN BEGIN
+        EXIT;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetService@1100281000(VAR pService@1100281001 : Record 50066;pServiceNo@1100281000 : Code[20]) rValue : Boolean;
+    BEGIN
+      // Permet de r‚cup‚rer un service
+      rValue := FALSE;
+
+      IF NOT pService.GET(pServiceNo) THEN BEGIN
+        EXIT;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetPurchItemNo@1100281007(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pLineNo@1100281002 : Integer;pCorporateNo@1100281007 : Code[20];pServiceOrderType@1100281008 : Code[20];pEmergency@1100281009 : Boolean;VAR pItemNo@1100281003 : Code[20]) rValue : Boolean;
+    VAR
+      lServiceCode@1100281006 : Record 50040;
+      lSpecialization@1100281004 : Record 50005;
+      lProductCatalog@1100281005 : Record 50060;
+      lServiceOrderType@1100281010 : Record 5903;
+    BEGIN
+      // Si plusieurs sp‚cialit‚ : article sur Produit
+      // Sinon article sur sp‚cialisation
+
+      //<<IMH07.ST
+      IF pEmergency THEN BEGIN
+        IF lServiceOrderType.GET(pServiceOrderType) THEN
+          IF NOT lServiceOrderType."Apply Emergency Price" THEN
+            pEmergency := FALSE;
+      END;
+      //>>IMH07.ST
+
+      rValue := FALSE;
+
+      lServiceCode.SETRANGE("Service Type",lServiceCode."Service Type"::Intervention);
+      lServiceCode.SETRANGE("Service No.",pServiceNo);
+      lServiceCode.SETRANGE("Service Header No.",pServiceHeaderNo);
+      lServiceCode.SETRANGE("Intervention Line No.",pLineNo);
+      lServiceCode.SETRANGE("Code Type",lServiceCode."Code Type"::Speciality);
+      IF NOT lServiceCode.ISEMPTY THEN BEGIN
+        IF lServiceCode.COUNT = 1 THEN BEGIN
+          lServiceCode.FINDFIRST;
+          IF lSpecialization.GET(lServiceCode.Code) THEN BEGIN
+            IF pEmergency THEN BEGIN
+              pItemNo := lSpecialization."Emergency Purchase Item No.";
+            END ELSE BEGIN
+              pItemNo := lSpecialization."Purchase Item No.";
+            END;
+          END;
+          rValue := pItemNo <> '';
+          IF rValue THEN BEGIN
+            EXIT;
+          END;
+        END;
+      END;
+
+      IF NOT lProductCatalog.GET(pCorporateNo,pServiceOrderType) THEN BEGIN
+        EXIT;
+      END;
+
+      IF pEmergency THEN BEGIN
+        pItemNo := lProductCatalog."Multi Spe. Em. Purch. Item No.";
+      END ELSE BEGIN
+        pItemNo := lProductCatalog."Multi Spe. Purch. Item No.";
+      END;
+
+      //<<IMH05.PC
+      IF pItemNo = '' THEN BEGIN
+        lServiceOrderType.GET(pServiceOrderType);
+        //pItemNo := lServiceOrderType."Generic Item No.";
+        IF pEmergency THEN BEGIN
+          pItemNo := lServiceOrderType."Multi Spe. Em. Purch. Item No.";
+        END ELSE BEGIN
+          pItemNo := lServiceOrderType."Multi Spe. Purch. Item No.";
+        END;
+      END;
+      //>>IMH05.PC
+      rValue := pItemNo <> '';
+    END;
+
+    PROCEDURE CreateBeneficiaryVendor@1100281009(PcontactNo@1100281003 : Code[20];VAR PVendorNo@1100281004 : Code[20]);
+    VAR
+      lGeneralLedgerSetup@1100281000 : Record 98;
+      lDataTemplateHeader@1100281001 : Record 8618;
+      lContact@1100281002 : Record 5050;
+      lVendor@1100281005 : Record 23;
+      lRecRef@1100281006 : RecordRef;
+      lTemplateMgt@1100281007 : Codeunit 8612;
+    BEGIN
+      //<<IMH47.isat.PC
+      lGeneralLedgerSetup.GET;
+      lGeneralLedgerSetup.TESTFIELD("IMH Vendor Template");
+      lDataTemplateHeader.GET(lGeneralLedgerSetup."IMH Vendor Beneficiary Templ.");
+      //>>IMH47.isat.PC
+      lContact.GET(PcontactNo);
+      lContact.CreateVendor;
+      //<<IMH47.isat.PC
+      lContact.GetVendor(PVendorNo);
+      IF lVendor.GET(PVendorNo) THEN BEGIN
+        lRecRef.GETTABLE(lVendor);
+        lTemplateMgt.UpdateRecord(lDataTemplateHeader,lRecRef);
+      END;
+      //>>IMH47.isat.PC
+    END;
+
+    PROCEDURE UdatePurchCostOnMinute@1100281011(VAR pServInterventionMinute@1100281002 : Record 50084;VAR pVatPRodGroup@1100281010 : Code[10]);
+    VAR
+      lService@1100281000 : Record 50066;
+      lServiceInterventionLine@1100281001 : Record 50075;
+      lItemNo@1100281003 : Code[20];
+      lPurchLine@1100281004 : TEMPORARY Record 39;
+      lPurchHeader@1100281005 : Record 38;
+      lPurchPriceCalcMgt@1100281006 : Codeunit 7010;
+      lArea@1100281007 : Record 284;
+      lServiceHeader@1100281008 : Record 5900;
+      lServiceOrderType@1100281009 : Record 5903;
+      lItem@1100281011 : Record 27;
+    BEGIN
+      WITH pServInterventionMinute DO BEGIN
+        lServiceInterventionLine.GET("Service Header No.","Service Intervention Line No.");
+        lService.GET(lServiceInterventionLine."Service No.");
+        lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServInterventionMinute."Service Header No.");
+        lServiceOrderType.GET(lServiceHeader."Service Order Type");
+        IF NOT lServiceOrderType."Apply Emergency Price" THEN BEGIN
+          pServInterventionMinute."Recomm. Unit Cost Excl. VAT" := 0;
+          EXIT;
+        END;
+
+        IF NOT lServiceInterventionLine.Urgent THEN BEGIN
+          pServInterventionMinute."Recomm. Unit Cost Excl. VAT" := 0;
+          EXIT;
+        END;
+        //<<IMH09
+        IF lServiceOrderType."Emergency Price Control" THEN BEGIN
+          IF lServiceInterventionLine."Non-Urgent Pursuit" <> lServiceInterventionLine."Non-Urgent Pursuit"::No THEN
+            EXIT;
+          IF NOT lServiceInterventionLine.Travel THEN
+            EXIT;
+        END;
+        //>>IMH09
+        IF ("Tarif Zone Code" = '') THEN
+          IF lArea.GET(COPYSTR(lServiceHeader."Ship-to Post Code",1,2)) THEN
+            "Tarif Zone Code" := lArea."Tarif Zone Code";
+
+        IF (pServInterventionMinute."Package Price" = '') THEN
+          GetTarifCode(pServInterventionMinute);
+
+        GetPurchItemNo(lServiceHeader."Service No.",
+                       "Service Header No.",
+                       "Service Intervention Line No.",
+                       lService."Corporate No.",
+                       lServiceInterventionLine."Service Order Type",
+                       lServiceInterventionLine.Urgent,
+                       lItemNo);
+        lPurchLine."Pay-to Vendor No." := lServiceInterventionLine."Provider No.";
+        lPurchLine.Type := lPurchLine.Type::Item;
+        lPurchLine."No." := lItemNo;
+        IF NOT lItem.GET(lItemNo) THEN
+        BEGIN
+          pServInterventionMinute."Recomm. Unit Cost Excl. VAT" := 0;
+          EXIT;
+        END;
+        pVatPRodGroup := lItem."VAT Prod. Posting Group";
+        lPurchLine.Quantity := 1;
+        lPurchLine."Tarif Zone Code" := "Tarif Zone Code";
+        lPurchLine."Package Price" := "Package Price";
+
+        lPurchHeader."Pay-to Vendor No." := lServiceInterventionLine."Provider No.";
+        lPurchPriceCalcMgt.FindPurchLinePrice(lPurchHeader,lPurchLine,lPurchLine.FIELDNO(Quantity));
+        pServInterventionMinute.Amount := lPurchLine."Direct Unit Cost";
+        pServInterventionMinute."Recomm. Unit Cost Excl. VAT" := lPurchLine."Direct Unit Cost";
+        pServInterventionMinute.VALIDATE(Amount);//IMH09
+      END;
+    END;
+
+    PROCEDURE GetTarifCode@1100281012(VAR pServInterventionMinute@1100281000 : Record 50084);
+    VAR
+      lService@1100281007 : Record 50066;
+      lServiceInterventionLine@1100281006 : Record 50075;
+      lItemNo@1100281005 : Code[20];
+      lPurchLine@1100281004 : TEMPORARY Record 39;
+      lPurchHeader@1100281003 : Record 38;
+      lPurchPriceCalcMgt@1100281002 : Codeunit 7010;
+      lArea@1100281001 : Record 284;
+      lVendInvDisc@1100281008 : Record 24;
+      lBaseCalendarChange@1100281009 : Record 7601;
+      lServMgtSetup@1100281010 : Record 5911;
+      lCompanyInfo@1100281011 : Record 79;
+      lNbHour@1100281012 : Decimal;
+      lServiceHeader@1100281013 : Record 5900;
+      lExitLoop@1100281014 : Boolean;
+    BEGIN
+      //<<IMH06.ISAT.VA
+      WITH pServInterventionMinute DO
+      BEGIN
+        lServiceInterventionLine.GET("Service Header No.","Service Intervention Line No.");
+        lService.GET(lServiceInterventionLine."Service No.");
+        lServMgtSetup.GET;
+        lCompanyInfo.GET;
+        lCompanyInfo.TESTFIELD("Base Calendar Code");
+        lCompanyInfo.TESTFIELD("Holliday Reason Code");
+
+        IF (lServiceInterventionLine."Arrival Date" = 0D) THEN
+        BEGIN
+          lVendInvDisc.SETFILTER("Monday Starting Hour",'<=12:00');
+          lVendInvDisc.SETFILTER("Monday Ending Hour",'>=12:00');
+        END ELSE BEGIN
+
+          lBaseCalendarChange.RESET;
+          lBaseCalendarChange.SETRANGE("Base Calendar Code",lCompanyInfo."Base Calendar Code");
+          lBaseCalendarChange.SETRANGE("Recurring System",lBaseCalendarChange."Recurring System"::"Annual Recurring");
+          lBaseCalendarChange.SETRANGE("Start Date",lServiceInterventionLine."Arrival Date");
+          lBaseCalendarChange.SETRANGE("Nonworking Reason Code",lCompanyInfo."Holliday Reason Code");
+          IF lBaseCalendarChange.FINDFIRST THEN
+          BEGIN
+            lVendInvDisc.SETRANGE("Day Off",TRUE);
+            lVendInvDisc.SETFILTER("Day Off Starting Hour",'>=%1',lServiceInterventionLine."Arrival Time");
+            lVendInvDisc.SETFILTER("Day Off Ending Hour",'<=%1',lServiceInterventionLine."Arrival Time");
+          END ELSE BEGIN
+            CASE DATE2DWY(lServiceInterventionLine."Arrival Date",1) OF
+              1:BEGIN
+                lVendInvDisc.SETFILTER("Monday Starting Hour",'<=%1',lServiceInterventionLine."Arrival Time");
+                lVendInvDisc.SETFILTER("Monday Ending Hour",'>=%1',lServiceInterventionLine."Arrival Time");
+              END;
+              2:BEGIN
+                lVendInvDisc.SETFILTER("Tuesday Starting Hour",'<=%1',lServiceInterventionLine."Arrival Time");
+                lVendInvDisc.SETFILTER("Tuesday Ending Hour",'>=%1',lServiceInterventionLine."Arrival Time");
+              END;
+              3:BEGIN
+                lVendInvDisc.SETFILTER("Wednesday Starting Hour",'<=%1',lServiceInterventionLine."Arrival Time");
+                lVendInvDisc.SETFILTER("Wednesday Ending Hour",'>=%1',lServiceInterventionLine."Arrival Time");
+              END;
+              4:BEGIN
+                lVendInvDisc.SETFILTER("Thursday Starting Hour",'<=%1',lServiceInterventionLine."Arrival Time");
+                lVendInvDisc.SETFILTER("Thursday Ending Hour",'>=%1',lServiceInterventionLine."Arrival Time");
+              END;
+              5:BEGIN
+                lVendInvDisc.SETFILTER("Friday Starting Hour",'<=%1',lServiceInterventionLine."Arrival Time");
+                lVendInvDisc.SETFILTER("Friday Ending Hour",'>=%1',lServiceInterventionLine."Arrival Time");
+              END;
+              6:BEGIN
+                lVendInvDisc.SETFILTER("Saturday Starting Hour",'<=%1',lServiceInterventionLine."Arrival Time");
+                lVendInvDisc.SETFILTER("Saturday Ending Hour",'>=%1',lServiceInterventionLine."Arrival Time");
+              END;
+              7:BEGIN
+                lVendInvDisc.SETFILTER("Sunday Starting Hour",'<=%1',lServiceInterventionLine."Arrival Time");
+                lVendInvDisc.SETFILTER("Sunday Ending Hour",'>=%1',lServiceInterventionLine."Arrival Time");
+              END;
+            END;
+          END;
+        END;
+
+        lNbHour := 24;
+        IF (lServiceInterventionLine."Assigned Date" <> 0D) AND (lServiceInterventionLine."Arrival Date" <> 0D) AND
+           (lServiceInterventionLine."Assigned Time" <> 0T) AND (lServiceInterventionLine."Arrival Time" <> 0T) THEN
+        BEGIN
+          IF (lServiceInterventionLine."Assigned Date" = lServiceInterventionLine."Arrival Date") THEN
+            lNbHour :=0;
+          lNbHour += ((lServiceInterventionLine."Arrival Time" - lServiceInterventionLine."Assigned Time") / 3600000);
+      //    lNbHour := lNbHour / 60000;
+          lVendInvDisc.SETRANGE("Type Hour",lVendInvDisc."Type Hour"::Less);
+          //<<IMH16.PC
+          //lVendInvDisc.SETFILTER("Nb Hour",'<=%1',lNbHour);
+          //IF lVendInvDisc.FINDLAST THEN
+          lExitLoop := FALSE;
+          IF lVendInvDisc.FINDLAST THEN BEGIN
+            REPEAT
+              IF lNbHour <= lVendInvDisc."Nb Hour" THEN BEGIN
+                pServInterventionMinute."Package Price" := lVendInvDisc.Code;
+                lExitLoop := TRUE;
+              END;
+            UNTIL lExitLoop OR (lVendInvDisc.NEXT(-1) = 0);
+          END;
+          //>>IMH16.PC
+
+          IF (pServInterventionMinute."Package Price" = '') THEN
+          BEGIN
+            lVendInvDisc.SETRANGE("Type Hour",lVendInvDisc."Type Hour"::More);
+            //<<IMH16.PC
+            //lVendInvDisc.SETFILTER("Nb Hour",'>=%1',lNbHour);
+            //IF lVendInvDisc.FINDLAST THEN
+            //  pServInterventionMinute."Package Price" := lVendInvDisc.Code
+            lExitLoop := FALSE;
+            IF lVendInvDisc.FINDLAST THEN BEGIN
+              REPEAT
+                IF lNbHour >= lVendInvDisc."Nb Hour" THEN BEGIN
+                  pServInterventionMinute."Package Price" := lVendInvDisc.Code;
+                  lExitLoop := TRUE;
+                END;
+              UNTIL lExitLoop OR (lVendInvDisc.NEXT(-1) = 0);
+            END;
+            //>>IMH16.PC
+          END;
+        END;
+        IF (pServInterventionMinute."Package Price" = '') THEN
+        BEGIN
+          lVendInvDisc.SETRANGE("Nb Hour");
+          lVendInvDisc.SETRANGE("Type Hour");
+          IF lVendInvDisc.FINDFIRST THEN
+            pServInterventionMinute."Package Price" := lVendInvDisc.Code
+        END;
+      END;
+      //>>IMH06.ISAT.VA
+    END;
+
+    PROCEDURE UpdateAmountExpected@1100281015(VAR pServInterQuote@1100281000 : Record 50076);
+    VAR
+      lPurchRcptLine@1100281001 : Record 121;
+      lServInterventionLine@1100281002 : Record 50075;
+    BEGIN
+      lServInterventionLine.GET(pServInterQuote."Service Header No.",pServInterQuote."Intervention Line No.");
+
+      //pServInterQuote."Transfered Amount" := pServInterQuote."Amount Excl. VAT";
+      //pServInterQuote."Transfered Amount Incl. VAT" := pServInterQuote."Amount Incl. VAT";
+
+      lPurchRcptLine.RESET;
+      lPurchRcptLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lPurchRcptLine.SETRANGE("Service No.",lServInterventionLine."Service No.");
+      lPurchRcptLine.SETRANGE("Service Header No.",lServInterventionLine."Service Header No.");
+      lPurchRcptLine.SETRANGE("Intervention Line No.",lServInterventionLine."Line No.");
+      lPurchRcptLine.SETRANGE("Quote Line No.",pServInterQuote."Line No.");
+      IF lPurchRcptLine.ISEMPTY THEN
+        EXIT;
+      lPurchRcptLine.FINDSET;
+      REPEAT
+      //<<IMH08.ST
+          pServInterQuote."Transfered Amount" += lPurchRcptLine."Item Charge Base Amount";
+      //d‚sactiv‚ car faux
+      //    pServInterQuote."Transfered Amount" += lPurchRcptLine."VAT Base Amount";
+      //    pServInterQuote."Transfered Amount Incl. VAT" += lPurchRcptLine."Amount Including VAT";
+      //>>IMH08.ST
+      UNTIL(lPurchRcptLine.NEXT = 0);
+    END;
+
+    PROCEDURE ShowInvoiceDoc@1000000000(pDocType@1000000000 : ' ,PurchHeader,PurchInvHeader';pDocNo@1000000001 : Code[20]);
+    VAR
+      lPurchHeader@1000000002 : Record 38;
+      lPurchInvHeader@1000000003 : Record 122;
+    BEGIN
+      //IMH18.ST
+      CASE pDocType OF
+        pDocType::PurchHeader :
+          IF lPurchHeader.GET(lPurchHeader."Document Type"::Invoice, pDocNo) THEN
+            FORM.RUNMODAL(FORM::"Purchase Invoice", lPurchHeader);
+        pDocType::PurchInvHeader  :
+          IF lPurchInvHeader.GET(pDocNo) THEN
+            FORM.RUNMODAL(FORM::"Posted Purchase Invoice", lPurchInvHeader);
+      END;
+    END;
+
+    PROCEDURE CreatePurchLine@1100281016(pPurchHeader@1100281000 : Record 38;pVATProdPostingGroup@1100281006 : Code[10];pAmountExclVAT@1100281007 : Decimal;pDeprAmt@1100281008 : Decimal;pDeductAmt@1100281009 : Decimal) : Boolean;
+    VAR
+      lGLSetup@1100281005 : Record 98;
+      lServIntervLine@1100281003 : Record 50075;
+      lPurchLine@1100281001 : Record 39;
+      lLineNo@1100281002 : Integer;
+      lItemNo@1100281004 : Code[20];
+    BEGIN
+      // Cr‚ation d'une ligne de commande
+
+      WITH pPurchHeader DO BEGIN
+        // R‚cup‚ration de l'article … facturer
+        IF "Intervention Line No." <> 0 THEN BEGIN
+          lServIntervLine.GET("Service Header No.", "Intervention Line No.");
+          GetPurchItemNo("Service No.", "Service Header No.", "Intervention Line No.",
+                         lServIntervLine."Corporate No.", lServIntervLine."Service Order Type", lServIntervLine.Urgent,
+                         lItemNo);
+        END;
+        IF pPurchHeader."Service Header Voucher No." <> 0 THEN BEGIN
+          lGLSetup.GET;
+          lItemNo := lGLSetup."Item No. For Voucher";
+        END;
+      END;
+
+      // R‚cup‚ration de la derniŠre ligne sur la commande
+      WITH lPurchLine DO BEGIN
+        SETRANGE("Document Type", pPurchHeader."Document Type");
+        SETRANGE("Document No.", pPurchHeader."No.");
+        SETRANGE(Type, Type::Item);
+        SETRANGE("No.",lItemNo);
+        IF FINDFIRST THEN BEGIN
+          IF pVATProdPostingGroup <> "VAT Prod. Posting Group" THEN
+            VALIDATE("VAT Prod. Posting Group",pVATProdPostingGroup);
+          IF "Direct Unit Cost" <> pAmountExclVAT THEN
+            VALIDATE("Direct Unit Cost",pAmountExclVAT);
+          IF "Deductible Amount" <> pDeductAmt THEN
+            VALIDATE("Deductible Amount", pDeductAmt);
+          IF "Depreciation Amount" <> pDeprAmt THEN
+            VALIDATE("Depreciation Amount",pDeprAmt);
+          MODIFY(TRUE);
+        END
+        ELSE BEGIN
+          SETRANGE(Type);
+          SETRANGE("No.");
+          LOCKTABLE;
+          IF FINDLAST THEN
+            lLineNo := "Line No." + 10000
+          ELSE
+            lLineNo := 10000;
+
+          VALIDATE("Document Type", pPurchHeader."Document Type");
+          VALIDATE("Document No.", pPurchHeader."No.");
+          VALIDATE(Type, Type::Item);
+          VALIDATE("No.", lItemNo);
+          VALIDATE(Quantity, 1);
+          VALIDATE("Qty. to Invoice", 1);
+          "Service No." := pPurchHeader."Service No.";
+          "Service Header No." := pPurchHeader."Service Header No.";
+          "Intervention Line No." := pPurchHeader."Intervention Line No.";
+          "Quote Line No." := pPurchHeader."Quote Line No.";
+          "Service Header Voucher No." := pPurchHeader."Service Header Voucher No.";
+          "Corporate No." := pPurchHeader."Corporate No.";
+          "Corporate Region Code" := pPurchHeader."Corporate Region Code";
+          "Service Order Type" := pPurchHeader."Service Order Type";
+          VALIDATE("VAT Prod. Posting Group",pVATProdPostingGroup);
+          VALIDATE("Direct Unit Cost",pAmountExclVAT);
+          VALIDATE("Deductible Amount",pDeductAmt);
+          VALIDATE("Depreciation Amount",pDeprAmt);
+          "Line No." := lLineNo;
+          INSERT(TRUE);
+        END;
+      END;
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH20 @d 19/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3730
+          @a Ajout permission TableData Vendor=r,
+          @a Ajout permission TableData Vendor Invoice Disc.=r,
+          @a Ajout permission TableData Item=r,
+          @a Ajout permission TableData Purchase Header=rimd,
+          @a Ajout permission TableData Purchase Line=rimd,
+          @a Ajout permission TableData Company Information=r,
+          @a Ajout permission TableData General Ledger Setup=r,
+          @a Ajout permission TableData Purch. Rcpt. Header=r,
+          @a Ajout permission TableData Purch. Rcpt. Line=r,
+          @a Ajout permission TableData Purch. Inv. Header=r,
+          @a Ajout permission TableData Purch. Inv. Line=r,
+          @a Ajout permission TableData Area=r,
+          @a Ajout permission TableData VAT Posting Setup=rimd,
+          @a Ajout permission TableData Contact=r,
+          @a Ajout permission TableData Marketing Setup=r,
+          @a Ajout permission TableData Service Header=rimd,
+          @a Ajout permission TableData Service Order Type=r,
+          @a Ajout permission TableData Service Mgt. Setup=r,
+          @a Ajout permission TableData Base Calendar Change=r,
+          @a Ajout permission TableData Provider=rim,
+          @a Ajout permission TableData Specialization=r,
+          @a Ajout permission TableData Provider Agreement=r,
+          @a Ajout permission TableData Service Code=r,
+          @a Ajout permission TableData Corporate Region=r,
+          @a Ajout permission TableData Product Catalog=r,
+          @a Ajout permission TableData Service Quote Codes=r,
+          @a Ajout permission TableData Service=rimd,
+          @a Ajout permission TableData Service Intervention Quote=rimd,
+          @a Ajout permission TableData Service Intervention Minutes=rimd,
+          @a Ajout permission TableData Service Header Voucher=rimd,
+          @a Ajout permission TableData Invoicing Matrix Setup=r,
+          @a Ajout permission TableData Sales Item Setup=ri */
+      /** @r IMH19 @d 28/08/2012 @a ISAT.RC @v IMH6.01.212 @s Version 1.4.1 @c Gestion date de reference matrice @h 3795
+          @c Changement de la signature de la fonction CheckCreationAvailable Rajout du paramŠtre Service Header*/
+      /** @r IMH18 @d 28/02/12 @a ISAT.ST @v IMH6.01.146 @s Refonte facturation */
+      /** @r IMH17 @d 23/12/11 @a ISAT.ST @v IMH6.01.146 @s Comptabilit‚ @c 2514 */
+      /** @r IMH16 @d 21/12/11 @a ISAT.PC @v IMH6.01.146 @s Comptabilit‚ @c 2514 */
+      /** @r IMH15 @d 21/12/11 @a ISAT.EBA @v IMH6.01.018 @s Gestion des agr‚ments */
+      /** @r IMH14 @d 20/12/11 @a ISAT.ST @v IMH6.01.146 @s R‚ouverture commande sur l'ajout de ligne */
+      /** @r IMH13 @d 23/11/11 @a ISAT.EBA @v IMH6.01.146 @s Cr‚ation commande d'achat */
+      /** @r IMH12 @d 24/10/11 @a ISAT.EBA @v IMH6.01.146 @s Comptabilit‚ - Gestion facturation */
+      /** @r IMH11 @d 15/10/11 @a ISAT.EBA @v IMH6.01.146 @s Gestion des franchises\v‚tust‚  */
+      /** @r IMH10 @d 15/10/11 @a ISAT.EBA @v IMH6.01.146 @s Comptabilit‚ - Gestion facturation */
+      /** @r IMH09 @d 09/09/11 @a ISAT.LLT @v IMH6.01.146 @s Gestion r‚ception forfait urgence */
+      /** @r IMH08 @d 09/08/11 @a ISAT.ST @v IMH6.01.146 @s Gestion r‚ception forfait urgence */
+      /** @r IMH07 @d 08/08/11 @a ISAT.ST @v IMH6.01.146 @s Article non urgent selon le type produit */
+      /** @r IMH06 @d 01/08/11 @a ISAT.VA @v IMH6.01.146 @s Gestion du prix d'achat */
+      /** @r IMH05 @d 26/07/11 @a isat.PC @v IMH6.01.146 @s Comptabilit‚ - Gestion facturation @c gestion article g‚n‚rique */
+      /** @r IMH04 @d 21/05/11 @a isat.PC @v IMH6.01.146 @s Comptabilit‚ - Gestion facturation @c Refonte du codeunit */
+      /** @r IMH03 @d 04/04/11 @a CAP.ZW @v IMH6.01.146 @s Comptabilit‚ - Gestion facturation @c Modify Creation commande */
+      /** @r IMH02 @d 30/02/11 @a CAP.JC @v IMH6.01.146 @s Comptabilit‚ - Gestion facturation
+          @c Ajout fonction GenerateTransmissionFile. */
+      /** @r IMH01 @d 14/03/11 @a ISAT.LLT @v IMH6.01.146 @s Gestion facturation @c Cr‚ation */
+    }
+    END.
+  }
+}

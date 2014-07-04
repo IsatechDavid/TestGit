@@ -1,0 +1,1639 @@
+OBJECT Report 8016650 Depreciation Book Pro Forma
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:22:00;
+    Modified=Yes;
+    Version List=ISA6.00,IMISAT6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Fixed Asset - Projected Value;
+               FRA=Immo. - Valeur projet‚e];
+    OnPreReport=BEGIN
+                  DeprBook.GET(DeprBookCode);
+                  Year365Days := DeprBook."Fiscal Year 365 Days"; //ISA01.ST
+                  IF GroupTotals = GroupTotals::"FA Posting Group" THEN
+                    FAGenReport.SetFAPostingGroup("Fixed Asset",DeprBook.Code);
+                  FAGenReport.AppendFAPostingFilter("Fixed Asset",StartingDate,EndingDate);
+                  FAFilter := "Fixed Asset".GETFILTERS;
+                  DeprBookText := STRSUBSTNO('%1%2 %3',DeprBook.TABLECAPTION,':',DeprBookCode);
+                  MakeGroupTotalText;
+                  ValidateDates;
+                  IF PrintDetails THEN BEGIN
+                    FANo := "Fixed Asset".FIELDCAPTION("No.");
+                    FADescription := "Fixed Asset".FIELDCAPTION(Description);
+                  END;
+                  IF DeprBook."No. of Days in Fiscal Year" > 0 THEN
+                    DaysInFiscalYear := DeprBook."No. of Days in Fiscal Year"
+                  ELSE
+                    DaysInFiscalYear := 360;
+                  //<<ISA01.ST
+                  IF Year365Days THEN
+                    DaysInFiscalYear := 365;
+                  //>>ISA01.ST
+                  IF PeriodLength = 0 THEN
+                    PeriodLength := DaysInFiscalYear;
+                  IF (PeriodLength <= 5) OR (PeriodLength > DaysInFiscalYear) THEN
+                    ERROR(
+                      Text000,DaysInFiscalYear);
+                  FALedgEntry2."FA Posting Type" := FALedgEntry2."FA Posting Type"::Depreciation;
+                  DeprText := STRSUBSTNO('%1',FALedgEntry2."FA Posting Type");
+                  IF DeprBook."Use Custom 1 Depreciation" THEN BEGIN
+                    DeprText2 := DeprText;
+                    FALedgEntry2."FA Posting Type" := FALedgEntry2."FA Posting Type"::"Custom 1";
+                    Custom1Text := STRSUBSTNO('%1',FALedgEntry2."FA Posting Type");
+                    DeprCustom1Text := STRSUBSTNO('%1 %2 %3',DeprText,'+',Custom1Text);
+                  END;
+                  SalesPriceFieldname := FADeprBook.FIELDCAPTION("Projected Proceeds on Disposal");
+                  GainLossFieldname := Text001;
+
+                  TempDate[1] := StartingDate;
+                  i := 1;
+                  REPEAT BEGIN
+                    OldDate := TempDate[i];
+                    i += 1;
+                    TempDate[i] := CALCDATE('+1A',OldDate);
+                  END UNTIL i = 7;
+
+                  i:=1 ;
+                  REPEAT BEGIN
+                    TempDeprGenTotal[i] := 0;
+                    i += 1;
+                  END UNTIL i=11;
+
+                  TemporaryTable.DELETEALL;
+                END;
+
+    Orientation=Landscape;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table5600;
+        DataItemTableView=SORTING(No.);
+        NewPagePerGroup=No;
+        NewPagePerRecord=No;
+        PrintOnlyIfDetail=Yes;
+        OnPreDataItem=BEGIN
+                        CurrReport.CREATETOTALS(TemporaryTable.TotalDebit,TemporaryTable.TotalCredit,TemporaryTable."Amount 3",
+                                                TemporaryTable."Amount 4",TemporaryTable."Amount 5",TemporaryTable."Amount 6",
+                                                TemporaryTable."Amount 7",TemporaryTable."Amount 8",TemporaryTable."Amount 9",
+                                                TemporaryTable."Amount 10");
+
+
+                        CASE GroupTotals OF
+                          GroupTotals::"FA Class":
+                            SETCURRENTKEY("FA Class Code");
+                          GroupTotals::"FA Subclass":
+                            SETCURRENTKEY("FA Subclass Code");
+                          GroupTotals::"FA Location":
+                            SETCURRENTKEY("FA Location Code");
+                          GroupTotals::"Main Asset":
+                            SETCURRENTKEY("Component of Main Asset");
+                          GroupTotals::"Global Dimension 1":
+                            SETCURRENTKEY("Global Dimension 1 Code");
+                          GroupTotals::"Global Dimension 2":
+                            SETCURRENTKEY("Global Dimension 2 Code");
+                          GroupTotals::"FA Posting Group":
+                            SETCURRENTKEY("FA Posting Group");
+                        END;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           Cumul := 0;
+
+                           IF NOT FADeprBook.GET("No.",DeprBookCode) THEN
+                             CurrReport.SKIP;
+                           IF SkipRecord THEN
+                             CurrReport.SKIP;
+
+                           IF GroupTotals = GroupTotals::"FA Posting Group" THEN
+                             IF "FA Posting Group" <> FADeprBook."FA Posting Group" THEN
+                               ERROR(Text004,FIELDCAPTION("FA Posting Group"),"No.");
+
+                           StartingDate := StartingDate2;
+                           EndingDate := EndingDate2;
+                           DoProjectedDisposal := FALSE;
+                           EntryPrinted := FALSE;
+                           IF ProjectedDisposal AND
+                              (FADeprBook."Projected Disposal Date" > 0D) AND
+                              (FADeprBook."Projected Disposal Date" <= EndingDate)
+                           THEN BEGIN
+                              EndingDate := FADeprBook."Projected Disposal Date";
+                              IF StartingDate > EndingDate THEN
+                                StartingDate := EndingDate;
+                              DoProjectedDisposal := TRUE;
+                           END;
+
+                           FALE.RESET;
+                           FALE.SETCURRENTKEY("FA No.","Depreciation Book Code","FA Posting Category","FA Posting Type","Posting Date");
+                           FALE.SETRANGE("FA No.","Fixed Asset"."No.");
+                           FALE.SETRANGE("Depreciation Book Code",DeprBookCode);
+                           FALE.SETRANGE("FA Posting Type",FALE."FA Posting Type"::"Acquisition Cost");
+                           FALE.CALCSUMS(Amount);
+
+                           FixedAsset.RESET;
+                           FixedAsset.COPYFILTERS("Fixed Asset");
+
+                           CASE GroupTotals OF
+                             GroupTotals::"FA Class":
+                               FixedAsset.SETCURRENTKEY("FA Class Code");
+                             GroupTotals::"FA Subclass":
+                               FixedAsset.SETCURRENTKEY("FA Subclass Code");
+                             GroupTotals::"FA Location":
+                               FixedAsset.SETCURRENTKEY("FA Location Code");
+                             GroupTotals::"Main Asset":
+                               FixedAsset.SETCURRENTKEY("Component of Main Asset");
+                             GroupTotals::"Global Dimension 1":
+                               FixedAsset.SETCURRENTKEY("Global Dimension 1 Code");
+                             GroupTotals::"Global Dimension 2":
+                               FixedAsset.SETCURRENTKEY("Global Dimension 2 Code");
+                             GroupTotals::"FA Posting Group":
+                               FixedAsset.SETCURRENTKEY("FA Posting Group");
+                           END;
+
+                           IF FixedAsset.NEXT = 0 THEN
+                             ShowTotal := TRUE;
+                         END;
+
+        ReqFilterFields=No.,FA Class Code,FA Subclass Code,Budgeted Asset;
+        GroupTotalFields=FA Class Code,FA Subclass Code,Global Dimension 1 Code,Global Dimension 2 Code,FA Location Code,Component of Main Asset,FA Posting Group;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=27600;
+            SectionHeight=4230;
+          }
+          CONTROLS
+          {
+            { 1100281034;Label  ;6150 ;2538 ;1800 ;1269 ;HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Acquisition Value;
+                                                                    FRA=Valeur d'acquisition] }
+            { 1100281035;TextBox;1800 ;2961 ;4200 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         SourceExpr=FADescription }
+            { 1100281037;TextBox;0    ;1692 ;18150;423  ;SourceExpr="Fixed Asset".TABLECAPTION + ': ' + FAFilter }
+            { 1100281038;TextBox;19200;0    ;7500 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+            { 1100281039;TextBox;0    ;0    ;7500 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         SourceExpr=COMPANYNAME }
+            { 1100281041;TextBox;0    ;423  ;7500 ;423  ;SourceExpr=DeprBookText }
+            { 1100281042;TextBox;19200;846  ;7500 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1100281044;TextBox;0    ;2961 ;1650 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         SourceExpr=FANo }
+            { 1100281045;TextBox;10050;2538 ;1650 ;1269 ;HorzAlign=Center;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation ' +FORMAT(TempDate[1]) }
+            { 1100281046;TextBox;11850;2538 ;1650 ;1269 ;HorzAlign=Center;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[2]) }
+            { 1100281047;TextBox;13650;2538 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[3]) }
+            { 1100281048;TextBox;15450;2538 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[4]) }
+            { 1100281049;TextBox;17250;2538 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[5]) }
+            { 1100281050;TextBox;19050;2538 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[6]) }
+            { 1100281051;TextBox;20850;2538 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[7]) }
+            { 1100281052;Label  ;22650;2538 ;2100 ;1269 ;FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Depreciation Total;
+                                                                    FRA=Cumul des dotations] }
+            { 1100281053;Label  ;24900;2538 ;1800 ;1269 ;HorzAlign=Center;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Net Value;
+                                                                    FRA=VNC] }
+            { 1100281054;TextBox;8100 ;2538 ;1800 ;1269 ;HorzAlign=Center;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation avant ' +FORMAT(TempDate[1]) }
+            { 1100281065;Shape  ;0    ;3807 ;26700;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281080;Label  ;25500;423  ;750  ;423  ;ParentControl=1100281081 }
+            { 1100281081;TextBox;26250;423  ;450  ;423  ;CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 1100281004;Label  ;7650 ;0    ;10050;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=FIXED ASSET - PRO-FORMA;
+                                                                    FRA=IMMOBILISATIONS - ETAT PREVISIONNEL] }
+            { 1100281012;TextBox;1650 ;846  ;1500 ;423  ;CaptionML=[ENU=Starting Date;
+                                                                    FRA=Date d‚but];
+                                                         SourceExpr=TempDate[1] }
+            { 1100281013;Label  ;0    ;846  ;1500 ;423  ;ParentControl=1100281012;
+                                                         VertAlign=Center;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281017;Label  ;0    ;1269 ;1500 ;423  ;ParentControl=1100281018;
+                                                         VertAlign=Center;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281018;TextBox;1650 ;1269 ;1500 ;423  ;CaptionML=[ENU=Ending Date;
+                                                                    FRA=Date fin];
+                                                         SourceExpr=TempDate[7] }
+            { 1100281028;TextBox;0    ;2115 ;4200 ;423  ;SourceExpr=GroupCodeName }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=27600;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           MakeGroupHeadLine;
+                           InitGroupTotals;
+                           CurrReport.SHOWOUTPUT(PrintDetails AND (GroupTotals <> GroupTotals::" "));
+
+                           i:=1;
+                           REPEAT BEGIN
+                             TempDeprTotal[i] := 0;
+                             i += 1;
+                           END UNTIL i=9;
+                           CumulAmort := 0;
+
+                           TemporaryTable.SETRANGE(AccountNo,GroupHeadLine);
+                           IF NOT TemporaryTable.FIND THEN BEGIN
+                             TemporaryTable.AccountNo := GroupHeadLine;
+                             TemporaryTable.INSERT;
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 26  ;TextBox      ;0    ;0    ;5400 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         SourceExpr=GroupHeadLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=27600;
+            SectionHeight=0;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(PrintDetails);
+                           TransferValues;
+                         END;
+
+            OnPostSection=BEGIN
+                            IF CurrReport.SHOWOUTPUT THEN
+                              GroupAmounts[5] := GroupAmounts[5] + FALE.Amount;
+
+                            i := 1;
+                            REPEAT BEGIN
+                              TempDepr[i] := 0;
+                              i += 1;
+                            END UNTIL i = 9;
+                            OldDate := 0D;
+                          END;
+
+          }
+          CONTROLS
+          {
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=27600;
+            SectionHeight=846;
+            OnPostSection=BEGIN
+                            GroupAmountsDim[5] += GroupAmountsDim[5];
+                            GroupAmountsDim[1] += GroupAmounts[1];
+                            TotalBookValueDim[1] += TotalBookValue[1];
+
+                            TemporaryTable.SETRANGE(AccountNo,GroupHeadLine);
+                            IF TemporaryTable.FIND THEN BEGIN
+                              TemporaryTable.TotalDebit := GroupAmounts[5];
+                              TemporaryTable.TotalCredit := -TempDeprTotal[1];
+                              TemporaryTable."Amount 3" := -TempDeprTotal[2];
+                              TemporaryTable."Amount 4" := -TempDeprTotal[3];
+                              TemporaryTable."Amount 5" := -TempDeprTotal[4];
+                              TemporaryTable."Amount 6" := -TempDeprTotal[5];
+                              TemporaryTable."Amount 7" := -TempDeprTotal[6];
+                              TemporaryTable."Amount 8" := -TempDeprTotal[7];
+                              TemporaryTable."Amount 9" := -CumulAmort;
+                              TemporaryTable."Amount 10" := GroupAmounts[5]+CumulAmort;
+                              TemporaryTable."Amount 11" := -TempDeprTotal[8];
+                              TemporaryTable.MODIFY;
+                            END;
+
+                            i:=1 ;
+                            REPEAT BEGIN
+                              TempDeprGenTotal[i] += TempDeprTotal[i];
+                              i += 1;
+                            END UNTIL i=9;
+                            TempDeprGenTotal[9] += -CumulAmort;
+                            TempDeprGenTotal[10] += GroupAmounts[5]+CumulAmort;
+                            TempDeprGenTotal[11] += GroupAmounts[5];
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 27  ;TextBox      ;0    ;0    ;5850 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text002 + ': ' + GroupHeadLine }
+            { 1000000011;Shape  ;0    ;423  ;26850;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281002;TextBox;6000 ;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         FontItalic=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GroupAmounts[5] }
+            { 1100281029;TextBox;10050;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprTotal[1] }
+            { 1100281030;TextBox;11850;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprTotal[2] }
+            { 1100281031;TextBox;13650;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprTotal[3] }
+            { 1100281032;TextBox;15450;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprTotal[4] }
+            { 1100281033;TextBox;17250;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprTotal[5] }
+            { 1100281036;TextBox;19050;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprTotal[6] }
+            { 1100281063;TextBox;20850;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprTotal[7] }
+            { 1100281064;TextBox;22650;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-CumulAmort }
+            { 1100281001;TextBox;8100 ;0    ;1800 ;423  ;Name=Cumul;
+                                                         HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Cumul];
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprTotal[8] }
+            { 1100281066;TextBox;24750;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GroupAmounts[5]+CumulAmort }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=27600;
+            SectionHeight=1269;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(ShowTotal);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281003;Shape  ;0    ;846  ;25500;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281005;TextBox;10650;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=-(GroupAmounts[1]+GroupAmounts[6]);
+                                                         AutoFormatType=1 }
+            { 1100281006;TextBox;14100;0    ;2250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TotalBookValueDim[1];
+                                                         AutoFormatType=1 }
+            { 1100281008;TextBox;0    ;0    ;5250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text002 + ': ' + 'Dimension Value.Code' }
+            { 1100281009;TextBox;5250 ;0    ;3450 ;423  ;FontSize=8;
+                                                         FontItalic=Yes;
+                                                         SourceExpr=' Valeur d''acquisition' }
+            { 1100281010;TextBox;8700 ;0    ;1950 ;423  ;FontSize=8;
+                                                         FontItalic=Yes;
+                                                         SourceExpr=GroupAmountsDim[5] }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=27600;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 1100281094;Label  ;0    ;0    ;5100 ;423  ;HorzAlign=Right;
+                                                         FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=TOTAL;
+                                                                    FRA=TOTAL GENERAL] }
+            { 1100281095;TextBox;8100 ;0    ;1800 ;423  ;Name=Cumul;
+                                                         HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Cumul];
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[8] }
+            { 1100281096;TextBox;10050;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[1] }
+            { 1100281097;TextBox;11850;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[2] }
+            { 1100281098;TextBox;13650;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[3] }
+            { 1100281099;TextBox;15450;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[4] }
+            { 1100281100;TextBox;17250;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[5] }
+            { 1100281101;TextBox;19050;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[6] }
+            { 1100281102;TextBox;20850;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[7] }
+            { 1100281103;TextBox;22650;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TempDeprGenTotal[9] }
+            { 1100281104;TextBox;24750;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TempDeprGenTotal[10] }
+            { 1100281105;TextBox;5700 ;0    ;2250 ;423  ;Name=Cumul;
+                                                         HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Cumul];
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TempDeprGenTotal[11] }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table5601;
+        DataItemTableView=SORTING(FA No.,Depreciation Book Code,FA Posting Date)
+                          WHERE(FA Posting Type=CONST(Depreciation));
+        NewPagePerGroup=No;
+        NewPagePerRecord=No;
+        OnPreDataItem=BEGIN
+                        SETRANGE("Depreciation Book Code",DeprBookCode);
+                        SETRANGE("FA Posting Date",0D,StartingDate);
+                        BookValue := 0;
+                        IF NOT PrintDetails THEN
+                          CurrReport.BREAK;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF "Part of Book Value" THEN
+                             BookValue := BookValue + Amount;
+                           EntryPrinted := TRUE;
+
+                           TempDepr[8] += Amount;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         GroupAmounts[6] := GroupAmounts[6] + BookValue;
+                         TotalAmounts[6] := TotalAmounts[6] + BookValue;
+                       END;
+
+        DataItemLink=FA No.=FIELD(No.);
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=FILTER(1..1000000));
+        NewPagePerGroup=No;
+        DataItemVarName=ProjectedDepreciation;
+        OnPreDataItem=BEGIN
+                        FirstToDate := TRUE;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF UntilDate >= EndingDate THEN
+                             CurrReport.BREAK
+                           ELSE BEGIN
+                             IF Number = 1  THEN BEGIN
+                               CalculateFirstDeprAmount(Done);
+                               IF FADeprBook."Book Value" <> 0 THEN
+                                 Done := Done OR NOT EntryPrinted;
+                             END ELSE
+                               CalculateSecondDeprAmount(Done);
+                             IF Done THEN
+                               UpdateTotals
+                             ELSE
+                               CurrReport.BREAK;
+                           END;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=27600;
+            SectionHeight=0;
+            OnPostSection=BEGIN
+                            i := 1;
+                            REPEAT BEGIN
+                              IF (UntilDate <= TempDate[i]) AND (UntilDate > OldDate) THEN BEGIN
+                                TempDepr[i] += DeprAmount;
+                              END;
+                              OldDate := TempDate[i];
+                              i += 1;
+                            END UNTIL i = 8;
+                          END;
+
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        DataItemVarName=DisplayTotalAsset;
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        DataItemVarName=Fixed Asset Line;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=27600;
+            SectionHeight=423;
+            OnPostSection=BEGIN
+                            i:=1 ;
+                            Cumul := 0;
+                            REPEAT BEGIN
+                              TempDeprTotal[i] += TempDepr[i];
+                              Cumul += TempDepr[i];
+                              i += 1;
+                            END UNTIL i=9;
+                            CumulAmort += Cumul;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 24  ;TextBox      ;0    ;0    ;1350 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr="Fixed Asset"."No." }
+            { 1000000032;TextBox;1500 ;0    ;4350 ;423  ;FontSize=8;
+                                                         FontBold=No;
+                                                         SourceExpr="Fixed Asset".Description }
+            { 1100281055;TextBox;10050;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDepr[1] }
+            { 1100281056;TextBox;11850;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDepr[2] }
+            { 1100281057;TextBox;13650;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDepr[3] }
+            { 1100281058;TextBox;15450;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDepr[4] }
+            { 1100281059;TextBox;17250;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDepr[5] }
+            { 1100281060;TextBox;19050;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDepr[6] }
+            { 1100281061;TextBox;20850;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDepr[7] }
+            { 1100281062;TextBox;22650;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-Cumul }
+            { 1000000001;TextBox;8100 ;0    ;1800 ;423  ;Name=Cumul;
+                                                         HorzAlign=Right;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Cumul];
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDepr[8] }
+            { 1000000013;TextBox;6000 ;0    ;1950 ;423  ;FontSize=8;
+                                                         FontItalic=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FALE.Amount }
+            { 1100281040;TextBox;24750;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FALE.Amount+Cumul }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        DataItemVarName=ProjectionTotal;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=27600;
+            SectionHeight=0;
+            OnPreSection=BEGIN
+                           IF PrintAmountsPerDate THEN
+                             CurrReport.NEWPAGE;
+                         END;
+
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=FILTER(1..));
+        DataItemVarName=Buffer;
+        OnPreDataItem=BEGIN
+                        IF NOT  PrintAmountsPerDate THEN
+                          CurrReport.BREAK;
+                        FABufferProjection.RESET;
+
+                        IF NOT FABufferProjection.FIND('-') THEN
+                          CurrReport.BREAK;
+
+                        TemporaryTable.RESET;
+                        FABufferProjection.RESET;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           { isat ec 05/12/05
+                           IF Nombre = 1 THEN BEGIN
+                             IF NoT FABufferProjection.FIND('-') THEN
+                               CurrReport.BREAK;
+                           END ELSE
+                             IF FABufferProjection.NEXT = 0 THEN
+                               CurrReport.BREAK;
+                           }
+                           IF Number = 1 THEN BEGIN
+                             IF NOT TemporaryTable.FIND('-') THEN
+                               CurrReport.BREAK;
+                           END ELSE
+                             IF TemporaryTable.NEXT = 0 THEN
+                               CurrReport.BREAK;
+
+                           IF NOT FASubClass.GET(TemporaryTable.AccountNo) THEN;
+
+                           i := 1;
+                           OldDate := 0D;
+                           REPEAT BEGIN
+                             FABufferProjection.SETRANGE("Code Name",TemporaryTable.AccountNo);
+                             FABufferProjection.SETRANGE("FA Posting Date",OldDate,TempDate[i]);
+                             TempDepr[i] := 0;
+                             REPEAT
+                               TempDepr[i] += - FABufferProjection.Depreciation;
+                             UNTIL FABufferProjection.NEXT=0;
+                             OldDate := TempDate[i];
+                             i += 1;
+                           END UNTIL i = 7;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=27600;
+            SectionHeight=3807;
+          }
+          CONTROLS
+          {
+            { 68  ;TextBox      ;19200;0    ;7500 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 73  ;TextBox      ;26250;423  ;450  ;423  ;CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 74  ;Label        ;25500;423  ;750  ;423  ;ParentControl=73 }
+            { 72  ;TextBox      ;19200;846  ;7500 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+            { 76  ;TextBox      ;0    ;0    ;7500 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         SourceExpr=COMPANYNAME }
+            { 77  ;TextBox      ;0    ;423  ;7500 ;423  ;SourceExpr=DeprBookText }
+            { 91  ;Label        ;8100 ;0    ;10050;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=FIXED ASSET - PRO-FORMA SUMMARY;
+                                                                    FRA=IMMOBILISATIONS - SYNTHESE PREVISIONNEL] }
+            { 1100281015;Label  ;0    ;2115 ;1950 ;1269 ;FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Code;
+                                                                    FRA=Code] }
+            { 1100281016;Label  ;2100 ;2115 ;3300 ;1269 ;FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=D‚signation] }
+            { 1100281082;Shape  ;0    ;3384 ;26700;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281108;Label  ;5550 ;2115 ;2100 ;1269 ;HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Acquisition Value;
+                                                                    FRA=Valeur d'acquisition] }
+            { 1100281109;TextBox;7800 ;2115 ;1800 ;1269 ;HorzAlign=Center;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation avant ' +FORMAT(TempDate[1]) }
+            { 1100281110;TextBox;9750 ;2115 ;1650 ;1269 ;HorzAlign=Center;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation ' +FORMAT(TempDate[1]) }
+            { 1100281111;TextBox;11550;2115 ;1650 ;1269 ;HorzAlign=Center;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[2]) }
+            { 1100281112;TextBox;13350;2115 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[3]) }
+            { 1100281113;TextBox;15150;2115 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[4]) }
+            { 1100281114;TextBox;16950;2115 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[5]) }
+            { 1100281115;TextBox;18750;2115 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[6]) }
+            { 1100281116;TextBox;20550;2115 ;1650 ;1269 ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='Dotation '+FORMAT(TempDate[7]) }
+            { 1100281117;Label  ;22350;2115 ;2100 ;1269 ;FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Depreciation Total;
+                                                                    FRA=Cumul des dotations] }
+            { 1100281118;Label  ;24600;2115 ;1800 ;1269 ;HorzAlign=Center;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Net Value;
+                                                                    FRA=VNC] }
+            { 1100281070;TextBox;0    ;1692 ;4200 ;423  ;SourceExpr=GroupCodeName }
+            { 1100281019;TextBox;1650 ;1269 ;1500 ;423  ;CaptionML=[ENU=Ending Date;
+                                                                    FRA=Date fin];
+                                                         SourceExpr=TempDate[7] }
+            { 1100281020;Label  ;0    ;1269 ;1500 ;423  ;ParentControl=1100281019;
+                                                         VertAlign=Center;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281021;TextBox;1650 ;846  ;1500 ;423  ;CaptionML=[ENU=Starting Date;
+                                                                    FRA=Date d‚but];
+                                                         SourceExpr=TempDate[1] }
+            { 1100281022;Label  ;0    ;846  ;1500 ;423  ;ParentControl=1100281021;
+                                                         VertAlign=Center;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=27600;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           i := 1;
+                           CumulAmort := 0;
+                           REPEAT BEGIN
+                             CumulAmort += TempDepr[i];
+                             i += 1;
+                           END UNTIL i = 7;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281000;TextBox;0    ;0    ;1650 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         SourceExpr=TemporaryTable.AccountNo }
+            { 1100281007;TextBox;9750 ;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable.TotalCredit }
+            { 1100281011;TextBox;11550;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 3" }
+            { 1100281014;TextBox;1800 ;0    ;3600 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         SourceExpr=FASubClass.Name }
+            { 1100281023;TextBox;13350;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 4" }
+            { 1100281024;TextBox;15150;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 5" }
+            { 1100281025;TextBox;16950;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 6" }
+            { 1100281026;TextBox;18750;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 7" }
+            { 1100281027;TextBox;20550;0    ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 8" }
+            { 1000000006;TextBox;22350;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 9" }
+            { 1100281067;TextBox;5550 ;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable.TotalDebit }
+            { 1100281068;TextBox;24600;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 10" }
+            { 1100281119;TextBox;7800 ;0    ;1800 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TemporaryTable."Amount 11" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=27600;
+            SectionHeight=1269;
+          }
+          CONTROLS
+          {
+            { 1100281069;Label  ;0    ;423  ;5100 ;423  ;HorzAlign=Right;
+                                                         FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=TOTAL;
+                                                                    FRA=TOTAL GENERAL] }
+            { 1100281083;Shape  ;0    ;0    ;26700;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281084;TextBox;5250 ;423  ;2400 ;423  ;Name=Cumul;
+                                                         HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Cumul];
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TempDeprGenTotal[11] }
+            { 1100281085;TextBox;7800 ;423  ;1800 ;423  ;Name=Cumul;
+                                                         HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Cumul];
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[8] }
+            { 1100281086;TextBox;9750 ;423  ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[1] }
+            { 1100281087;TextBox;11550;423  ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[2] }
+            { 1100281088;TextBox;13350;423  ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[3] }
+            { 1100281089;TextBox;15150;423  ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[4] }
+            { 1100281090;TextBox;16950;423  ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[5] }
+            { 1100281091;TextBox;18750;423  ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[6] }
+            { 1100281092;TextBox;20550;423  ;1750 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=-TempDeprGenTotal[7] }
+            { 1100281093;TextBox;22350;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TempDeprGenTotal[9] }
+            { 1100281106;TextBox;24600;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TempDeprGenTotal[10] }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=10230;
+      Height=3520;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   IF DeprBookCode = '' THEN BEGIN
+                     FASetup.GET;
+                     DeprBookCode := FASetup."Default Depr. Book";
+                   END;
+
+                   //paramŠtres par d‚faut
+                   PrintDetails := TRUE;
+                   PeriodLength := 360;
+                   DaysInFirstPeriod := 360;
+                   PrintAmountsPerDate := TRUE;
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1   ;Label        ;0    ;3080 ;3300 ;440  ;ParentControl=2 }
+      { 2   ;TextBox      ;3410 ;3080 ;2750 ;440  ;CaptionML=[ENU=Group Totals;
+                                                              FRA=Sous-totaux];
+                                                   OptionCaptionML=[ENU=" ,FA Class,FA Subclass,FA Location,Main Asset,Global Dimension 1,Global Dimension 2,FA Posting Group";
+                                                                    FRA=" ,Classe immo.,Sous-classe immo.,Emplacement immo.,Immo. principale,Axe principal 1,Axe principal 2,Groupe compta. immo."];
+                                                   NextControl=21;
+                                                   SourceExpr=GroupTotals }
+      { 12  ;Label        ;0    ;660  ;3300 ;440  ;ParentControl=14 }
+      { 13  ;Label        ;0    ;1210 ;3300 ;440  ;ParentControl=15 }
+      { 14  ;TextBox      ;3410 ;660  ;1650 ;440  ;CaptionML=[ENU=First Depreciation Date;
+                                                              FRA=Date premier amortissement];
+                                                   SourceExpr=StartingDate }
+      { 15  ;TextBox      ;3410 ;1210 ;1650 ;440  ;CaptionML=[ENU=Last Depreciation Date;
+                                                              FRA=Date dernier amortissement];
+                                                   SourceExpr=EndingDate }
+      { 18  ;Label        ;6380 ;0    ;3300 ;440  ;ParentControl=21 }
+      { 21  ;CheckBox     ;9790 ;0    ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Print per Fixed Asset;
+                                                              FRA=Imprimer par immobilisation];
+                                                   SourceExpr=PrintDetails }
+      { 3   ;TextBox      ;3410 ;0    ;2750 ;440  ;CaptionML=[ENU=Depreciation Book;
+                                                              FRA=Lois d'amortissement];
+                                                   SourceExpr=DeprBookCode;
+                                                   TableRelation="Depreciation Book" }
+      { 4   ;Label        ;0    ;0    ;3300 ;440  ;ParentControl=3 }
+      { 5   ;TextBox      ;3410 ;1870 ;1650 ;440  ;CaptionML=[ENU=Number of Days;
+                                                              FRA=Nombre de jours];
+                                                   BlankZero=Yes;
+                                                   SourceExpr=PeriodLength;
+                                                   MinValue=0;
+                                                   OnValidate=BEGIN
+                                                                IF PeriodLength > 0 THEN
+                                                                  UseAccountingPeriod := FALSE;
+                                                              END;
+                                                               }
+      { 6   ;Label        ;0    ;1870 ;3300 ;440  ;ParentControl=5 }
+      { 7   ;CheckBox     ;9790 ;1100 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Print Amounts per Date;
+                                                              FRA=Imprimer montants par date];
+                                                   SourceExpr=PrintAmountsPerDate }
+      { 8   ;Label        ;6380 ;1100 ;3300 ;440  ;ParentControl=7 }
+      { 9   ;CheckBox     ;9790 ;550  ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Projected Disposal;
+                                                              FRA=Cession pr‚vue];
+                                                   SourceExpr=ProjectedDisposal }
+      { 10  ;Label        ;6380 ;550  ;3300 ;440  ;ParentControl=9 }
+      { 17  ;TextBox      ;3410 ;2420 ;1650 ;440  ;CaptionML=[ENU=No. of Days in First Period;
+                                                              FRA=Nombre de jours dans premiŠre p‚riode];
+                                                   BlankZero=Yes;
+                                                   SourceExpr=DaysInFirstPeriod;
+                                                   MinValue=0 }
+      { 19  ;Label        ;0    ;2420 ;3300 ;440  ;ParentControl=17 }
+      { 20  ;CheckBox     ;9790 ;1650 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Use Accounting Period;
+                                                              FRA=Utiliser p‚riode comptable];
+                                                   SourceExpr=UseAccountingPeriod;
+                                                   OnValidate=BEGIN
+                                                                IF UseAccountingPeriod THEN BEGIN
+                                                                  PeriodLength := 0;
+                                                                //ec 05/10/05
+                                                                  UseToDateSituation := FALSE;
+                                                                  CLEAR(ToDate);
+                                                                END;
+                                                              END;
+                                                               }
+      { 22  ;Label        ;6380 ;1650 ;3300 ;440  ;ParentControl=20 }
+      { 1100281002;CheckBox;9790;2200 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=To Date Annual Situation;
+                                                              FRA=Situation annuelle … date];
+                                                   SourceExpr=UseToDateSituation;
+                                                   OnValidate=BEGIN
+                                                                IF UseToDateSituation THEN
+                                                                  UseAccountingPeriod := FALSE;
+                                                              END;
+                                                               }
+      { 1100281003;Label  ;6380 ;2200 ;3300 ;440  ;ParentControl=1100281002 }
+      { 1100281000;TextBox;8580 ;2860 ;1650 ;440  ;CaptionML=[ENU=Situation Date;
+                                                              FRA=Date situation];
+                                                   SourceExpr=ToDate;
+                                                   OnValidate=VAR
+                                                                year@1100281000 : Integer;
+                                                                day@1100281001 : Integer;
+                                                                month@1100281002 : Integer;
+                                                              BEGIN
+                                                                year := DATE2DMY(StartingDate,3);
+                                                                month := DATE2DMY(ToDate,2);
+                                                                day := DATE2DMY(ToDate,1);
+                                                                IF DATE2DMY(ToDate,3) <> year THEN
+                                                                  ToDate := DMY2DATE(day,month,year);
+                                                              END;
+                                                               }
+      { 1100281001;Label  ;6380 ;2860 ;2090 ;440  ;ParentControl=1100281000 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      Text000@1000 : TextConst 'ENU=Number of Days must Not be greater than %1 or less than 5.;FRA=Le Nombre de jours ne doit pas ˆtre sup‚rieur … %1 ou inf‚rieur … 5.';
+      Text001@1001 : TextConst 'ENU=Projected Gain/Loss;FRA=Gains/Pertes pr‚vu(e)s';
+      Text002@1002 : TextConst 'ENU=Group Total;FRA=Sous-total';
+      Text003@1003 : TextConst 'ENU=Group Totals;FRA=Sous-totaux';
+      Text004@1004 : TextConst 'ENU=%1 has been modified in fixed asset %2;FRA=%1 a ‚t‚ modifi‚(e) dans l''immobilisation %2';
+      FASubClass@1100281019 : Record 5608;
+      TempDate@1100281010 : ARRAY [7] OF Date;
+      OldDate@1100281020 : Date;
+      TempDeprGenTotal@1100281022 : ARRAY [11] OF Decimal;
+      TempDeprTotal@1100281021 : ARRAY [8] OF Decimal;
+      TempDepr@1100281016 : ARRAY [8] OF Decimal;
+      TemporaryTable@1100281004 : TEMPORARY Record 8016603;
+      i@1100281017 : Integer;
+      GroupTotalsText@1100281023 : Text[30];
+      "-------isat ec -----------"@1100281018 : Integer;
+      GLSetup@1100281009 : Record 98;
+      FASetup@1005 : Record 5603;
+      DeprBook@1006 : Record 5611;
+      FADeprBook@1007 : Record 5612;
+      FixedAsset@1100281015 : Record 5600;
+      FA@1008 : Record 5600;
+      FALedgEntry2@1009 : Record 5601;
+      FABufferProjection@1010 : TEMPORARY Record 5641;
+      FAGenReport@1011 : Codeunit 5626;
+      CalculateDepr@1012 : Codeunit 5610;
+      FADateCalc@1013 : Codeunit 5617;
+      DepreciationCalc@1014 : Codeunit 5616;
+      DeprBookCode@1015 : Code[10];
+      FAFilter@1016 : Text[250];
+      DeprBookText@1017 : Text[50];
+      GroupCodeName@1018 : Text[50];
+      GroupCodeName2@1019 : Text[50];
+      GroupHeadLine@1020 : Text[50];
+      DeprText@1021 : Text[50];
+      DeprText2@1022 : Text[50];
+      Custom1Text@1023 : Text[50];
+      DeprCustom1Text@1024 : Text[50];
+      FANo@1026 : Text[50];
+      FADescription@1027 : Text[50];
+      GroupTotals@1028 : ' ,FA Class,FA Subclass,FA Location,Main Asset,Global Dimension 1,Global Dimension 2,FA Posting Group';
+      BookValue@1029 : Decimal;
+      NewFiscalYear@1030 : Date;
+      EndFiscalYear@1031 : Date;
+      DaysInFiscalYear@1032 : Integer;
+      Custom1DeprUntil@1033 : Date;
+      PeriodLength@1034 : Integer;
+      FirstToDate@1100281002 : Boolean;
+      UseToDateSituation@1100281000 : Boolean;
+      UseAccountingPeriod@1035 : Boolean;
+      ToDate@1100281001 : Date;
+      StartingDate@1036 : Date;
+      StartingDate2@1037 : Date;
+      EndingDate@1038 : Date;
+      EndingDate2@1039 : Date;
+      PrintAmountsPerDate@1040 : Boolean;
+      OldUntilDate@1100281003 : Date;
+      UntilDate@1041 : Date;
+      PrintDetails@1042 : Boolean;
+      EntryAmounts@1043 : ARRAY [4] OF Decimal;
+      AssetAmounts@1044 : ARRAY [4] OF Decimal;
+      GroupAmountsDim@1100281012 : ARRAY [6] OF Decimal;
+      GroupAmounts@1045 : ARRAY [6] OF Decimal;
+      TotalAmounts@1046 : ARRAY [6] OF Decimal;
+      TotalBookValue@1047 : ARRAY [2] OF Decimal;
+      TotalBookValueDim@1100281013 : ARRAY [2] OF Decimal;
+      DateFromProjection@1048 : Date;
+      DeprAmount@1049 : Decimal;
+      Custom1Amount@1050 : Decimal;
+      NumberOfDays@1051 : Integer;
+      Custom1NumberOfDays@1052 : Integer;
+      DaysInFirstPeriod@1053 : Integer;
+      Done@1054 : Boolean;
+      NotFirstGroupTotal@1055 : Boolean;
+      SalesPriceFieldname@1056 : Text[50];
+      GainLossFieldname@1057 : Text[50];
+      ProjectedDisposal@1058 : Boolean;
+      DoProjectedDisposal@1059 : Boolean;
+      EntryPrinted@1060 : Boolean;
+      Text005@1061 : TextConst 'ENU=" ,FA Class,FA Subclass,FA Location,Main Asset,Global Dimension 1,Global Dimension 2,FA Posting Group";FRA=" ,Classe immo.,Sous-classe immo.,Emplacement immo.,Immo. principale,Axe principal 1,Axe principal 2,Groupe compta. immo."';
+      Cumul@1000000000 : Decimal;
+      CumulAmort@1000000001 : Decimal;
+      "---ID-VarG---"@1000000002 : Integer;
+      FALE@1000000003 : Record 5601;
+      Text006@1100281005 : TextConst 'FRA=Axe Principal 1 est d‚j… utilis‚ dans Sous-totaux analytiques';
+      Text007@1100281006 : TextConst 'FRA=Axe Principal 2 est d‚j… utilis‚ dans Sous-totaux analytiques';
+      Text008@1100281008 : TextConst 'FRA=Axe Principal 1 est d‚j… utilis‚ dans Sous-totaux';
+      Text009@1100281007 : TextConst 'FRA=Axe Principal 2 est d‚j… utilis‚ dans Sous-totaux';
+      Text010@1100281011 : TextConst 'FRA=Sous-totaux analytiques : %1';
+      ShowTotal@1100281014 : Boolean;
+      Year365Days@1100481000 : Boolean;
+
+    LOCAL PROCEDURE SkipRecord@5() : Boolean;
+    BEGIN
+      EXIT(
+        "Fixed Asset".Inactive OR
+        (FADeprBook."Acquisition Date" = 0D) OR
+        (FADeprBook."Acquisition Date" > EndingDate) OR
+        (FADeprBook."Last Depreciation Date" > EndingDate) OR
+        (FADeprBook."Disposal Date" > 0D));
+    END;
+
+    LOCAL PROCEDURE TransferValues@3();
+    BEGIN
+      WITH FADeprBook DO BEGIN
+        CALCFIELDS("Book Value",Depreciation,"Custom 1");
+        DateFromProjection := 0D;
+        EntryAmounts[1] := "Book Value";
+        EntryAmounts[2] := "Custom 1";
+        EntryAmounts[3] :=
+          DepreciationCalc.DeprInFiscalYear("Fixed Asset"."No.",DeprBookCode,StartingDate);
+        TotalBookValue[1] := TotalBookValue[1] + "Book Value";
+        TotalBookValue[2] := TotalBookValue[2] + "Book Value";
+        NewFiscalYear := FADateCalc.GetFiscalYear(DeprBookCode,StartingDate);
+        EndFiscalYear := FADateCalc.CalculateDate(
+            DepreciationCalc.Yesterday(NewFiscalYear,Year365Days),DaysInFiscalYear,Year365Days);
+        IF DeprBook."Use Custom 1 Depreciation" THEN
+          Custom1DeprUntil := FADeprBook."Depr. Ending Date (Custom 1)"
+        ELSE
+          Custom1DeprUntil := 0D;
+
+        IF Custom1DeprUntil > 0D THEN
+          EntryAmounts[4] := GetDeprBasis;
+      END;
+      UntilDate := 0D;
+      AssetAmounts[1] := 0;
+      AssetAmounts[2] := 0;
+      AssetAmounts[3] := 0;
+      AssetAmounts[4] := 0;
+    END;
+
+    LOCAL PROCEDURE CalculateFirstDeprAmount@8(VAR Done@1000 : Boolean);
+    VAR
+      FirstTime@1001 : Boolean;
+    BEGIN
+      FirstTime := TRUE;
+      UntilDate := StartingDate;
+
+      REPEAT
+        IF NOT FirstTime THEN BEGIN
+          GetNextDate;
+        END;
+        FirstTime := FALSE;
+        CalculateDepr.Calculate(
+          DeprAmount,Custom1Amount,NumberOfDays,Custom1NumberOfDays,
+          "Fixed Asset"."No.",DeprBookCode,UntilDate,EntryAmounts,0D,DaysInFirstPeriod);
+        Done := (DeprAmount <> 0) OR (Custom1Amount <> 0);
+
+      UNTIL (UntilDate >= EndingDate) OR Done;
+      EntryAmounts[3] :=
+        DepreciationCalc.DeprInFiscalYear("Fixed Asset"."No.",DeprBookCode,UntilDate);
+    END;
+
+    LOCAL PROCEDURE CalculateSecondDeprAmount@12(VAR Done@1000 : Boolean);
+    BEGIN
+      IF FirstToDate AND UseToDateSituation THEN BEGIN
+        UntilDate := ToDate;
+        FirstToDate := FALSE;
+      END ELSE
+        GetNextDate;
+
+      CalculateDepr.Calculate(
+        DeprAmount,Custom1Amount,NumberOfDays,Custom1NumberOfDays,
+        "Fixed Asset"."No.",DeprBookCode,UntilDate,EntryAmounts,DateFromProjection,0);
+      Done := CalculationDone(
+        (DeprAmount <> 0) OR (Custom1Amount <> 0),DateFromProjection);
+    END;
+
+    LOCAL PROCEDURE GetNextDate@13();
+    VAR
+      UntilDate2@1000 : Date;
+    BEGIN
+      IF UseToDateSituation AND (UntilDate<ToDate) THEN
+        UntilDate := ToDate;
+
+      UntilDate2 := GetPeriodEndingDate(UseAccountingPeriod,UntilDate,PeriodLength);
+
+      IF Custom1DeprUntil > 0D THEN
+        IF (UntilDate < Custom1DeprUntil) AND (UntilDate2 > Custom1DeprUntil) THEN
+          UntilDate2 := Custom1DeprUntil;
+
+      IF NOT UseToDateSituation THEN BEGIN
+        IF (UntilDate < EndFiscalYear) AND (UntilDate2 > EndFiscalYear) THEN
+          UntilDate2 := EndFiscalYear;
+      END;
+
+      IF UntilDate = EndFiscalYear THEN BEGIN
+        EntryAmounts[3] := 0;
+        NewFiscalYear := DepreciationCalc.ToMorrow(EndFiscalYear,Year365Days);
+        EndFiscalYear := FADateCalc.CalculateDate(EndFiscalYear,DaysInFiscalYear,Year365Days);
+      END;
+
+      DateFromProjection := DepreciationCalc.ToMorrow(UntilDate,Year365Days);
+      UntilDate := UntilDate2;
+      IF (UntilDate >= EndingDate) THEN
+        UntilDate := EndingDate;
+    END;
+
+    LOCAL PROCEDURE GetPeriodEndingDate@14(UseAccountingPeriod@1000 : Boolean;PeriodEndingDate@1001 : Date;VAR PeriodLength@1002 : Integer) : Date;
+    VAR
+      AccountingPeriod@1003 : Record 50;
+      UntilDate2@1004 : Date;
+    BEGIN
+      IF NOT UseAccountingPeriod THEN
+       EXIT(FADateCalc.CalculateDate(PeriodEndingDate,PeriodLength,Year365Days));
+      AccountingPeriod.SETFILTER("Starting Date",'>=%1',DepreciationCalc.ToMorrow(PeriodEndingDate,Year365Days) + 1);
+      IF AccountingPeriod.FIND('-') THEN BEGIN
+        UntilDate2 := DepreciationCalc.Yesterday(AccountingPeriod."Starting Date",Year365Days);
+        PeriodLength :=
+          DepreciationCalc.DeprDays(DepreciationCalc.ToMorrow(PeriodEndingDate,Year365Days),UntilDate2,Year365Days);
+        IF (PeriodLength <= 5) OR (PeriodLength > DaysInFiscalYear) THEN
+          PeriodLength := DaysInFiscalYear;
+        EXIT(UntilDate2);
+      END ELSE
+       EXIT(FADateCalc.CalculateDate(PeriodEndingDate,PeriodLength,Year365Days));
+    END;
+
+    LOCAL PROCEDURE MakeGroupTotalText@6();
+    BEGIN
+      CASE GroupTotals OF
+        GroupTotals::"FA Class":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("FA Class Code");
+        GroupTotals::"FA Subclass":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("FA Subclass Code");
+        GroupTotals::"FA Location":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("FA Location Code");
+        GroupTotals::"Main Asset":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("Main Asset/Component");
+        GroupTotals::"Global Dimension 1":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("Global Dimension 1 Code");
+        GroupTotals::"Global Dimension 2":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("Global Dimension 2 Code");
+        GroupTotals::"FA Posting Group":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("FA Posting Group");
+      END;
+      IF GroupCodeName <> '' THEN BEGIN
+        GroupCodeName2 := GroupCodeName;
+        IF GroupTotals = GroupTotals::"Main Asset" THEN
+          GroupCodeName2 := STRSUBSTNO('%1',SELECTSTR(GroupTotals + 1,Text005));
+        GroupCodeName := STRSUBSTNO('%1%2 %3',Text003,':',GroupCodeName2);
+      END;
+    END;
+
+    LOCAL PROCEDURE ValidateDates@2();
+    BEGIN
+      FAGenReport.ValidateDeprDates(StartingDate,EndingDate);
+      EndingDate2 := EndingDate;
+      StartingDate2 := StartingDate;
+    END;
+
+    LOCAL PROCEDURE MakeGroupHeadLine@1();
+    BEGIN
+      WITH "Fixed Asset" DO BEGIN
+        CASE GroupTotals OF
+          GroupTotals::"FA Class":
+            GroupHeadLine := "FA Class Code";
+          GroupTotals::"FA Subclass":
+            GroupHeadLine := "FA Subclass Code";
+          GroupTotals::"FA Location":
+            GroupHeadLine := "FA Location Code";
+          GroupTotals::"Main Asset":
+            BEGIN
+              FA."Main Asset/Component" := FA."Main Asset/Component"::"Main Asset";
+              GroupHeadLine :=
+                STRSUBSTNO('%1 %2',FA."Main Asset/Component","Component of Main Asset");
+              IF "Component of Main Asset" = '' THEN
+                GroupHeadLine := STRSUBSTNO('%1%2',GroupHeadLine,'*****');
+            END;
+          GroupTotals::"Global Dimension 1":
+            GroupHeadLine := "Global Dimension 1 Code";
+          GroupTotals::"Global Dimension 2":
+            GroupHeadLine := "Global Dimension 2 Code";
+          GroupTotals::"FA Posting Group":
+            GroupHeadLine := "FA Posting Group";
+        END;
+      END;
+      IF GroupHeadLine = '' THEN
+        GroupHeadLine := '*****';
+    END;
+
+    LOCAL PROCEDURE UpdateTotals@10();
+    VAR
+      EntryNo@1000 : Integer;
+      CodeName@1001 : Code[20];
+    BEGIN
+      EntryAmounts[1] := EntryAmounts[1] + DeprAmount + Custom1Amount;
+       IF Custom1DeprUntil > 0D THEN
+        IF UntilDate <= Custom1DeprUntil THEN
+          EntryAmounts[4] := EntryAmounts[4] + DeprAmount + Custom1Amount;
+      EntryAmounts[2] := EntryAmounts[2] + Custom1Amount;
+      EntryAmounts[3] := EntryAmounts[3] + DeprAmount + Custom1Amount;
+      AssetAmounts[1] := AssetAmounts[1] + DeprAmount;
+      AssetAmounts[2] := AssetAmounts[2] + Custom1Amount;
+      GroupAmounts[1] := GroupAmounts[1] + DeprAmount;
+      GroupAmounts[2] := GroupAmounts[2] + Custom1Amount;
+      TotalAmounts[1] := TotalAmounts[1] + DeprAmount;
+      TotalAmounts[2] := TotalAmounts[2] + Custom1Amount;
+      TotalBookValue[1] := TotalBookValue[1] + DeprAmount + Custom1Amount;
+      TotalBookValue[2] := TotalBookValue[2] + DeprAmount + Custom1Amount;
+
+      IF (UntilDate > 0D) OR PrintAmountsPerDate THEN
+        WITH FABufferProjection DO BEGIN
+          RESET;
+          IF FIND('+') THEN
+            EntryNo := "Entry No." + 1
+          ELSE
+            EntryNo := 1;
+          SETRANGE("FA Posting Date",UntilDate);
+          IF GroupTotals <> GroupTotals::" " THEN BEGIN
+            CASE GroupTotals OF
+              GroupTotals::"FA Class":
+                CodeName := "Fixed Asset"."FA Class Code";
+              GroupTotals::"FA Subclass":
+                CodeName := "Fixed Asset"."FA Subclass Code";
+              GroupTotals::"FA Location":
+                CodeName := "Fixed Asset"."FA Location Code";
+              GroupTotals::"Main Asset":
+                CodeName := "Fixed Asset"."Component of Main Asset";
+              GroupTotals::"Global Dimension 1":
+                CodeName := "Fixed Asset"."Global Dimension 1 Code";
+              GroupTotals::"Global Dimension 2":
+                CodeName := "Fixed Asset"."Global Dimension 2 Code";
+            END;
+            SETRANGE("Code Name",CodeName);
+          END;
+          IF NOT FIND('=><') THEN BEGIN
+            INIT;
+            "Code Name" := CodeName;
+            "FA Posting Date" := UntilDate;
+            "Entry No." := EntryNo;
+            Depreciation := DeprAmount;
+            "Custom 1" := Custom1Amount;
+            INSERT;
+          END ELSE BEGIN
+            Depreciation := Depreciation + DeprAmount;
+            "Custom 1" := "Custom 1" + Custom1Amount;
+            MODIFY;
+          END;
+        END;
+    END;
+
+    LOCAL PROCEDURE InitGroupTotals@4();
+    BEGIN
+      GroupAmounts[1] := 0;
+      GroupAmounts[2] := 0;
+      GroupAmounts[3] := 0;
+      GroupAmounts[4] := 0;
+      GroupAmounts[5] := 0;
+      GroupAmounts[6] := 0;
+      IF NotFirstGroupTotal THEN
+        TotalBookValue[1] := 0
+      ELSE
+        TotalBookValue[1] := EntryAmounts[1];
+      NotFirstGroupTotal := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetDeprBasis@7() : Decimal;
+    VAR
+      FALedgEntry@1000 : Record 5601;
+    BEGIN
+      WITH FALedgEntry DO BEGIN
+        SETCURRENTKEY("FA No.","Depreciation Book Code","Part of Book Value","FA Posting Date");
+        SETRANGE("FA No.","Fixed Asset"."No.");
+        SETRANGE("Depreciation Book Code",DeprBookCode);
+        SETRANGE("Part of Book Value",TRUE);
+        SETRANGE("FA Posting Date",0D,Custom1DeprUntil);
+        CALCSUMS(Amount);
+        EXIT(Amount);
+      END;
+    END;
+
+    LOCAL PROCEDURE CalculateGainLoss@9();
+    VAR
+      EntryAmounts@1000 : ARRAY [14] OF Decimal;
+      CalculateDisposal@1001 : Codeunit 5605;
+    BEGIN
+      CalculateDisposal.CalcGainLoss("Fixed Asset"."No.",DeprBookCode,EntryAmounts);
+      AssetAmounts[3] := FADeprBook."Projected Proceeds on Disposal";
+      IF EntryAmounts[1] <> 0 THEN
+        AssetAmounts[4] := EntryAmounts[1]
+      ELSE
+        AssetAmounts[4] := EntryAmounts[2];
+      AssetAmounts[4] :=
+        AssetAmounts[4] + AssetAmounts[1] + AssetAmounts[2] - FADeprBook."Projected Proceeds on Disposal";
+      GroupAmounts[3] := GroupAmounts[3] + AssetAmounts[3];
+      GroupAmounts[4] := GroupAmounts[4] + AssetAmounts[4];
+      TotalAmounts[3] := TotalAmounts[3] + AssetAmounts[3];
+      TotalAmounts[4] := TotalAmounts[4] + AssetAmounts[4];
+    END;
+
+    LOCAL PROCEDURE CalculationDone@11(Done@1000 : Boolean;FirstDeprDate@1001 : Date) : Boolean;
+    VAR
+      TableDeprCalc@1002 : Codeunit 5618;
+    BEGIN
+      IF Done OR
+        (FADeprBook."Depreciation Method" <> FADeprBook."Depreciation Method"::"User-Defined")
+      THEN
+        EXIT(Done);
+      EXIT(
+        TableDeprCalc.GetTablePercent(
+          DeprBookCode,FADeprBook."Depreciation Table Code",
+          FADeprBook."First User-Defined Depr. Date",FirstDeprDate,UntilDate) = 0);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/07/11 @a ISAT.ST @v IMH6.01.151 @s Immobilisation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

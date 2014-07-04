@@ -1,0 +1,214 @@
+OBJECT Report 50059 Export Trial Balance Conso.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=23/02/11;
+    Time=17:57:54;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Trial Balance;
+               FRA=Export Balance pour consolidation];
+    ProcessingOnly=Yes;
+    OnPreReport=BEGIN
+                  GLFilter := "G/L Account".GETFILTERS;
+                  PeriodText := "G/L Account".GETFILTER("Date Filter");
+                  gRecCpt.COPYFILTERS("G/L Account");
+                  gFiltreAna := "G/L Account".GETFILTER("G/L Account"."Global Dimension 1 Filter");
+                  MakeExcelInfo;
+                END;
+
+    OnPostReport=BEGIN
+                   CreateExcelbook;
+                 END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table15;
+        DataItemTableView=SORTING(No.)
+                          WHERE(Account Type=CONST(Posting));
+        OnPreDataItem=BEGIN
+                        gRecParamCompta.GET;
+                        gCodAna := gRecParamCompta."Global Dimension 1 Code";
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           CALCFIELDS("Balance at Date");
+
+                           gRecCpt.GET("No.");
+
+                           IF "Income/Balance" = "Income/Balance"::"Balance Sheet" THEN
+                             MakeExcelDataBody
+                           ELSE
+                           BEGIN
+                             gRecSecAna.SETRANGE("Dimension Code",gCodAna);
+                             gRecSecAna.SETFILTER(Code,gFiltreAna);
+                             gRecSecAna.SETRANGE("Dimension Value Type",gRecSecAna."Dimension Value Type"::Standard);
+                             IF gRecSecAna.FINDSET THEN
+                             REPEAT
+                               gRecCpt.SETFILTER("Global Dimension 1 Filter",gRecSecAna.Code);
+                               gRecCpt.CALCFIELDS("Net Change");
+                               fNulMakeExcelDataBodyAna;
+                             UNTIL gRecSecAna.NEXT =0;
+                             gRecSecAna.Code := ' ';
+                             gRecSecAna.Name := 'SANS';
+                             gRecCpt.SETFILTER("Global Dimension 1 Filter",'=%1',gRecSecAna.Code);
+                             gRecCpt.CALCFIELDS("Net Change");
+                             fNulMakeExcelDataBodyAna;
+                           END;
+                         END;
+
+        ReqFilterFields=No.,Account Type,Date Filter,G/L Entry Type Filter;
+      }
+      SECTIONS
+      {
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=3850;
+      Height=440;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      Text000@1000 : TextConst 'ENU=Period: %1;FRA=P‚riode : %1';
+      ExcelBuf@1005 : TEMPORARY Record 370;
+      GLFilter@1001 : Text[250];
+      PeriodText@1002 : Text[30];
+      PrintToExcel@1004 : Boolean;
+      Text001@1006 : TextConst 'ENU=Trial Balance;FRA=Export Balance pour consolidation';
+      Text002@1007 : TextConst 'ENU=Data;FRA=Donn‚es';
+      Text003@1008 : TextConst 'ENU=Debit;FRA=Solde au';
+      Text005@1011 : TextConst 'ENU=Company Name;FRA=Nom de la soci‚t‚';
+      Text006@1013 : TextConst 'ENU=Report No.;FRA=Nø ‚tat';
+      Text007@1014 : TextConst 'ENU=Report Name;FRA=Nom ‚tat';
+      Text008@1015 : TextConst 'ENU=User ID;FRA=Code utilisateur';
+      Text009@1016 : TextConst 'ENU=Date;FRA=Date';
+      Text010@1010 : TextConst 'ENU=G/L Filter;FRA=Filtre comptabilit‚';
+      CurrFormat@1012 : Text[30];
+      Text011@1003 : TextConst 'ENU=Period Filter;FRA=Filtre p‚riode';
+      Text10800@1120000 : TextConst 'ENU=This report includes simulation entries.;FRA=Cet ‚tat inclut des ‚critures de simulation.';
+      gRecParamCompta@1100286000 : Record 98;
+      gCodAna@1100286001 : Code[20];
+      gRecSecAna@1100286002 : Record 349;
+      gRecCpt@1100286003 : Record 15;
+      gFiltreAna@1100286004 : Text[1024];
+
+    PROCEDURE MakeExcelInfo@3();
+    BEGIN
+      ExcelBuf.SetUseInfoSheed;
+      ExcelBuf.AddInfoColumn(FORMAT(Text005),FALSE,'',TRUE,FALSE,FALSE,'');
+      ExcelBuf.AddInfoColumn(COMPANYNAME,FALSE,'',FALSE,FALSE,FALSE,'');
+      ExcelBuf.NewRow;
+      ExcelBuf.AddInfoColumn(FORMAT(Text007),FALSE,'',TRUE,FALSE,FALSE,'');
+      ExcelBuf.AddInfoColumn(FORMAT(Text001),FALSE,'',FALSE,FALSE,FALSE,'');
+      ExcelBuf.NewRow;
+      ExcelBuf.AddInfoColumn(FORMAT(Text006),FALSE,'',TRUE,FALSE,FALSE,'');
+      ExcelBuf.AddInfoColumn(REPORT::"Export Trial Balance Conso.",FALSE,'',FALSE,FALSE,FALSE,'');
+      ExcelBuf.NewRow;
+      ExcelBuf.AddInfoColumn(FORMAT(Text008),FALSE,'',TRUE,FALSE,FALSE,'');
+      ExcelBuf.AddInfoColumn(USERID,FALSE,'',FALSE,FALSE,FALSE,'');
+      ExcelBuf.NewRow;
+      ExcelBuf.AddInfoColumn(FORMAT(Text009),FALSE,'',TRUE,FALSE,FALSE,'');
+      ExcelBuf.AddInfoColumn(TODAY,FALSE,'',FALSE,FALSE,FALSE,'');
+      ExcelBuf.NewRow;
+      ExcelBuf.AddInfoColumn(FORMAT(Text010),FALSE,'',TRUE,FALSE,FALSE,'');
+      ExcelBuf.AddInfoColumn("G/L Account".GETFILTER("No."),FALSE,'',FALSE,FALSE,FALSE,'');
+      ExcelBuf.NewRow;
+      ExcelBuf.AddInfoColumn(FORMAT(Text011),FALSE,'',TRUE,FALSE,FALSE,'');
+      ExcelBuf.AddInfoColumn("G/L Account".GETFILTER("Date Filter"),FALSE,'',FALSE,FALSE,FALSE,'');
+      ExcelBuf.ClearNewRow;
+      MakeExcelDataHeader;
+    END;
+
+    LOCAL PROCEDURE MakeExcelDataHeader@2();
+    BEGIN
+      ExcelBuf.AddColumn("G/L Account".FIELDCAPTION("No."),FALSE,'',TRUE,FALSE,TRUE,'');
+      ExcelBuf.AddColumn("G/L Account".FIELDCAPTION(Name),FALSE,'',TRUE,FALSE,TRUE,'');
+      ExcelBuf.AddColumn(
+        FORMAT("G/L Account".FIELDCAPTION("Net Change") + ' - ' + Text003),FALSE,'',TRUE,FALSE,TRUE,'');
+    END;
+
+    PROCEDURE MakeExcelDataBody@4();
+    VAR
+      BlankFiller@1000 : Text[250];
+    BEGIN
+      BlankFiller := PADSTR(' ',MAXSTRLEN(BlankFiller),' ');
+      ExcelBuf.NewRow;
+      ExcelBuf.AddColumn(
+        "G/L Account"."No.",FALSE,'',"G/L Account"."Account Type" <> "G/L Account"."Account Type"::Posting,
+        FALSE,FALSE,'');
+      ExcelBuf.AddColumn(
+        "G/L Account".Name,FALSE,'',"G/L Account"."Account Type" <> "G/L Account"."Account Type"::Posting,
+        FALSE,FALSE,'@');
+
+      ExcelBuf.AddColumn(
+        "G/L Account"."Balance at Date",FALSE,'',"G/L Account"."Account Type" <> "G/L Account"."Account Type"::Posting,
+        FALSE,FALSE,CurrFormat);
+    END;
+
+    PROCEDURE CreateExcelbook@1();
+    BEGIN
+      ExcelBuf.CreateBook;
+      ExcelBuf.CreateSheet(Text002,Text001,COMPANYNAME,USERID);
+      ExcelBuf.GiveUserControl;
+      ERROR('');
+    END;
+
+    PROCEDURE fNulMakeExcelDataBodyAna@1100286001();
+    VAR
+      BlankFiller@1000 : Text[250];
+    BEGIN
+      IF gRecCpt."Net Change" = 0 THEN
+        EXIT;
+
+      BlankFiller := PADSTR(' ',MAXSTRLEN(BlankFiller),' ');
+
+      ExcelBuf.NewRow;
+
+      ExcelBuf.AddColumn(
+        "G/L Account"."No." + gRecSecAna.Code,FALSE,'',"G/L Account"."Account Type" <> "G/L Account"."Account Type"::Posting,
+        FALSE,FALSE,'');
+
+      ExcelBuf.AddColumn(
+        "G/L Account".Name + '-' + gRecSecAna.Name,FALSE,'',"G/L Account"."Account Type" <> "G/L Account"."Account Type"::Posting,
+        FALSE,FALSE,'@');
+
+      ExcelBuf.AddColumn(
+        gRecCpt."Net Change",FALSE,'',"G/L Account"."Account Type" <> "G/L Account"."Account Type"::Posting,
+        FALSE,FALSE,CurrFormat);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH06 @d 23/02/2011 @a CAP.JC @v IMH6.01.149 @s Comptabilit‚ - Consolidation
+          @c cr‚ation du report pour export excel des "soldes au" pour consolidation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

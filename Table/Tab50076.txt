@@ -1,0 +1,1516 @@
+OBJECT Table 50076 Service Intervention Quote
+{
+  OBJECT-PROPERTIES
+  {
+    Date=03/06/14;
+    Time=16:55:48;
+    Modified=Yes;
+    Version List=IMH6.01,DevFus,JUILLET;
+  }
+  PROPERTIES
+  {
+    OnInsert=BEGIN
+               ServHeader.GET(ServHeader."Document Type"::Invoice, "Service Header No.");
+               "Service Order Type" := ServHeader."Service Order Type";
+               "Deductible Type" := ServHeader."Appropriate Deductible Amount"; //IMH23.ST
+               ServIntervLine.GET("Service Header No.", "Intervention Line No.");
+               "Intervention No." := ServIntervLine."Intervention No.";
+               //<<IMH39 d‚sactiv‚
+               //ServIntervLine.CALCFIELDS("No. of Active Quotes");
+               //ServIntervLine.Suspended := (ServIntervLine."No. of Active Quotes" > 0);
+               //ServIntervLine.MODIFY;
+               //>>IMH39 d‚sactiv‚
+
+               //<<IMH13.JCD
+               IF GetBooCommission THEN
+                 IF Provider.GET(ServIntervLine."Provider No.") THEN
+                   VALIDATE("Percentage Commission",Provider."Percentage Commission");
+               //>>IMH13.JCD
+               "Corporate No." := ServHeader."Corporate No.";//IMH03
+               //<<IMH02 isat.ZW
+               IF "Line No." = 0 THEN
+                 GetNextLineNo;
+
+               IF "Document Date" = 0D THEN
+                 "Document Date" := WORKDATE;
+               IF "Receive Date" = 0D THEN
+                 "Receive Date" := WORKDATE;
+               IF ("Amount Excl. VAT" <> 0) OR ("Amount Incl. VAT" <> 0) THEN BEGIN
+                 TESTFIELD("Amount Excl. VAT");
+                 TESTFIELD("Amount Incl. VAT");
+               END;
+
+               InitDepreciation;//IMH06
+
+               TouchRecord(TRUE);
+               //>>IMH02 isat.ZW
+               CheckInterventionStatus(TRUE);
+               //<<IMH05
+               //Initialisation prcessus
+               //IMH24.ST d‚sactiv‚ GetProcessCode;
+               //>>IMH05
+               ServLog.LogQuote(Rec,0); //IMH21.ST
+
+               //Soumis … controler si devis fusion
+               //IF ServHeader."Fusion Service" THEN
+               //  "Expert Quote Check" := "Expert Quote Check"::"Expert Check";
+             END;
+
+    OnModify=BEGIN
+               IF ("Amount Excl. VAT" <> 0) OR ("Amount Incl. VAT" <> 0) THEN BEGIN
+                 TESTFIELD("Amount Excl. VAT");
+                 TESTFIELD("Amount Incl. VAT");
+               END;
+               //<<IMH25
+               CheckActive;
+               //>>IMH25
+
+               TouchRecord(FALSE);
+               //<<IMH11.ST
+               //<<IMH40
+               //AutoStep;
+               IF NOT SkipAutoStep THEN
+                 AutoStep;
+               //>>IMH40
+               MODIFY(FALSE);
+               //>>IMH11.ST
+               CheckInterventionStatus(FALSE);
+               ServLog.LogQuote(Rec,1); //IMH21.ST
+             END;
+
+    OnDelete=VAR
+               lProcMgt@1100281000 : Codeunit 50040;
+             BEGIN
+               lProcMgt.DeleteSourceRec(DATABASE::"Service Intervention Quote", "Service Header No.", '', "Intervention Line No.",
+                                        "Line No."); //IMH11.ST
+               CheckInterventionStatus(FALSE);
+
+               ServLog.LogQuote(Rec,2); //IMH21.ST
+
+               ServIntervLine.GET("Service Header No.", "Intervention Line No.");
+               ServIntervLine.CALCFIELDS("No. of Active Quotes");
+               ServIntervLine.Suspended := ServIntervLine."No. of Active Quotes" > 2;
+               ServIntervLine.MODIFY;
+             END;
+
+    OnRename=BEGIN
+               TouchRecord(FALSE);
+               ServLog.LogQuote(Rec,3); //IMH21.ST
+             END;
+
+    CaptionML=[ENU=Service Intervention Quote;
+               FRA=Devis intervention];
+    LookupFormID=Form50091;
+    DrillDownFormID=Form50091;
+  }
+  FIELDS
+  {
+    { 3   ;   ;Service Header No.  ;Code20        ;TableRelation="Service Header".No. WHERE (Document Type=CONST(Invoice));
+                                                   CaptionML=[ENU=Service Header No.;
+                                                              FRA=Nø ligne produit];
+                                                   Editable=No }
+    { 4   ;   ;Intervention Line No.;Integer      ;CaptionML=[ENU=Intervention Line No.;
+                                                              FRA=Nø ligne intervention] }
+    { 5   ;   ;Line No.            ;Integer       ;CaptionML=[ENU=Line No.;
+                                                              FRA=Nø ligne] }
+    { 7   ;   ;Intervention No.    ;Integer       ;CaptionML=[ENU=Intervenion No.;
+                                                              FRA=Nø intervention];
+                                                   BlankZero=Yes;
+                                                   Editable=No }
+    { 8   ;   ;Receive Date        ;Date          ;OnValidate=VAR
+                                                                lIntervLine@1100281000 : Record 50075;
+                                                              BEGIN
+                                                                //IMH20.zw
+                                                                IF "Receive Date" <> 0D THEN BEGIN
+                                                                  IF lIntervLine.GET("Service Header No.", "Intervention Line No.") THEN
+                                                                    IF "Receive Date" < lIntervLine."Assigned Date" THEN
+                                                                      ERROR(Text007, lIntervLine."Assigned Date");
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Receive Date;
+                                                              FRA=Date r‚ception] }
+    { 9   ;   ;Document Date       ;Date          ;CaptionML=[ENU=Document Date;
+                                                              FRA=Date document] }
+    { 10  ;   ;Service Order Type  ;Code10        ;TableRelation="Service Order Type";
+                                                   CaptionML=[ENU=Service Order Type;
+                                                              FRA=Type produit];
+                                                   Editable=No }
+    { 12  ;   ;Service Quote Type  ;Code10        ;TableRelation="Service Quote Codes".Code WHERE (Service Order Type=FIELD(Service Order Type),
+                                                                                                   Type=FILTER(QuoteType));
+                                                   CaptionML=[ENU=Service Quote Type;
+                                                              FRA=Type devis service] }
+    { 13  ;   ;Service Quote Type Desc.;Text50    ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Code.Description WHERE (Table ID=CONST(50062),
+                                                                                              Field ID=CONST(2),
+                                                                                              Code=FIELD(Service Quote Type)));
+                                                   CaptionML=[ENU="Service Quote Type Desc. ";
+                                                              FRA=Description type devis];
+                                                   Editable=No }
+    { 18  ;   ;Intervention Urgent ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Intervention Line".Urgent WHERE (Service Header No.=FIELD(Service Header No.),
+                                                                                                                Line No.=FIELD(Intervention Line No.)));
+                                                   CaptionML=[ENU=Intervention Urgent;
+                                                              FRA=Intervention urgente];
+                                                   Editable=No }
+    { 19  ;   ;Contact No.         ;Code20        ;TableRelation=Contact.No.;
+                                                   CaptionML=[ENU=Contact No.;
+                                                              FRA=Nø b‚n‚ficiaire] }
+    { 20  ;   ;Quote Reference     ;Text30        ;CaptionML=[ENU=Quote Reference;
+                                                              FRA=R‚f‚rence devis] }
+    { 21  ;   ;Amount Excl. VAT    ;Decimal       ;OnValidate=VAR
+                                                                lCurrExchRate@1100281000 : Record 330;
+                                                              BEGIN
+                                                                CheckAmount;//IMH10
+                                                                GetCurrency("Currency Code");
+                                                                "Amount Excl. VAT (LCY)" := CalcExchAmtFCYToLCY("Amount Excl. VAT");
+                                                                "Amount Excl. VAT" := ROUND("Amount Excl. VAT",Currency."Amount Rounding Precision");
+                                                                CalcAmount(FALSE);//IMH19.ST
+                                                                IF GetBooCommission THEN
+                                                                  VALIDATE("Percentage Commission");//IMH13.JCD
+                                                              END;
+
+                                                   CaptionML=[ENU=Amount Excl. VAT;
+                                                              FRA=Devis HT];
+                                                   AutoFormatType=1;
+                                                   AutoFormatExpr="Currency Code" }
+    { 22  ;   ;Amount Incl. VAT    ;Decimal       ;OnValidate=BEGIN
+                                                                CheckAmount;//IMH10
+                                                                GetCurrency("Currency Code");
+                                                                "Amount Incl. VAT (LCY)" := CalcExchAmtFCYToLCY("Amount Incl. VAT");
+                                                                "Amount Incl. VAT" := ROUND("Amount Incl. VAT",Currency."Amount Rounding Precision");
+                                                                CalcAmount(TRUE);//IMH19.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Amount Incl. VAT;
+                                                              FRA=Devis TTC];
+                                                   AutoFormatType=1;
+                                                   AutoFormatExpr="Currency Code" }
+    { 30  ;   ;Amount Excl. VAT (LCY);Decimal     ;CaptionML=[ENU=Amount Excl. VAT (LCY);
+                                                              FRA=Devis HT (DS)];
+                                                   Editable=No;
+                                                   AutoFormatType=1 }
+    { 31  ;   ;Amount Incl. VAT (LCY);Decimal     ;CaptionML=[ENU=Amount Incl. VAT (LCY);
+                                                              FRA=Devis TTC (DS)];
+                                                   Editable=No;
+                                                   AutoFormatType=1 }
+    { 32  ;   ;Currency Code       ;Code10        ;TableRelation=Currency;
+                                                   OnValidate=BEGIN
+                                                                IF "Currency Code" <> xRec."Currency Code" THEN
+                                                                  UpdateCurrencyFactor;
+                                                              END;
+
+                                                   CaptionML=[ENU=Currency Code;
+                                                              FRA=Code devise] }
+    { 33  ;   ;Currency Factor     ;Decimal       ;OnValidate=BEGIN
+                                                                VALIDATE("Amount Excl. VAT");
+                                                                VALIDATE("Amount Incl. VAT");
+                                                              END;
+
+                                                   CaptionML=[ENU=Currency Factor;
+                                                              FRA=Facteur devise];
+                                                   DecimalPlaces=0:15;
+                                                   MinValue=0;
+                                                   Editable=No }
+    { 34  ;   ;VAT                 ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(50070),
+                                                                                  Field ID=CONST(14));
+                                                   OnValidate=BEGIN
+                                                                CalcAmount(FALSE);//IMH19.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=VAT;
+                                                              FRA=TVA] }
+    { 40  ;   ;Approval Status     ;Option        ;OnValidate=BEGIN
+                                                                IF "Approval Status" = "Approval Status"::Yes THEN BEGIN
+                                                                  CheckMandatoryFields; //IMH24.ST
+                                                                  "Approval Date" := CURRENTDATETIME;
+                                                                //<<IMH21.ST
+                                                                  IF "Approval Status" <> xRec."Approval Status" THEN
+                                                                    ServLog.ApproveQuote;
+                                                                //>>IMH21.ST
+                                                                END
+                                                                ELSE
+                                                                  "Approval Date" := 0DT;
+                                                                //<<IMH09.ST
+                                                                IF "Approval Status" = "Approval Status"::No THEN
+                                                                  VALIDATE(Active, FALSE);
+                                                                //>>IMH09.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Approval Status;
+                                                              FRA=Validation];
+                                                   OptionCaptionML=[ENU=" ,Yes,No,WaitSurveyor,WaitAdjuster,WaitReport";
+                                                                    FRA=" ,Oui,Non,Attente m‚treur,Attente t‚l‚-expert,Attente CR"];
+                                                   OptionString=[ ,Yes,No,WaitSurveyor,WaitAdjuster,WaitReport] }
+    { 41  ;   ;Acceptance          ;Option        ;OnValidate=VAR
+                                                                lInvoicingMgt@1100281000 : Codeunit 50080;
+                                                                lInvoicingMatrixSetup@1100281001 : Record 50137;
+                                                                lService@1100281002 : Record 50066;
+                                                                lServiceHeader@1100281003 : Record 5900;
+                                                                lServiceMgtSetup@1100281004 : Record 5911;
+                                                              BEGIN
+                                                                //<<IMH09.ST
+                                                                IF Acceptance <> Acceptance::" " THEN
+                                                                  TESTFIELD("Approval Status", "Approval Status"::Yes);
+                                                                //>>IMH09.ST
+                                                                IF Acceptance = Acceptance::Yes THEN BEGIN
+                                                                  //<<IMH03
+                                                                  //<<IMH10
+                                                                  //IF NOT CONFIRM(Text001) THEN
+                                                                  //  EXIT;
+                                                                  //>>IMH10
+                                                                  TESTFIELD("Amount Excl. VAT");
+                                                                  TESTFIELD("Amount Incl. VAT");
+                                                                  TESTFIELD("Order VAT Prod. Posting Group");
+
+                                                                  //<<IMH25
+                                                                  ServIntervLine.GET("Service Header No.", "Intervention Line No.");
+                                                                  AcceptQuote(ServIntervLine);
+                                                                  "Order Amount Excl. VAT" := "Amount Excl. VAT";
+                                                                  //>>IMH25
+                                                                  CalcAmountOrder(TRUE);
+
+                                                                  CalcAmountOrder(FALSE);
+                                                                  // Lance la commande de travaux
+                                                                  //>>IMH03
+                                                                  "Acceptance Date" := CURRENTDATETIME;
+                                                                  CreatePurchOrder;
+                                                                  //<<IMH37.RC.ISAT
+                                                                  lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.");
+                                                                  SendReturnToIMA(lServiceHeader);
+                                                                  //>>IMH37.RC.ISAT
+
+                                                                END ELSE BEGIN
+                                                                  "Acceptance Date" := 0DT;
+                                                                END;
+                                                                //<<IMH09.ST
+                                                                IF Acceptance IN [Acceptance::"No - wait new",Acceptance::"No - Without continuation"]  THEN
+                                                                  VALIDATE(Active, FALSE);
+                                                                //>>IMH09.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Acceptance;
+                                                              FRA=Acceptation];
+                                                   OptionCaptionML=[ENU=" ,Wait Beneficiary,Yes,No - wait new,No - Without continuation";
+                                                                    FRA=" ,Attente b‚n‚ficiaire,Oui,Non - attente devis,Non - sans suite"];
+                                                   OptionString=[ ,Wait Beneficiary,Yes,No - wait new,No - Without continuation] }
+    { 42  ;   ;Approval Date       ;DateTime      ;CaptionML=[ENU=Approval Date;
+                                                              FRA=Date de validation];
+                                                   Editable=No }
+    { 43  ;   ;Acceptance Date     ;DateTime      ;CaptionML=[ENU=Acceptance Date;
+                                                              FRA=Date d'acceptation];
+                                                   Editable=No }
+    { 44  ;   ;Active              ;Boolean       ;InitValue=Yes;
+                                                   OnValidate=BEGIN
+                                                                CheckActive;//IMH25
+                                                              END;
+
+                                                   CaptionML=[ENU=Active;
+                                                              FRA=Actif] }
+    { 45  ;   ;Quote Refusal Reason Code;Code10   ;TableRelation="Service Quote Codes".Code WHERE (Service Order Type=FIELD(Service Order Type),
+                                                                                                   Type=CONST(QuoteRefusal));
+                                                   OnValidate=BEGIN
+                                                                IF "Quote Refusal Reason Code" <> '' THEN
+                                                                  VALIDATE(Acceptance, Acceptance::"No - wait new");
+                                                              END;
+
+                                                   CaptionML=[ENU=Quote Refusal Reason Code;
+                                                              FRA=Code motif refus devis] }
+    { 46  ;   ;External Approval Status;Option    ;OnValidate=BEGIN
+                                                                //<<IMH10
+                                                                IF "External Approval Status" = "External Approval Status"::Yes THEN
+                                                                  "External Approval Date" := CURRENTDATETIME
+                                                                ELSE
+                                                                  "External Approval Date" := 0DT;
+                                                                //>>IMH10
+                                                                //<<IMH09.ST
+                                                                IF "External Approval Status" = "External Approval Status"::No THEN
+                                                                  VALIDATE(Active, FALSE);
+                                                                //>>IMH09.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Approval Status;
+                                                              FRA=Validation externe];
+                                                   OptionCaptionML=[ENU=" ,Yes,No,Wait Adjuster,Wait Corporate,Wait Teleconsultation";
+                                                                    FRA=" ,Oui,Non,Attente expert,Attente Grand Compte,Attente t‚l‚-expert"];
+                                                   OptionString=[ ,Yes,No,WaitAdjuster,WaitCorporate,WaitTeleconsultation];
+                                                   Editable=No }
+    { 47  ;   ;Use External Approval;Option       ;CaptionML=[ENU=Use External Approval;
+                                                              FRA=Utilise validation externe];
+                                                   OptionCaptionML=[ENU=" ,Yes,No";
+                                                                    FRA=" ,Oui,Non"];
+                                                   OptionString=[ ,Yes,No];
+                                                   Editable=No }
+    { 48  ;   ;External Approval Date;DateTime    ;CaptionML=[ENU=External Approval Date;
+                                                              FRA=Date validation externe];
+                                                   Editable=No }
+    { 49  ;   ;External Refused Reason;Code10     ;TableRelation=Code.Code WHERE (Table ID=CONST(50076),
+                                                                                  Field ID=CONST(49));
+                                                   OnValidate=BEGIN
+                                                                IF "External Refused Reason" <> '' THEN
+                                                                  VALIDATE("External Approval Status", "External Approval Status"::No);
+                                                              END;
+
+                                                   CaptionML=[ENU=External Refused Reason;
+                                                              FRA=Code refus validation externe] }
+    { 50  ;   ;Quote Mark          ;Integer       ;CaptionML=[ENU=Quote Mark;
+                                                              FRA=Note devis];
+                                                   MinValue=0 }
+    { 51  ;   ;Unapproved Reason Code;Code10      ;TableRelation="Reason Code";
+                                                   OnValidate=BEGIN
+                                                                //<<IMH18.ISAT.EBA
+                                                                IF "Unapproved Reason Code" <> '' THEN
+                                                                  TESTFIELD("Approval Status","Approval Status"::No);
+                                                                //>>IMH18.ISAT.EBA
+                                                              END;
+
+                                                   CaptionML=[ENU=Unapproved Reason Code;
+                                                              FRA=Code motif non validation] }
+    { 52  ;   ;Ext. Unapproved Reason Code;Code10 ;TableRelation="Reason Code";
+                                                   OnValidate=BEGIN
+                                                                //<<IMH18.ISAT.EBA
+                                                                IF "Ext. Unapproved Reason Code" <> '' THEN
+                                                                  TESTFIELD("External Approval Status","External Approval Status"::No);
+                                                                //>>IMH18.ISAT.EBA
+                                                              END;
+
+                                                   CaptionML=[ENU=Ext. Unapproved Reason Code;
+                                                              FRA=Code motif non valid. ext.] }
+    { 60  ;   ;Corporate No.       ;Code20        ;TableRelation=Customer.No. WHERE (Service Contact=CONST(Corporate Customer),
+                                                                                     Service Corporate=CONST(Yes));
+                                                   CaptionML=[ENU=Corporate No.;
+                                                              FRA=Nø grand compte];
+                                                   Editable=No }
+    { 61  ;   ;Provider No.        ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Intervention Line"."Provider No." WHERE (Service Header No.=FIELD(Service Header No.),
+                                                                                                                        Line No.=FIELD(Intervention Line No.)));
+                                                   TableRelation=Provider.No.;
+                                                   ValidateTableRelation=No;
+                                                   CaptionML=[ENU=Provider No.;
+                                                              FRA=Nø prestataire];
+                                                   Editable=No }
+    { 70  ;   ;Deductible Amount (LCY);Decimal    ;OnValidate=BEGIN
+                                                                //<<IMH24.ST
+                                                                IF "Deductible Amount (LCY)" <> xRec."Deductible Amount (LCY)" THEN BEGIN
+                                                                  IF "Approval Status" = "Approval Status"::Yes THEN
+                                                                    FIELDERROR("Approval Status");
+                                                                END;
+                                                                //>>IMH24.ST
+                                                                CheckDeductibleAmount;//IMH03
+                                                              END;
+
+                                                   CaptionML=[ENU=Deductible Amount (LCY);
+                                                              FRA=Montant franchise];
+                                                   BlankZero=Yes;
+                                                   AutoFormatType=1 }
+    { 71  ;   ;Deductible Type     ;Option        ;OnValidate=BEGIN
+                                                                //<<IMH24.ST
+                                                                IF "Deductible Type" <> xRec."Deductible Type" THEN BEGIN
+                                                                  IF "Approval Status" = "Approval Status"::Yes THEN
+                                                                    FIELDERROR("Approval Status");
+                                                                END;
+                                                                //>>IMH24.ST
+                                                                InitDeductible;//IMH06
+                                                              END;
+
+                                                   CaptionML=[ENU=Deductible Type;
+                                                              FRA=Type franchise];
+                                                   OptionCaptionML=[ENU=" ,No Deductible,Other,Deductible 1,Deductible 2";
+                                                                    FRA=" ,Absence de franchise,Autre,Franchise,Franchise BG"];
+                                                   OptionString=[ ,No Deductible,Other,Deductible 1,Deductible 2];
+                                                   BlankZero=Yes }
+    { 72  ;   ;Depreciation Amount ;Decimal       ;OnValidate=BEGIN
+                                                                //<<IMH24.ST
+                                                                IF "Depreciation Amount" <> xRec."Depreciation Amount" THEN BEGIN
+                                                                  IF "Approval Status" = "Approval Status"::Yes THEN
+                                                                    FIELDERROR("Approval Status");
+                                                                END;
+                                                                //>>IMH24.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Depreciation Amount;
+                                                              FRA=Montant v‚tust‚] }
+    { 110 ;   ;Attachments         ;Integer       ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Document Attachment" WHERE (Referent Table No.=CONST(50076),
+                                                                                                  Key Integer 1=FIELD(Intervention Line No.),
+                                                                                                  Key Integer 2=FIELD(Line No.),
+                                                                                                  Key Code 1=FIELD(Service Header No.)));
+                                                   CaptionML=[ENU=Attachments;
+                                                              FRA=Doc. joint];
+                                                   Editable=No }
+    { 50049;  ;Service No.         ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header"."Service No." WHERE (Document Type=CONST(Invoice),
+                                                                                                            No.=FIELD(Service Header No.)));
+                                                   TableRelation=Service."Service No.";
+                                                   CaptionML=[ENU=Service No.;
+                                                              FRA=Nø service];
+                                                   Editable=No }
+    { 50050;  ;Default Team Code   ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header"."Default Team Code" WHERE (Document Type=CONST(Invoice),
+                                                                                                                  No.=FIELD(Service Header No.)));
+                                                   CaptionML=[ENU=Default Team Code;
+                                                              FRA=Code corbeille par d‚faut];
+                                                   Editable=No }
+    { 50051;  ;Service Creation Date;DateTime     ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Service."Creation Date" WHERE (Service No.=FIELD(Service No.)));
+                                                   CaptionML=[ENU=Service Creation Date;
+                                                              FRA=Date cr‚ation service];
+                                                   Editable=No }
+    { 50052;  ;Corporate Region Code;Code10       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Intervention Line"."Corporate Region Code" WHERE (Service Header No.=FIELD(Service Header No.),
+                                                                                                                                 Line No.=FIELD(Intervention Line No.)));
+                                                   CaptionML=[ENU=Corporate Region Code;
+                                                              FRA=Code r‚gion grand compte];
+                                                   Editable=No }
+    { 50070;  ;Channel             ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header".Channel WHERE (Document Type=CONST(Invoice),
+                                                                                                      No.=FIELD(Service Header No.)));
+                                                   TableRelation=Code.Code WHERE (Table ID=CONST(50066),
+                                                                                  Field ID=CONST(12));
+                                                   CaptionML=[ENU=Channel;
+                                                              FRA=Canal] }
+    { 50071;  ;Requisitioner       ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header".Requisitioner WHERE (Document Type=CONST(Invoice),
+                                                                                                            No.=FIELD(Service Header No.)));
+                                                   TableRelation=Code.Code WHERE (Table ID=CONST(50066),
+                                                                                  Field ID=CONST(13));
+                                                   CaptionML=[ENU=Requisitioner;
+                                                              FRA=Demandeur];
+                                                   Editable=No }
+    { 50250;  ;Exempt VAT Base Amount;Decimal     ;CaptionML=[ENU=Exempt VAT Base Amount;
+                                                              FRA=Montant base TVA EXO] }
+    { 50251;  ;Reduced VAT Base Amount;Decimal    ;CaptionML=[ENU=Reduced VAT Base Amount;
+                                                              FRA=Montant base TVA REDUIT] }
+    { 50252;  ;Normal VAT Base Amount;Decimal     ;CaptionML=[ENU=Normal VAT Base Amount;
+                                                              FRA=Montant base TVA NORMAL] }
+    { 50253;  ;Order Amount Incl. VAT;Decimal     ;OnValidate=BEGIN
+                                                                CalcAmount(TRUE);
+                                                                CreatePurchOrder;
+                                                              END;
+
+                                                   CaptionML=[ENU=Order Amount Incl. VAT;
+                                                              FRA=Montant Commande TTC] }
+    { 50254;  ;Order Amount Excl. VAT;Decimal     ;OnValidate=BEGIN
+                                                                CalcAmount(FALSE);
+                                                                CreatePurchOrder;
+                                                              END;
+
+                                                   CaptionML=[ENU=Order Amount Excl. VAT;
+                                                              FRA=Montant commande HT] }
+    { 50255;  ;Order VAT Prod. Posting Group;Code10;
+                                                   TableRelation="VAT Product Posting Group";
+                                                   OnValidate=VAR
+                                                                lVATPostingSetup@1100281000 : Record 325;
+                                                              BEGIN
+                                                                CALCFIELDS("Provider No.");
+                                                                IF Vendor.GET("Provider No.") THEN
+                                                                  "Order VAT Bus. Posting Group" := Vendor."VAT Bus. Posting Group";
+
+                                                                ServiceMgtSetup.GET;
+                                                                IF ("Order VAT Bus. Posting Group" ='') THEN
+                                                                  "Order VAT Bus. Posting Group" := ServiceMgtSetup."VAT Bus. Posting Group Default";
+
+                                                                "VAT %" := 0;
+                                                                IF lVATPostingSetup.GET("Order VAT Bus. Posting Group","Order VAT Prod. Posting Group") THEN
+                                                                  "VAT %" := lVATPostingSetup."VAT %";
+                                                                CalcAmount(FALSE);
+
+                                                                CreatePurchOrder;
+                                                              END;
+
+                                                   CaptionML=[ENU=Order VAT Prod. Posting Group;
+                                                              FRA=Taux TVA commande] }
+    { 50256;  ;Order VAT Bus. Posting Group;Code10;TableRelation="VAT Business Posting Group";
+                                                   CaptionML=[ENU=VAT Bus. Posting Group;
+                                                              FRA=Groupe compta. march‚ TVA] }
+    { 50257;  ;VAT %               ;Decimal       ;CaptionML=[ENU=VAT %;
+                                                              FRA=% TVA];
+                                                   MinValue=0 }
+    { 50258;  ;Transfered Amount   ;Decimal       ;CaptionML=[ENU=Amount Excl. VAT (LCY);
+                                                              FRA=Montant devis HT transf‚r‚];
+                                                   Editable=No;
+                                                   AutoFormatType=1 }
+    { 50259;  ;Transfered Amount Incl. VAT;Decimal;CaptionML=[ENU=Amount Incl. VAT (LCY);
+                                                              FRA=Montant devis TTC transf‚r‚];
+                                                   Editable=No;
+                                                   AutoFormatType=1 }
+    { 50500;  ;Creation Date       ;DateTime      ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date de cr‚ation];
+                                                   Editable=No }
+    { 50501;  ;Creation User ID    ;Text30        ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Creation User ID;
+                                                              FRA=Utilisateur cr‚ation];
+                                                   Editable=No }
+    { 50502;  ;Last Modification Date;DateTime    ;CaptionML=[ENU=Last Modification Date;
+                                                              FRA=Date derniŠre modification];
+                                                   Editable=No }
+    { 50503;  ;Last Modification User ID;Text30   ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Last Modification User ID;
+                                                              FRA=Utilisateur derniŠre modification];
+                                                   Editable=No }
+    { 50520;  ;Process Code        ;Code10        ;TableRelation=Process.Code;
+                                                   CaptionML=[ENU=Process Code;
+                                                              FRA=Code processus];
+                                                   Editable=No }
+    { 50521;  ;Process Status No.  ;Integer       ;TableRelation="Process Status"."Status No." WHERE (Process Code=FIELD(Process Code));
+                                                   OnValidate=VAR
+                                                                lProcessQuoteMgt@1100281000 : Codeunit 50046;
+                                                              BEGIN
+                                                                lProcessQuoteMgt.OnChangeProcessStatus(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Process Status No.;
+                                                              FRA=Nø statut processus];
+                                                   BlankZero=Yes;
+                                                   Editable=No }
+    { 50522;  ;Process Status Description;Text30  ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Process Status".Description WHERE (Process Code=FIELD(Process Code),
+                                                                                                          Status No.=FIELD(Process Status No.)));
+                                                   CaptionML=[ENU=Status Description;
+                                                              FRA=Description statut];
+                                                   Editable=No }
+    { 50523;  ;User Next Step Available;Boolean   ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Process Step" WHERE (Process Code=FIELD(Process Code),
+                                                                                           Previous Status=FIELD(Process Status No.),
+                                                                                           Active=CONST(Yes),
+                                                                                           Manual User Step=CONST(Yes)));
+                                                   CaptionML=[ENU=User Next Step Available;
+                                                              FRA=Etape suivante disponible];
+                                                   Editable=No }
+    { 50600;  ;To Invoice          ;Boolean       ;CaptionML=[ENU=To Invoice;
+                                                              FRA=A facturer] }
+    { 50601;  ;Invoiced            ;Boolean       ;CaptionML=[ENU=Invoiced;
+                                                              FRA=Factur‚];
+                                                   Editable=No }
+    { 50602;  ;Sale Order Nb       ;Integer       ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Sales Header" WHERE (Document Type=CONST(Order),
+                                                                                           Service Header No.=FIELD(Service Header No.),
+                                                                                           Intervention Line No.=FIELD(Intervention Line No.),
+                                                                                           Quote Line No.=FIELD(Line No.)));
+                                                   OnLookup=VAR
+                                                              lSalesHeader@1100281000 : Record 36;
+                                                              lCounter@1100281001 : Integer;
+                                                            BEGIN
+                                                              lSalesHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+                                                              CALCFIELDS("Service No.");
+                                                              lSalesHeader.SETRANGE("Service No.","Service No.");
+                                                              lSalesHeader.SETRANGE("Service Header No.","Service Header No.");
+                                                              lSalesHeader.SETRANGE("Intervention Line No.","Intervention Line No.");
+                                                              lSalesHeader.SETRANGE("Quote Line No.","Line No.");
+                                                              lSalesHeader.SETRANGE("Document Type",lSalesHeader."Document Type"::Order);
+                                                              lCounter := lSalesHeader.COUNT;
+                                                              CASE lCounter OF
+                                                                0 : ;
+                                                                1 : FORM.RUNMODAL(FORM::"Sales Order",lSalesHeader);
+                                                                ELSE FORM.RUNMODAL(FORM::"Sales List",lSalesHeader);
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Sale Order Nb;
+                                                              FRA=Nb commande vente];
+                                                   Editable=No }
+    { 50603;  ;Purchase Order Nb   ;Integer       ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Purchase Header" WHERE (Document Type=CONST(Order),
+                                                                                              Service Header No.=FIELD(Service Header No.),
+                                                                                              Intervention Line No.=FIELD(Intervention Line No.),
+                                                                                              Quote Line No.=FIELD(Line No.)));
+                                                   OnLookup=VAR
+                                                              lPurchaseHeader@1100281000 : Record 38;
+                                                              lCounter@1100281001 : Integer;
+                                                            BEGIN
+                                                              lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+                                                              CALCFIELDS("Service No.");
+                                                              lPurchaseHeader.SETRANGE("Service No.","Service No.");
+                                                              lPurchaseHeader.SETRANGE("Service Header No.","Service Header No.");
+                                                              lPurchaseHeader.SETRANGE("Intervention Line No.","Intervention Line No.");
+                                                              lPurchaseHeader.SETRANGE("Quote Line No.","Line No.");
+                                                              lPurchaseHeader.SETRANGE("Document Type",lPurchaseHeader."Document Type"::Order);
+                                                              lCounter := lPurchaseHeader.COUNT;
+                                                              CASE lCounter OF
+                                                                0 : ;
+                                                                1 : FORM.RUNMODAL(FORM::"Purchase Order",lPurchaseHeader);
+                                                                ELSE FORM.RUNMODAL(FORM::"Purchase List",lPurchaseHeader);
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Purchase Order Nb;
+                                                              FRA=Nb commande achat];
+                                                   Editable=No }
+    { 50604;  ;Percentage Commission;Decimal      ;OnValidate=VAR
+                                                                lRecLigneIntervention@1100281000 : Record 50075;
+                                                              BEGIN
+                                                                //IMH13.JCD
+                                                                IF "Percentage Commission" <> 0 THEN
+                                                                  IF GetBooCommission=FALSE THEN
+                                                                    ERROR(Text006);
+                                                                "Commission Amount" := "Amount Excl. VAT" * "Percentage Commission"/100;
+                                                              END;
+
+                                                   CaptionML=FRA=% Commission;
+                                                   MinValue=0;
+                                                   MaxValue=100;
+                                                   Description=IMH6.01 }
+    { 50605;  ;Commission Amount   ;Decimal       ;OnValidate=BEGIN
+                                                                //IMH13.JCD
+                                                                IF "Commission Amount" <> 0 THEN BEGIN
+                                                                  IF GetBooCommission=FALSE THEN
+                                                                    ERROR(Text006);
+                                                                  IF "Commission Amount" <> xRec."Commission Amount" THEN
+                                                                    IF "Amount Excl. VAT" <> 0 THEN BEGIN
+                                                                      "Percentage Commission" := ("Commission Amount"*100)/"Amount Excl. VAT" ;
+                                                                      IF ("Percentage Commission" IN [0..100])=FALSE THEN
+                                                                        ERROR(Text005);
+                                                                    END ELSE
+                                                                      ERROR(Text004);
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=FRA=Montant commission;
+                                                   Description=IMH6.01;
+                                                   AutoFormatExpr="Currency Code" }
+    { 50620;  ;Additional Quote    ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Service Quote Codes" WHERE (Code=FIELD(Service Order Type),
+                                                                                                  Code=FIELD(Service Quote Type),
+                                                                                                  Type=FILTER(QuoteType),
+                                                                                                  Service Quote Type=FILTER(Additional)));
+                                                   CaptionML=[ENU=Additional Quote;
+                                                              FRA=Devis compl‚mentaire];
+                                                   Editable=No }
+    { 50621;  ;Contradictory Quote ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Service Quote Codes" WHERE (Service Order Type=FIELD(Service Order Type),
+                                                                                                  Code=FIELD(Service Quote Type),
+                                                                                                  Type=FILTER(QuoteType),
+                                                                                                  Service Quote Type=FILTER(Contradictory)));
+                                                   CaptionML=[ENU=Contradictory Quote;
+                                                              FRA=Devis contradictoire];
+                                                   Editable=No }
+    { 50700;  ;Urgent              ;Option        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header".Urgent WHERE (Document Type=CONST(Invoice),
+                                                                                                     No.=FIELD(Service Header No.)));
+                                                   CaptionML=[ENU=Urgent;
+                                                              FRA=Urgent];
+                                                   OptionCaptionML=[ENU=" ,Yes,No";
+                                                                    FRA=" ,Oui,Non"];
+                                                   OptionString=[ ,Yes,No];
+                                                   Editable=No }
+    { 50710;  ;Service Cause       ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header"."Service Cause" WHERE (Document Type=CONST(Invoice),
+                                                                                                              No.=FIELD(Service Header No.)));
+                                                   CaptionML=[ENU=Service Cause;
+                                                              FRA=Cause intervention];
+                                                   Editable=No }
+    { 56020;  ;Expert Quote Check  ;Option        ;OnValidate=VAR
+                                                                lServiceHeader@1000000000 : Record 5900;
+                                                                lInterfaceReference@1000000002 : Record 50164;
+                                                                lFUSIONInterfaceMgt@1000000001 : Codeunit 50181;
+                                                              BEGIN
+                                                                MODIFY(FALSE);
+                                                                //<<IMH38.PC
+                                                                //lFUSIONInterfaceMgt.CreateSendMQByQuote(Rec);
+                                                                IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.") THEN BEGIN
+                                                                  IF lInterfaceReference.GetServiceHeaderGUID(lServiceHeader) = '' THEN BEGIN
+                                                                    lFUSIONInterfaceMgt.CreateSendMQByServiceHeader(lServiceHeader, 0);
+                                                                  END;
+                                                                  lFUSIONInterfaceMgt.CreateSendMQByQuote(Rec);
+                                                                END;
+                                                                //>>IMH38.PC
+
+                                                                CASE "Expert Quote Check" OF
+                                                                  "Expert Quote Check"::"Expert Check" : BEGIN
+                                                                    "Expert Ask Quote Check Date" := CURRENTDATETIME;
+                                                                    "Expert Ask Quote Check User ID" := USERID;
+                                                                  END;
+                                                                  "Expert Quote Check"::" " : BEGIN
+                                                                    "Expert Ask Quote Check Date" := 0DT;
+                                                                    "Expert Ask Quote Check User ID" := '';
+                                                                  END;
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Expert Quote Check;
+                                                              FRA=Soumis … contr“le];
+                                                   OptionCaptionML=[ENU=" ,Expert Check,Quote Checked OK,Quote Checked Refusal";
+                                                                    FRA=" ,Soumis … contr“le,Devis contr“l‚ OK,Devis contr“l‚ refus"];
+                                                   OptionString=[ ,Expert Check,Quote Checked OK,Quote Checked Refusal] }
+    { 56021;  ;Expert Quote Check Comment;Text250 ;CaptionML=[ENU=Expert Quote Check Comment;
+                                                              FRA=Commentaire soumis … contr“le] }
+    { 56022;  ;Expert Ask Quote Check User ID;Text30;
+                                                   TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Expert Ask Quote Check User ID;
+                                                              FRA=Utilisateur demande soumis … contr“le];
+                                                   Editable=No }
+    { 56023;  ;Expert Ask Quote Check Date;DateTime;
+                                                   CaptionML=[ENU=Expert Ask Quote Check Date;
+                                                              FRA=Date demande soumis … contr“le];
+                                                   Editable=No }
+    { 56024;  ;Fusion Expert Quote Check;Option   ;OnValidate=BEGIN
+                                                                CASE "Expert Quote Check" OF
+                                                                  "Expert Quote Check"::"Expert Check" : BEGIN
+                                                                    "Expert Ask Quote Check Date" := CURRENTDATETIME;
+                                                                    "Expert Ask Quote Check User ID" := USERID;
+                                                                  END;
+                                                                  "Expert Quote Check"::" " : BEGIN
+                                                                    "Expert Ask Quote Check Date" := 0DT;
+                                                                    "Expert Ask Quote Check User ID" := '';
+                                                                  END;
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Fusion Expert Quote Check;
+                                                              FRA=Fusion statut soumis … contr“le];
+                                                   OptionCaptionML=[ENU=" ,Expert Check,Quote Checked OK,Quote Checked Refusal";
+                                                                    FRA=" ,Soumis … contr“le,Devis contr“l‚ OK,Devis contr“l‚ refus"];
+                                                   OptionString=[ ,Expert Check,Quote Checked OK,Quote Checked Refusal] }
+    { 56025;  ;Fusion GUID Code    ;Text40        ;CaptionML=[ENU=Fusion GUID Code;
+                                                              FRA=Code GUID Fusion] }
+  }
+  KEYS
+  {
+    {    ;Service Header No.,Intervention Line No.,Line No.;
+                                                   Clustered=Yes }
+    {    ;Service Header No.,Intervention Line No.,Active,Approval Status,External Approval Status,Acceptance;
+                                                   SumIndexFields=Amount Incl. VAT,Amount Incl. VAT (LCY),Order Amount Incl. VAT,Order Amount Excl. VAT,Amount Excl. VAT,Amount Excl. VAT (LCY);
+                                                   MaintainSIFTIndex=No }
+    {    ;Corporate No.,Approval Status            }
+    {    ;Expert Quote Check                       }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      ServHeader@1100281001 : Record 5900;
+      ServIntervLine@1100281000 : Record 50075;
+      Currency@1100281002 : Record 4;
+      Text001@1100281003 : TextConst 'ENU=You are going to generate a work order, continue ?;FRA=Vous allez g‚n‚rer une commande de travaux, voulez vous confirmer ?';
+      Text002@1100281004 : TextConst 'ENU=%1 can not be > to %2;FRA=%1 ne peut ˆtre > … %2';
+      Text003@1100281005 : TextConst 'ENU=Active Quote allready exists, continue ?;FRA=Il existe d‚j… un devis actif, continuer ?';
+      Text004@1100281006 : TextConst 'FRA=Le montant HT ne peut pas ˆtre nul s''il y a une commission.';
+      Provider@1100281007 : Record 50000;
+      Text005@1100281008 : TextConst 'ENU=The percentage of commission must be between 0 and 100%;FRA=Le pourcentage de commission doit ˆtre compris entre 0 et 100%';
+      Text006@1100281009 : TextConst 'FRA=Ce type de produit ne peut pas avoir de commission.';
+      Vendor@1000000001 : Record 23;
+      ServiceMgtSetup@1000000000 : Record 5911;
+      ServLog@1000000002 : Codeunit 50149;
+      PurchaseInvoicingMgt@1100281010 : Codeunit 50080;
+      Text007@1100281011 : TextConst 'ENU=Receive date must be after Assigned Date %1.;FRA=La date r‚ception doit ˆtre sup‚rieure ou ‚gale … la date d''assignation %1.';
+      Text008@1100281015 : TextConst 'ENU=It is not possible to create purchase order;FRA=Impossible de cr‚er la commande d''achat.';
+      SkipAutoStep@1100281012 : Boolean;
+
+    PROCEDURE GetNextLineNo@1100281001();
+    VAR
+      lInterventionQuote@1100281000 : Record 50076;
+    BEGIN
+      //IMH02 ZW
+      lInterventionQuote.LOCKTABLE(TRUE);
+      lInterventionQuote.SETRANGE("Service Header No.","Service Header No.");
+      lInterventionQuote.SETRANGE("Intervention Line No.", "Intervention Line No.");
+      IF lInterventionQuote.ISEMPTY THEN BEGIN
+        "Line No." := 10000;
+        EXIT;
+      END;
+
+      lInterventionQuote.FINDLAST;
+      "Line No." := lInterventionQuote."Line No." + 10000;
+    END;
+
+    LOCAL PROCEDURE UpdateCurrencyFactor@1100281000();
+    VAR
+      lCurrExchRate@1100281000 : Record 330;
+    BEGIN
+      //ISAT01.ST
+      IF "Currency Code" <> '' THEN BEGIN
+        IF "Document Date" <> 0D THEN
+          "Currency Factor" := lCurrExchRate.ExchangeRate("Document Date","Currency Code")
+        ELSE
+          "Currency Factor" := lCurrExchRate.ExchangeRate(WORKDATE,"Currency Code")
+      END ELSE
+        "Currency Factor" := 0;
+      VALIDATE("Currency Factor");
+    END;
+
+    LOCAL PROCEDURE GetCurrency@3(pCurrencyCode@1100281000 : Code[10]);
+    BEGIN
+      //ISAT01.ST
+      IF pCurrencyCode = '' THEN BEGIN
+        CLEAR(Currency);
+        Currency.InitRoundingPrecision
+      END ELSE
+        IF pCurrencyCode <> Currency.Code THEN BEGIN
+          Currency.GET(pCurrencyCode);
+          Currency.TESTFIELD("Amount Rounding Precision");
+        END;
+    END;
+
+    LOCAL PROCEDURE CalcExchAmtFCYToLCY@1100281002(pAmount@1100281000 : Decimal) : Decimal;
+    VAR
+      lCurrExchRate@1100281001 : Record 330;
+    BEGIN
+      //ISAT01.ST
+      IF "Currency Code" = '' THEN
+        EXIT(pAmount);
+
+      IF "Document Date" = 0D THEN
+        EXIT(lCurrExchRate.ExchangeAmtFCYToLCY(
+                WORKDATE,"Currency Code",
+                pAmount,"Currency Factor"))
+      ELSE
+        EXIT(lCurrExchRate.ExchangeAmtFCYToLCY(
+                "Document Date","Currency Code",
+                pAmount,"Currency Factor"));
+    END;
+
+    PROCEDURE TouchRecord@1100281006(pInsert@1100281000 : Boolean);
+    BEGIN
+      IF pInsert THEN BEGIN
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+      END;
+      "Last Modification Date" := CURRENTDATETIME;
+      "Last Modification User ID" := USERID;
+    END;
+
+    PROCEDURE CheckDeductibleAmount@1100281003();
+    VAR
+      lServiceHeader@1100281002 : Record 5900;
+      lCorporateContract@1100281003 : Record 50057;
+      lServiceInterventionQuote@1100281000 : Record 50076;
+      lTotDedAmount@1100281001 : Decimal;
+      lMaxDedAmount@1100281004 : Decimal;
+      lText001@1100281005 : TextConst 'ENU=Deductible amounts exceeds corporate deductible amount;FRA=Les franchises devis ont d‚pass‚ la franchise du grand compte';
+    BEGIN
+      //IMH03
+      //Contr“le de coh‚rence
+      //Le contr“le s'opŠre sur le total des montants saisis en Franchise sur les Devis typ‚s 'Actif'
+      //************* A COMPLETER *********************** /
+      //<<IMH28.ST
+      IF "Deductible Amount (LCY)" = 0 THEN
+        EXIT;
+      //>>IMH28.ST
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.");
+      //<<IMH29
+      IF NOT lCorporateContract.GET(lServiceHeader."Corporate No.",lServiceHeader."Contract Form Code") THEN
+        EXIT;
+      //>>IMH29
+      lServiceInterventionQuote.SETRANGE("Service Header No.","Service Header No.");
+      lServiceInterventionQuote.SETRANGE(Active,TRUE);
+      IF lServiceInterventionQuote.ISEMPTY THEN
+        EXIT;
+      REPEAT
+        lTotDedAmount += lServiceInterventionQuote."Deductible Amount (LCY)";
+      UNTIL lServiceInterventionQuote.NEXT = 0;
+      CASE "Deductible Type" OF
+        "Deductible Type"::"No Deductible": lMaxDedAmount := lCorporateContract."Default Deductible 1 (LCY)";
+        "Deductible Type"::Other: lMaxDedAmount := lCorporateContract."Default Deductible 2 (LCY)";
+      END;
+      IF lMaxDedAmount = 0 THEN
+        EXIT;
+      IF lTotDedAmount > lMaxDedAmount THEN BEGIN
+        ERROR(lText001);
+      END;
+    END;
+
+    PROCEDURE CheckInterventionStatus@1100281004(pFromInsert@1100281000 : Boolean);
+    VAR
+      lModify@1000000000 : Boolean;
+      lOldAmt@1000000001 : Decimal;
+    BEGIN
+      // pilotage du statut de l'intervention
+      IF NOT ServIntervLine.GET("Service Header No.", "Intervention Line No.") THEN
+        EXIT;
+      IF NOT pFromInsert THEN
+        MODIFY(FALSE);
+
+      //<<IMH31.ST
+      lOldAmt := ServIntervLine."Total Order Amount Incl. VAT";
+      ServIntervLine.CalcTotOrderAmount;
+      IF (lOldAmt <> ServIntervLine."Total Order Amount Incl. VAT") OR
+         ServIntervLine.UpdateExtranetDelay //IMH32.ST
+      THEN BEGIN
+        ServIntervLine.MODIFY(TRUE); // d‚clenche l'autostep
+        EXIT;
+      END;
+      //>>IMH31.ST
+      IF ServIntervLine.AutoStep THEN
+        ServIntervLine.MODIFY(TRUE);
+    END;
+
+    PROCEDURE AutoStep@1100281011() : Boolean;
+    VAR
+      lProcessQuoteMgt@1100281000 : Codeunit 50046;
+    BEGIN
+      //IMH05
+      MODIFY;  //IMH84
+      EXIT(lProcessQuoteMgt.TestAutoStep(Rec));
+    END;
+
+    PROCEDURE GetProcessCode@1100281005();
+    VAR
+      lServiceMgtSetup@1100281000 : Record 5911;
+      lServiceHeader@1100281001 : Record 5900;
+    BEGIN
+      //IMH05
+      lServiceMgtSetup.GET;
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, "Service Header No.");
+      IF NOT lServiceHeader."Fusion Service" THEN BEGIN
+        "Process Code" := lServiceMgtSetup."Interv. Quote Process Code";
+        VALIDATE("Process Status No.", lServiceMgtSetup."Interv. Quote Start Status");
+      END ELSE BEGIN
+        "Process Code" := lServiceMgtSetup."Expert Quote Check Process";
+        VALIDATE("Process Status No.", lServiceMgtSetup."Expert Quote Check Status");
+      END;
+    END;
+
+    PROCEDURE InitDeductible@1100281007();
+    VAR
+      lServiceHeader@1100281000 : Record 5900;
+      lContactContract@1100281001 : Record 50059;
+    BEGIN
+      //IMH06
+
+      IF NOT ("Deductible Type" IN ["Deductible Type"::Other
+                                   ,"Deductible Type"::"Deductible 1"
+                                   ,"Deductible Type"::"Deductible 2"]) THEN
+        EXIT;
+
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.");
+
+      CASE "Deductible Type" OF
+        "Deductible Type"::Other:
+          "Deductible Amount (LCY)" := lServiceHeader."Deductible Amount";
+        "Deductible Type"::"Deductible 1","Deductible Type"::"Deductible 2":
+        BEGIN
+          IF (lServiceHeader."Contract Form Code" = '') OR
+             (lServiceHeader."Contract Occurence No." = 0) THEN
+            EXIT;
+          IF lContactContract.GET(lServiceHeader."Contact No."
+                                 ,lServiceHeader."Corporate No."
+                                 ,lServiceHeader."Contract Form Code"
+                                 ,lServiceHeader."Contract Occurence No.") THEN BEGIN
+            IF  "Deductible Type" = "Deductible Type"::"Deductible 1" THEN
+              "Deductible Amount (LCY)" := lContactContract."Deductible 1 (LCY)"
+            ELSE
+              "Deductible Amount (LCY)" := lContactContract."Deductible 2 (LCY)";
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE InitDepreciation@1100281008();
+    VAR
+      lServiceHeader@1100281000 : Record 5900;
+    BEGIN
+      //IMH06
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.") THEN
+        EXIT;
+      IF lServiceHeader."Unsecured Depreciation Amount" <> 0 THEN
+        "Depreciation Amount" := lServiceHeader."Unsecured Depreciation Amount";
+    END;
+
+    PROCEDURE CreateInteraction@1100281015();
+    VAR
+      lSegmentLine@1000 : TEMPORARY Record 5077;
+    BEGIN
+      //IMH07.ST
+      lSegmentLine.CreateInteracFromIntervQuote(Rec,'');
+    END;
+
+    PROCEDURE CheckAmount@1100281009();
+    BEGIN
+      //IMH10
+      IF ("Amount Excl. VAT" = 0) OR ("Amount Incl. VAT" = 0) THEN
+        EXIT;
+      IF "Amount Incl. VAT" < "Amount Excl. VAT" THEN
+        ERROR(STRSUBSTNO(Text002,FIELDCAPTION("Amount Excl. VAT")
+              ,FIELDCAPTION("Amount Incl. VAT")));
+    END;
+
+    PROCEDURE CheckActiveQuote@1100281010() : Boolean;
+    VAR
+      lServiceIntervQuote@1100281000 : Record 50076;
+    BEGIN
+      //IMH10
+      lServiceIntervQuote.SETRANGE("Service Header No.","Service Header No.");
+      lServiceIntervQuote.SETRANGE("Intervention Line No.","Intervention Line No.");
+      lServiceIntervQuote.SETFILTER("Line No.",'<>%1',"Line No.");
+      lServiceIntervQuote.SETRANGE(Active,TRUE);
+      IF NOT lServiceIntervQuote.ISEMPTY THEN
+        EXIT(CONFIRM(Text003));
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetBooCommission@1100281012() rBooCommission : Boolean;
+    VAR
+      lServOrderType@1100281000 : Record 5903;
+    BEGIN
+      rBooCommission := FALSE;
+      IF lServOrderType.GET("Service Order Type") THEN
+        IF lServOrderType.Commission THEN
+          rBooCommission := TRUE;
+    END;
+
+    PROCEDURE CalcAmount@1100281013(pFromInclVAT@1100281001 : Boolean);
+    VAR
+      lVAT@1100281000 : Decimal;
+      lText001@1100281002 : TextConst 'ENU=The %1 field must be a decimal;FRA=Le champ %1 doit ˆtre de type d‚cimal';
+      lVATPostingSetup@1000000000 : Record 325;
+      lVATPourBuffer@1100281003 : Decimal;
+    BEGIN
+      //IMH19.ST
+      IF "VAT %" = 0 THEN BEGIN
+        IF lVATPostingSetup.GET("Order VAT Bus. Posting Group","Order VAT Prod. Posting Group") THEN BEGIN
+          "VAT %" := lVATPostingSetup."VAT %";
+        END ELSE BEGIN
+          //<<IMH26.PC
+          IF ("Amount Incl. VAT" <> 0) AND ("Amount Excl. VAT" <> 0) THEN BEGIN
+            lVATPourBuffer := ROUND(100 * (("Amount Incl. VAT" / "Amount Excl. VAT") - 1),0.01);
+            lVATPostingSetup.SETRANGE("VAT %",lVATPourBuffer);
+            IF lVATPostingSetup.FINDFIRST THEN BEGIN
+              "VAT %" := lVATPostingSetup."VAT %";
+              "Order VAT Prod. Posting Group" := lVATPostingSetup."VAT Prod. Posting Group";
+              "Order VAT Bus. Posting Group" := lVATPostingSetup."VAT Bus. Posting Group";
+            END;
+          END;
+          //>>IMH26.PC
+        END;
+      END;
+
+      IF pFromInclVAT THEN BEGIN
+        IF "Amount Incl. VAT" <> 0 THEN BEGIN
+          "Amount Excl. VAT" := "Amount Incl. VAT" / (1 + ("VAT %" / 100));
+        END;
+      END ELSE BEGIN
+        IF "Amount Excl. VAT" <> 0 THEN BEGIN
+          "Amount Incl. VAT" := "Amount Excl. VAT" + ("Amount Excl. VAT" * "VAT %") / 100;
+        END;
+      END;
+
+      GetCurrency("Currency Code");
+      "Amount Incl. VAT" := ROUND("Amount Incl. VAT",Currency."Amount Rounding Precision");
+      "Amount Incl. VAT (LCY)" := CalcExchAmtFCYToLCY("Amount Incl. VAT");
+      "Amount Excl. VAT" := ROUND("Amount Excl. VAT",Currency."Amount Rounding Precision");
+      "Amount Excl. VAT (LCY)" := CalcExchAmtFCYToLCY("Amount Excl. VAT");
+    END;
+
+    PROCEDURE CalcAmountOrder@1100281014(pFromInclVAT@1100281001 : Boolean);
+    VAR
+      lVAT@1100281000 : Decimal;
+      lText001@1100281002 : TextConst 'ENU=The %1 field must be a decimal;FRA=Le champ %1 doit ˆtre de type d‚cimal';
+      lVATPostingSetup@1100281003 : Record 325;
+    BEGIN
+      //IMH19.ST
+      IF "VAT %" = 0 THEN BEGIN
+      IF lVATPostingSetup.GET("Order VAT Bus. Posting Group","Order VAT Prod. Posting Group") THEN
+        "VAT %" := lVATPostingSetup."VAT %";
+      END;
+      IF pFromInclVAT THEN BEGIN
+        IF "Order Amount Incl. VAT" <> 0 THEN BEGIN
+          "Order Amount Excl. VAT" := "Order Amount Incl. VAT" / (1 + ("VAT %" / 100));
+        END;
+      END
+      ELSE BEGIN
+        IF "Order Amount Excl. VAT" <> 0 THEN BEGIN
+          "Order Amount Incl. VAT" := "Order Amount Excl. VAT" + ("Order Amount Excl. VAT" * "VAT %") / 100;
+        END;
+      END;
+
+      GetCurrency("Currency Code");
+      "Order Amount Incl. VAT" := ROUND("Order Amount Incl. VAT",Currency."Amount Rounding Precision");
+      "Order Amount Excl. VAT" := ROUND("Order Amount Excl. VAT",Currency."Amount Rounding Precision");
+    END;
+
+    PROCEDURE CreatePurchOrder@1100281016();
+    VAR
+      lInvoicingMgt@1100281004 : Codeunit 50080;
+      lInvoicingMatrixSetup@1100281003 : Record 50137;
+      lService@1100281002 : Record 50066;
+      lServiceHeader@1100281001 : Record 5900;
+      lServiceMgtSetup@1100281000 : Record 5911;
+      lPurchHeader@1100281005 : Record 38;
+    BEGIN
+      //<<IMH15.isat.PC
+      EXIT; // D‚sactiv‚ ST 27/03/2012
+      IF ("Order VAT Prod. Posting Group" <> '') AND
+         ("Order Amount Incl. VAT" <> 0) AND
+         ("Order Amount Excl. VAT" <> 0) AND
+         (Acceptance = Acceptance::Yes)
+      THEN BEGIN
+        CALCFIELDS("Service No.");
+        IF NOT lService.GET("Service No.") THEN
+          lService.INIT;
+        IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.") THEN
+          lServiceHeader.INIT;
+        CALCFIELDS("Provider No.");
+        //<<IMH36.ISAT.RC
+        //IF PurchaseInvoicingMgt.CheckCreationAvailable(
+        //   lInvoicingMatrixSetup,
+        //   lService."Corporate No.",
+        //   lServiceHeader."Service Order Type",
+        //   lService."Corporate Region Code",
+        //   lService."Service No.",
+        //   "Provider No.")
+        IF PurchaseInvoicingMgt.CheckCreationAvailable(
+           lInvoicingMatrixSetup,
+           lService."Corporate No.",
+           lServiceHeader."Service Order Type",
+           lService."Corporate Region Code",
+           lService."Service No.",
+           "Provider No.",lServiceHeader)
+         //>>IMH36.ISAT.RC
+           THEN
+
+        BEGIN
+          IF PurchaseInvoicingMgt.CreatePurchOrderFromQuote(Rec) THEN
+          BEGIN
+            lServiceMgtSetup.GET;
+            IF ("Service Quote Type" = lServiceMgtSetup."Oposite Quote") THEN
+            BEGIN
+              lPurchHeader.RESET;
+              lPurchHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+              lPurchHeader.SETRANGE("Document Type", lPurchHeader."Document Type"::Order); //IMH30.ST
+              lPurchHeader.SETRANGE("Service No.",lService."Service No.");
+              lPurchHeader.SETRANGE("Service Header No.","Service Header No.");
+              lPurchHeader.SETRANGE("Intervention Line No.","Intervention Line No.");
+              lPurchHeader.SETFILTER("Quote Line No.",'<>%1',"Line No.");
+              IF NOT lPurchHeader.ISEMPTY THEN
+                lPurchHeader.DELETEALL(TRUE);
+            END;
+          END ELSE
+            ERROR(Text008);
+        END;
+      END;
+      //>>IMH15.isat.PC
+    END;
+
+    PROCEDURE CheckMandatoryFields@1100281018();
+    BEGIN
+      //IMH24.ST
+      TESTFIELD("Service Quote Type");
+      TESTFIELD("Quote Reference");
+      TESTFIELD("Amount Excl. VAT");
+      TESTFIELD("Amount Incl. VAT");
+      TESTFIELD("Order VAT Prod. Posting Group");
+      //TESTFIELD("Deductible Type");//IMH25
+    END;
+
+    PROCEDURE InitOrderAmountInclVAT@1100281022(VAR pServIntervLine@1100281000 : Record 50075);
+    VAR
+      lAmount@1100281001 : Decimal;
+      lAmountExclVAT@1100281002 : Decimal;
+    BEGIN
+      //IMH25
+      //Si "demande devis" alors  "Total commande TTC " = 0
+      //Sinon
+      // Total commande TTC = montant du chiffrage - franchise - v‚tust‚
+
+      {//**eb
+      IF pServIntervLine."Quote Managment" THEN BEGIN
+        "Order Amount Incl. VAT" := 0;
+        "Order Amount Excl. VAT" := 0;
+      END ELSE BEGIN
+        IF pServIntervLine."Global Amount (Incl. VAT)" <> 0 THEN BEGIN
+          lAmount := pServIntervLine."Global Amount (Incl. VAT)";
+          lAmountExclVAT := pServIntervLine."Global Amount (Excl. VAT)";
+        END ELSE BEGIN
+          pServIntervLine.CALCFIELDS("Total Descr. Amount Incl. VAT");
+          lAmount := pServIntervLine."Total Descr. Amount Incl. VAT";
+          lAmountExclVAT := pServIntervLine."Total Descr. Amount Excl. VAT";
+        END;
+        "Order Amount Incl. VAT" := lAmount
+           - pServIntervLine."Deductible Amount"
+           - pServIntervLine."Unsecured Depreciation Amount";
+        "Order Amount Excl. VAT" := lAmountExclVAT
+           - pServIntervLine."Deductible Amount"
+           - pServIntervLine."Unsecured Depreciation Amount";
+
+      END;
+      }
+
+      "Order Amount Incl. VAT" := "Amount Incl. VAT";
+      "Order Amount Excl. VAT" := "Amount Excl. VAT";
+      //**
+
+      IF "Order Amount Incl. VAT" < 0 THEN BEGIN
+        "Order Amount Incl. VAT" := 0;
+        "Order Amount Excl. VAT" := 0;
+      END;
+      VALIDATE("Order Amount Incl. VAT");
+    END;
+
+    PROCEDURE AcceptQuote@1100281017(VAR pServIntervLine@1100281000 : Record 50075);
+    VAR
+      lServInterQuote@1100281001 : Record 50076;
+      lQuoteAmount@1100281002 : Decimal;
+      lQuoteExclVATAmount@1100281004 : Decimal;
+      lAmount@1100281003 : Decimal;
+      lAmountExclVAT@1100281005 : Decimal;
+    BEGIN
+      //**eb
+      //<<IMH27.ST
+      IF "Line No." = 0 THEN
+        INSERT(TRUE)
+      ELSE
+        MODIFY;
+      //>>IMH27.ST
+      pServIntervLine.CalcTotOrderAmount;
+      pServIntervLine.MODIFY;
+      EXIT;
+      //**
+
+      //IMH25
+      //Gestion de l'acceptation du devis
+
+      // Cas "Demande Devis" … Oui
+      // Recupere l'ensemble des devis
+      IF pServIntervLine."Quote Managment" THEN BEGIN
+        lServInterQuote.SETCURRENTKEY("Service Header No.","Intervention Line No.",Active,"Approval Status");
+        lServInterQuote.SETRANGE("Service Header No.","Service Header No.");
+        lServInterQuote.SETRANGE("Intervention Line No.","Intervention Line No.");
+        lServInterQuote.SETRANGE(Active,TRUE);
+      //  lServInterQuote.SETRANGE(Acceptance,lServInterQuote.Acceptance::Yes);
+        IF NOT lServInterQuote.ISEMPTY THEN BEGIN
+          lServInterQuote.FINDSET;
+          REPEAT
+            lQuoteAmount += lServInterQuote."Amount Incl. VAT";
+            lQuoteExclVATAmount += lServInterQuote."Amount Excl. VAT";
+          UNTIL lServInterQuote.NEXT = 0;
+        END;
+        pServIntervLine."Total Order Amount Incl. VAT" := lQuoteAmount
+             - pServIntervLine."Deductible Amount"
+             - pServIntervLine."Unsecured Depreciation Amount";
+        pServIntervLine."Total Order Amount Excl. VAT" := lQuoteExclVATAmount
+             - pServIntervLine."Deductible Amount"
+             - pServIntervLine."Unsecured Depreciation Amount";
+
+      END ELSE BEGIN
+        CALCFIELDS("Additional Quote","Contradictory Quote");
+        IF "Additional Quote" THEN BEGIN
+          IF Acceptance = Acceptance::Yes THEN BEGIN
+            //"Order Amount Incl. VAT" := "Order Amount Incl. VAT" + "Amount Incl. VAT"
+            pServIntervLine.CALCFIELDS("Total Descr. Amount Incl. VAT","Total Descr. Amount Excl. VAT");
+            lAmount := pServIntervLine."Total Descr. Amount Incl. VAT";
+            lAmountExclVAT := pServIntervLine."Total Descr. Amount Excl. VAT";
+            IF lAmount = 0 THEN BEGIN
+              lAmount := pServIntervLine."Global Amount (Incl. VAT)";
+              lAmountExclVAT := pServIntervLine."Global Amount (Excl. VAT)";
+            END;
+            pServIntervLine."Total Order Amount Incl. VAT" := lAmount
+              + "Amount Incl. VAT"
+              - pServIntervLine."Deductible Amount"
+              - pServIntervLine."Unsecured Depreciation Amount";
+            pServIntervLine."Total Order Amount Excl. VAT" := lAmountExclVAT
+              + "Amount Excl. VAT"
+              - pServIntervLine."Deductible Amount"
+              - pServIntervLine."Unsecured Depreciation Amount";
+          END;
+        END;
+        // Devis contradictoire
+        IF "Contradictory Quote" THEN BEGIN
+          IF Acceptance = Acceptance::Yes THEN BEGIN
+             pServIntervLine."Total Order Amount Incl. VAT" := "Amount Incl. VAT"
+             - pServIntervLine."Deductible Amount"
+             - pServIntervLine."Unsecured Depreciation Amount";
+          END
+          ELSE BEGIN
+            pServIntervLine.CALCFIELDS("Total Descr. Amount Incl. VAT");
+            pServIntervLine.CALCFIELDS("Total Descr. Amount Excl. VAT");
+            lAmount := pServIntervLine."Total Descr. Amount Incl. VAT";
+            lAmountExclVAT := pServIntervLine."Total Descr. Amount Excl. VAT";
+            IF lAmount = 0 THEN BEGIN
+              lAmount := pServIntervLine."Global Amount (Incl. VAT)";
+              lAmountExclVAT := pServIntervLine."Global Amount (Excl. VAT)";
+            END;
+            pServIntervLine."Total Order Amount Incl. VAT" := lAmount
+              - pServIntervLine."Deductible Amount"
+              - pServIntervLine."Unsecured Depreciation Amount";
+            pServIntervLine."Total Order Amount Excl. VAT" := lAmountExclVAT
+              - pServIntervLine."Deductible Amount"
+              - pServIntervLine."Unsecured Depreciation Amount";
+
+          END;
+        END;
+      END;
+      //<<IMH33
+      //Ajout du montant du PV urgent
+      pServIntervLine.CALCFIELDS("Interv. Minutes Amount");
+      pServIntervLine.CALCFIELDS("Interv. Minutes Amnt Incl. VAT");
+      pServIntervLine."Total Order Amount Incl. VAT" := pServIntervLine."Total Order Amount Incl. VAT"
+        + pServIntervLine."Total Order Amount Incl. VAT" ;
+      pServIntervLine."Total Order Amount Excl. VAT" :=  pServIntervLine."Total Order Amount Excl. VAT"
+        + pServIntervLine."Interv. Minutes Amount";
+
+      //>>IMH33
+
+      IF pServIntervLine."Total Order Amount Incl. VAT"  < 0 THEN BEGIN
+        pServIntervLine."Total Order Amount Incl. VAT"  := 0;
+        pServIntervLine."Total Order Amount Excl. VAT"  := 0;
+      END;
+      pServIntervLine."Total Order VAT Amount" :=
+        pServIntervLine."Total Order Amount Incl. VAT"  -
+        pServIntervLine."Total Order Amount Excl. VAT";
+
+      pServIntervLine.MODIFY;
+    END;
+
+    PROCEDURE CheckActive@1100281020();
+    VAR
+      lServInterQuote@1100281000 : Record 50076;
+      lServiceInterventionLine@1100281001 : Record 50075;
+      lAMount@1100281002 : Decimal;
+    BEGIN
+      IF Active THEN
+        EXIT;
+      lServInterQuote.SETCURRENTKEY("Service Header No.","Intervention Line No.",Active,"Approval Status");
+      lServInterQuote.SETRANGE("Service Header No.","Service Header No.");
+      lServInterQuote.SETRANGE("Intervention Line No.","Intervention Line No.");
+      lServInterQuote.SETFILTER("Line No.",'<>%1',"Line No.");
+      lServInterQuote.SETRANGE(Active,TRUE);
+      IF NOT lServInterQuote.ISEMPTY THEN
+        EXIT;
+      IF lServiceInterventionLine.GET("Service Header No.","Intervention Line No.") THEN BEGIN
+        //**eb
+        //lServiceInterventionLine.CALCFIELDS("Total Descr. Amount Incl. VAT");
+        //lAMount := lServiceInterventionLine."Total Descr. Amount Incl. VAT";
+        //IF lAMount = 0 THEN
+        //  lAMount := lServiceInterventionLine."Global Amount (Incl. VAT)";
+        //lServiceInterventionLine."Total Order Amount Incl. VAT" := lAMount
+        //  - lServiceInterventionLine."Deductible Amount"
+        //  - lServiceInterventionLine."Unsecured Depreciation Amount";
+        lServiceInterventionLine.CalcTotOrderAmount;
+        //**
+        lServiceInterventionLine.MODIFY;
+      END;
+    END;
+
+    PROCEDURE SendReturnToIMA@1100281046(pServiceHeader@1100281001 : Record 5900);
+    VAR
+      lServSetup@1100281003 : Record 5911;
+      lReasonCode@1100281002 : Record 50079;
+      lEAISentIMAAction@1100281000 : Codeunit 50130;
+      lServiceInterventionQuote@1100281004 : Record 50076;
+    BEGIN
+      //<<IMH37.RC.ISAT
+
+      IF NOT pServiceHeader."Home Service" THEN
+        EXIT;
+
+      IF pServiceHeader."Cheque / BC Receipt Date" = 0D THEN
+        EXIT;
+
+
+      lServiceInterventionQuote.SETRANGE("Service Header No.","Service Header No.");
+      lServiceInterventionQuote.SETRANGE(Acceptance,lServiceInterventionQuote.Acceptance::Yes);
+      IF lServiceInterventionQuote.COUNT > 1 THEN
+        EXIT;
+
+      lEAISentIMAAction.SendFromSrvHeader(pServiceHeader,FALSE,TRUE,FALSE);
+
+      //>>IMH37.RC.ISAT
+    END;
+
+    PROCEDURE SetSkipAutoStep@1100281052(pSkipAutoStep@1100281000 : Boolean);
+    BEGIN
+      //IMH40
+      SkipAutoStep := pSkipAutoStep;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH85 @d 11/12/13 @a IMH.WGA @v IMH6.01.4903 @s MAD Champ Description Type Devis @h 4903
+          @c Ajout Champ Flowfield 13 Service Quote Type Desc. */
+      /** @r IMH84 @d 11/07/13 @a ISAT.ZW @v IMH6.01.351 @s JUILLET @h 3872 @c Modify avant autostep */
+      /** @r IMH83 @d 13/05/13 @a ISAT.ZW @v IMH6.01.345 @s MAI @h 4470 @c correction champ flowfiled "Contradictory Quote" */
+      /** @r IMH42 @d 04/03/13 @a ISAT.ZW @v IMH6.01.340 @s NEP IMH 4 @h 4329 @c Mise … disposition du champ : 50070 canal */
+      /** @r IMH41 @d 09/01/13 @a ISAT.ZW @v IMH6.01.333 @s NEP00012 @h 4208 @c Ajout champ flowfield 50071 Requisitioner */
+      /** @r IMH40 @d 17/10/12 @a ISAT.ZW @v IMH6.01.224 @s NEP00006 @h 3702 @c Ajout SkipAutoStep */
+      /** @r IMH39 @d 02/10/12 @a ISAT.ZW @v IMH6.01.224 @s NEP00004 @h 3719 @s Gestion de devis en traiement */
+      /** @r IMH38 @d 17/09/12 @a ISAT.PC @v IMH6.01.P005 @s Controle de devis NAV-FUSION @c Ajout synchro + demande controle devis */
+      /** @r IMH37 @d 07/09/12 @a ISAT.RC @v IMH6.01.212 @h 3289 @s Remboursement au soci‚taire & ajout Fonction SendReturntoIMA */
+      /** @r IMH36 @d 28/08/12 @a ISAT.RC @v IMH6.01.212 @s Gestion date de reference matrice @h 3795
+          @c Changement de la signature de la fonction CheckCreationAvailable Rajout du paramŠtre Service Header */
+      /** @r IMH35 @d 28/06/12 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @h 3486
+          @c Modifier champ 50710, Service Cause (flowfield)  */
+      /** @r IMH34 @d 18/06/12 @a ISAT.PC @v IMH6.01.011 @s Gestion du service @h 3486
+          @c Ajout champ 50700, Urgent (flowfield)
+          @c Ajout champ 50710, Service Cause (flowfield)
+          @c Ajout champ 50711, Service Cause Description (flowfield)*/
+      /** @r IMH33 @d 10/04/12 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @h 1353 @c Gestion PV urgent */
+      /** @r IMH32 @d 30/03/12 @a ISAT.ST @v IMH6.01.165 @s Extranet - Mantis @h 3209 @c Mise … jour calcul d‚lai intervention */
+      /** @r IMH31 @d 28/03/12 @a ISAT.ST @v IMH6.01.146 @s Refonte facturation @c Recalcul du montant intervention */
+      /** @r IMH30 @d 04/01/12 @a ISAT.ST @v IMH6.01.146 @s Gestion facturation @c Manque filtre suppression */
+      /** @r IMH29 @d 30/12/11 @a ISAT.ZW @v IMH6.01.012 @s Gestion du devis @c Controle montant franchise */
+      /** @r IMH28 @d 29/12/11 @a ISAT.ST @v IMH6.01.012 @s Gestion du devis @c Controle montant franchise */
+      /** @r IMH27 @d 19/12/11 @a ISAT.ST @v IMH6.01.012 @s Gestion du devis @c Correction montant commande */
+      /** @r IMH26 @d 21/11/11 @a ISAT.PC @v IMH6.01.012 @s Gestion du devis @c Gestion de la TVA */
+      /** @r IMH25 @d 06/09/11 @a ISAT.LLT @v IMH6.01.012 @s Gestion du devis @c Initialisation montant commande */
+      /** @r IMH24 @d 29/08/11 @a ISAT.ST @v IMH6.01.012 @s Gestion du devis @c Ajout CheckMandatoryFields
+          @c Gestion des statuts: pas dans le OnInsert*/
+      /** @r IMH23 @d 29/07/11 @a ISAT.ST @v IMH6.01.012 @s Gestion du devis @c Suivi franchise */
+      /** @r IMH22 @d 07/07/11 @a ISAT.ZW @v IMH6.01.136 @s Fusion
+          @c Ajout champ 56020 56021 Fusion Validation + Fusion Validation Comment */
+      /** @r IMH21 @d 17/06/11 @a ISAT.ST @v IMH6.01.161 @s Log Service @c Appel … la validation du devis + triggers std */
+      /** @r IMH20 @d 16/05/11 @a ISAT.ZW @v IMH6.01.012 @s Gestion du devis
+          @c La date de r‚ception d'un devis ne peut pas ˆtre ant‚rieure … la date d'assignation */
+      /** @r IMH19 @d 13/05/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c CalcAmount TVA */
+      /** @r IMH18 @d 18/04/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service
+          @c Ajout de champs : "Unapproved Reason Code", "Ext. Unapproved Reason Code" */
+      /** @r IMH17 @d 07/04/11 @a ISAT.EBA @v IMH6.01.199 @s Modifications diverses Lot 2
+          @c Modif."TableRelation" du champ "Order VAT Bus. Posting Group": "VAT Business Posting Group" par "VAT Product Posting Group"*/
+      /** @r IMH16 @d 04/04/11 @a ISAT.ZW @v IMH6.01.146 @s Gestion facturation
+          @c Champ 50255 Order VAT Gen. Posting Group --> VAT Prod. Posting Group
+      /** @r IMH15 @d 01/04/11 @a ISAT.PC @v IMH6.01.146 @s Gestion facturation
+          @c Ajout champ 50253, Order Amount Incl. VAT
+          @c Ajout champ 50254, Order Amount Excl. VAT
+          @c Ajout champ 50255, Order VAT Bus. Posting Group*/
+      /** @r IMH14 @d 21/03/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout champs 50250-50252 Base de TVA */
+      /** @r IMH13 @d 17/03/11 @a CAP.JC @v IMH6.01.148 @s Comptabilit‚ - Commission
+          @c cr‚ation champs 54821, Percentage Commission
+          @c cr‚ation champs 54822, Commission Amount */
+      /** @r IMH12 @d 14/03/11 @a ISAT.LLT @v IMH6.01.146 @s Gestion facturation
+          @c Ajout champ 50600 To Invoice
+          @c Ajout champ 50601 Invoiced
+          @c Ajout champ 50602 Sales Order No.
+          @c Ajout champ 50603 Purchase Order No.
+          @c Appel fonction de r‚ception */
+      /** @r IMH11 @d 21/02/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Finalisation */
+      /** @r IMH10 @d 17/02/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Modifs valeur Statut validation
+          @c Ajout champ 46 External Approval Stat
+          @c Ajout champ 47 Use External Approval Status
+          @c Ajout champ 48 External Approval Date
+          @c Ajout champ 49 External Refused Reason
+          @c Envoi commande de travaux … supprimer */
+      /** @r IMH09 @d 17/02/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Automatismes */
+      /** @r IMH08 @d 14/02/11 @a ISAT.LLT @v IMH6.01.108 @s Interactions
+          @c Ajout champ 50051 Service Creation Date */
+      /** @r IMH07 @d 08/02/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Ajout fonction CreateInteraction */
+      /** @r IMH06 @d 20/01/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Gestion du montant de franchise */
+      /** @r IMH05 @d 20/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout champ 50520 Process Code
+          @c Ajout champ 50521 Process Status No.
+          @c Ajout champ 50522 Process Status Description */
+      /** @r IMH04 @d 16/12/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Ajout du champ 15 et gestion code obligatoire */
+      /** @r IMH03 @d 29/11/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Ajout champ 60 Corporate No. + Index pour info panel GC
+          @c Ajout champ 70 Deductible Amount
+          @c Ajout champ 71 Deductible Type
+          @c Ajout champ 72 Depreciation Amount */
+      /** @r IMH02 @d 14/10/10 @a ISAT.ZW @v IMH6.01.012 @s Gestion du devis @c Fonction GetNextLineNo + Ajout champ Attachments */
+      /** @r IMH01 @d 11/10/10 @a ISAT.ST @v IMH6.01.012 @s Gestion du devis @c Cr‚ation */
+    }
+    END.
+  }
+}

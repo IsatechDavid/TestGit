@@ -1,0 +1,779 @@
+OBJECT Codeunit 50079 Sales Invoicing Managment
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/02/14;
+    Time=17:38:14;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 6=r,
+                TableData 18=r,
+                TableData 27=r,
+                TableData 36=rimd,
+                TableData 37=rimd,
+                TableData 110=rm,
+                TableData 111=r,
+                TableData 284=r,
+                TableData 5079=r,
+                TableData 5900=rim,
+                TableData 5903=r,
+                TableData 50040=rim,
+                TableData 50060=r,
+                TableData 50066=rim,
+                TableData 50075=rim,
+                TableData 50084=rimd,
+                TableData 50137=r,
+                TableData 50138=r;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      HideDialog@1100281000 : Boolean;
+
+    PROCEDURE CreateSalesOrderFromService@1100281000(VAR pServiceHeader@1100281000 : Record 5900) rValue : Code[20];
+    VAR
+      lService@1100281004 : Record 50066;
+      lSalesHeader@1100281001 : Record 36;
+      lSalesHeader2@1100281013 : Record 36;
+      lSalesLine@1100281002 : Record 37;
+      lInvoicingMatrixSetup@1100281003 : Record 50137;
+      lServiceOrderType@1100281005 : Record 5903;
+      lReleaseSalesDocument@1100281008 : Codeunit 414;
+      lSalesPost@1100281009 : Codeunit 80;
+      lLastLineNo@1100281006 : Integer;
+      lItemNo@1100281007 : Code[20];
+      lBillCust@1100281010 : Record 18;
+      lServIntervLine@1100281011 : Record 50075;
+      lServIntervMin@1100281012 : Record 50084;
+    BEGIN
+      // Cr‚ation d'une commande de vente … partir d'une ligne produit (5900) le type de produit
+      // doit ˆtre param‚tr‚ en cr‚ation sans intervention
+
+      rValue := '';
+
+      IF NOT GetService(lService,pServiceHeader."Service No.") THEN BEGIN
+        EXIT;
+      END;
+
+      IF lServiceOrderType.GET(pServiceHeader."Service Order Type") THEN BEGIN
+        //IF NOT lServiceOrderType."Sal. Order Creat. (With. Int.)" THEN BEGIN
+        //  EXIT;
+        //END;
+      END;
+      //<<IMH10.ISAT.RC
+      // regles de gestion sur diag immo abandonn‚es, declenchement sur cloture intervention
+      {
+      //<<IMH08.ISAT.SB
+      IF pServiceHeader."Real Estate Diag." THEN BEGIN
+
+        lServIntervLine.RESET;
+        lServIntervLine.SETRANGE("Service Header No.",pServiceHeader."No.");
+        lServIntervLine.SETFILTER("Intervention Status",'<>%1',lServIntervLine."Intervention Status"::Closed);
+          IF NOT lServIntervLine.ISEMPTY THEN
+            EXIT;
+
+        lServIntervMin.RESET;
+        lServIntervMin.SETRANGE("Service Header No.",pServiceHeader."No.");
+        lServIntervMin.SETRANGE(Status,lServIntervMin.Status::Validated);
+        lServIntervMin.SETRANGE(Type,lServIntervMin.Type::"End of work");
+          IF NOT lServIntervMin.ISEMPTY THEN
+            EXIT;
+
+        lServIntervLine.RESET;
+        lServIntervLine.SETRANGE("Service Header No.",pServiceHeader."No.");
+        IF NOT lServIntervLine.FINDFIRST THEN
+            EXIT;
+
+      END;
+      //>>IMH08.ISAT.SB
+      }
+      //>>IMH10.ISAT.RC
+
+      IF NOT CheckCreationAvailable(lInvoicingMatrixSetup
+               ,pServiceHeader."Corporate No."
+               ,pServiceHeader."Service Order Type"
+               ,lService."Corporate Region Code"
+               ,
+               //<<IMH12
+               //lService."Service No.", pServiceHeader)
+               lService."Service No.",'', pServiceHeader)
+               //>>IMH12
+      THEN BEGIN
+        EXIT;
+      END;
+
+      lInvoicingMatrixSetup.FINDSET;
+      REPEAT
+        //<<IMH15.PC
+        // V‚rification de l'existence d'une commande
+        lSalesHeader2.RESET;
+        lSalesHeader2.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+        lSalesHeader2.SETRANGE("Service No.",pServiceHeader."Service No.");
+        lSalesHeader2.SETRANGE("Service Header No.",pServiceHeader."No.");
+        lSalesHeader2.SETRANGE("Corporate No.",pServiceHeader."Corporate No.");
+        //<<IMH17
+        //lSalesHeader2.SETRANGE("Service Order Type",pServiceHeader."Service Order Type");
+        lSalesHeader2.SETFILTER("Service Order Type",'%1|%2', pServiceHeader."Service Order Type", '' );
+        //>>IMH17
+        lSalesHeader2.SETRANGE("Corporate Region Code",pServiceHeader."Corporate Region Code");
+        //<<IMH16.SB
+        //lSalesHeader2.SETRANGE("Inv. Matrix Entry No.",lInvoicingMatrixSetup."Entry No.");
+        //>>IMH16.SB
+        IF lSalesHeader2.ISEMPTY THEN BEGIN
+          // Cr‚ation de l'en-tˆte
+          CLEAR(lSalesHeader);
+          WITH lSalesHeader DO BEGIN
+            VALIDATE("Document Type","Document Type"::Order);
+            INSERT(TRUE);
+            rValue := "No.";
+            VALIDATE("Document Date",WORKDATE);
+            VALIDATE("Sell-to Customer No.",lInvoicingMatrixSetup."Sell-To Customer No.");
+            //<<IMH04
+            SetHideValidationDialog(TRUE);
+            VALIDATE("Bill-to Customer No.",lInvoicingMatrixSetup."Bill-to Customer No.");
+            IF lInvoicingMatrixSetup."Sale Payment Method" = '' THEN BEGIN
+              lBillCust.GET(lInvoicingMatrixSetup."Bill-to Customer No.");
+              VALIDATE("Payment Method Code",lBillCust."Payment Method Code");
+            END ELSE
+              VALIDATE("Payment Method Code",lInvoicingMatrixSetup."Sale Payment Method");
+
+            //>>IMH04
+            VALIDATE("Corporate No.",pServiceHeader."Corporate No.");
+            VALIDATE("Corporate Region Code",pServiceHeader."Corporate Region Code");
+            VALIDATE("Service No.",pServiceHeader."Service No.");
+            VALIDATE("Service Header No.",pServiceHeader."No.");
+            //<<IMH15.PC
+            VALIDATE("Service Order Type",pServiceHeader."Service Order Type");
+            VALIDATE("Inv. Matrix Entry No.",lInvoicingMatrixSetup."Entry No.");
+            //>>IMH15.PC
+            MODIFY(TRUE);
+            lLastLineNo := 0;
+          END;
+
+          // Cr‚ation des lignes
+          CLEAR(lSalesLine);
+          WITH lSalesLine DO BEGIN
+            lLastLineNo += 10000;
+            VALIDATE("Document Type",lSalesHeader."Document Type");
+            VALIDATE("Document No.",lSalesHeader."No.");
+            VALIDATE("Line No.",lLastLineNo);
+            INSERT(TRUE);
+            lItemNo := GetSalesItemNo(pServiceHeader."No.",FALSE);
+            VALIDATE(Type,Type::Item);
+            VALIDATE("No.",lItemNo);
+            VALIDATE(Quantity,1);
+            VALIDATE("Corporate No.",pServiceHeader."Corporate No.");
+            VALIDATE("Corporate Region Code",pServiceHeader."Corporate Region Code");
+            VALIDATE("Service No.",pServiceHeader."Service No.");
+            VALIDATE("Service Header No.",pServiceHeader."No.");
+            VALIDATE("Service Order Type",pServiceHeader."Service Order Type");
+            //SB
+            VALIDATE(lSalesLine."Reference No.",lService."Reference No.");
+            VALIDATE("Qty. to Invoice",0);
+            MODIFY(TRUE);
+          END;
+
+          CLEAR(lReleaseSalesDocument);
+          CLEAR(lSalesPost);
+          lReleaseSalesDocument.RUN(lSalesHeader);
+          lSalesHeader.Ship := TRUE;
+          lSalesPost.RUN(lSalesHeader);
+        END;
+      UNTIL lInvoicingMatrixSetup.NEXT = 0;
+
+      //<<IMH07.ISAT.EBA
+      pServiceHeader."Customer No." := lSalesHeader."Sell-to Customer No.";
+      pServiceHeader."Bill-to Customer No." := lSalesHeader."Bill-to Customer No.";
+      pServiceHeader.MODIFY;
+      //>>IMH07.ISAT.EBA
+    END;
+
+    PROCEDURE CreateSalesOrderFromFusion@1100281030(VAR pFusionInvoicingJournalLine@1100281000 : Record 50187) rValue : Code[20];
+    VAR
+      lFusionInvoicingJournalLine@1100281004 : Record 50187;
+      lServiceHeaderTmp@1100281011 : TEMPORARY Record 5900;
+      lSalesHeader@1100281001 : Record 36;
+      lSalesLine@1100281002 : Record 37;
+      lInvoicingMatrixSetup@1100281003 : Record 50137;
+      lServiceOrderType@1100281005 : Record 5903;
+      lReleaseSalesDocument@1100281008 : Codeunit 414;
+      lSalesPost@1100281009 : Codeunit 80;
+      lLastLineNo@1100281006 : Integer;
+      lItemNo@1100281007 : Code[20];
+      lBillCust@1100281010 : Record 18;
+    BEGIN
+      //IMH12
+      // Cr‚ation d'une commande de vente … partir d'une ligne document facturation Fusion le type de produit
+
+      rValue := '';
+
+      IF NOT lFusionInvoicingJournalLine.GET(pFusionInvoicingJournalLine."Fusion Document No.") THEN BEGIN
+        EXIT;
+      END;
+
+      IF lServiceOrderType.GET(pFusionInvoicingJournalLine."New Service Order Type") THEN BEGIN
+        //IF NOT lServiceOrderType."Sal. Order Creat. (With. Int.)" THEN BEGIN
+        //  EXIT;
+        //END;
+      END;
+
+      IF NOT CheckCreationAvailable(lInvoicingMatrixSetup
+               ,pFusionInvoicingJournalLine."Corporate No."
+               ,pFusionInvoicingJournalLine."New Service Order Type"
+               ,pFusionInvoicingJournalLine."Corporate Region Code"
+               ,
+               //<<IMH12
+               //lService."Service No.", pServiceHeader)
+               '',pFusionInvoicingJournalLine."Fusion Document No.", lServiceHeaderTmp)
+               //>>IMH12
+      THEN BEGIN
+        EXIT;
+      END;
+
+      lInvoicingMatrixSetup.FINDSET;
+      REPEAT
+        // Cr‚ation de l'en-tˆte
+        CLEAR(lSalesHeader);
+        WITH lSalesHeader DO BEGIN
+          VALIDATE("Document Type","Document Type"::Order);
+          INSERT(TRUE);
+          rValue := "No.";
+          //<<IMH13.PC
+          //VALIDATE("Document Date",WORKDATE);
+          VALIDATE("Posting Date",pFusionInvoicingJournalLine."Fusion Last Doc. Change Date");
+          VALIDATE("Document Date",pFusionInvoicingJournalLine."Fusion Last Doc. Change Date");
+          VALIDATE("Order Date",pFusionInvoicingJournalLine."Fusion Last Doc. Change Date");
+          //<<IMH14.SB
+          VALIDATE("Shipment Date",pFusionInvoicingJournalLine."Fusion Last Doc. Change Date");
+          SetHideValidationDialog(TRUE);
+          VALIDATE("Requested Delivery Date",pFusionInvoicingJournalLine."Fusion Last Doc. Change Date");
+          VALIDATE("Promised Delivery Date",pFusionInvoicingJournalLine."Fusion Last Doc. Change Date");
+          //>>IMH14.SB
+          //>>IMH13.PC
+          //<<IMH04
+          VALIDATE("Sell-to Customer No.",lInvoicingMatrixSetup."Sell-To Customer No.");
+          //<<IMH04
+          SetHideValidationDialog(TRUE);
+          VALIDATE("Bill-to Customer No.",lInvoicingMatrixSetup."Bill-to Customer No.");
+          IF lInvoicingMatrixSetup."Sale Payment Method" = '' THEN BEGIN
+            lBillCust.GET(lInvoicingMatrixSetup."Bill-to Customer No.");
+            VALIDATE("Payment Method Code",lBillCust."Payment Method Code");
+          END ELSE
+            VALIDATE("Payment Method Code",lInvoicingMatrixSetup."Sale Payment Method");
+
+          //>>IMH04
+          VALIDATE("Corporate No.",pFusionInvoicingJournalLine."Corporate No.");
+          VALIDATE("Corporate Region Code",pFusionInvoicingJournalLine."Corporate Region Code");
+          VALIDATE("Fusion Document No.", pFusionInvoicingJournalLine."Fusion Document No.");
+          MODIFY(TRUE);
+          lLastLineNo := 0;
+        END;
+
+        // Cr‚ation des lignes
+        CLEAR(lSalesLine);
+        WITH lSalesLine DO BEGIN
+          lLastLineNo += 10000;
+          VALIDATE("Document Type",lSalesHeader."Document Type");
+          VALIDATE("Document No.",lSalesHeader."No.");
+          VALIDATE("Line No.",lLastLineNo);
+          INSERT(TRUE);
+          lItemNo := GetSalesItemNo3(pFusionInvoicingJournalLine."New Service Order Type",
+                      pFusionInvoicingJournalLine."Corporate No.",
+                      pFusionInvoicingJournalLine."Corporate Region Code",FALSE, FALSE);
+          VALIDATE(Type,Type::Item);
+          VALIDATE("No.",lItemNo);
+          VALIDATE(Quantity,1);
+          VALIDATE("Corporate No.",pFusionInvoicingJournalLine."Corporate No.");
+          VALIDATE("Corporate Region Code",pFusionInvoicingJournalLine."Corporate Region Code");
+          //VALIDATE("Service No.",pServiceHeader."Service No.");
+          //VALIDATE("Service Header No.",pServiceHeader."No.");
+          VALIDATE("Fusion Document No.", pFusionInvoicingJournalLine."Fusion Document No.");
+          VALIDATE("Service Order Type",pFusionInvoicingJournalLine."New Service Order Type");
+          //SB
+          //VALIDATE(lSalesLine."Reference No.",lService."Reference No.");
+          VALIDATE(lSalesLine."Reference No.",pFusionInvoicingJournalLine."Sinister No.");
+          VALIDATE("Qty. to Invoice",0);
+          MODIFY(TRUE);
+        END;
+
+        CLEAR(lReleaseSalesDocument);
+        CLEAR(lSalesPost);
+        lReleaseSalesDocument.RUN(lSalesHeader);
+        lSalesHeader.Ship := TRUE;
+        lSalesPost.SetHideDialog(TRUE);
+        lSalesPost.RUN(lSalesHeader);
+
+      UNTIL lInvoicingMatrixSetup.NEXT = 0;
+    END;
+
+    PROCEDURE CheckCreationAvailable@1100281002(VAR pInvoicingMatrixSetup@1100281000 : Record 50137;pCorporateNo@1100281001 : Code[20];pServiceOrderType@1100281002 : Code[10];pCorporateRegionCode@1100281003 : Code[10];pServiceNo@1100281005 : Code[20];pFusionDocNo@1100281010 : Code[30];VAR pServiceHeader@1100281009 : Record 5900) rValue : Boolean;
+    VAR
+      lService@1100281004 : Record 50066;
+      lFusionInvoicingJournalLine@1100281011 : Record 50187;
+      lRecordRef@1100281008 : RecordRef;
+      lSalesReferenceDate@1100281006 : Date;
+      lFindRecord@1100281007 : Boolean;
+    BEGIN
+      // V‚rification si la cr‚ation est autoris‚e
+      rValue := FALSE;
+
+      WITH pInvoicingMatrixSetup DO BEGIN
+        SETRANGE("Corporate No.",pCorporateNo);
+        SETRANGE("Service Order Type",pServiceOrderType);
+        SETRANGE("Corporate Region Code",pCorporateRegionCode);
+        SETRANGE(Enable,TRUE);
+        SETRANGE("Sale Order Creation",TRUE);
+        //<<IMH12
+        //IF NOT lService.GET(pServiceNo) THEN
+        //  EXIT;
+        //<<IMH09.ISAT.RC
+        //SETFILTER("Starting Date",'''''|<=%1',DT2DATE(lService."Creation Date"));
+        //SETFILTER("Ending Date",'''''|>=%1',DT2DATE(lService."Creation Date"));
+
+        lSalesReferenceDate:=0D ;
+        lFindRecord:=FALSE;
+        IF pFusionDocNo = '' THEN BEGIN
+          IF NOT lService.GET(pServiceNo) THEN
+            EXIT;
+          lRecordRef.GETTABLE(pServiceHeader);
+        END ELSE BEGIN
+          IF NOT lFusionInvoicingJournalLine.GET(pFusionDocNo) THEN
+            EXIT;
+          lRecordRef.GETTABLE(lFusionInvoicingJournalLine);
+        END;
+        //>>IMH12
+        IF  pInvoicingMatrixSetup.FINDSET THEN
+        REPEAT
+          lSalesReferenceDate:=pInvoicingMatrixSetup.GetSalesReferenceDate(lRecordRef);
+          IF ((pInvoicingMatrixSetup."Starting Date" = 0D ) OR  (pInvoicingMatrixSetup."Starting Date" <= lSalesReferenceDate )) AND
+             ((pInvoicingMatrixSetup."Ending Date" = 0D ) OR  (pInvoicingMatrixSetup."Ending Date" >= lSalesReferenceDate )) THEN
+            lFindRecord:= TRUE
+        UNTIL (lFindRecord=TRUE) OR (pInvoicingMatrixSetup.NEXT=0);
+        IF NOT lFindRecord THEN   BEGIN
+          EXIT;
+        SETFILTER("Starting Date",'''''|<=%1',lSalesReferenceDate);
+        SETFILTER("Ending Date",'''''|>=%1',lSalesReferenceDate);
+
+        //IF ISEMPTY THEN BEGIN
+        //  EXIT;
+
+        END;
+        //>>IMH09.ISAT.RC
+      END;
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetService@1100281001(VAR pService@1100281001 : Record 50066;pServiceNo@1100281000 : Code[20]) rValue : Boolean;
+    BEGIN
+      // Permet de r‚cup‚rer un service
+      rValue := FALSE;
+
+      IF NOT pService.GET(pServiceNo) THEN BEGIN
+        EXIT;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetSalesItemNo@1100281016(pServiceHeaderNo@1100281002 : Code[20];pAccreditedProvider@1100281003 : Boolean) rValue : Code[20];
+    VAR
+      lServiceHeader@1100281004 : Record 5900;
+    BEGIN
+      // Permet de retrouver l'article qui doit descendre en fonction du nø de service
+      rValue := '';
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServiceHeaderNo) THEN BEGIN
+        EXIT;
+      END;
+
+      EXIT(GetSalesItemNo2(lServiceHeader, pAccreditedProvider));
+    END;
+
+    LOCAL PROCEDURE GetSalesItemNo2@1100281004(VAR pServiceHeader@1100281002 : Record 5900;pAccreditedProvider@1100281003 : Boolean) rValue : Code[20];
+    VAR
+      lSalesItemSetup@1100281001 : Record 50138;
+      LitemFind@1100281000 : Boolean;
+    BEGIN
+      // Permet de retrouver l'article qui doit descendre en fonction du nø de service
+      rValue := '';
+
+      //<<IMH12
+      rValue := GetSalesItemNo3(pServiceHeader."Service Order Type", pServiceHeader."Corporate No.",
+                  pServiceHeader."Corporate Region Code", pAccreditedProvider,
+                  pServiceHeader.Urgent = pServiceHeader.Urgent::Yes);
+
+      {
+      //IMH12  d‚placer dans la fonction GetSalesItemNo3
+      //<<IMH02
+      LitemFind := FALSE;
+      lSalesItemSetup.RESET;
+      lSalesItemSetup.SETRANGE("Service Order Type",pServiceHeader."Service Order Type");
+      lSalesItemSetup.SETRANGE("Corporate No.",pServiceHeader."Corporate No.");
+      lSalesItemSetup.SETRANGE("Corporate Region Code",pServiceHeader."Corporate Region Code");
+      //lSalesItemSetup.SETRANGE("Accredited Provider",pAccreditedProvider);
+      LitemFind := lSalesItemSetup.FINDFIRST;
+
+      IF NOT LitemFind THEN BEGIN
+        lSalesItemSetup.SETRANGE("Corporate Region Code");
+        LitemFind := lSalesItemSetup.FINDFIRST;
+      END;
+
+      IF NOT LitemFind THEN BEGIN
+        lSalesItemSetup.SETRANGE("Corporate No.");
+        LitemFind := lSalesItemSetup.FINDFIRST;
+      END;
+
+      IF NOT LitemFind THEN
+        EXIT;
+      //>>IMH02
+
+      IF pServiceHeader.Urgent = pServiceHeader.Urgent::Yes THEN BEGIN
+        rValue := lSalesItemSetup."Emergency Item No.";
+      END ELSE BEGIN
+        rValue := lSalesItemSetup."Item No.";
+      END;
+      }
+      //>>IMH12
+    END;
+
+    LOCAL PROCEDURE GetSalesItemNo3@1100281031(pServiceOrderType@1100281002 : Code[10];pCorporateNo@1100281004 : Code[20];pCorporateRegionCode@1100281005 : Code[20];pAccreditedProvider@1100281003 : Boolean;pUrgence@1100281006 : Boolean) rValue : Code[20];
+    VAR
+      lSalesItemSetup@1100281001 : Record 50138;
+      LitemFind@1100281000 : Boolean;
+    BEGIN
+      //<<IMH12
+      // Permet de retrouver l'article qui doit descendre en fonction du nø de service
+      rValue := '';
+
+      //<<IMH02
+      LitemFind := FALSE;
+      lSalesItemSetup.RESET;
+      lSalesItemSetup.SETRANGE("Service Order Type",pServiceOrderType);
+      lSalesItemSetup.SETRANGE("Corporate No.",pCorporateNo);
+      lSalesItemSetup.SETRANGE("Corporate Region Code",pCorporateRegionCode);
+      //lSalesItemSetup.SETRANGE("Accredited Provider",pAccreditedProvider);
+      LitemFind := lSalesItemSetup.FINDFIRST;
+
+      IF NOT LitemFind THEN BEGIN
+        lSalesItemSetup.SETRANGE("Corporate Region Code");
+        LitemFind := lSalesItemSetup.FINDFIRST;
+      END;
+
+      IF NOT LitemFind THEN BEGIN
+        lSalesItemSetup.SETRANGE("Corporate No.");
+        LitemFind := lSalesItemSetup.FINDFIRST;
+      END;
+
+      IF NOT LitemFind THEN
+        EXIT;
+      //>>IMH02
+
+      IF pUrgence THEN BEGIN
+        rValue := lSalesItemSetup."Emergency Item No.";
+      END ELSE BEGIN
+        rValue := lSalesItemSetup."Item No.";
+      END;
+      //>>IMH12
+    END;
+
+    PROCEDURE UpdateSalesPrice@1100281011(VAR pServHeader@1100281002 : Record 5900) : Decimal;
+    VAR
+      lService@1100281000 : Record 50066;
+      lServiceInterventionLine@1100281001 : Record 50075;
+      lItemNo@1100281003 : Code[20];
+      lSalesLine@1100281004 : TEMPORARY Record 37;
+      lSalesHeader@1100281005 : Record 36;
+      lSalesPriceCalcMgt@1100281006 : Codeunit 7000;
+      lArea@1100281007 : Record 284;
+      lServiceHeader@1100281008 : Record 5900;
+      lServiceOrderType@1100281009 : Record 5903;
+      lItem@1100281011 : Record 27;
+      lServiceCode@1100281010 : Record 50040;
+      lProductCatalog@1100281012 : Record 50060;
+      lSalesItemSetup@1100281013 : Record 50138;
+      lCustomer@1100281014 : Record 18;
+      lCustomerPriceGroup@1100281015 : Record 6;
+    BEGIN
+      WITH pServHeader DO BEGIN
+        lItemNo := GetSalesItemNo2(pServHeader,FALSE);
+        IF (lItemNo = '') THEN
+          EXIT;
+        lSalesHeader."Document Type" := lSalesHeader."Document Type"::Quote;
+        lSalesHeader."No." := pServHeader."No.";
+        lSalesHeader."Bill-to Customer No." := "Corporate No.";
+      //<<IMH06.ST
+      //  lSalesHeader."Order Date" := lService."Event Date";   date de cr‚ation de la ligne produit.
+        IF pServHeader."Creation Date" = 0DT THEN
+          lSalesHeader."Order Date" := TODAY
+        ELSE
+          lSalesHeader."Order Date" := DT2DATE(pServHeader."Creation Date");
+        lSalesHeader."Posting Date" := lSalesHeader."Order Date";
+        lSalesHeader."Document Date" := lSalesHeader."Order Date";
+        lSalesHeader."Prices Including VAT" := TRUE;
+        IF lCustomer.GET("Corporate No.") THEN
+          lSalesHeader."Customer Price Group" := lCustomer."Customer Price Group";
+        IF lCustomerPriceGroup.GET(lSalesHeader."Customer Price Group") THEN
+          lSalesHeader."VAT Bus. Posting Group" := lCustomerPriceGroup."VAT Bus. Posting Gr. (Price)"
+        ELSE
+          lSalesHeader."VAT Bus. Posting Group" := lCustomer."VAT Bus. Posting Group";
+      //>>IMH06.ST
+        lSalesHeader."Corporate No." := "Corporate No.";
+        lSalesHeader."Corporate Region Code" := "Corporate Region Code";
+        lSalesLine.SuspendStatusCheck(TRUE); //IMH06.ST
+        lSalesLine.SetSalesHeader(lSalesHeader);
+        lSalesLine."Document Type" := lSalesHeader."Document Type";
+        lSalesLine."Document No." := lSalesHeader."No.";
+        lSalesLine."Bill-to Customer No." := lSalesHeader."Bill-to Customer No.";
+        lSalesLine."Customer Price Group" := lSalesHeader."Customer Price Group";
+        lSalesLine."VAT Bus. Posting Group" := lSalesHeader."VAT Bus. Posting Group";
+        lSalesLine.Type := lSalesLine.Type::Item;
+        lSalesLine."No." := lItemNo;
+        IF lItem.GET(lItemNo) THEN BEGIN
+          lSalesLine.VALIDATE("VAT Prod. Posting Group", lItem."VAT Prod. Posting Group");
+        END;
+        lSalesLine.Quantity := 1;
+        lSalesPriceCalcMgt.FindSalesLinePrice(lSalesHeader,lSalesLine,lSalesLine.FIELDNO(Quantity));
+        EXIT(lSalesLine."Unit Price");
+      END;
+    END;
+
+    PROCEDURE CancelSalesDoc@1100281005(pServHeader@1100281000 : Record 5900);
+    VAR
+      lSalesHeader@1100281001 : Record 36;
+      lSalesShptHeader@1100281002 : Record 110;
+      lSalesLine@1100281003 : Record 37;
+    BEGIN
+      // Annulation des documents g‚n‚r‚s sur un service
+      lSalesHeader.SETCURRENTKEY("Service No.", "Service Header No.");
+      lSalesHeader.SETRANGE("Document Type", lSalesHeader."Document Type"::Order);
+      lSalesHeader.SETRANGE("Service No.", pServHeader."Service No.");
+      lSalesHeader.SETRANGE("Service Header No.", pServHeader."No.");
+      lSalesHeader.SETRANGE(Canceled, FALSE);
+      IF lSalesHeader.FINDSET THEN
+        REPEAT
+          CancelSalesHeader(lSalesHeader)
+        UNTIL lSalesHeader.NEXT = 0;
+
+      lSalesShptHeader.SETCURRENTKEY("Service Header No.");
+      lSalesShptHeader.SETRANGE("Service Header No.", pServHeader."No.");
+      lSalesShptHeader.SETRANGE(Canceled, FALSE);
+      IF lSalesShptHeader.FINDSET THEN
+        REPEAT
+          //<<IMH13.PC
+          //<<IMH14.SB
+          //CreateReturnFromSalesShptHdr(lSalesShptHeader);
+          CreateReturnFromSalesShptHdr(lSalesShptHeader,WORKDATE);
+          //>>IMH13.PC
+          //>>IMH14.SB
+        UNTIL lSalesShptHeader.NEXT = 0;
+    END;
+
+    PROCEDURE CancelSalesDocFusion@1100281003(VAR pFusionInvoicingJournalLine@1100281000 : Record 50187);
+    VAR
+      lSalesHeader@1100281001 : Record 36;
+      lSalesShptHeader@1100281002 : Record 110;
+      lSalesLine@1100281003 : Record 37;
+    BEGIN
+      //IMH12
+      // Annulation des documents g‚n‚r‚s sur un dossier Fusion
+      lSalesHeader.SETCURRENTKEY("Fusion Document No.");
+      lSalesHeader.SETRANGE("Document Type", lSalesHeader."Document Type"::Order);
+      lSalesHeader.SETRANGE("Fusion Document No.", pFusionInvoicingJournalLine."Fusion Document No.");
+      lSalesHeader.SETRANGE(Canceled, FALSE);
+      IF lSalesHeader.FINDSET THEN
+        REPEAT
+          CancelSalesHeader(lSalesHeader)
+        UNTIL lSalesHeader.NEXT = 0;
+
+      lSalesShptHeader.SETCURRENTKEY("Fusion Document No.");
+      lSalesShptHeader.SETRANGE("Fusion Document No.", pFusionInvoicingJournalLine."Fusion Document No.");
+      lSalesShptHeader.SETRANGE(Canceled, FALSE);
+      IF lSalesShptHeader.FINDSET THEN
+        REPEAT
+          //<<IMH13.PC
+          //<<IMH14.SB
+          //CreateReturnFromSalesShptHdr(lSalesShptHeader);
+          CreateReturnFromSalesShptHdr(lSalesShptHeader,pFusionInvoicingJournalLine."Fusion Last Doc. Change Date");
+          //>>IMH13.PC
+          //>>IMH14.SB
+        UNTIL lSalesShptHeader.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE CancelSalesHeader@1100281006(pSalesHeader@1100281000 : Record 36);
+    VAR
+      lSalesLine@1100281002 : Record 37;
+      lSalesRelease@1100281004 : Codeunit 414;
+      lAllLinesDeleted@1100281007 : Boolean;
+    BEGIN
+      IF pSalesHeader.Canceled THEN
+        EXIT;
+
+      IF pSalesHeader.Status = pSalesHeader.Status::Released THEN
+        lSalesRelease.Reopen(pSalesHeader);
+      lAllLinesDeleted := TRUE;
+      WITH lSalesLine DO BEGIN
+        SETRANGE("Document Type", pSalesHeader."Document Type");
+        SETRANGE("Document No.", pSalesHeader."No.");
+        IF FINDSET THEN
+          REPEAT
+            IF "Quantity Shipped" = 0 THEN
+              DELETE(TRUE)
+            ELSE BEGIN
+              lAllLinesDeleted := FALSE;
+              IF Quantity <> "Quantity Shipped" THEN BEGIN
+                VALIDATE(Quantity, "Quantity Shipped");
+                MODIFY(TRUE);
+              END;
+            END;
+          UNTIL lSalesLine.NEXT=0;
+      END; // WITH
+      IF lAllLinesDeleted THEN
+        pSalesHeader.DELETE(TRUE)
+      ELSE BEGIN
+        pSalesHeader.Canceled := TRUE;
+        pSalesHeader.MODIFY;
+      END;
+    END;
+
+    LOCAL PROCEDURE CreateReturnFromSalesShptHdr@1100281010(pSalesShptHeader@1100281000 : Record 110;pPostingDate@1100281007 : Date);
+    VAR
+      lSalesHeader@1100281001 : Record 36;
+      lSalesLine@1100281002 : Record 37;
+      lSalesShptLine@1100281003 : Record 111;
+      lSalesRelease@1100281004 : Codeunit 414;
+      lReceive@1100281005 : Boolean;
+      lSalesPost@1100281006 : Codeunit 80;
+    BEGIN
+      IF pSalesShptHeader.Canceled THEN
+        EXIT;
+
+      WITH lSalesHeader DO BEGIN
+        VALIDATE("Document Type","Document Type"::"Return Order");
+        INSERT(TRUE);
+        SetHideValidationDialog(TRUE);
+        //<<IMH13.PC
+        VALIDATE("Posting Date",pPostingDate);
+        VALIDATE("Document Date",pPostingDate);
+        //<<IMH14.SB
+        VALIDATE("Order Date",pPostingDate);
+        VALIDATE("Shipment Date",pPostingDate);
+        VALIDATE("Requested Delivery Date",pPostingDate);
+        VALIDATE("Promised Delivery Date",pPostingDate);
+        //>>IMH14.SB
+        //>>IMH13.PC
+        VALIDATE("Sell-to Customer No.", pSalesShptHeader."Sell-to Customer No.");
+        IF "Bill-to Customer No." <> pSalesShptHeader."Bill-to Customer No." THEN
+          VALIDATE("Bill-to Customer No.", pSalesShptHeader."Bill-to Customer No.");
+        IF "Payment Method Code" <> pSalesShptHeader."Payment Method Code" THEN
+          VALIDATE("Payment Method Code", pSalesShptHeader."Payment Method Code");
+        IF "Corporate No." <> pSalesShptHeader."Corporate No." THEN
+          VALIDATE("Corporate No.", pSalesShptHeader."Corporate No.");
+        IF "Corporate Region Code" <> pSalesShptHeader."Corporate Region Code" THEN
+          VALIDATE("Corporate Region Code", pSalesShptHeader."Corporate Region Code");
+        IF "Service No." <> pSalesShptHeader."Service No." THEN
+          VALIDATE("Service No.", pSalesShptHeader."Service No.");
+        IF "Service Header No." <> pSalesShptHeader."Service Header No." THEN
+          VALIDATE("Service Header No.", pSalesShptHeader."Service Header No.");
+        //<<IMH12
+        IF "Fusion Document No." <> pSalesShptHeader."Fusion Document No." THEN
+          VALIDATE("Fusion Document No.", pSalesShptHeader."Fusion Document No.");
+        //<<IMH12
+        MODIFY(TRUE);
+      END;
+      WITH lSalesShptLine DO BEGIN
+        SETRANGE("Document No.", pSalesShptHeader."No.");
+        IF FINDSET THEN
+          REPEAT
+            lSalesLine."Document Type" := lSalesHeader."Document Type";
+            lSalesLine."Document No." := lSalesHeader."No.";
+            lSalesLine."Line No." := "Line No.";
+            lSalesLine.VALIDATE(Type, Type::Item);
+            lSalesLine.VALIDATE("No.", "No.");
+            lSalesLine.VALIDATE(Quantity, Quantity);
+            lSalesLine.VALIDATE("Corporate No.", lSalesHeader."Corporate No.");
+            lSalesLine.VALIDATE("Corporate Region Code", lSalesHeader."Corporate Region Code");
+            lSalesLine.VALIDATE("Service No.", lSalesHeader."Service No.");
+            lSalesLine.VALIDATE("Service Header No.", lSalesHeader."Service Header No.");
+            lSalesLine.VALIDATE("Fusion Document No.", lSalesHeader."Fusion Document No.");  //IMH12
+            lSalesLine.VALIDATE("Service Order Type", "Service Order Type");
+            lSalesLine.VALIDATE("Qty. to Invoice",0);
+            lSalesLine.VALIDATE("Return Qty. to Receive", Quantity);
+            lSalesLine.INSERT(TRUE);
+            lReceive := TRUE;
+          UNTIL lSalesLine.NEXT=0;
+      END; // WITH
+      pSalesShptHeader.Canceled := TRUE;
+      pSalesShptHeader.MODIFY;
+
+      IF lReceive THEN BEGIN
+        CLEAR(lSalesRelease);
+        lSalesRelease.RUN(lSalesHeader);
+        lSalesHeader.Receive := TRUE;
+        //<<IMH12
+        IF HideDialog THEN
+          lSalesPost.SetHideDialog(TRUE);
+        //>>IMH12
+        lSalesPost.RUN(lSalesHeader);
+      END;
+    END;
+
+    PROCEDURE SetHideDialog@1100281007(pHideDialog@1100281000 : Boolean);
+    BEGIN
+      //IMH12
+      HideDialog := pHideDialog;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH17 @d 20/02/14 @a ISAT.ZW @v IMH6.01.4632 @s AOUT @h 4632 @h correctif sur la gestion des doublons */
+      /** @r IMH16 @d 10/10/13 @a ISAT.SB @v IMH6.01.351 @s AOUT @h 4632 @h correctif sur la gestion des doublons */
+      /** @r IMH15 @d 22/02/13 @a ISAT.PC @v IMH6.01.340 @s NEP IMH 4 @h 4171
+          @c ajout de l'enregistrement des champs nø seq de la matrice + du type de produit */
+      /** @r IMH14 @d 04/02/13 @a ISAT.SB @v IMH6.01.340 @s NEP IMH 4 @h 4263
+      /** @r IMH13 @d 04/02/13 @a ISAT.PC @v IMH6.01.220 @s Projet Facturation Fusion
+          @c Gestion de la date de compta pour gestion des prix */
+      /** @r IMH12 @d 05/12/12 @a ISAT.ZW @v IMH6.01.220 @s Projet Facturation Fusion
+          @c Ajout Fonction CancelSalesDocFusion + HideDialog */
+      /** @r IMH11 @d 19/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3730
+          @a Ajout permission TableData Customer Price Group=r,
+          @a Ajout permission TableData Customer=r,
+          @a Ajout permission TableData Item=r,
+          @a Ajout permission TableData Sales Header=rimd,
+          @a Ajout permission TableData Sales Line=rimd,
+          @a Ajout permission TableData Sales Shipment Header=rm,
+          @a Ajout permission TableData Sales Shipment Line=r,
+          @a Ajout permission TableData Area=r,
+          @a Ajout permission TableData Marketing Setup=r,
+          @a Ajout permission TableData Service Header=rim,
+          @a Ajout permission TableData Service Order Type=r,
+          @a Ajout permission TableData Service Code=rim,
+          @a Ajout permission TableData Product Catalog=r,
+          @a Ajout permission TableData Service=rim,
+          @a Ajout permission TableData Service Intervention Line=rim,
+          @a Ajout permission TableData Service Intervention Minutes=rimd,
+          @a Ajout permission TableData Invoicing Matrix Setup=r,
+          @a Ajout permission TableData Sales Item Setup=r */
+      /** @r IMH10 @d 28/09/12 @a ISAT.RC @v IMH6.01.212 @s Version 1.4.1 @h 3331
+          @s Facturation de IMH … IMH Service … la cloture de l'intervention */
+      /** @r IMH09 @d 28/08/2012 @a ISAT.RC @v IMH6.01.212 @s Version 1.4.1 @c Gestion date de reference matrice @h 3795
+          @c Modication signature CheckCreationAvailable rajout du parametre pServiceHeader*/
+      /** @r IMH08 @d 21/11/11 @a ISAT.SB @v IMH6.01.011 @s Gestion du service */
+          @c Contr“les ajout‚s si Diag Immo (mˆme contr“le que la fonction sendprovider to ima de la table 5900) */
+      /** @r IMH07 @d 15/10/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service */
+      /** @r IMH05 @d 22/08/11 @a ISTA.ST @v IMH6.01.146 @s Gestion facturation @c Ajout CancelSalesDoc */
+      /** @r IMH05 @d 12/08/11 @a ISAT.ST @v IMH6.01.146 @s Gestion facturation @c UpdateSalesPrice corrig‚ */
+      /** @r IMH04 @d 01/08/11 @a ISAT.sb @v IMH6.01.146 @s Gestion facturation @c Prise en compte du factur‚ */
+      /** @r IMH03 @d 07/06/11 @a ISAT.VA @v IMH6.01.146 @s Gestion des tarifs @c Ajout fonction SetCreationDeprivationInvoice */
+      /** @r IMH02 @d 07/06/11 @a ISAT.VA @v IMH6.01.146 @s Gestion des tarifs @c Cr‚ation */
+      /** @r IMH01 @d 20/05/11 @a ISAT.PC @v IMH6.01.146 @s Gestion facturation @c Cr‚ation */
+    }
+    END.
+  }
+}

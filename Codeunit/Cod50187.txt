@@ -1,0 +1,86 @@
+OBJECT Codeunit 50187 FUSION Sent Acquittal Val. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=28/05/13;
+    Time=16:45:41;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281001 : TEMPORARY Record 8016720;
+          BEGIN
+            lEAISentMQBuffer := Rec;
+            //<<IMH02.ST
+            CALCFIELDS("XML Source");
+            lEAISentMQBuffer."XML Source" := Rec."XML Source";
+            //>>IMH02.ST
+            Code(lEAISentMQBuffer);
+            Rec := lEAISentMQBuffer;
+            lEAISentMQBuffer.CALCFIELDS("XML Source", "Response XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+            "Response XML Source" := lEAISentMQBuffer."Response XML Source"; //IMH02.ST
+            IF NOT Rec.INSERT(TRUE) THEN
+              Rec.MODIFY;
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE Code@1100281000(VAR pEAISentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lEAIExchangeType@1100281001 : Record 8016717;
+      lwinHTTPService@1100281006 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDoc@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDom@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1100281002 : InStream;
+      lOutStream@1100281004 : OutStream;
+    BEGIN
+      lEAIExchangeType.GET(lEAIExchangeType.Type::Inbound, pEAISentMQBuffer."EAI Exchange Type Code");
+      lEAIExchangeType.TESTFIELD("Ingoing Queue Label");
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',lEAIExchangeType."Ingoing Queue Label",0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','"http://tempuri.org/IEdiService/SetInt‚grationFlux"');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      CREATE(lXmlDoc);
+      pEAISentMQBuffer.CALCFIELDS("XML Source");
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXmlDoc.load(lInStream);
+
+      lwinHTTPService.Send(lXmlDoc);
+      CLEAR(lInStream);
+      CLEAR(lXmlDoc);
+
+      IF NOT lwinHTTPService.WaitForResponse(60) THEN ERROR('Request timed out.');
+      //<<IMH02.ST
+      CLEAR(pEAISentMQBuffer."Response XML Source");
+      pEAISentMQBuffer."Response XML Source".CREATEOUTSTREAM(lOutStream);
+      CLEAR(lXmlDom);
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(lOutStream);
+      //>>IMH02.ST
+      //lXmlDom.save('Z:\Temp\test fusion\ReponseAcq.xml');
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 06/05/13 @a ISAT.PC @v IMH6.01.222 @s Uniformisation Darva
+          @c Modification de la gestion pour r‚cup‚rer le type d'‚change */
+      /** @r IMH02 @d 26/08/11 @a ISAT.ST @v IMH6.01.134 @s DARVA Management @c Ajout Response XML Source */
+      /** @r IMH01 @d 12/04/11 @a ISAT.ZW @v IMH6.01.136 @s Interface Fusion @c cr‚ation */
+    }
+    END.
+  }
+}

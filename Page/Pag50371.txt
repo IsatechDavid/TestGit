@@ -1,0 +1,366 @@
+OBJECT Page 50371 DARVA Send (old)
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/11/13;
+    Time=09:31:43;
+    Modified=Yes;
+    Version List=IMH6.01,MATMUT01;
+  }
+  PROPERTIES
+  {
+    Editable=Yes;
+    CaptionML=[ENU=DARVA Send;
+               FRA=Envoi DARVA];
+    DataCaptionExpr=PageDescription;
+    PageType=NavigatePage;
+    OnOpenPage=BEGIN
+                 IF NOT DataLoaded THEN
+                   CurrPage.CLOSE;
+               END;
+
+    OnQueryClosePage=BEGIN
+                       IF NOT SkipClosureTest THEN
+                         EXIT(CONFIRM(Text001, TRUE))
+                       ELSE
+                         EXIT(TRUE);
+                     END;
+
+    ActionList=ACTIONS
+    {
+      { 1000000001;  ;ActionContainer;
+                      ActionContainerType=ActionItems }
+      { 1000000003;1 ;Action    ;
+                      ShortCutKey=Ctrl+E;
+                      CaptionML=[ENU=Send;
+                                 FRA=Envoyer];
+                      Promoted=Yes;
+                      PromotedIsBig=Yes;
+                      Image=SendTo;
+                      PromotedCategory=Process;
+                      OnAction=BEGIN
+                                 SendSDR;
+                               END;
+                                }
+      { 1000000006;1 ;Action    ;
+                      CaptionML=[ENU=Add attachment;
+                                 FRA=Joindre un fichier];
+                      Promoted=Yes;
+                      Image=MailAttachment;
+                      PromotedCategory=Process;
+                      OnAction=VAR
+                                 lTempToList@1000000001 : TEMPORARY Record 50125;
+                               BEGIN
+                                 CurrPage.DARVATemplates.FORM.RetrieveDARVATemplate(lTempToList, Subject, BodyText);
+                                 IF lTempToList.ISEMPTY THEN
+                                   ERROR(Text003);
+
+                                 //<<IMH03.ACO
+                                 lTempToList.FINDFIRST;
+                                 IF NOT lTempToList."Allow Attachments" THEN
+                                   ERROR(Text005);
+                                 //>>IMH03.ACO
+
+                                 CurrPage.Attachments.FORM.AddDocument;
+                               END;
+                                }
+    }
+  }
+  CONTROLS
+  {
+    { 1000000000;;Container;
+                ContainerType=ContentArea }
+
+    { 1100281000;1;Part   ;
+                Name=DARVATemplates;
+                CaptionML=[ENU=Follow Up;
+                           FRA=Suivi de dossier];
+                SubFormView=WHERE(Active=CONST(Yes));
+                PagePartID=Page50366;
+                PartType=Page }
+
+    { 1100281001;1;Part   ;
+                Name=Attachments;
+                CaptionML=[ENU=Attachments;
+                           FRA=PiŠces jointes];
+                PagePartID=Page50368;
+                PartType=Page }
+
+  }
+  CODE
+  {
+    VAR
+      PageDescription@1100281000 : Text[80];
+      Subject@1000000001 : Text[1024];
+      BodyText@1000000002 : BigText;
+      DataLoaded@1100281002 : Boolean;
+      SegLine@1000000003 : TEMPORARY Record 5077;
+      SkipClosureTest@1000000004 : Boolean;
+      Text001@1000000005 : TextConst 'ENU=SDR has not been sent. Do you really want to quit ?;FRA=Le SDR n''est pas envoy‚. Etes-vous s–r de vouloir quitter ?';
+      Text003@1000000006 : TextConst 'ENU=Please select a least one SDR.;FRA=Vous devez s‚lectionner un SDR … envoyer.';
+      ServiceHeader@1000000007 : Record 5900;
+      ServiceInterventionNo@1000000008 : Integer;
+      ServiceInterventionLineNo@1000000014 : Integer;
+      TempAttList@1000000010 : TEMPORARY Record 50021;
+      InteractLogEntry@1000000009 : Record 5065;
+      DARVATemplate@1000000000 : Record 50125;
+      TextMgt@1000000011 : Codeunit 50085;
+      DARVAMgt@1000000012 : Codeunit 50150;
+      Text004@1000000013 : TextConst 'ENU=There is no data in file.;FRA=Le fichier %1 ne contient pas de donn‚es.';
+      Text005@1000000015 : TextConst 'ENU=You cannot add attachments to this template;FRA=Vous ne pouvez ajouter de piŠces jointes pour ce modŠle d''envoi.';
+
+    LOCAL PROCEDURE SendSDR@1000000000();
+    VAR
+      lTempToList@1000000001 : TEMPORARY Record 50125;
+      lTempDocAttach@1000000004 : TEMPORARY Record 50021;
+      lEAISendMQBuffer@1000000002 : TEMPORARY Record 8016720;
+      lTemplateCode@1000000003 : Code[10];
+    BEGIN
+      // R‚cup‚ration des r‚sultats
+      CurrPage.DARVATemplates.FORM.RetrieveDARVATemplate(lTempToList, Subject, BodyText);
+
+      IF lTempToList.ISEMPTY THEN
+        ERROR(Text003);
+
+      lTempToList.FINDFIRST;
+      lTemplateCode := lTempToList.Code;
+
+      CurrPage.Attachments.FORM.RetrieveDocumentList(lTempDocAttach);
+
+      IF NOT lTempDocAttach.ISEMPTY THEN BEGIN
+        //traitement piŠce jointe issu du FileSystem
+        AddAttachmentsFromFileSystem(lTempDocAttach, lTemplateCode);
+
+        //Ajout des piŠces jointes
+        CreateXMLFileToSaveAttachments(lTempDocAttach, lEAISendMQBuffer);
+      END;
+
+      TextMgt.SetEAISentMQBuffer(lEAISendMQBuffer);
+
+      SkipClosureTest := TRUE;
+
+      lTempToList.DELETEALL;
+      lTempDocAttach.DELETEALL;
+      //Envoi du SDR
+      SaveText(FALSE,lTemplateCode);
+
+      CurrPage.CLOSE;
+    END;
+
+    PROCEDURE SetServiceHeader@1000000001(pServiceHeader@1000000000 : Record 5900;pInterventionNo@1000000002 : Integer;pInterventionLineNo@1000000003 : Integer);
+    VAR
+      lService@1000000001 : Record 50066;
+    BEGIN
+      IF NOT lService.GET(pServiceHeader."Service No.") THEN
+        EXIT;
+
+      ServiceHeader := pServiceHeader;
+      ServiceInterventionNo := pInterventionNo;
+      ServiceInterventionLineNo := pInterventionLineNo;
+
+      LoadServData(lService);
+      LoadData(STRSUBSTNO('%1 %2', pServiceHeader.TABLECAPTION, pServiceHeader."No."),
+                              TempAttList);
+    END;
+
+    PROCEDURE LoadData@1100281000(pPageDesc@1100281000 : Text[80];VAR pAttachmentList@1100281002 : Record 50021);
+    BEGIN
+      PageDescription := pPageDesc;
+
+      //ModŠle d'envoi DARVA
+      CurrPage.DARVATemplates.FORM.LoadDARVATemplates(ServiceHeader."Corporate No.", ServiceHeader."No.", ServiceInterventionNo);
+
+      //PiŠces jointes
+      CurrPage.Attachments.FORM.InitList(pAttachmentList);
+
+      DataLoaded := TRUE;
+    END;
+
+    PROCEDURE LoadServData@1100281024(pService@1100281000 : Record 50066);
+    VAR
+      lContact@1100281003 : Record 5050;
+      lDocAttach@1100281001 : Record 50021;
+    BEGIN
+      WITH lDocAttach DO BEGIN
+        // Doc joint service
+        SETCURRENTKEY("Service No.", "Service Document No.");
+        SETRANGE("Service No.", pService."Service No.");
+        //SETRANGE("Service Document No.", '');
+        IF FINDSET(FALSE) THEN
+          REPEAT
+            AddAttachment(lDocAttach);
+          UNTIL NEXT = 0;
+      END; // WITH lDocAttach
+    END;
+
+    LOCAL PROCEDURE AddAttachment@1100281004(pAttachment@1100281000 : Record 50021);
+    BEGIN
+      TempAttList := pAttachment;
+      pAttachment.CALCFIELDS("Merge Source");
+      TempAttList."Merge Source" := pAttachment."Merge Source";
+      IF NOT TempAttList.FIND('=') THEN BEGIN
+        IF TempAttList."Interaction Template Code" = '' THEN BEGIN
+          IF TempAttList."Interaction Log Entry No." <> 0 THEN BEGIN
+            IF InteractLogEntry.GET(TempAttList."Interaction Log Entry No.") THEN BEGIN
+              TempAttList."Interaction Template Code" := InteractLogEntry."Interaction Template Code";
+            END;
+          END;
+        END;
+        TempAttList.Modifiable := FALSE;
+        TempAttList.INSERT(FALSE);
+      END;
+    END;
+
+    PROCEDURE SaveText@1000000002(pAskQuestion@1100281001 : Boolean;pTemplateCode@1000000002 : Code[10]);
+    VAR
+      lCommentLine@1000000000 : TEMPORARY Record 50056;
+      lCommentDate@1000000001 : Date;
+    BEGIN
+      //IF pAskQuestion THEN BEGIN
+      //  IF NOT CONFIRM(Text001,TRUE) THEN BEGIN
+      //    DeleteAttachment(FALSE);
+      //    EXIT;
+      //  END;
+      //END;
+
+      //Cr‚ation d'un commentaire
+      lCommentLine.INIT;
+      lCommentLine.Code := pTemplateCode;
+      lCommentLine."Source No." := ServiceHeader."Service No.";
+      lCommentLine."Source No. 2" := ServiceHeader."No.";
+      lCommentLine."Source No. 3" := ServiceInterventionLineNo;
+      lCommentLine."Creation Date" := CURRENTDATETIME;
+      lCommentLine."Creation User ID" := USERID;
+      lCommentLine.Publication := lCommentLine.Publication::Darva;
+      lCommentLine.INSERT(TRUE);
+
+      //Sauvegarde du commentaire
+      TextMgt.SaveBigText(lCommentLine,lCommentDate, BodyText);
+    END;
+
+    PROCEDURE AddAttachmentsFromFileSystem@1000000006(VAR pAttachmentsList@1000000000 : Record 50021;pTemplateCode@1000000003 : Code[10]);
+    VAR
+      lDocumentAttachment@1000000001 : Record 50021;
+      lAttachmentsFromDisk@1000000002 : TEMPORARY Record 50021;
+    BEGIN
+      //Copie des piŠces jointes s‚lectionn‚es et cr‚‚es depuis le disque
+      IF pAttachmentsList.ISEMPTY THEN
+        EXIT;
+
+      lAttachmentsFromDisk.DELETEALL;
+      pAttachmentsList.RESET;
+      pAttachmentsList.SETRANGE("Referent Table No.", -1);
+      IF pAttachmentsList.FINDSET THEN
+        REPEAT
+          lAttachmentsFromDisk.INIT;
+          lAttachmentsFromDisk.TRANSFERFIELDS(pAttachmentsList);
+          pAttachmentsList.CALCFIELDS("Merge Source");
+          lAttachmentsFromDisk."Merge Source" := pAttachmentsList."Merge Source";
+          lAttachmentsFromDisk.INSERT(TRUE);
+        UNTIL pAttachmentsList.NEXT = 0;
+      pAttachmentsList.RESET;
+
+      IF lAttachmentsFromDisk.FINDSET THEN
+        REPEAT
+          //Cr‚ation de la piŠce jointe physique et dans Nav
+          CreateAttachment(lAttachmentsFromDisk, lDocumentAttachment, pTemplateCode);
+
+          //suppression de la piŠce jointe temporaire dans la liste des s‚lectionn‚s
+          IF pAttachmentsList.GET(lAttachmentsFromDisk."Referent Table No.",
+                                  lAttachmentsFromDisk."Key Integer 1",
+                                  lAttachmentsFromDisk."Key Integer 2",
+                                  lAttachmentsFromDisk."Key Code 1",
+                                  lAttachmentsFromDisk."Key Code 2",
+                                  lAttachmentsFromDisk."Entry No.") THEN BEGIN
+            pAttachmentsList.DELETE;
+            pAttachmentsList.RESET;
+          END;
+
+          //Ajout de la nouvelle piŠce jointe dans la liste des s‚lectionn‚s
+          pAttachmentsList.INIT;
+          pAttachmentsList.TRANSFERFIELDS(lDocumentAttachment);
+          pAttachmentsList.INSERT(TRUE);
+        UNTIL lAttachmentsFromDisk.NEXT = 0;
+    END;
+
+    PROCEDURE CreateAttachment@1000000005(VAR pDocumentAttachmentTmp@1000000000 : Record 50021;VAR pDocumentAttachment@1000000007 : Record 50021;pTemplateCode@1000000008 : Code[10]);
+    VAR
+      lDocumentAttachment@1000000006 : Record 50021;
+      lAttachmentTemp@1000000005 : TEMPORARY Record 5062;
+      lSourceAttchMgt@1000000004 : Codeunit 50003;
+      lRecordRef@1000000003 : RecordRef;
+      lFileOriginName@1000000002 : Text[250];
+      lFileExtension@1000000001 : Text[10];
+    BEGIN
+      lFileOriginName :=  pDocumentAttachmentTmp.Description;
+      lFileExtension := pDocumentAttachmentTmp."File Extension";
+
+      pDocumentAttachmentTmp.CALCFIELDS("Merge Source");
+      IF NOT pDocumentAttachmentTmp."Merge Source".HASVALUE THEN BEGIN
+        ERROR(Text004,pDocumentAttachmentTmp.Description);
+      END;
+
+      WITH pDocumentAttachment DO BEGIN
+        SETCURRENTKEY("Service Document No.","Service Intervention Line No.","Intervention Quote Line No.");
+        SETRANGE("Service Document No.",ServiceHeader."No.");
+        "Key Integer 1" := 0;
+        "Key Integer 2" := 0;
+        "Key Code 1" := '';
+        "Key Code 2" := '';
+        //<<IMH02.ACO
+        //Description := pTemplateCode;
+        Description := lFileOriginName;
+        //>>IMH02.ACO
+        "Description 2" := COPYSTR(lFileOriginName + '.' + lFileExtension,1,MAXSTRLEN("Description 2"));
+        //<<IMH02.ACO
+        "File Extension" := lFileExtension;
+        "Queue Type" := "Queue Type"::Emission;
+        //>>IMH02.ACO
+      END;
+
+      lAttachmentTemp.Attachment := pDocumentAttachmentTmp."Merge Source";
+      lSourceAttchMgt.CreateAttachment(pDocumentAttachment,'',lAttachmentTemp);
+    END;
+
+    PROCEDURE CreateXMLFileToSaveAttachments@1000000011(VAR pDocumentAttachment@1000000000 : Record 50021;VAR pEAISentMQBuffer@1000000008 : Record 8016720);
+    VAR
+      lXMLMgt@1000000006 : Codeunit 8016710;
+      lXmlNewDoc@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlNewChild1@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlNewChild2@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlNewChild3@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lOutStream@1000000001 : OutStream;
+      lEAISentMQBuffer@1000000007 : Record 8016720;
+    BEGIN
+      IF pDocumentAttachment.ISEMPTY THEN
+        EXIT;
+
+      lXMLMgt.CreateXml(lXmlNewDoc,'<FLUXML/>',lXmlNewChild1);
+      pDocumentAttachment.RESET;
+      IF pDocumentAttachment.FINDSET THEN
+        REPEAT
+          lXMLMgt.AddElement(lXmlNewChild1,'Attachment','','',lXmlNewChild2);
+          lXMLMgt.AddElement(lXmlNewChild2,'ReferentTableNo.',FORMAT(pDocumentAttachment."Referent Table No."),'',lXmlNewChild3);
+          lXMLMgt.AddElement(lXmlNewChild2,'KeyInteger1',FORMAT(pDocumentAttachment."Key Integer 1"),'',lXmlNewChild3);
+          lXMLMgt.AddElement(lXmlNewChild2,'KeyInteger2',FORMAT(pDocumentAttachment."Key Integer 2"),'',lXmlNewChild3);
+          lXMLMgt.AddElement(lXmlNewChild2,'KeyCode1',pDocumentAttachment."Key Code 1",'',lXmlNewChild3);
+          lXMLMgt.AddElement(lXmlNewChild2,'KeyCode2',pDocumentAttachment."Key Code 2",'',lXmlNewChild3);
+          lXMLMgt.AddElement(lXmlNewChild2,'EntryNo',FORMAT(pDocumentAttachment."Entry No."),'',lXmlNewChild3);
+          lXmlNewChild2 := lXmlNewChild2.parentNode;
+        UNTIL pDocumentAttachment.NEXT = 0;
+
+      pEAISentMQBuffer."To Generate XML Source".CREATEOUTSTREAM(lOutStream);
+      lXmlNewDoc.save(lOutStream);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 12/11/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot1
+          @c Autorisation ou non de joindre piŠce jointe selon modŠle d'envoi */
+      /** @r IMH02 @d 14/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot1 @h 4789
+          @c Sauvegarde de l'extension du fichier joint */
+      /** @r IMH01 @d 23/08/13 @a ISAT.ACO @v IMH6.01.348 @s Darva MATMUT Lot1 @c Cr‚ation */
+    }
+    END.
+  }
+}

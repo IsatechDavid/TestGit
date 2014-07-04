@@ -1,0 +1,72 @@
+OBJECT Codeunit 8016726 EAI Rcvd Generation Post Line
+{
+  OBJECT-PROPERTIES
+  {
+    Date=09/10/13;
+    Time=10:39:19;
+    Modified=Yes;
+    Version List=ISAEAI1.00,SysAgDarva;
+  }
+  PROPERTIES
+  {
+    TableNo=8016721;
+    OnRun=VAR
+            lEAIRegisterMgt@1100481000 : Codeunit 8016711;
+            lRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+          BEGIN
+            lRcvdMQBuffer := Rec;
+            Code(lRcvdMQBuffer);
+            Rec := lRcvdMQBuffer;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100281000 : TextConst 'FRA=Aucun CodeUnit de g‚n‚ration pour l''act %1, de type %2.';
+      Error002@1180044000 : TextConst 'ENU=EAI Act %1 is not set up to post message.;FRA=L''acte EAI %1 ne se valide pas automatiquement.';
+      Error003@1100281001 : TextConst 'ENU=No EAI Act on flow. Please, check your setup.;FRA=Aucun acte EAI n''est pr‚sent sur le flux. Merci de v‚rifier le param‚trage';
+
+    LOCAL PROCEDURE Code@1100281000(VAR pRcvdMQBuffer@1100281000 : Record 8016721);
+    VAR
+      lEAIActMgt@1100281002 : Codeunit 8016703;
+      lEAIMQBufferMgt@1100481000 : Codeunit 8016708;
+      lGenerationCodeUnitNo@1100281001 : Integer;
+    BEGIN
+      //On v‚rifie la pr‚sence d'un acte
+      IF pRcvdMQBuffer."EAI Act Code" = '' THEN
+        pRcvdMQBuffer.FIELDERROR("EAI Act Code",Error003);
+
+      //On r‚cup‚re le codeunit de g‚n‚ration de l'acte
+      lGenerationCodeUnitNo :=
+         lEAIActMgt.GetGenerationCodeUnitNo(pRcvdMQBuffer."EAI Act Type Code",pRcvdMQBuffer."EAI Act Code",WORKDATE);
+
+      //<<EAI01
+      CASE pRcvdMQBuffer.Status OF
+        pRcvdMQBuffer.Status::Unprocessed:
+          IF (NOT lEAIActMgt.AutoValidate(pRcvdMQBuffer."EAI Act Type Code",pRcvdMQBuffer."EAI Act Code"))
+          THEN
+            ERROR(Error002,pRcvdMQBuffer."EAI Act Code"); //il faut g‚n‚rer une erreur, sinon le traitement semble avoir r‚ussi...
+        pRcvdMQBuffer.Status::Processing,
+        pRcvdMQBuffer.Status::Error:
+          EXIT;
+        pRcvdMQBuffer.Status::"Unit Test":;
+      END;
+      //>>EAI01
+
+      IF lGenerationCodeUnitNo <> 0 THEN
+      BEGIN
+        lEAIMQBufferMgt.LockCurrentRcvdMQ(pRcvdMQBuffer);
+        CODEUNIT.RUN(lGenerationCodeUnitNo,pRcvdMQBuffer)
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 11/07/13 @a ISAT.PC @v IMH6.01.350 @s SystŠme aiguillage @c Ajout de Error003 */
+      /** @r EAI01 @d 24/10/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Test sur status=active */
+      /** @r EAI00 @d 01/02/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Cr‚ation de l'objet */
+    }
+    END.
+  }
+}

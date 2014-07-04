@@ -1,0 +1,232 @@
+OBJECT Codeunit 50074 Transfert factor
+{
+  OBJECT-PROPERTIES
+  {
+    Date=11/05/11;
+    Time=17:16:26;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=23;
+    Permissions=TableData 17=imd,
+                TableData 21=imd,
+                TableData 25=imd,
+                TableData 45=imd,
+                TableData 253=rimd,
+                TableData 254=imd,
+                TableData 271=imd,
+                TableData 272=imd,
+                TableData 379=imd,
+                TableData 380=imd,
+                TableData 5601=rimd,
+                TableData 5617=imd,
+                TableData 5625=rimd;
+    OnRun=VAR
+            lCodNoDocExt@1100281000 : Code[20];
+          BEGIN
+            //<<IMH01.CAP.JC Cr‚ation de l'OD entre le fournisseur et le fournisseur factor
+            IF "Factor No." ='' THEN
+              EXIT;
+
+            CLEAR(gRecVendLedgEntry);
+
+            IF gCodPieceGesco = ''  THEN BEGIN
+              IF CONFIRM(gCstTxt001,FALSE,"No.","Factor No.")=FALSE THEN
+                EXIT;
+              gRecVendLedgEntry.SETCURRENTKEY("Vendor No.",Open,Positive,"Due Date","Currency Code");
+              gRecVendLedgEntry.SETRANGE("Vendor No.","No.");
+              gRecVendLedgEntry.SETRANGE(Open,TRUE);
+              gRecVendLedgEntry.SETRANGE("Posting Date","Starting Date Factor","Ending Date Factor");
+              //<<IMH02
+              //gRecVendLedgEntry.SETFILTER("Applies-to ID",'=%1',' ');
+              gRecVendLedgEntry.SETRANGE("Applies-to ID",'');
+              //>>IMH02
+            END ELSE BEGIN
+              //Ecriture provenant de la gestion commerciale
+              gRecVendLedgEntry.SETCURRENTKEY("Document No.");
+              gRecVendLedgEntry.SETRANGE("Document No.",gCodPieceGesco);
+              gRecVendLedgEntry.SETRANGE("Document Type",
+                gRecVendLedgEntry."Document Type"::Invoice,gRecVendLedgEntry."Document Type"::"Credit Memo");
+              gRecVendLedgEntry.SETRANGE("Vendor No.","No.");
+              gRecVendLedgEntry.SETRANGE("Posting Date","Starting Date Factor","Ending Date Factor");
+            END;
+
+            IF gRecVendLedgEntry.FINDSET THEN
+            REPEAT
+              gRecVendLedgEntry.CALCFIELDS(gRecVendLedgEntry."Original Amount",gRecVendLedgEntry."Remaining Amount");
+              IF gRecVendLedgEntry."Original Amount" = gRecVendLedgEntry."Remaining Amount" THEN
+              BEGIN
+
+                //Charge les axes analytiques
+                gRecLedgEntryDim.SETRANGE("Table ID",DATABASE::"Vendor Ledger Entry");
+                gRecLedgEntryDim.SETRANGE("Entry No.",gRecVendLedgEntry."Entry No.");
+                gRecTempJnlLineDim.RESET;
+                gRecTempJnlLineDim.DELETEALL;
+                gCuDimMgt.CopyLedgEntryDimToJnlLineDim(gRecLedgEntryDim,gRecTempJnlLineDim);
+                gRecVendLedgEntry.CALCFIELDS(Amount,"Amount (LCY)","Original Amount",gRecVendLedgEntry."Original Amt. (LCY)");
+
+                //Ecriture factor
+                gRecGenJnlLine.INIT;
+                gRecGenJnlLine."Posting Date" := gRecVendLedgEntry."Posting Date";
+                gRecGenJnlLine."Document Date" := gRecVendLedgEntry."Document Date";
+                gRecGenJnlLine.Description := gRecVendLedgEntry.Description;
+                gRecGenJnlLine."Shortcut Dimension 1 Code" := gRecVendLedgEntry."Global Dimension 1 Code";
+                gRecGenJnlLine."Shortcut Dimension 2 Code" := gRecVendLedgEntry."Global Dimension 2 Code";
+                gRecGenJnlLine."Reason Code" := gRecVendLedgEntry."Reason Code";
+                gRecGenJnlLine."Account Type" := gRecGenJnlLine."Account Type"::Vendor;
+                gRecGenJnlLine."Account No." := "Factor No.";
+                //IMH03.JCD gRecGenJnlLine."Document Type" := gRecVendLedgEntry."Document Type";
+                gRecGenJnlLine."Document No." := fCodNoPiece(gRecVendLedgEntry."Document No.");
+                lCodNoDocExt := fCodNoDocExt(gRecVendLedgEntry."External Document No.","Factor No.");
+                gRecGenJnlLine."External Document No." := lCodNoDocExt;
+                gRecGenJnlLine."Bal. Account No." := ' ';
+                gRecGenJnlLine."Currency Code" := gRecVendLedgEntry."Currency Code";
+                gRecGenJnlLine.Amount := gRecVendLedgEntry.Amount;
+                gRecGenJnlLine."Source Currency Code" := gRecVendLedgEntry."Currency Code";
+                gRecGenJnlLine."Source Currency Amount" := gRecGenJnlLine.Amount;
+                gRecGenJnlLine."Amount (LCY)" := gRecVendLedgEntry."Amount (LCY)";
+                IF gRecVendLedgEntry."Currency Code" = '' THEN
+                  gRecGenJnlLine."Currency Factor" :=  1
+                ELSE
+                  gRecGenJnlLine."Currency Factor" :=  gRecVendLedgEntry."Adjusted Currency Factor";
+                gRecGenJnlLine."Applies-to Doc. Type" := gRecGenJnlLine."Applies-to Doc. Type"::" ";
+                gRecGenJnlLine."Applies-to Doc. No." := '';
+                gRecGenJnlLine."Source Type" := gRecGenJnlLine."Source Type"::Vendor;
+                gRecGenJnlLine."Source No." := "Factor No.";
+                gRecGenJnlLine."Source Code" := gRecVendLedgEntry."Source Code";
+                gRecGenJnlLine."Posting No. Series" := gRecVendLedgEntry."No. Series";
+                gRecGenJnlLine."IC Partner Code" := gRecVendLedgEntry."IC Partner Code";
+                gRecGenJnlLine."Allow Zero-Amount Posting" := TRUE;
+                gRecGenJnlLine."Payment Method Code" := gRecVendLedgEntry."Payment Method Code";
+                gRecGenJnlLine."Due Date" := gRecVendLedgEntry."Due Date";
+                gRecGenJnlLine."Payment Terms Code" := "Payment Terms Code";
+                gRecGenJnlLine."Pmt. Discount Date" := gRecVendLedgEntry."Pmt. Discount Date";
+                IF gRecVendLedgEntry."Original Amount" <> 0 THEN
+                  gRecGenJnlLine."Payment Discount %" :=
+                    (gRecVendLedgEntry."Original Pmt. Disc. Possible"*100)/gRecVendLedgEntry."Original Amount";
+
+                gCuGenJnlPostLine.RunWithCheck(gRecGenJnlLine,gRecTempJnlLineDim);
+
+                //Contre partie facture ou avoir … lettrer
+                gRecGenJnlLine.INIT;
+                gRecGenJnlLine."Posting Date" := gRecVendLedgEntry."Posting Date";
+                gRecGenJnlLine."Document Date" := gRecVendLedgEntry."Document Date";
+                gRecGenJnlLine.Description := gRecVendLedgEntry.Description;
+                gRecGenJnlLine."Shortcut Dimension 1 Code" := gRecVendLedgEntry."Global Dimension 1 Code";
+                gRecGenJnlLine."Shortcut Dimension 2 Code" := gRecVendLedgEntry."Global Dimension 2 Code";
+                gRecGenJnlLine."Reason Code" := gRecVendLedgEntry."Reason Code";
+                gRecGenJnlLine."Account Type" := gRecGenJnlLine."Account Type"::Vendor;
+                gRecGenJnlLine."Account No." := gRecVendLedgEntry."Vendor No.";
+                //Erreur sinon, le programme cr‚‚ une ‚criture d'escompte quand il y en a
+                {<<IMH03.JCD IF gRecVendLedgEntry."Remaining Pmt. Disc. Possible" = 0 THEN
+                  IF gRecVendLedgEntry."Document Type" = gRecVendLedgEntry."Document Type"::"Credit Memo" THEN
+                    gRecGenJnlLine."Document Type" := gRecGenJnlLine."Document Type"::Refund
+                  ELSE
+                    gRecGenJnlLine."Document Type" := gRecGenJnlLine."Document Type"::Payment;
+                >>IMH03.JCD}
+                gRecGenJnlLine."Document No." := fCodNoPiece(gRecVendLedgEntry."Document No.");
+                gRecGenJnlLine."External Document No." := lCodNoDocExt;
+                gRecGenJnlLine."Bal. Account No." := ' ';
+                gRecGenJnlLine."Currency Code" := gRecVendLedgEntry."Currency Code";
+                gRecGenJnlLine.Amount := -gRecVendLedgEntry.Amount;
+                gRecGenJnlLine."Source Currency Code" := gRecVendLedgEntry."Currency Code";
+                gRecGenJnlLine."Source Currency Amount" := -gRecVendLedgEntry."Original Amount";
+                gRecGenJnlLine."Amount (LCY)" := -gRecVendLedgEntry."Amount (LCY)";
+                gRecGenJnlLine."Payment Discount %" := 0;
+                IF gRecVendLedgEntry."Currency Code" = '' THEN
+                  gRecGenJnlLine."Currency Factor" :=  1
+                ELSE
+                  gRecGenJnlLine."Currency Factor" :=  gRecVendLedgEntry."Adjusted Currency Factor";
+                IF gRecVendLedgEntry."Document No."<> '' THEN BEGIN //IMH03.JCD
+                  gRecGenJnlLine."Applies-to Doc. Type" := gRecVendLedgEntry."Document Type";
+                  gRecGenJnlLine."Applies-to Doc. No." := gRecVendLedgEntry."Document No.";
+                END;
+                gRecGenJnlLine."Source Type" := gRecGenJnlLine."Source Type"::Vendor;
+                gRecGenJnlLine."Source No." := gRecVendLedgEntry."Vendor No.";
+                gRecGenJnlLine."Source Code" := gRecVendLedgEntry."Source Code";
+                gRecGenJnlLine."Posting No. Series" := gRecVendLedgEntry."No. Series";
+                gRecGenJnlLine."IC Partner Code" := gRecVendLedgEntry."IC Partner Code";
+                gRecGenJnlLine."Allow Zero-Amount Posting" := TRUE;
+                gCuGenJnlPostLine.RunWithCheck(gRecGenJnlLine,gRecTempJnlLineDim);
+
+              //--------------------------------------
+              END;
+            UNTIL gRecVendLedgEntry.NEXT = 0;
+            //>>IMH01.CAP.JC
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      gCuDimMgt@1100281000 : Codeunit 408;
+      gRecGenJnlLine@1100281007 : Record 81;
+      gCuGenJnlCheckLine@1100281006 : Codeunit 11;
+      gCuGenJnlPostLine@1100281005 : Codeunit 12;
+      gCodFactor@1100281004 : Code[20];
+      gRecVendLedgEntry@1100281003 : Record 25;
+      gRecTempJnlLineDim@1100281002 : TEMPORARY Record 356;
+      gRecLedgEntryDim@1100281001 : Record 355;
+      gCstTxt001@1100281008 : TextConst 'FRA=Souhaitez vous transf‚rer les ‚critures entiŠrements ouvertes du fournisseur %1 vers le factor %2.';
+      gCodPieceGesco@1100281009 : Code[20];
+
+    PROCEDURE fCodNoPiece@1100281000(pCodPiece@1100281000 : Code[20]) rCodNoPiece : Code[20];
+    BEGIN
+      rCodNoPiece := COPYSTR('T'+ pCodPiece,1,20);
+    END;
+
+    PROCEDURE fCodNoDocExt@1100281001(pCodDocExt@1100281000 : Code[20];pCodFou@1100281001 : Code[20]) rCodDocExt : Code[20];
+    VAR
+      lRecVendLedgEntry@1100281002 : Record 25;
+      lCodPieceCtrl@1100281003 : Code[20];
+    BEGIN
+      //<<IMH01.CAP.JC renvoie un nouveau nø de doc externe dans le cas o— il existe d‚j…
+      lRecVendLedgEntry.RESET;
+      lRecVendLedgEntry.SETCURRENTKEY("External Document No.");
+      lCodPieceCtrl := 'X' + COPYSTR(pCodDocExt,1,19);
+      lRecVendLedgEntry.SETRANGE("External Document No.",lCodPieceCtrl);
+      lRecVendLedgEntry.SETRANGE("Vendor No.",pCodFou);
+      lRecVendLedgEntry.SETRANGE("Document Type",lRecVendLedgEntry."Document Type"::Invoice,
+        lRecVendLedgEntry."Document Type"::"Credit Memo");
+
+      IF lRecVendLedgEntry.FINDSET = TRUE THEN
+      BEGIN
+        lCodPieceCtrl := 'Y' + COPYSTR(pCodDocExt,1,19);
+        lRecVendLedgEntry.SETRANGE("External Document No.",lCodPieceCtrl);
+        IF lRecVendLedgEntry.FINDSET = TRUE THEN
+        BEGIN
+          lCodPieceCtrl := 'Z' + COPYSTR(pCodDocExt,1,19);
+          lRecVendLedgEntry.SETRANGE("External Document No.",lCodPieceCtrl);
+          IF lRecVendLedgEntry.FINDSET = TRUE THEN BEGIN
+            lCodPieceCtrl := 'W'+ COPYSTR(pCodDocExt,1,19);
+            lRecVendLedgEntry.SETRANGE("External Document No.",lCodPieceCtrl);
+            IF lRecVendLedgEntry.FINDSET = TRUE THEN
+              lCodPieceCtrl := 'V'+ COPYSTR(pCodDocExt,1,19);
+           END
+        END;
+      END;
+
+      rCodDocExt := lCodPieceCtrl;
+      //>>IMH01.CAP.JC
+    END;
+
+    PROCEDURE fCodPieceGesco@1100281002(pCodPiece@1100281000 : Code[20]);
+    BEGIN
+      //<<IMH01.CAP.JC permet de savoir si le transfert est demand‚ … partir de la validation de
+      //la facture en gestion commerciale. Dans ce cas l…, il n'y a pas de demande de confirmation de transfert.
+      gCodPieceGesco := pCodPiece;
+      //>>IMH01.CAP.JC
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 11/05/11 @a CAP.JC @v IMH6.01.155 @s gestion factor @c Debug */
+      /** @r IMH02 @d 27/04/11 @a ISAT.ZW @v IMH6.01.155 @s gestion factor @c Debug */
+      /** @r IMH01 @d 21/02/11 @a CAP.JC @v IMH6.01.155 @s gestion factor
+          @c OnRun pour la cr‚ation automatique de l'OD entre le fournisseur et son factor
+    }
+    END.
+  }
+}

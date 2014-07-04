@@ -1,0 +1,159 @@
+OBJECT Report 50070 Purchase Invoice - Minutes
+{
+  OBJECT-PROPERTIES
+  {
+    Date=06/03/12;
+    Time=13:50:04;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    ProcessingOnly=Yes;
+    OnPreReport=BEGIN
+                  IF NOT GUIALLOWED THEN
+                    HideDlg := TRUE;
+                END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50075;
+        DataItemTableView=WHERE(Intervention Status=FILTER(<>Cancel));
+        OnPreDataItem=BEGIN
+                        // Choix de la meilleure cl‚
+                        CASE TRUE OF
+                          GETFILTER("Provider No.") <> '' : SETCURRENTKEY("Provider No.");
+                          GETFILTER("Contact No.") <> '' : SETCURRENTKEY("Contact No.");
+                          GETFILTER("Contact Name") <> '' : SETCURRENTKEY("Contact Name");
+                          GETFILTER("Service No.") <> '' : SETCURRENTKEY("Service No.");
+                          GETFILTER("Assigned Date") <> '' : SETCURRENTKEY("Assigned Date");
+                        END;
+
+                        IF NOT HideDlg THEN BEGIN
+                          DlgMgt.InitDialog(Text010);
+                          DlgMgt.InitProgress(1, COUNT, 2);
+                        END;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF NOT HideDlg THEN
+                             DlgMgt.UpdateProgress(1);
+                           ServMin.RESET;
+                           ServMin.SETRANGE("Service Header No.", "Service Header No.");
+                           ServMin.SETRANGE("Service Intervention Line No.", "Line No.");
+                           IF NOT ServMin.ISEMPTY THEN BEGIN
+                             // Parcours des PV Non rapproch‚s
+                             ServMin.SETRANGE("Last Purch. Invoice Type", ServMin."Last Purch. Invoice Type"::" ");
+                             IF ServMin.ISEMPTY THEN
+                               CurrReport.SKIP;
+                             ServMin.FINDSET;
+                             REPEAT
+                               ServMin.InitDeductAmt;
+                               AddMinute(ServMin);
+                             UNTIL ServMin.NEXT = 0;
+                           END
+                           ELSE BEGIN
+                             IF "Intervention Status" <> "Intervention Status"::InProgress THEN
+                               CurrReport.SKIP;
+                             AddInterv("Service Intervention Line");
+                           END;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         IF NOT HideDlg THEN
+                           DlgMgt.CloseDialog;
+                         IF USERID = 'ISAT-ST' THEN BEGIN
+                           MESSAGE(STRSUBSTNO(Text001, CurrIntervAmt[1], CurrIntervAmt[2]));
+                           MESSAGE(STRSUBSTNO(Text002, CurrMinutesAmt[1], CurrMinutesAmt[2]));
+                         END;
+                       END;
+
+        ReqFilterFields=Provider No.,Corporate No.,Service Order Type,Assigned Date;
+      }
+      SECTIONS
+      {
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      ServMin@1000000000 : Record 50084;
+      MinutesExists@1000000001 : Boolean;
+      ExcelBuff@1000000002 : TEMPORARY Record 370;
+      CurrIntervAmt@1000000004 : ARRAY [2] OF Decimal;
+      CurrMinutesAmt@1000000003 : ARRAY [2] OF Decimal;
+      TempMinutes@1000000005 : TEMPORARY Record 50084;
+      Text001@1000000006 : TextConst 'ENU=Intervention in progress without minutes : %1 / %2.;FRA=Interventions en cours sans PV : %1 / %2';
+      Text002@1000000007 : TextConst 'ENU=Intervention with minutes without invoice : %1 / %2;FRA=Interventions avec PV non rapproch‚s : %1 / %2';
+      HideDlg@1000000008 : Boolean;
+      Text010@1000000009 : TextConst 'ENU=Processing intervention lines\@1@@@@@@@@@@@@@@;FRA=Parcours des interventions\@1@@@@@@@@@@@@@@';
+      DlgMgt@1000000014 : Codeunit 50092;
+
+    LOCAL PROCEDURE InitHeader@1000000002();
+    BEGIN
+    END;
+
+    LOCAL PROCEDURE AddMinute@1000000000(pServMin@1000000000 : Record 50084);
+    BEGIN
+      CurrMinutesAmt[1] += pServMin."Net Amount (LCY)";
+      CurrMinutesAmt[2] += pServMin."Net Amount Incl. VAT (LCY)";
+    END;
+
+    LOCAL PROCEDURE AddInterv@1000000001(pIntervLine@1000000000 : Record 50075);
+    BEGIN
+      // Ajout d'un intervention : simulation d'un PV de fin de travaux.
+      WITH TempMinutes DO BEGIN
+        INIT;
+        "Service Header No." := pIntervLine."Service Header No.";
+        "Service Intervention Line No." := pIntervLine."Line No.";
+        "Receipt Date" := WORKDATE;
+        VALIDATE(Type, Type::"End of work");
+        CurrIntervAmt[1] += "Net Amount (LCY)";
+        CurrIntervAmt[2] += "Net Amount Incl. VAT (LCY)";
+      END;
+    END;
+
+    PROCEDURE RetrieveResult@1000000003(VAR pCurrIntervAmt@1000000000 : ARRAY [2] OF Decimal;VAR pCurrMinutesAmt@1000000001 : ARRAY [2] OF Decimal);
+    BEGIN
+      pCurrIntervAmt[1] := CurrIntervAmt[1];
+      pCurrIntervAmt[2] := CurrIntervAmt[2];
+      pCurrMinutesAmt[1] := CurrMinutesAmt[1];
+      pCurrMinutesAmt[2] := CurrMinutesAmt[2];
+    END;
+
+    PROCEDURE SetHideDlg@1000000004(pHideDlg@1000000000 : Boolean);
+    BEGIN
+      HideDlg := pHideDlg;
+    END;
+
+    BEGIN
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

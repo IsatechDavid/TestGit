@@ -1,0 +1,411 @@
+OBJECT Codeunit 50232 Serv. Time Register Correction
+{
+  OBJECT-PROPERTIES
+  {
+    Date=09/04/13;
+    Time=10:57:17;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=50067;
+    Permissions=TableData 91=r,
+                TableData 50067=rm;
+    OnRun=VAR
+            lSessionBuffer@1000000000 : TEMPORARY Record 2000000009;
+            lServiceTimeRegister@1000000002 : Record 50067;
+            lStartDate@1000000001 : DateTime;
+            lEndDate@1000000003 : DateTime;
+          BEGIN
+
+            lServiceTimeRegister.COPY(Rec);
+            lServiceTimeRegister.SETCURRENTKEY("Timing Process","User ID","Start DateTime");
+            lServiceTimeRegister.SETRANGE("Timing Process",FALSE);
+            lServiceTimeRegister.SETFILTER("Entry No.",'>=%1',0);
+            IF lServiceTimeRegister.ISEMPTY THEN BEGIN
+              EXIT;
+            END;
+            lStartDate := CURRENTDATETIME;
+
+            IF NOT GUIALLOWED THEN BEGIN
+              MESSAGE(Text003);
+            END;
+            LoadSessionBuffer(lSessionBuffer);
+            IF NOT GUIALLOWED THEN BEGIN
+              MESSAGE(STRSUBSTNO(Text004,lStartDate));
+            END;
+            LaunchProcess(lSessionBuffer,lServiceTimeRegister);
+
+            lEndDate := CURRENTDATETIME;
+
+            IF NOT GUIALLOWED THEN BEGIN
+              ManualCorrection := FALSE;
+              MESSAGE(STRSUBSTNO(Text002,lStartDate,lEndDate));
+            END;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      FreeServTimeBuffer@1000000005 : TEMPORARY Record 50067 INDATASET;
+      LastServiceTimeRegister@1000000002 : Record 50067;
+      TaskHandler@1000000006 : Codeunit 8016715;
+      LastDateTime@1000000003 : DateTime;
+      WDialog@1000000001 : Dialog;
+      HideDialog@1000000000 : Boolean;
+      Text001@1000000008 : TextConst 'ENU=Processing user #1#####################\Service #2#####################;FRA=Traitement utilisateur #1#####################\Service #2#####################';
+      Text002@1000000004 : TextConst 'ENU=Register time. Start %1 - End %2;FRA=Temps service. D‚but %1 - Fin %2';
+      ManualCorrection@1000000007 : Boolean;
+      Text003@1000000009 : TextConst 'ENU=Register time. Load Session.;FRA=Temps service.  Chargement session.';
+      Text004@1000000010 : TextConst 'ENU=Register time. Start %1.;FRA=Temps service.  D‚marrage %1.';
+
+    LOCAL PROCEDURE LaunchProcess@1100281064(VAR pSession@1000000000 : Record 2000000009;VAR pServiceTimeRegister@1000000001 : Record 50067);
+    VAR
+      lNextServTimeReg@1100281001 : Record 50067;
+      lServiceTimeRegister@1000000003 : Record 50067;
+      lServiceTimeRegister2@1000000002 : Record 50067;
+      lUserSetupBuffer@1100281005 : TEMPORARY Record 91;
+      lDateTime@1100281003 : DateTime;
+      lFirstRec@1100281004 : Boolean;
+    BEGIN
+
+      IF NOT LoadUserFromServTimeReg(pServiceTimeRegister,lUserSetupBuffer) THEN BEGIN
+        EXIT;
+      END;
+
+      IF GUIALLOWED AND NOT HideDialog THEN BEGIN
+        WDialog.OPEN(Text001);
+      END;
+      lUserSetupBuffer.FINDSET;
+      REPEAT
+        IF GUIALLOWED AND NOT HideDialog THEN BEGIN
+          WDialog.UPDATE(1,lUserSetupBuffer."User ID");
+        END;
+
+        lServiceTimeRegister.RESET;
+        lServiceTimeRegister.COPY(pServiceTimeRegister);
+        lServiceTimeRegister.SETRANGE("User ID",lUserSetupBuffer."User ID");
+
+        pSession.SETCURRENTKEY("User ID");
+        pSession.SETRANGE("User ID",lUserSetupBuffer."User ID");
+        IF pSession.FINDFIRST THEN BEGIN
+          lDateTime := CREATEDATETIME(pSession."Login Date",pSession."Login Time");
+          lServiceTimeRegister.SETFILTER("Start DateTime",'<%1',lDateTime);
+        END ELSE BEGIN
+          lServiceTimeRegister.SETFILTER("Start DateTime",'<%1',CURRENTDATETIME);
+        END;
+
+        IF lServiceTimeRegister.FINDSET THEN BEGIN
+          REPEAT
+            //<<IMH02.PC
+            //IF NOT HideDialog THEN BEGIN
+            IF GUIALLOWED AND NOT HideDialog THEN BEGIN
+              WDialog.UPDATE(2,lServiceTimeRegister."Service No.");
+            END;
+            //>>IMH02.PC
+            lNextServTimeReg.RESET;
+            lNextServTimeReg.COPY(lServiceTimeRegister);
+            lNextServTimeReg := lServiceTimeRegister;
+            IF lNextServTimeReg.NEXT = 0 THEN BEGIN
+              lServiceTimeRegister."Corrected Time" := lServiceTimeRegister."Open Time";
+              lServiceTimeRegister.MODIFY;
+            END ELSE BEGIN
+              IF lServiceTimeRegister."End DateTime" < lNextServTimeReg."Start DateTime" THEN BEGIN
+                lServiceTimeRegister."Corrected Time" := lServiceTimeRegister."Open Time";
+                lServiceTimeRegister.MODIFY;
+              END ELSE BEGIN
+                FreeServTimeBuffer.DELETEALL;
+                AddNewPeriodToBuffer(lServiceTimeRegister);
+                LastDateTime := lServiceTimeRegister."End DateTime";
+                TreatLine(lServiceTimeRegister,lNextServTimeReg);
+                lServiceTimeRegister := LastServiceTimeRegister;
+              END;
+            END;
+          UNTIL lServiceTimeRegister.NEXT = 0;
+        END;
+        IF NOT ManualCorrection THEN BEGIN
+          lServiceTimeRegister2.COPY(lServiceTimeRegister);
+          lServiceTimeRegister2.MODIFYALL("Timing Process",TRUE);
+        END;
+        COMMIT;
+
+        IF TaskHandler.IsStoppingTime THEN BEGIN
+          TaskHandler.AddExpiredMsg('');
+          EXIT;
+        END;
+      UNTIL lUserSetupBuffer.NEXT = 0;
+
+      IF GUIALLOWED AND NOT HideDialog THEN BEGIN
+        WDialog.CLOSE;
+      END;
+    END;
+
+    LOCAL PROCEDURE TreatLine@1100281004(VAR pParentRegister@1100281000 : Record 50067;VAR pSonRegister@1100281001 : Record 50067);
+    VAR
+      lParentRegister@1100281007 : Record 50067;
+      lSonRegister@1100281006 : Record 50067;
+      lSaveSonRegister@1100281002 : Record 50067;
+      lLastRegister@1100281003 : Boolean;
+      lNextRegister@1100281004 : Record 50067;
+    BEGIN
+      AddNewPeriodToBuffer(pSonRegister);
+
+      IF pParentRegister."End DateTime" > pSonRegister."Start DateTime" THEN BEGIN
+        pParentRegister."Corrected Time" :=
+          ROUND((pSonRegister."Start DateTime" - pParentRegister."Start DateTime") / 1000, 1);
+        CalcDelayFromBuffer(pParentRegister."Start DateTime", pSonRegister."Start DateTime");
+        pParentRegister.MODIFY;
+      END ELSE BEGIN
+        pParentRegister."Corrected Time" := pParentRegister."Open Time";
+        CalcDelayFromBuffer(pParentRegister."Start DateTime", pParentRegister."End DateTime");
+        pParentRegister.MODIFY;
+      END;
+
+      IF LastDateTime < pSonRegister."End DateTime" THEN BEGIN
+        LastDateTime := pSonRegister."End DateTime";
+      END;
+
+      lSaveSonRegister.COPY(pSonRegister);
+      lSaveSonRegister := pSonRegister;
+      lSonRegister.COPY(pSonRegister);
+      lSonRegister := pSonRegister;
+      IF lSonRegister.NEXT = 0 THEN BEGIN
+        lLastRegister := TRUE;
+        LastServiceTimeRegister := lSaveSonRegister;
+      END ELSE BEGIN
+        IF lSonRegister."Start DateTime" > LastDateTime THEN BEGIN
+          lLastRegister := TRUE;
+          LastServiceTimeRegister := lSaveSonRegister;
+        END ELSE BEGIN
+          TreatLine(lSaveSonRegister,lSonRegister);
+        END;
+      END;
+
+      IF lLastRegister THEN BEGIN
+        lSaveSonRegister.GET(
+          lSaveSonRegister."Service No.", lSaveSonRegister."Service Header No.",
+          lSaveSonRegister."Intervention Line No.", lSaveSonRegister."Entry No.");
+        lSaveSonRegister."Corrected Time" := lSaveSonRegister."Open Time";
+        CalcDelayFromBuffer(lSaveSonRegister."Start DateTime", lSaveSonRegister."End DateTime");
+        lSaveSonRegister.MODIFY;
+        lLastRegister := FALSE;
+      END;
+
+      IF pParentRegister."End DateTime" > lSaveSonRegister."End DateTime" THEN BEGIN
+        pParentRegister."Corrected Time" +=
+          CalcDelayFromBuffer(lSaveSonRegister."End DateTime", pParentRegister."End DateTime");
+        pParentRegister.MODIFY;
+      END;
+    END;
+
+    LOCAL PROCEDURE AddNewPeriodToBuffer@1100281017(pServiceTimeRegister@1100281000 : Record 50067);
+    BEGIN
+      FreeServTimeBuffer.RESET;
+      FreeServTimeBuffer.SETCURRENTKEY(FreeServTimeBuffer."End DateTime");
+      IF FreeServTimeBuffer.FINDLAST THEN BEGIN
+        IF pServiceTimeRegister."End DateTime" > FreeServTimeBuffer."End DateTime" THEN BEGIN
+          FreeServTimeBuffer."End DateTime" := pServiceTimeRegister."End DateTime";
+          FreeServTimeBuffer.MODIFY;
+        END;
+      END ELSE BEGIN
+        FreeServTimeBuffer."Entry No." := 1;
+        FreeServTimeBuffer."Start DateTime" := pServiceTimeRegister."Start DateTime";
+        FreeServTimeBuffer."End DateTime" := pServiceTimeRegister."End DateTime";
+        FreeServTimeBuffer.INSERT;
+      END;
+    END;
+
+    LOCAL PROCEDURE CalcDelayFromBuffer@1100281020(pStartDateTime@1100281000 : DateTime;pEndDateTime@1100281001 : DateTime) rDelay : Integer;
+    VAR
+      lStartDateTimeSave@1100281003 : DateTime;
+      lEndDateTimeSave@1100281004 : DateTime;
+      lLastNo@1100281005 : Integer;
+    BEGIN
+      IF pEndDateTime <= pStartDateTime THEN BEGIN
+        EXIT(0);
+      END;
+
+      FreeServTimeBuffer.RESET;
+      FreeServTimeBuffer.SETCURRENTKEY("Timing Process","User ID","Start DateTime");
+
+      IF FreeServTimeBuffer.FINDSET THEN BEGIN
+        REPEAT
+          CASE TRUE OF
+            pEndDateTime < FreeServTimeBuffer."Start DateTime" : EXIT;
+
+            pStartDateTime > FreeServTimeBuffer."End DateTime" : ;
+
+            (pStartDateTime > FreeServTimeBuffer."Start DateTime") AND
+            (pEndDateTime >= FreeServTimeBuffer."End DateTime") : BEGIN
+              lStartDateTimeSave := pStartDateTime;
+              pStartDateTime := FreeServTimeBuffer."End DateTime";
+              FreeServTimeBuffer."End DateTime" := lStartDateTimeSave;
+              FreeServTimeBuffer.MODIFY;
+              rDelay += ROUND((pStartDateTime - lStartDateTimeSave) / 1000, 1);
+              IF rDelay < 0 THEN BEGIN
+                ERROR('1');
+              END;
+              IF pStartDateTime = pEndDateTime THEN BEGIN
+                EXIT;
+              END;
+            END;
+
+            (pStartDateTime <= FreeServTimeBuffer."Start DateTime") AND
+            (pEndDateTime < FreeServTimeBuffer."End DateTime") : BEGIN
+              lEndDateTimeSave := pEndDateTime;
+              pEndDateTime := FreeServTimeBuffer."Start DateTime";
+              FreeServTimeBuffer."Start DateTime" := lEndDateTimeSave;
+              FreeServTimeBuffer.MODIFY;
+              rDelay += ROUND((lEndDateTimeSave - pEndDateTime) / 1000, 1);
+              IF rDelay < 0 THEN BEGIN
+                ERROR('1');
+              END;
+              EXIT;
+            END;
+
+            (pStartDateTime <= FreeServTimeBuffer."Start DateTime") AND
+            (pEndDateTime >= FreeServTimeBuffer."End DateTime") : BEGIN
+              lStartDateTimeSave := pStartDateTime;
+              pStartDateTime := FreeServTimeBuffer."End DateTime";
+              rDelay += ROUND((FreeServTimeBuffer."End DateTime" - FreeServTimeBuffer."Start DateTime") / 1000, 1);
+              FreeServTimeBuffer.DELETE;
+              IF rDelay < 0 THEN BEGIN
+                ERROR('1');
+              END;
+              IF pStartDateTime = pEndDateTime THEN BEGIN
+                EXIT;
+              END;
+            END;
+
+            (pStartDateTime > FreeServTimeBuffer."Start DateTime") AND
+            (pEndDateTime < FreeServTimeBuffer."End DateTime") : BEGIN
+              lEndDateTimeSave := FreeServTimeBuffer."End DateTime";
+              FreeServTimeBuffer."End DateTime" := pStartDateTime;
+              FreeServTimeBuffer.MODIFY;
+              lLastNo := GetLastServTimeRegEntryNo;
+
+              FreeServTimeBuffer.INIT;
+              FreeServTimeBuffer."Entry No." := lLastNo;
+              FreeServTimeBuffer."Start DateTime" := pEndDateTime;
+              FreeServTimeBuffer."End DateTime" := lEndDateTimeSave;
+              FreeServTimeBuffer.INSERT;
+              rDelay += ROUND((pEndDateTime - pStartDateTime) / 1000, 1);
+              IF rDelay < 0 THEN BEGIN
+                ERROR('1');
+              END;
+              EXIT;
+            END;
+          END;
+        UNTIL FreeServTimeBuffer.NEXT = 0;
+      END;
+    END;
+
+    LOCAL PROCEDURE LoadSessionBuffer@1100281003(VAR pSession@1000000000 : Record 2000000009);
+    VAR
+      lSession@1100281000 : Record 2000000009;
+      lDateTime@1100281001 : DateTime;
+      lUserID@1100281002 : Code[50];
+    BEGIN
+      pSession.RESET;
+      pSession.DELETEALL;
+      IF lSession.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+      lSession.SETCURRENTKEY("User ID");
+      lSession.FINDSET;
+      REPEAT
+        IF STRPOS(lSession."User ID", '\') > 0 THEN BEGIN
+          lUserID := COPYSTR(lSession."User ID",STRPOS(lSession."User ID", '\') + 1);
+        END ELSE BEGIN
+          lUserID := lSession."User ID";
+        END;
+        pSession.SETRANGE(pSession."User ID", lUserID);
+        IF pSession.FINDFIRST THEN BEGIN
+          IF pSession."Login Date" > lSession."Login Date" THEN BEGIN
+            pSession."Login Date" := lSession."Login Date";
+            pSession."Login Time" := lSession."Login Time";
+            pSession.MODIFY;
+          END ELSE BEGIN
+            IF pSession."Login Date" = lSession."Login Date" THEN BEGIN
+              IF pSession."Login Time" > lSession."Login Time" THEN BEGIN
+                pSession."Login Time" := lSession."Login Time";
+                pSession.MODIFY;
+              END;
+            END;
+          END;
+        END ELSE BEGIN
+          pSession := lSession;
+          pSession."User ID" := lUserID;
+          pSession.INSERT(FALSE);
+        END;
+      UNTIL lSession.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE LoadUserFromServTimeReg@1000000000(VAR pServiceTimeRegister@1000000000 : Record 50067;VAR pUserSetup@1000000001 : Record 91) rValue : Boolean;
+    VAR
+      lUserSetup@1000000003 : Record 91;
+      i@1000000002 : Integer;
+    BEGIN
+      rValue := FALSE;
+
+      i := 0;
+      IF NOT pServiceTimeRegister.FINDSET THEN BEGIN
+        EXIT;
+      END;
+      REPEAT
+        i += 1;
+        IF NOT pUserSetup.GET(pServiceTimeRegister."User ID") THEN BEGIN
+          pUserSetup."User ID" := pServiceTimeRegister."User ID";
+          pUserSetup.INSERT;
+        END;
+      UNTIL (i >= 1000) OR (pServiceTimeRegister.NEXT = 0);
+
+      IF (i >= 1000) THEN BEGIN
+        pUserSetup.RESET;
+        pUserSetup.DELETEALL;
+        lUserSetup.FINDSET;
+        REPEAT
+          pUserSetup := lUserSetup;
+          pUserSetup.INSERT;
+        UNTIL lUserSetup.NEXT = 0;
+      END;
+
+      IF pUserSetup.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetLastServTimeRegEntryNo@1100281014() : Integer;
+    VAR
+      lSaveRec@1100281000 : Record 50067;
+    BEGIN
+      FreeServTimeBuffer.RESET;
+      IF FreeServTimeBuffer.FINDLAST THEN BEGIN
+        EXIT(FreeServTimeBuffer."Entry No." + 1);
+      END ELSE BEGIN
+        EXIT(1);
+      END;
+    END;
+
+    PROCEDURE SetHideDialog@1000000001(pHideDialog@1000000000 : Boolean);
+    BEGIN
+      HideDialog := pHideDialog;
+    END;
+
+    PROCEDURE SetManualCorrection@1000000002(pManualCorrection@1000000000 : Boolean);
+    BEGIN
+      ManualCorrection := pManualCorrection;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 09/04/13 @a ISAT.PC @v IMH6.01.334 @s Mantis 4004 @h 4004 @c Cr‚ation */
+      /** @r IMH01 @d 26/11/12 @a ISAT.PC @v IMH6.01.334 @s Mantis 4004 @h 4004 @c Cr‚ation */
+    }
+    END.
+  }
+}

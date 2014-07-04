@@ -1,0 +1,231 @@
+OBJECT Codeunit 50107 EXT Out. FLG LECT PREST
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/01/11;
+    Time=10:32:41;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            lEAISentMQBuffer := Rec;
+            Code(lEAISentMQBuffer);
+            lEAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+            Rec := lEAISentMQBuffer;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIXmlDocMgt@1100281001 : Codeunit 8016713;
+
+    LOCAL PROCEDURE Code@1008844003(VAR pEAISentMQBuffer@1008844001 : Record 8016720);
+    VAR
+      lEAIDocEntryMgt@1108844009 : Codeunit 8016707;
+      lXMLDocument@1008844005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewChild@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIAct@1108844004 : Record 8016706;
+      lRecID@1108844003 : RecordID;
+      lRecRef@1108844002 : RecordRef;
+      lInStream@1100281000 : InStream;
+      lNameSpace@1108844001 : Text[30];
+      lProvider@1100281001 : Record 50000;
+      lProviderSpec@1100281003 : Record 50006;
+      lContact@1100281004 : Record 5050;
+      lXMLProviderNode@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      lNameSpace := '';
+
+      lEAIAct.GET(pEAISentMQBuffer."EAI Act Type Code",pEAISentMQBuffer."EAI Act Code");
+
+      //On r‚cup‚re la facture vente enregistr‚e
+      lRecID := pEAISentMQBuffer.RecordId;
+      lRecRef := lRecID.GETRECORD;
+      lRecRef.SETTABLE(lProvider);
+      lProvider.SETRECFILTER;
+      lProvider.LOCKTABLE;
+      lProvider.FINDFIRST;
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'FLG-LECT-PREST', lXMLNewChild);
+
+      WriteXMLProvider(lXMLNewChild, lNameSpace, lProvider, lXMLProviderNode);
+      //AdresseIntervenant
+      WriteXMLAddress(lXMLProviderNode, lNameSpace, lProvider);
+
+      //MoyenCommunicationIntervenant
+      WriteXMLComunication(lXMLProviderNode, lNameSpace, lProvider);
+      //List<CorpsDeMetierIntervenant>
+      lProviderSpec.SETRANGE("Provider No.", lProvider."No.");
+      IF lProviderSpec.FINDFIRST THEN
+        REPEAT
+          WriteXMLSpecialization(lXMLProviderNode, lNameSpace, lProviderSpec);
+        UNTIL lProviderSpec.NEXT = 0;
+      //List<ContactIntervenant>
+      lContact.SETRANGE("Company No.", lProvider."No.");
+      lContact.SETRANGE(Type, lContact.Type::Person);
+      IF lContact.FINDFIRST THEN
+        REPEAT
+          WriteXMLContact(lXMLProviderNode, lNameSpace, lContact);
+        UNTIL lContact.NEXT = 0;
+
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXMLDocument.save(lInStream);
+
+      //Enregistrement dans la table "‚riture document EDI"
+      lEAIDocEntryMgt.AddEntryFromSentBuffer(
+         DATABASE::Provider,0,
+         lProvider."No.",'',0, pEAISentMQBuffer);
+    END;
+
+    PROCEDURE WriteXMLProvider@1100281000(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pProvider@1100281006 : Record 50000;VAR pXMLProviderNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        AddElement(pXMLParNode,'Intervenant','',pNameSpace,pXMLProviderNode);
+
+        //Identifiant de l'intervenant
+        AddElement(pXMLProviderNode,'codeIntervenant',pProvider."No.",pNameSpace,lXMLNewNode);
+        //La raison sociale de l'intervenant
+        AddElement(pXMLProviderNode,'raisonSociale',pProvider.Name,pNameSpace,lXMLNewNode);
+      END;
+    END;
+
+    PROCEDURE WriteXMLAddress@1100281001(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pProvider@1100281006 : Record 50000);
+    VAR
+      lXMLAddressNode@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        AddElement(pXMLParNode,'AdresseIntervenant','',pNameSpace,lXMLAddressNode);
+
+        //Adresse 1 de l'intervenant
+        AddElement(lXMLAddressNode,'adresseLigne1',pProvider.Address,pNameSpace,lXMLNewNode);
+        //Adresse 2 de l'intervenant
+        AddElement(lXMLAddressNode,'adresseLigne2',pProvider."Address 2",pNameSpace,lXMLNewNode);
+        //Adresse 3 de l'intervenant
+        AddElement(lXMLAddressNode,'adresseLigne3',pProvider.County,pNameSpace,lXMLNewNode);
+        //code postal de l'intervenant
+        AddElement(lXMLAddressNode,'codePostal',pProvider."Post Code",pNameSpace,lXMLNewNode);
+        //ville de l'intervenant
+        AddElement(lXMLAddressNode,'ville',pProvider.City,pNameSpace,lXMLNewNode);
+        //pays de l'intervenant
+        AddElement(lXMLAddressNode,'pays',pProvider."Country/Region Code",pNameSpace,lXMLNewNode);
+      END;
+    END;
+
+    PROCEDURE WriteXMLComunication@1100281005(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pProvider@1100281006 : Record 50000);
+    VAR
+      lXMLCommunicationNode@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        IF pProvider."Fax No." <> '' THEN BEGIN
+          AddElement(pXMLParNode,'MoyenCommunicationIntervenant','',pNameSpace,lXMLCommunicationNode);
+          AddElement(lXMLCommunicationNode,'codeTypeMoyenComm','F',pNameSpace,lXMLNewNode);
+          AddElement(lXMLCommunicationNode,'valeurMoyenComm',pProvider."Fax No.",pNameSpace,lXMLNewNode);
+        END;
+
+        IF pProvider."E-Mail" <> '' THEN BEGIN
+          AddElement(pXMLParNode,'MoyenCommunicationIntervenant','',pNameSpace,lXMLCommunicationNode);
+          AddElement(lXMLCommunicationNode,'codeTypeMoyenComm','M',pNameSpace,lXMLNewNode);
+          AddElement(lXMLCommunicationNode,'valeurMoyenComm',pProvider."E-Mail",pNameSpace,lXMLNewNode);
+        END;
+
+        IF pProvider."Mobile Phone No." <> '' THEN BEGIN
+          AddElement(pXMLParNode,'MoyenCommunicationIntervenant','',pNameSpace,lXMLCommunicationNode);
+          AddElement(lXMLCommunicationNode,'codeTypeMoyenComm','P',pNameSpace,lXMLNewNode);
+          AddElement(lXMLCommunicationNode,'valeurMoyenComm',pProvider."Mobile Phone No.",pNameSpace,lXMLNewNode);
+        END;
+
+        IF pProvider."Phone No." <> '' THEN BEGIN
+          AddElement(pXMLParNode,'MoyenCommunicationIntervenant','',pNameSpace,lXMLCommunicationNode);
+          AddElement(lXMLCommunicationNode,'codeTypeMoyenComm','T',pNameSpace,lXMLNewNode);
+          AddElement(lXMLCommunicationNode,'valeurMoyenComm',pProvider."Phone No.",pNameSpace,lXMLNewNode);
+        END;
+      END;
+    END;
+
+    PROCEDURE WriteXMLSpecialization@1100281010(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pProviderSpec@1100281006 : Record 50006);
+    VAR
+      lXMLSpecializationNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lProviderAgreement@1100281001 : Record 50012;
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        AddElement(pXMLParNode,'CorpsDeMetierIntervenant','',pNameSpace,lXMLSpecializationNode);
+
+        //TODO --- Liste des agr‚ments clients
+        lProviderAgreement.SETRANGE("Provider No.", pProviderSpec."Provider No.");
+        IF lProviderAgreement.FINDFIRST THEN
+          REPEAT
+            WriteXMLAgreement(lXMLSpecializationNode, pNameSpace, lProviderAgreement);
+          UNTIL lProviderAgreement.NEXT = 0;
+
+        //Code corps de m‚tier
+        AddElement(lXMLSpecializationNode,'codeCorpsDeMetier',pProviderSpec."Specialization Code",pNameSpace,lXMLNewNode);
+      END;
+    END;
+
+    PROCEDURE WriteXMLAgreement@1100281006(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pProviderAgreement@1100281006 : Record 50012);
+    VAR
+      lXMLAgreementNode@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      //--- TODO ----
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        AddElement(pXMLParNode,'AgrementClientIntervenant','',pNameSpace,lXMLAgreementNode);
+
+        //Code grand compte
+        AddElement(lXMLAgreementNode,'codeAgrement',pProviderAgreement."Corporate No.",pNameSpace,lXMLNewNode);
+      END;
+    END;
+
+    PROCEDURE WriteXMLContact@1100281007(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pContact@1100281006 : Record 5050);
+    VAR
+      lXMLContactNode@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lContactJobResponsibility@1100281001 : Record 5067;
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        AddElement(pXMLParNode,'ContactIntervenant','',pNameSpace,lXMLContactNode);
+
+        //type de contact
+        lContactJobResponsibility.SETRANGE("Contact No.", pContact."No.");
+        IF lContactJobResponsibility.FINDFIRST THEN
+          AddElement(lXMLContactNode,'typeContact',lContactJobResponsibility."Job Responsibility Code",pNameSpace,lXMLNewNode)
+        ELSE
+          AddElement(lXMLContactNode,'typeContact','',pNameSpace,lXMLNewNode);
+        //Nom du contact
+        AddElement(lXMLContactNode,'nomContact',pContact.Surname,pNameSpace,lXMLNewNode);
+        //Pr‚nom du contact
+        AddElement(lXMLContactNode,'prenomContact',pContact."First Name",pNameSpace,lXMLNewNode);
+        //Email du contact
+        AddElement(lXMLContactNode,'emailContact',pContact."E-Mail",pNameSpace,lXMLNewNode);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IHM01 @d 06/01/11 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Creation */
+    }
+    END.
+  }
+}

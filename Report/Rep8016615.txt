@@ -1,0 +1,1018 @@
+OBJECT Report 8016615 Cust. Invoice Statement
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:19:14;
+    Modified=Yes;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 21=rm,
+                TableData 379=rm;
+    CaptionML=[ENU=Cust. Invoice Statement;
+               FRA=Relev‚ de facture client];
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table18;
+        DataItemTableView=SORTING(No.)
+                          WHERE(Invoice statement=CONST(Yes));
+        NewPagePerRecord=Yes;
+        DataItemVarName=Customer;
+        OnPreDataItem=BEGIN
+                        CompanyInfo.GET;
+
+                        FormatAdr.Company(AdrCompany,CompanyInfo);
+
+
+                        IF NOT Reedition THEN BEGIN
+                           IF (BeginDate = 0D) THEN
+                              ERROR (Text50003);
+                           IF (EndDate = 0D) THEN
+                             ERROR (Text50004);
+                           IF (BeginDate > EndDate) THEN
+                             ERROR (Text50005);
+                        END ;
+
+                        IF NOT Reedition AND (InvoiceStatementFilter <> '') THEN
+                          ERROR (Text50007);
+
+                        SalesSetup.GET;
+                      END;
+
+        OnAfterGetRecord=VAR
+                           ContBusRel@1000000000 : Record 5054;
+                         BEGIN
+                           CLEAR(DateEcheanceTot);
+                           CLEAR(MontEcheanceTot);
+
+                           IF NOT Reedition THEN BEGIN
+
+                             CustLedgerEntry.RESET;
+                             CustLedgerEntry.SETCURRENTKEY("Customer No.","Posting Date");
+                             CustLedgerEntry.SETRANGE("Customer No.","No.");
+                             CustLedgerEntry.SETRANGE("Posting Date",BeginDate,EndDate);
+                             CustLedgerEntry.SETFILTER("Document Type",'%1|%2',
+                                                         CustLedgerEntry."Document Type"::Invoice,CustLedgerEntry."Document Type"::"Credit Memo");
+                             CustLedgerEntry.SETRANGE("Invoice Statement No.",'');
+                             CustLedgerEntry.SETRANGE(Open,TRUE);    //IB CC
+                             IF NOT CustLedgerEntry.FIND('-') THEN
+                               CurrReport.SKIP;
+                           END;
+
+                           IF Reedition THEN BEGIN
+                             CustLedgerEntry.RESET;
+                             CustLedgerEntry.SETCURRENTKEY("Customer No.","Posting Date");
+                             CustLedgerEntry.SETRANGE("Customer No.","No.");
+                             //CustLedgerEntry.SETRANGE("Posting Date",BeginDate,EndDate);
+                             CustLedgerEntry.SETFILTER("Document Type",'Facture|Avoir');
+                             IF (InvoiceStatementFilter <> '') THEN
+                               CustLedgerEntry.SETFILTER("Invoice Statement No.",InvoiceStatementFilter)
+                             ELSE
+                               CustLedgerEntry.SETFILTER("Invoice Statement No.",'<>%1','');
+
+                             IF NOT CustLedgerEntry.FIND('-') THEN
+                               CurrReport.SKIP;
+                           END;
+
+                           FormatAdr.Customer(AdrCustomer,Customer);
+                           CurrReport.PAGENO := 1;
+
+                           IF NOT Reedition THEN BEGIN
+                             //IF NOT CurrReport.PREVIEW THEN BEGIN
+                             //Recherche du prochain Nø relev‚ de facture
+                             NextStatementNo := NoSeriesMgt.GetNextNo(SalesSetup."Invoice Statement Nos.",EndDate,TRUE);
+
+                             CustInvStatement.INIT;
+                             CustInvStatement."Invoice Statement No." := NextStatementNo;
+                             CustInvStatement."Customer No." := Customer."No.";
+                             CustInvStatement."Payment Method Code" := Customer."Payment Method Code";
+                             CustInvStatement."Statement Date" := EndDate;
+                             CustInvStatement."Payment terms code" := Customer."Payment Terms Code";
+
+                             PaymentTerms.GET(Customer."Payment Terms Code");
+                             CustInvStatement."Due Date" := CALCDATE(PaymentTerms."Due Date Calculation",EndDate);
+                             CustInvStatement."Begin Date" := BeginDate;
+                             CustInvStatement."End Date" := EndDate;
+                             IF NOT CustInvStatement.INSERT THEN
+                               ERROR (Text50008);
+
+                             //Maj des ‚critures client
+                             CustLedgerEntry.RESET;
+                             CustLedgerEntry.SETCURRENTKEY("Customer No.","Posting Date");
+                             CustLedgerEntry.SETRANGE("Customer No.",Customer."No.");
+                             CustLedgerEntry.SETRANGE("Posting Date",BeginDate,EndDate);
+                             CustLedgerEntry.SETFILTER("Document Type",'Facture|Avoir');
+                             CustLedgerEntry.SETRANGE("Invoice Statement No.",'');
+                             CustLedgerEntry.SETRANGE(Open,TRUE); // IB CC
+                             IF CustLedgerEntry.FIND('-') THEN BEGIN
+                               REPEAT
+                                 CustLedgerEntry."Invoice Statement No." := NextStatementNo;
+                                 CustLedgerEntry.MODIFY;
+
+                                 //Maj des ‚critures client d‚taill‚es
+                                 DetCustLedgerEntry.RESET;
+                                 DetCustLedgerEntry.SETCURRENTKEY("Cust. Ledger Entry No.","Entry Type","Posting Date");
+                                 DetCustLedgerEntry.SETRANGE("Cust. Ledger Entry No.",CustLedgerEntry."Entry No.");
+                                 DetCustLedgerEntry.SETRANGE("Entry Type",DetCustLedgerEntry."Entry Type"::"Initial Entry");
+                                 IF DetCustLedgerEntry.FIND('-') THEN BEGIN
+                                   REPEAT
+                                     DetCustLedgerEntry."Invoice Statement No." := NextStatementNo;
+                                     DetCustLedgerEntry.MODIFY;
+                                   UNTIL (DetCustLedgerEntry.NEXT = 0);
+                                 END;
+                               UNTIL (CustLedgerEntry.NEXT = 0);
+                             END ELSE BEGIN
+                               NextStatementNo := '';
+                             END;
+                           END ELSE BEGIN
+                             //Seul le premier numero trouv‚ de relev‚ du client courant sera trait‚
+                             NextStatementNo := CustLedgerEntry."Invoice Statement No.";
+                           END;
+
+                           // Appel ‚ch‚ances
+                           IF CustInvStatement.GET(NextStatementNo) THEN BEGIN
+                             BeginDate := CustInvStatement."Begin Date";
+                             EndDate := CustInvStatement."End Date";
+                             CustInvStatement.CALCFIELDS(Amount);
+
+                             gestioneffets."Eclatement par ‚ch‚ance"(
+                               CustInvStatement.Amount,
+                               CustInvStatement."Payment terms code",
+                               CustInvStatement."Payment Method Code",
+                               'R',
+                               NextStatementNo,
+                               CustInvStatement."Statement Date",
+                               DateEcheance,
+                               MontEcheance);
+                           END;
+
+                           DateEcheanceTot[1] := CustInvStatement."Due Date";
+                           MontEcheanceTot[1] := CustInvStatement.Amount;
+
+                           CustLedgerEntry.RESET;
+
+                           IF (Customer."Currency Code" = '') THEN
+                             TexteCurrency := 'EUR'
+                           ELSE
+                             TexteCurrency := Customer."Currency Code";
+
+                           IF NOT PaymentMethod.GET(CustInvStatement."Payment Method Code") THEN PaymentMethod.INIT;
+
+                           CustLedgerEntry.RESET;
+                         END;
+
+        ReqFilterFields=No.,Search Name;
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        DataItemVarName=integer;
+        OnPreDataItem=BEGIN
+                        TotPai := 0;
+                      END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18300;
+            SectionHeight=11844;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                            CurrReport.SHOWOUTPUT(Edit<>1);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000001;Label  ;1200 ;10575;1650 ;846  ;ParentControl=1000000000;
+                                                         HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000003;Label  ;5250 ;10575;2100 ;846  ;ParentControl=1000000002;
+                                                         HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000005;Label  ;7500 ;10575;5250 ;846  ;ParentControl=1000000004;
+                                                         HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000011;Label  ;13200;10575;2550 ;846  ;ParentControl=1000000010;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000012;Shape  ;0    ;11421;17850;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1000000013;TextBox;0    ;1269 ;6300 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=AdrCompany[1] }
+            { 1000000014;TextBox;0    ;1692 ;6300 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         SourceExpr=AdrCompany[2] }
+            { 1000000015;TextBox;0    ;2115 ;6300 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         SourceExpr=AdrCompany[3] }
+            { 1000000016;TextBox;0    ;2538 ;6300 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         SourceExpr=AdrCompany[4] }
+            { 1000000017;TextBox;0    ;2961 ;6300 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         SourceExpr=AdrCompany[7] }
+            { 1000000018;TextBox;0    ;3384 ;6300 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         SourceExpr=AdrCompany[8] }
+            { 1000000019;TextBox;9900 ;2961 ;6300 ;423  ;FontSize=9;
+                                                         SourceExpr=AdrCustomer[1] }
+            { 1000000020;TextBox;9900 ;3384 ;6300 ;423  ;FontSize=9;
+                                                         SourceExpr=AdrCustomer[2] }
+            { 1000000021;TextBox;9900 ;3807 ;6300 ;423  ;FontSize=9;
+                                                         SourceExpr=AdrCustomer[3] }
+            { 1000000022;TextBox;9900 ;4230 ;6300 ;423  ;FontSize=9;
+                                                         SourceExpr=AdrCustomer[4] }
+            { 1000000023;TextBox;9900 ;4653 ;6300 ;423  ;FontSize=9;
+                                                         SourceExpr=AdrCustomer[5] }
+            { 1000000024;TextBox;9900 ;5076 ;6300 ;423  ;FontSize=9;
+                                                         SourceExpr=AdrCustomer[6] }
+            { 1000000025;TextBox;9900 ;5499 ;6300 ;423  ;FontSize=9;
+                                                         SourceExpr=AdrCustomer[7] }
+            { 1000000026;TextBox;9900 ;5922 ;6300 ;423  ;FontSize=9;
+                                                         SourceExpr=AdrCustomer[8] }
+            { 1000000027;Label  ;12150;0    ;5550 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Relev‚ de facture client;
+                                                                    FRA=Relev‚ de facture client] }
+            { 1000000028;TextBox;2250 ;3807 ;4200 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=Nø t‚l‚phone;
+                                                         SourceExpr=CompanyInfo."Phone No." }
+            { 1000000029;Label  ;0    ;3807 ;2100 ;423  ;ParentControl=1000000028;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000030;TextBox;2250 ;4230 ;4200 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=Nø fax;
+                                                         SourceExpr=CompanyInfo."Fax No." }
+            { 1000000031;Label  ;0    ;4230 ;2100 ;423  ;ParentControl=1000000030;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000032;TextBox;2250 ;4653 ;4200 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=Nø id. intracomm.;
+                                                         SourceExpr=CompanyInfo."VAT Registration No." }
+            { 1000000033;Label  ;0    ;4653 ;2100 ;423  ;ParentControl=1000000032;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000034;TextBox;2250 ;5076 ;4200 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         CaptionML=FRA=Nø CCP;
+                                                         SourceExpr=CompanyInfo."Giro No." }
+            { 1000000035;Label  ;0    ;5076 ;2100 ;423  ;Visible=No;
+                                                         ParentControl=1000000034;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000036;TextBox;2250 ;5499 ;4200 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         CaptionML=FRA=Banque;
+                                                         SourceExpr=CompanyInfo."Bank Name" }
+            { 1000000037;Label  ;0    ;5499 ;2100 ;423  ;Visible=No;
+                                                         ParentControl=1000000036;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000038;TextBox;2250 ;5922 ;4200 ;423  ;Visible=No;
+                                                         FontSize=9;
+                                                         CaptionML=FRA=Nø compte;
+                                                         SourceExpr=CompanyInfo."Bank Account No." }
+            { 1000000039;Label  ;0    ;5922 ;2100 ;423  ;Visible=No;
+                                                         ParentControl=1000000038;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000040;TextBox;12150;423  ;2250 ;423  ;FontSize=9;
+                                                         SourceExpr=STRSUBSTNO('Page %1',FORMAT(CurrReport.PAGENO)) }
+            { 1000000041;TextBox;15150;8460 ;2550 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=Au;
+                                                         SourceExpr=EndDate }
+            { 1000000042;Label  ;12150;8460 ;2850 ;423  ;ParentControl=1000000041;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000043;Label  ;12150;8037 ;2850 ;423  ;ParentControl=1000000044;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000044;TextBox;15150;8037 ;2550 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=P‚riode du;
+                                                         SourceExpr=BeginDate }
+            { 1000000045;Label  ;12150;8883 ;2850 ;423  ;ParentControl=1000000046;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000046;TextBox;15150;8883 ;2550 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=Nø relev‚;
+                                                         SourceExpr=NextStatementNo }
+            { 1000000047;Label  ;12150;9306 ;2850 ;423  ;ParentControl=1000000048;
+                                                         HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000048;TextBox;15150;9306 ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=FRA=Devise;
+                                                         SourceExpr=TexteCurrency }
+            { 1000000049;Label  ;12150;6768 ;900  ;423  ;ParentControl=1000000050;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000050;TextBox;13200;6768 ;3900 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=Le;
+                                                         SourceExpr=FORMAT(EndDate,0,4) }
+            { 1000000055;Label  ;0    ;8037 ;2850 ;423  ;ParentControl=1000000056;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 1000000056;TextBox;3000 ;8037 ;1800 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=Nø client;
+                                                         SourceExpr=Customer."No." }
+            { 1000000064;Label  ;12150;9729 ;2850 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         CaptionML=FRA=Ech‚ance }
+            { 1000000008;TextBox;15150;9729 ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=FRA=Devise;
+                                                         SourceExpr=CustInvStatement."Due Date" }
+            { 1000000054;Label  ;3150 ;10575;1800 ;846  ;ParentControl=1000000009;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18300;
+            SectionHeight=2115;
+            OnPreSection=BEGIN
+                            CurrReport.SHOWOUTPUT(FALSE);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000053;Shape  ;450  ;846  ;17850;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1000000066;TextBox;15300;423  ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=TTC];
+                                                         SourceExpr=TotPai;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr=Customer."Currency Code" }
+            { 1000000067;Label  ;4950 ;423  ;4650 ;423  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Total des rŠglements : }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18300;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+            { 1000000068;TextBox;6000 ;0    ;4050 ;423  ;SourceExpr=Customer."Responsibility Center" }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table21;
+        DataItemTableView=SORTING(Customer No.,Posting Date)
+                          WHERE(Document Type=FILTER(Invoice|Credit Memo));
+        DataItemVarName=CustLedgerEntry;
+        OnPreDataItem=BEGIN
+                        IF NOT Reedition  THEN BEGIN
+                          SETRANGE("Posting Date",BeginDate,EndDate);
+                          SETRANGE(Open,TRUE); // IB CC
+                        END;
+
+                        SETRANGE("Invoice Statement No.",NextStatementNo);
+
+                        CurrReport.CREATETOTALS(Amount);
+                        CurrReport.CREATETOTALS(base_ht);
+                        CurrReport.CREATETOTALS(base_tva);
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           CLEAR(DateEcheance);
+                           CLEAR(MontEcheance);
+
+                           IF ("Document Type" = "Document Type"::Invoice) THEN BEGIN
+                             CalcInvoiceAmount("Document No.");
+                           END ELSE BEGIN
+                             CalcCrMemoAmount("Document No.");
+                           END;
+
+                           //conversion montantsoc en devise client
+                           IF Currency.GET(Customer."Currency Code") THEN BEGIN
+                             Currency.TESTFIELD("Amount Rounding Precision");
+
+                             Amount :=
+                               ROUND(
+                                 CurrencyRate.ExchangeAmtFCYToFCY(
+                                   "Posting Date",
+                                   "Currency Code",
+                                   Customer."Currency Code",
+                                   Amount),
+                                 Currency."Unit-Amount Rounding Precision");
+
+                             base_ht :=
+                               ROUND(
+                                 CurrencyRate.ExchangeAmtFCYToFCY(
+                                   "Posting Date",
+                                   "Currency Code",
+                                   Customer."Currency Code",
+                                   base_ht),
+                                 Currency."Unit-Amount Rounding Precision");
+
+                             base_tva :=
+                               ROUND(
+                                 CurrencyRate.ExchangeAmtFCYToFCY(
+                                   "Posting Date",
+                                   "Currency Code",
+                                   Customer."Currency Code",
+                                   base_tva),
+                                 Currency."Unit-Amount Rounding Precision");
+                           END;
+                         END;
+
+        DataItemLinkReference=Customer;
+        DataItemLink=Customer No.=FIELD(No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=18300;
+            SectionHeight=423;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                            CurrReport.SHOWOUTPUT(Edit<>1);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000058;TextBox;13350;0    ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Report];
+                                                         SourceExpr=Amount;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr=Customer."Currency Code" }
+            { 1000000059;Label  ;10650;0    ;2550 ;423  ;ParentControl=1000000058;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18300;
+            SectionHeight=846;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                            CurrReport.SHOWOUTPUT(Edit<>1);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000000;TextBox;1200 ;0    ;1680 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Posting Date;
+                                                                    FRA=Date];
+                                                         SourceExpr="Posting Date" }
+            { 1000000002;TextBox;5400 ;0    ;2100 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr="Document No." }
+            { 1000000004;TextBox;7650 ;0    ;5250 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=Description }
+            { 1000000010;TextBox;13350;0    ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=TTC];
+                                                         SourceExpr=Amount;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr=Customer."Currency Code" }
+            { 1000000009;TextBox;3150 ;0    ;1800 ;423  ;FontSize=9;
+                                                         SourceExpr="Document Type" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransFooter;
+            SectionWidth=18300;
+            SectionHeight=846;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                            CurrReport.SHOWOUTPUT(Edit<>1);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000060;TextBox;13350;423  ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=Report];
+                                                         SourceExpr=Amount;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr=Customer."Currency Code" }
+            { 1000000061;Label  ;10650;423  ;2550 ;423  ;ParentControl=1000000060;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18300;
+            SectionHeight=1269;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                            CurrReport.SHOWOUTPUT(Edit<>1);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000062;TextBox;13350;423  ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Amount;
+                                                                    FRA=TTC];
+                                                         SourceExpr=Amount;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr=Customer."Currency Code" }
+            { 1000000065;Label  ;9600 ;423  ;3600 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         CaptionML=FRA=Total du relev‚ }
+            { 1000000063;Shape  ;150  ;846  ;17850;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table112;
+        DataItemTableView=SORTING(No.);
+        OnPreDataItem=BEGIN
+                        IF CustLedgerEntry."Document Type" <> CustLedgerEntry."Document Type"::Invoice THEN
+                          CurrReport.BREAK;
+
+                        CLEAR(DateEcheance);
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           // calcul ‚ch‚ances
+                           CALCFIELDS("Amount Including VAT");
+                         END;
+
+        DataItemLink=No.=FIELD(Document No.);
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=4;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          ORDER(Ascending)
+                          WHERE(Number=FILTER(1..10));
+        DataItemVarName=echeance sur fact;
+        OnAfterGetRecord=BEGIN
+                           IF (DateEcheance[Number]=0D) OR (NOT "D‚tail des ‚ch‚ances" ) THEN CurrReport.SKIP;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         //cumuls echeances
+                         FOR ind1:=1 TO 10 DO
+                           IF DateEcheance[ind1]<>0D THEN
+                            FOR ind2:=1 TO 10 DO
+                                IF (DateEcheance[ind1]=DateEcheanceTot[ind2]) OR ( DateEcheanceTot[ind2]=0D) THEN BEGIN
+                                    DateEcheanceTot[ind2]:=DateEcheance[ind1];
+                                    MontEcheanceTot[ind2]:=MontEcheanceTot[ind2]+ MontEcheance[ind1];
+                                    DateEcheance[ind1]:=0D;
+                                    MontEcheance[ind1]:=0;
+                                END;
+                       END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18300;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           // CurrReport.SHOWOUTPUT(Edit<>1);  PAS DE MULTI ECHEANCE
+                            CurrReport.SHOWOUTPUT(FALSE);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000006;TextBox;15900;0    ;1950 ;423  ;FontSize=9;
+                                                         SourceExpr=MontEcheance[Number] }
+            { 1000000007;TextBox;13950;0    ;1800 ;423  ;FontSize=9;
+                                                         SourceExpr=DateEcheance[Number] }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table114;
+        DataItemTableView=SORTING(No.);
+        DataItemVarName=Cr.Memo AQ;
+        OnAfterGetRecord=BEGIN
+                           IF CustLedgerEntry."Document Type"<>CustLedgerEntry."Document Type"::"Credit Memo" THEN CurrReport.BREAK;
+
+                           //IF "Cr.Memo AQ"."No. Series"<>SalesSetup."Posted Credit Memo Nos." THEN  CurrReport.BREAK;
+                           // calcul ‚ch‚ances
+                           CALCFIELDS("Amount Including VAT");
+
+                           //cumuls echeances sur  la premiere echeance
+                           IF  DateEcheance[1]=0D THEN   DateEcheance[1]:="Cr.Memo AQ"."Posting Date";
+                           MontEcheance[1]:=0 - "Amount Including VAT";
+                           IF  DateEcheanceTot[1]=0D THEN   DateEcheanceTot[1]:="Cr.Memo AQ"."Posting Date";
+                           MontEcheanceTot[1]:=MontEcheanceTot[1] - "Amount Including VAT";
+                         END;
+
+        DataItemLink=No.=FIELD(Document No.);
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          ORDER(Ascending)
+                          WHERE(Number=FILTER(1..10));
+        DataItemVarName=paiement;
+        OnPreDataItem=BEGIN
+
+
+                        //Epuration des avoirs sur les echeances total
+                        FOR ind1:=1 TO 9  DO
+                         IF MontEcheanceTot[ind1]<0 THEN BEGIN
+                            MontEcheanceTot[ind1+1]:=MontEcheanceTot[ind1+1] +MontEcheanceTot[ind1];
+                            MontEcheanceTot[ind1]:=0;
+                            IF DateEcheanceTot[ind1+1]=0D THEN //erreur, releve negatif =>pas d'echeance
+                               MontEcheanceTot[ind1+1]:=0;
+                         END;
+                        //generation des effets sur releve
+                        IF NOT CurrReport.PREVIEW THEN  //daunat exige le preview. cela n'est plus tres certain
+                          IF NOT CustInvStatement."Draft generate" THEN BEGIN
+                          //i56 db modifie 27/09/2004
+                            CustInvStatement."Draft generate":=TRUE;
+                            CustInvStatement.MODIFY;
+                            COMMIT;
+                        //
+                            IF MontEcheanceTot[1] > 0 THEN BEGIN   // isat - cc 25/11/04
+                              CLEAR(gestioneffets);  // isat - cc 24/11/04
+                            gestioneffets.GenEchRel(DateEcheanceTot,MontEcheanceTot,
+                                             Customer."Payment Terms Code",
+                                             Customer."Payment Method Code",
+                                             CustInvStatement."Invoice Statement No.");
+                          END;
+                          END;    // fin isat - cc 25/11/04
+
+                        //il n'y pas de multi r‚glement en gie*****************************************
+                        CurrReport.BREAK;
+                        //
+
+                        //memorisation des effets generes
+                          IF DateEcheanceTot[1]<>0D THEN BEGIN CustInvStatement.date1:= DateEcheanceTot[1];
+                                                               CustInvStatement.mnt1 := MontEcheanceTot[1];
+                                                               END;
+                          IF DateEcheanceTot[2]<>0D THEN BEGIN CustInvStatement.date2:= DateEcheanceTot[2];
+                                                               CustInvStatement.mnt2 := MontEcheanceTot[2];
+                                                               END;
+                          IF DateEcheanceTot[3]<>0D THEN BEGIN CustInvStatement.date3:= DateEcheanceTot[3];
+                                                               CustInvStatement.mnt3 := MontEcheanceTot[3];
+                                                               END;
+                          IF DateEcheanceTot[4]<>0D THEN BEGIN CustInvStatement.date4:= DateEcheanceTot[4];
+                                                               CustInvStatement.mnt4 := MontEcheanceTot[4];
+                                                               END;
+                          IF DateEcheanceTot[5]<>0D THEN BEGIN CustInvStatement.date5:= DateEcheanceTot[5];
+                                                               CustInvStatement.mnt5 := MontEcheanceTot[5];
+                                                               END;
+                          IF DateEcheanceTot[6]<>0D THEN BEGIN CustInvStatement.date6:= DateEcheanceTot[6];
+                                                               CustInvStatement.mnt6 := MontEcheanceTot[6];
+                                                               END;
+                          IF DateEcheanceTot[7]<>0D THEN BEGIN CustInvStatement.date7:= DateEcheanceTot[7];
+                                                               CustInvStatement.mnt7 := MontEcheanceTot[7];
+                                                               END;
+                          IF DateEcheanceTot[8]<>0D THEN BEGIN CustInvStatement.date8:= DateEcheanceTot[8];
+                                                               CustInvStatement.mnt8 := MontEcheanceTot[8];
+                                                               END;
+                          IF DateEcheanceTot[9]<>0D THEN BEGIN CustInvStatement.date9:= DateEcheanceTot[9];
+                                                               CustInvStatement.mnt9 := MontEcheanceTot[9];
+                                                               END;
+                          IF DateEcheanceTot[10]<>0D THEN BEGIN CustInvStatement.date10:= DateEcheanceTot[10];
+                                                               CustInvStatement.mnt10 := MontEcheanceTot[10];
+                                                               END;
+                          CustInvStatement.MODIFY;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF MontEcheanceTot[Number]=0 THEN CurrReport.SKIP;
+                             TotPai:= TotPai+ MontEcheanceTot[Number];
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=18300;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                            CurrReport.SHOWOUTPUT(Edit<>1);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000051;Label  ;0    ;0    ;4950 ;423  ;ParentControl=1000000052;
+                                                         VertAlign=Bottom;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18300;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                            CurrReport.SHOWOUTPUT(Edit<>1);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000052;TextBox;150  ;0    ;1800 ;423  ;FontSize=9;
+                                                         CaptionML=FRA=Mode de rŠglement;
+                                                         SourceExpr=Customer."Payment Method Code" }
+            { 1000000057;TextBox;2100 ;0    ;4500 ;423  ;FontSize=9;
+                                                         SourceExpr=PaymentMethod.Description }
+            { 1000000100;TextBox;15900;0    ;1950 ;423  ;FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=MontEcheanceTot[Number] }
+            { 1000000101;TextBox;13950;0    ;1800 ;423  ;FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=DateEcheanceTot[Number] }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=8360;
+      Height=3520;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                     "D‚tail des ‚ch‚ances":=TRUE;
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1000000002;TextBox;3850 ;440  ;1650 ;440  ;CaptionML=[ENU=Date d‚but;
+                                                              FRA=Date d‚but];
+                                                   SourceExpr=BeginDate }
+      { 1000000003;Label  ;440  ;440  ;3300 ;440  ;ParentControl=1000000002 }
+      { 1000000004;TextBox;3850 ;990  ;1650 ;440  ;CaptionML=[ENU=Date fin;
+                                                              FRA=Date fin];
+                                                   SourceExpr=EndDate }
+      { 1000000005;Label  ;440  ;990  ;3300 ;440  ;ParentControl=1000000004 }
+      { 1000000006;CheckBox;3850;1650 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Reedition;
+                                                              FRA=R‚‚dition];
+                                                   SourceExpr=Reedition }
+      { 1000000007;Label  ;440  ;1650 ;3300 ;440  ;ParentControl=1000000006 }
+      { 1000000008;TextBox;3850 ;2200 ;4070 ;440  ;Lookup=Yes;
+                                                   CaptionML=[ENU=Filtre nø relev‚ facture;
+                                                              FRA=Filtre nø relev‚ facture];
+                                                   SourceExpr=InvoiceStatementFilter;
+                                                   OnLookup=BEGIN
+                                                              IF InvoiceStatement.GET(InvoiceStatementFilter) THEN;
+                                                              FormInvoiceStatement.SETTABLEVIEW(InvoiceStatement);
+                                                              FormInvoiceStatement.LOOKUPMODE(TRUE);
+                                                              IF FormInvoiceStatement.RUNMODAL = ACTION::LookupOK THEN BEGIN
+                                                                FormInvoiceStatement.GETRECORD(InvoiceStatement);
+                                                                InvoiceStatementFilter := InvoiceStatement."Invoice Statement No.";
+                                                              END;
+                                                            END;
+                                                             }
+      { 1000000009;Label  ;440  ;2200 ;3300 ;440  ;ParentControl=1000000008 }
+      { 1000000000;CheckBox;3850;2860 ;440  ;440  ;Visible=No;
+                                                   ShowCaption=No;
+                                                   SourceExpr="D‚tail des ‚ch‚ances" }
+      { 1000000001;Label  ;440  ;2860 ;3300 ;440  ;Visible=No;
+                                                   ParentControl=1000000000 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      CompanyInfo@1000000009 : Record 79;
+      PaymentMethod@1000000007 : Record 289;
+      SalesSetup@1000000005 : Record 311;
+      CustInvStatement@1000000017 : Record 8016602;
+      PaymentTerms@1000000016 : Record 3;
+      DetCustLedgerEntry@1000000019 : Record 379;
+      Currency@1000000023 : Record 4;
+      CurrencyRate@1000000024 : Record 330;
+      "-"@1000000010 : Integer;
+      FormatAdr@1000000008 : Codeunit 365;
+      NoSeriesMgt@1000000011 : Codeunit 396;
+      "--"@1000000004 : Integer;
+      AdrCompany@1000000013 : ARRAY [8] OF Text[50];
+      AdrCustomer@1000000014 : ARRAY [8] OF Text[50];
+      TexteCurrency@1000000018 : Text[10];
+      base_ht@1000000020 : Decimal;
+      base_tva@1000000021 : Decimal;
+      base_ttc@1000000022 : Decimal;
+      "---"@1000000012 : Integer;
+      NextStatementNo@1000000015 : Code[20];
+      "----"@1000000006 : Integer;
+      BeginDate@1000000000 : Date;
+      EndDate@1000000001 : Date;
+      Reedition@1000000003 : Boolean;
+      InvoiceStatementFilter@1000000002 : Code[100];
+      Text50000@50000 : TextConst 'ENU=Le code mode de rŠglement est obligatoire !;FRA=Le code mode de rŠglement est obligatoire !';
+      Text50001@50001 : TextConst 'ENU=Le code mode de rŠglement %1 est inconnu !;FRA=Le code mode de rŠglement %1 est inconnu !';
+      Text50002@50002 : TextConst 'ENU=Le code mode de rŠglement %1 n''est pas avec relev‚ de facture !;FRA=Le code mode de rŠglement %1 n''est pas avec relev‚ de facture !';
+      Text50003@50003 : TextConst 'ENU=L''option date de d‚but est obligatoire !;FRA=L''option date de d‚but est obligatoire !';
+      Text50004@50004 : TextConst 'ENU=L''option date de fin est obligatoire !;FRA=L''option date de fin est obligatoire !';
+      Text50005@50005 : TextConst 'ENU=Le s‚quencement des dates est incorrect !;FRA=Le s‚quencement des dates est incorrect !';
+      Text50006@50006 : TextConst 'ENU=Pour une r‚‚dition, vous devez sp‚cifier un filtre relev‚ de facture !;FRA=Pour une r‚‚dition, vous devez sp‚cifier un filtre relev‚ de facture !';
+      Text50007@50007 : TextConst 'ENU=Pour une ‚dition, vous ne devez pas sp‚cifier de filtre relev‚ de facture !;FRA=Pour une ‚dition, vous ne devez pas sp‚cifier de filtre relev‚ de facture !';
+      Text50008@50008 : TextConst 'ENU=Erreur d''insertion de relev‚ de facture client !;FRA=Erreur d''insertion de relev‚ de facture client !';
+      Text50009@50009 : TextConst 'ENU=Erreur de relecture du document de base %1 (%2,%3) !;FRA=Erreur de relecture du document de base %1 (%2,%3) !';
+      "-----"@1000000025 : Integer;
+      DateEcheance@1000000026 : ARRAY [10] OF Date;
+      MontEcheance@1000000027 : ARRAY [10] OF Decimal;
+      DateEcheanceTot@1000000029 : ARRAY [10] OF Date;
+      MontEcheanceTot@1000000030 : ARRAY [10] OF Decimal;
+      gestioneffets@1100281000 : Codeunit 8016603;
+      ind1@1000000031 : Integer;
+      ind2@1000000032 : Integer;
+      "D‚tail des ‚ch‚ances"@1000000033 : Boolean;
+      TotPai@1000000034 : Decimal;
+      TotAvoir@1000000035 : Decimal;
+      "------"@1000000036 : Integer;
+      InvoiceStatement@1000000037 : Record 8016602;
+      FormInvoiceStatement@1000000038 : Form 8016602;
+      Edit@1000000039 : Integer;
+
+    PROCEDURE CalcInvoiceAmount@1(DocumentNo@1000000000 : Code[20]);
+    VAR
+      LocSalesInvoiceLine@1000000001 : Record 113;
+    BEGIN
+      base_ht := 0;
+      base_tva := 0;
+      base_ttc := 0;
+
+      LocSalesInvoiceLine.RESET;
+      LocSalesInvoiceLine.SETRANGE("Document No.",DocumentNo);
+      IF LocSalesInvoiceLine.FIND('-') THEN BEGIN
+        REPEAT
+          base_ht := base_ht + LocSalesInvoiceLine.Amount;
+          base_tva :=
+            base_tva + (LocSalesInvoiceLine."Amount Including VAT" - LocSalesInvoiceLine.Amount);
+          base_ttc := base_ttc + LocSalesInvoiceLine."Amount Including VAT";
+        UNTIL (LocSalesInvoiceLine.NEXT = 0);
+      END;
+    END;
+
+    PROCEDURE CalcCrMemoAmount@2(DocumentNo@1000000000 : Code[20]);
+    VAR
+      LocSalesCrMemoLine@1000000001 : Record 115;
+    BEGIN
+      base_ht := 0;
+      base_tva := 0;
+      base_ttc := 0;
+
+      LocSalesCrMemoLine.RESET;
+      LocSalesCrMemoLine.SETRANGE("Document No.",DocumentNo);
+      IF LocSalesCrMemoLine.FIND('-') THEN BEGIN
+        REPEAT
+          base_ht := base_ht - LocSalesCrMemoLine.Amount;
+          base_tva :=
+            base_tva - (LocSalesCrMemoLine."Amount Including VAT" - LocSalesCrMemoLine.Amount);
+          base_ttc := base_ttc - LocSalesCrMemoLine."Amount Including VAT";
+        UNTIL (LocSalesCrMemoLine.NEXT = 0);
+      END;
+    END;
+
+    PROCEDURE SetOption@1000000000(Date1@1000000000 : Date;Date2@1000000001 : Date;Loc_edit@1000000002 : Integer;Loc_Cust@1000000003 : Code[20]);
+    BEGIN
+      BeginDate := Date1;
+      EndDate := Date2;
+      Edit := Loc_edit;
+      IF Loc_Cust <> '' THEN
+         Customer.SETRANGE("No.",Loc_Cust);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/01/11 @a ISAT.MA @v IMH6.01.040 @s Isatech+ */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

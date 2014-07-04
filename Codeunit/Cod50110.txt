@@ -1,0 +1,237 @@
+OBJECT Codeunit 50110 EXT In. FLE ADRESSE MEO
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/01/11;
+    Time=09:49:37;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100281001 : TextConst 'ENU=XML Stream is not well formated.;FRA=Le flux XML n''est pas bien format‚.';
+      Error002@1100281000 : TextConst 'ENU=XML Node %1 unfound.;FRA=Noeud XML %1 non trouv‚.';
+      Error003@1100281002 : TextConst 'ENU=The field should not be empty.;FRA=Le champ %1 ne doit pas ˆtre vide.';
+
+    LOCAL PROCEDURE Code@1008844003(VAR pEAIRcvdMQBuffer@1008844001 : Record 8016721);
+    VAR
+      lEAIXMLDocMgt@1108844004 : Codeunit 8016713;
+      lEAIDocumentEntryMgt@1100281001 : Codeunit 8016707;
+      lXMLDocument@1008844005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLDocumentNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lOutStream@1008844004 : OutStream;
+      lRecRef@1008844000 : RecordRef;
+      lEAIAct@1108844005 : Record 8016706;
+      lTempIntervLine@1108844001 : TEMPORARY Record 50075;
+      lIntervLine@1100281002 : Record 50075;
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+      pEAIRcvdMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+      lXMLDocument.load(lOutStream);
+
+      lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Code");
+
+      //Lecture du document XML
+      lEAIXMLDocMgt.ReadXMLDocuments(lXMLDocument,lXMLDocumentNode);
+
+
+      //lecture intervention line
+      ReadXMLIntervention(lXMLDocumentNode,lTempIntervLine);
+
+      //lecture service
+      ReadXMLService(lXMLDocumentNode,lTempIntervLine);
+
+      //lecture ADERSS INTERVENTION
+      ReadXMLAddress(lXMLDocumentNode,lTempIntervLine);
+
+      //TODO-----lecture departement
+      ReadXMLDepartement(lXMLDocumentNode,lTempIntervLine);
+
+      //Mettre … jour Intervention Line
+      ProcessIntervLine(lTempIntervLine, lIntervLine);
+
+      //cr‚ation suivi de document
+      lEAIDocumentEntryMgt.AddEntryFromRcvdBuffer(
+         DATABASE::"Service Intervention Line",0,lIntervLine."Service Header No.",'',
+         lIntervLine."Line No.", pEAIRcvdMQBuffer);
+
+      //Identifiant de la commande (ou derniŠre commande si allotie)
+      lRecRef.GETTABLE(lIntervLine);
+      pEAIRcvdMQBuffer.RecordId := lRecRef.RECORDID;
+    END;
+
+    PROCEDURE ReadXMLIntervention@1100281000(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewInterventionLine@1100281000 : Record 50075);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLDocIntervNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Intervention',lXMLDocIntervNode) THEN
+          ERROR(Error002,'Intervention');
+
+        //---TODO----  Identifiant unique de l'intervention
+        IF FindFirstNode(lXMLDocIntervNode,'InterventionId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'InterventionId');
+        END ELSE
+          ERROR(Error002,'InterventionId');
+
+
+        //Code intervention dans GSH
+        IF FindFirstNode(lXMLDocIntervNode,'GSH_NumeroIntervention',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'GSH_NumeroIntervention');
+          pNewInterventionLine."Line No." := lToolsMgt.TextToInteger(lXMLNodeFound.text)
+        END ELSE
+          ERROR(Error002,'GSH_NumeroIntervention');
+       END;
+    END;
+
+    PROCEDURE ReadXMLService@1100281015(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewInterventionLine@1100281000 : Record 50075);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLDocServNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Service',lXMLDocServNode) THEN
+          ERROR(Error002,'Service');
+
+        //---TODO----  Identifiant unique de l'intervention
+        IF FindFirstNode(lXMLDocServNode,'ServiceId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'ServiceId');
+        END ELSE
+          ERROR(Error002,'GSH_NumeroIntervention');
+
+        //Code intervention dans GSH
+        IF FindFirstNode(lXMLDocServNode,'GSH_ReferenceService',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'GSH_ReferenceService');
+          pNewInterventionLine."Service Header No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine."Service Header No."))
+        END ELSE
+          ERROR(Error002,'GSH_ReferenceService');
+       END;
+    END;
+
+    PROCEDURE ReadXMLAddress@1100281001(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewInterventionLine@1100281000 : Record 50075);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLDocAddNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lText001@1100281001 : TextConst 'ENU=Address should not be empty.;FRA=Au moins une des trois adresses doit ˆtre renseign‚e.';
+      lHasAddress@1100281003 : Boolean;
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Adresse',lXMLDocAddNode) THEN
+          ERROR(Error002,'Adresse');
+
+        //D‚tail de l'adresse
+        IF FindFirstNode(lXMLDocAddNode,'AdresseLigne1',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text <> '' THEN
+            lHasAddress := TRUE;
+          pNewInterventionLine.Address := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine.Address))
+        END;
+
+        //D‚tail de l'adresse
+        IF FindFirstNode(lXMLDocAddNode,'AdresseLigne2',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text <> '' THEN
+            lHasAddress := TRUE;
+          pNewInterventionLine."Address 2" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine."Address 2"))
+        END;
+
+        //D‚tail de l'adresse
+        IF FindFirstNode(lXMLDocAddNode,'AdresseLigne3',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text <> '' THEN
+            lHasAddress := TRUE;
+          pNewInterventionLine.County := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine.County))
+        END;
+
+        IF NOT lHasAddress THEN
+          ERROR(lText001);
+
+        //CodePostal
+        IF FindFirstNode(lXMLDocAddNode,'CodePostal',lXMLNodeFound) THEN
+        BEGIN
+          pNewInterventionLine."Post Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine."Post Code"))
+        END;
+
+        //Ville
+        IF FindFirstNode(lXMLDocAddNode,'Ville',lXMLNodeFound) THEN
+        BEGIN
+          pNewInterventionLine.City := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine.City))
+        END;
+
+        //Pays
+        IF FindFirstNode(lXMLDocAddNode,'Pays',lXMLNodeFound) THEN
+        BEGIN
+          pNewInterventionLine."Country/Region Code" :=
+              COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine."Country/Region Code"))
+        END;
+       END;
+    END;
+
+    PROCEDURE ReadXMLDepartement@1100281006(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewInterventionLine@1100281000 : Record 50075);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLDocServNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Departement',lXMLDocServNode) THEN
+          ERROR(Error002,'Departement');
+
+        //Identifiant unique de la r‚gion MEO  dans GSH
+        IF FindFirstNode(lXMLDocServNode,'CodeDepartement',lXMLNodeFound) THEN
+        BEGIN
+        END;// ELSE
+          //ERROR(Error002,'GSH_NumeroIntervention');
+      END;
+    END;
+
+    PROCEDURE ProcessIntervLine@1100281003(VAR pInterventionLine@1100281000 : Record 50075;VAR pNewInterventionLine@1100281002 : Record 50075);
+    BEGIN
+      IF pNewInterventionLine.GET(pInterventionLine."Service Header No.", pInterventionLine."Line No.") THEN BEGIN
+        pNewInterventionLine.VALIDATE(Address, pInterventionLine.Address);
+        pNewInterventionLine.VALIDATE("Address 2", pInterventionLine."Address 2");
+        pNewInterventionLine.VALIDATE(County, pInterventionLine.County);
+        pNewInterventionLine.VALIDATE("Post Code", pInterventionLine."Post Code");
+        pNewInterventionLine.VALIDATE(City, pInterventionLine.City);
+        pNewInterventionLine.VALIDATE("Country/Region Code", pInterventionLine."Country/Region Code");
+        pNewInterventionLine.MODIFY(TRUE);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IHM01 @d 18/01/11 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Creation */
+    }
+    END.
+  }
+}

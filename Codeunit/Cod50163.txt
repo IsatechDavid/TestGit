@@ -1,0 +1,130 @@
+OBJECT Codeunit 50163 FUSION Rcvd Quote Post Line
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/10/11;
+    Time=14:43:02;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016721;
+    OnRun=BEGIN
+            EAIRcvdMQBuffer := Rec;
+            Rec.CALCFIELDS("XML Source");
+            EAIRcvdMQBuffer."XML Source" := Rec."XML Source";
+            Code;
+            Rec := EAIRcvdMQBuffer;
+            IF NOT MODIFY THEN
+              INSERT;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIRcvdMQBuffer@1100281000 : Record 8016721;
+      ToolsMgt@1100281002 : Codeunit 8016602;
+      FUSIONInterfaceMgt@1100281003 : Codeunit 50181;
+      EAIXMLMgt@1100281006 : Codeunit 8016710;
+      CompanyInformation@1100281007 : Record 79;
+      InterfaceSetup@1100281009 : Record 50139;
+      ErrorText001@1100281008 : TextConst 'ENU="The value %1 of field %2 is not a valide. ";FRA=Le valeur %1 du champ %2 n''est pas valide.';
+
+    PROCEDURE Code@1100281000();
+    VAR
+      lInStream@1100281005 : InStream;
+      lXmlDom@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlNodeList@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lAttributeNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lErrorText@1100281006 : Text[250];
+      lRecRef@1100281014 : RecordRef;
+      lServInervQuote@1100281000 : Record 50076;
+      lServInervQuote2@1100281003 : Record 50076;
+    BEGIN
+      {
+      <xs:complexType name="DevisContr“l‚">
+       <xs:sequence>
+        <xs:element minOccurs="0" name="MontantDevisAccept‚" type="xs:decimal" />
+        <xs:element minOccurs="0" name="NAV_ExpertQuoteCheck" type="xs:int" />
+        <xs:element minOccurs="0" name="NAV_InterventionLineNo" type="xs:int" />
+        <xs:element minOccurs="0" name="NAV_LineNo" type="xs:int" />
+        <xs:element minOccurs="0" name="NAV_ServiceHeaderNo" nillable="true" type="xs:string" />
+        <xs:element minOccurs="0" name="NAV_ServiceNo" nillable="true" type="xs:string" />
+        <xs:element minOccurs="0" name="R‚ponseContr“leDevis" type="tns:R‚ponseContr“leDevisDtc" />
+      </xs:sequence>
+      }
+
+      // an XMLDOM object
+      EAIRcvdMQBuffer.CALCFIELDS("XML Source");
+      EAIRcvdMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      CREATE(lXmlDom);
+      lXmlDom.load(lInStream);
+      //lXmlDom.save('C:\Temp\Fusion.xml');
+
+      lXmlNodeList := lXmlDom.getElementsByTagName('GetDevisR‚sultatContr“leResult');
+      lXmlDomElement := lXmlNodeList.item(0);
+
+      //<xs:element minOccurs="0" name="MontantDevisAccept‚" type="xs:decimal" />
+      //lAttributeNode := pXmlDomElement.selectSingleNode('a:IdentifiantServiceSiTiers');
+      //lServiceNo := lAttributeNode.text;
+
+      //<xs:element minOccurs="0" name="NAV_ExpertQuoteCheck" type="xs:int" />
+      //<xs:element minOccurs="0" name="NAV_InterventionLineNo" type="xs:int" />
+      lAttributeNode := lXmlDomElement.selectSingleNode('a:NAV_InterventionLineNo');
+      IF NOT EVALUATE(lServInervQuote."Intervention Line No.", lAttributeNode.text) THEN
+        ERROR(ErrorText001, lAttributeNode.text, 'NAV_InterventionLineNo');
+
+      //<xs:element minOccurs="0" name="NAV_LineNo" type="xs:int" />
+      lAttributeNode := lXmlDomElement.selectSingleNode('a:NAV_LineNo');
+      IF NOT EVALUATE(lServInervQuote."Line No.", lAttributeNode.text) THEN
+        ERROR(ErrorText001, lAttributeNode.text, 'NAV_LineNo');
+
+      //<xs:element minOccurs="0" name="NAV_ServiceHeaderNo" nillable="true" type="xs:string" />
+      lAttributeNode := lXmlDomElement.selectSingleNode('a:NAV_ServiceHeaderNo');
+      lServInervQuote."Service Header No." := lAttributeNode.text;
+
+      //<xs:element minOccurs="0" name="NAV_ServiceNo" nillable="true" type="xs:string" />
+      //<xs:element minOccurs="0" name="R‚ponseContr“leDevis" type="tns:R‚ponseContr“leDevisDtc" />
+      lAttributeNode := lXmlDomElement.selectSingleNode('a:R‚ponseContr“leDevis');
+      CASE lAttributeNode.text OF
+        'Accept‚EnLEtat',
+        'Accept‚SuiteAccordPrestataire',
+        'Accept‚SuiteInterventionCRAuprŠsPrestataire' : BEGIN
+          lServInervQuote."Expert Quote Check" := lServInervQuote."Expert Quote Check"::"Quote Checked OK";
+          lServInervQuote."Fusion Expert Quote Check" := lServInervQuote."Expert Quote Check";
+          lServInervQuote."Expert Quote Check Comment" := lAttributeNode.text;
+        END;
+        'Refus‚SuiteInterventionCRAuprŠsPrestataire',
+        'ObsolŠteEnAttenteNouveauDevisPrestataire' : BEGIN
+          lServInervQuote."Expert Quote Check" := lServInervQuote."Expert Quote Check"::"Quote Checked OK";
+          lServInervQuote."Fusion Expert Quote Check" := lServInervQuote."Expert Quote Check";
+          lServInervQuote."Expert Quote Check Comment" := lAttributeNode.text;
+        END;
+        'AucuneR‚ponse' : lServInervQuote."Expert Quote Check Comment" := lAttributeNode.text;
+      END;
+
+      lServInervQuote2.GET(lServInervQuote."Service Header No.", lServInervQuote."Intervention Line No.", lServInervQuote."Line No.");
+      lServInervQuote2."Expert Quote Check" := lServInervQuote."Expert Quote Check";
+      lServInervQuote2."Fusion Expert Quote Check" := lServInervQuote."Fusion Expert Quote Check";
+      lServInervQuote2."Expert Quote Check Comment" := lServInervQuote."Expert Quote Check Comment";
+      lServInervQuote2.MODIFY(TRUE);
+
+      IF lErrorText <> '' THEN
+        ERROR(lErrorText);
+
+      lRecRef.GETTABLE(lServInervQuote2);
+      EAIRcvdMQBuffer.RecordId := lRecRef.RECORDID;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 18/08/11 @a ISAT.ST @v IMH6.01.136 @s Interface Fusion @c stabilisation */
+      /** @r IMH02 @d 04/08/11 @a ISAT.ST @v IMH6.01.136 @s Interface Fusion @c Ajout de contr“les */
+      /** @r IMH01 @d 12/04/11 @a ISAT.ZW @v IMH6.01.136 @s Interface Fusion @c cr‚ation */
+    }
+    END.
+  }
+}

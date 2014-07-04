@@ -1,0 +1,331 @@
+OBJECT Codeunit 50077 Dimension Repartition
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/04/12;
+    Time=16:28:06;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 17=rm;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      gCodRepartition@1100281000 : Code[10];
+      gDatDebRep@1100281001 : Date;
+      gDatFinRep@1100281005 : Date;
+      gCodAxe@1100281003 : Code[20];
+      gCodSection@1100281004 : Code[20];
+      gCstText001@1100281007 : TextConst 'FRA=Vous devez saisir les dates de d‚but et de fin de traitement.';
+      gBooDateOri@1100281002 : Boolean;
+      gIntAxePrincipal@1100281006 : Integer;
+      gCuDimMgt@1100281008 : Codeunit 408;
+      gRecGeneralLedgerSetup@1100281009 : Record 98;
+      gDiaFenetre@1100281010 : Dialog;
+      gCstText002@1100281011 : TextConst 'FRA=Code Table    #1#################\Analytique    #2#################\Nombre M…J.   #3#################';
+      gIntNbEnrg@1100281012 : Integer;
+      gIntNbEnrgTotal@1100281013 : Integer;
+
+    PROCEDURE fNulCreerAllRepartition@1100281001(pCodDimensionRepartition@1100281000 : Code[10]);
+    VAR
+      lRecDimensionValue@1100281001 : Record 349;
+      lCstText001@1100281002 : TextConst 'FRA=Le traitement %4 est termin‚, %3 ‚critures ont ‚t‚ trait‚es.\Veuillez valider la feuille %1 du modŠle de feuille %2 pour que la ventilation analytique soit effective';
+      lRecGenJournalLine@1100281003 : Record 81;
+      lCstText002@1100281004 : TextConst 'FRA=Veuillez vider la feuille %1 du modŠle %2 avant le traitement.';
+      lCstText003@1100281005 : TextConst 'FRA=Aucune ‚criture n''a ‚t‚ trait‚e pour la r‚partition %1.';
+    BEGIN
+      //Cr‚er toutes les r‚partitions en fonction d'un "code table" de la table Dimension Repartition
+      //La fonction fNulChargeDate doit-ˆtre appel‚ avant cette fonction.
+
+      gIntNbEnrgTotal := 0;
+
+      gRecGeneralLedgerSetup.GET;
+      lRecGenJournalLine.SETRANGE("Journal Template Name",gRecGeneralLedgerSetup."Repartition Journal Template");
+      lRecGenJournalLine.SETRANGE("Journal Batch Name",gRecGeneralLedgerSetup."Repartition Journal Batch Name");
+      {
+      IF lRecGenJournalLine.COUNT>1 THEN
+        ERROR(lCstText002,gRecGeneralLedgerSetup."Repartition Journal Batch Name"
+        ,gRecGeneralLedgerSetup."Repartition Journal Template");
+      }
+      lRecDimensionValue.RESET;
+      lRecDimensionValue.SETRANGE("Dimension Repartition Code",pCodDimensionRepartition);
+      lRecDimensionValue.SETRANGE("Global Dimension No.",1,2);
+      IF lRecDimensionValue.FINDFIRST THEN
+      REPEAT
+        fNulChargeAxeSectionAna(lRecDimensionValue."Dimension Code",lRecDimensionValue.Code);
+        fNulCreerRepartition;
+      UNTIL lRecDimensionValue.NEXT = 0;
+
+      IF gIntNbEnrgTotal = 0 THEN
+        MESSAGE(lCstText003,pCodDimensionRepartition)
+      ELSE
+        MESSAGE(lCstText001,gRecGeneralLedgerSetup."Repartition Journal Batch Name"
+        ,gRecGeneralLedgerSetup."Repartition Journal Template",gIntNbEnrgTotal,pCodDimensionRepartition);
+    END;
+
+    PROCEDURE fNulCreerRepartition@1100281000();
+    VAR
+      lRecDimensionValue@1100281000 : Record 349;
+      lRecEntCodRep@1100281001 : Record 50136;
+      lRecLigCodRep@1100281002 : Record 50136;
+      "lRecG/LEntry"@1100281003 : Record 17;
+      lRecGenJournalLine@1100281006 : Record 81;
+      lIntNbLig@1100281007 : Integer;
+      lIntDerLig@1100281008 : Integer;
+      lDecMt@1100281009 : Decimal;
+      lDecReste@1100281010 : Decimal;
+      lDecMtVal@1100281011 : Decimal;
+      lIntBoucle@1100281012 : Integer;
+      lDecDiff@1100281005 : Decimal;
+      lRecJournalLineDimension@1100281013 : Record 356;
+      lRecLedgerEntryDimension@1100281014 : Record 355;
+      lRecGenJournalTemplate@1100281004 : Record 80;
+    BEGIN
+      //Cr‚‚ la r‚partition pour une section analytique
+      //Les variables gDatDebRep,gDatFinRep,gCodAxe,gCodSection doivent ˆtre charg‚e par les
+      //fonctions fNulChargeDate, fNulChargeAxeSectionAna
+      IF gDatDebRep = 0D THEN
+        ERROR(gCstText001);
+      IF gDatFinRep = 0D THEN
+        ERROR(gCstText001);
+
+      //Contr“le existence param‚trage modele et nom feuille
+      gRecGeneralLedgerSetup.GET;
+      gRecGeneralLedgerSetup.TESTFIELD("Repartition Journal Template");
+      gRecGeneralLedgerSetup.TESTFIELD("Repartition Journal Batch Name");
+
+      IF lRecDimensionValue.GET(gCodAxe,gCodSection) = FALSE THEN
+        EXIT;
+      IF lRecDimensionValue."Dimension Repartition Code" = '' THEN
+        EXIT;
+
+      gIntNbEnrg :=0;
+      gDiaFenetre.OPEN(gCstText002);
+      gDiaFenetre.UPDATE(1,lRecDimensionValue."Dimension Repartition Code");
+      gDiaFenetre.UPDATE(2,gCodAxe + '-' +gCodSection);
+
+      lRecEntCodRep.SETRANGE(Type,lRecEntCodRep.Type::Header);
+      lRecEntCodRep.SETRANGE("Table Code",lRecDimensionValue."Dimension Repartition Code");
+      lRecEntCodRep.SETRANGE(Status,lRecEntCodRep.Status::Certified);
+      IF lRecEntCodRep.FINDFIRST THEN
+      BEGIN
+        "lRecG/LEntry".RESET;
+        "lRecG/LEntry".SETCURRENTKEY("Posting Date","Global Dimension 1 Code","Global Dimension 2 Code","Dimension Entry No.");
+        "lRecG/LEntry".SETRANGE("Posting Date",gDatDebRep,gDatFinRep);
+        CASE gIntAxePrincipal OF
+          1:   "lRecG/LEntry".SETRANGE("Global Dimension 1 Code",gCodSection);
+          2:   "lRecG/LEntry".SETRANGE("Global Dimension 2 Code",gCodSection);
+        END;
+        "lRecG/LEntry".SETRANGE("Dimension Entry No.",0);
+        IF "lRecG/LEntry".FINDFIRST THEN
+        REPEAT
+          IF fBooATraite("lRecG/LEntry"."Entry No.") THEN BEGIN
+            gIntNbEnrg +=1;
+            gIntNbEnrgTotal +=1;
+            gDiaFenetre.UPDATE(3,gIntNbEnrg);
+            //Remplit la r‚partition analytique dans feuille
+
+            //R‚cup‚ration derniŠre ligne
+            CLEAR(lRecGenJournalLine);
+            lRecGenJournalLine.SETRANGE("Journal Template Name",gRecGeneralLedgerSetup."Repartition Journal Template");
+            lRecGenJournalLine.SETRANGE("Journal Batch Name",gRecGeneralLedgerSetup."Repartition Journal Batch Name");
+            IF lRecGenJournalLine.FINDLAST THEN BEGIN
+              lIntDerLig := lRecGenJournalLine."Line No.";
+            END ELSE BEGIN
+              lIntDerLig := 0;
+            END;
+
+            //Ecriture d'extourne
+            lRecGenJournalLine.INIT;
+            lRecGenJournalLine."Journal Template Name" := gRecGeneralLedgerSetup."Repartition Journal Template";
+            lRecGenJournalLine."Journal Batch Name" := gRecGeneralLedgerSetup."Repartition Journal Batch Name";
+            lRecGenJournalTemplate.GET(gRecGeneralLedgerSetup."Repartition Journal Template");
+            lRecGenJournalLine."Source Code" := lRecGenJournalTemplate."Source Code";
+            lRecGenJournalLine."Reason Code" := lRecGenJournalTemplate."Reason Code";
+            lIntDerLig += 10000;
+            lRecGenJournalLine."Line No." := lIntDerLig;
+            lRecGenJournalLine.VALIDATE("Account Type",lRecGenJournalLine."Account Type"::"G/L Account");
+            lRecGenJournalLine.VALIDATE("Account No.","lRecG/LEntry"."G/L Account No.");
+            lRecGenJournalLine.VALIDATE("Posting Date","lRecG/LEntry"."Posting Date");
+            lRecGenJournalLine."Document Date" := "lRecG/LEntry"."Document Date";
+            lRecGenJournalLine."Document No." := "lRecG/LEntry"."Document No.";
+            lRecGenJournalLine.Description := "lRecG/LEntry".Description;
+            lRecGenJournalLine."External Document No." := "lRecG/LEntry"."External Document No.";
+            IF "lRecG/LEntry".Amount < 0 THEN BEGIN
+              lRecGenJournalLine.VALIDATE("Debit Amount",ABS("lRecG/LEntry".Amount));
+            END ELSE BEGIN
+              lRecGenJournalLine.VALIDATE("Credit Amount",ABS("lRecG/LEntry".Amount));
+            END;
+
+            //R‚cup‚ration autres axes analytiques
+            CLEAR(lRecLedgerEntryDimension);
+            lRecLedgerEntryDimension.SETRANGE("Table ID",17);
+            lRecLedgerEntryDimension.SETRANGE("Entry No.","lRecG/LEntry"."Entry No.");
+            gCuDimMgt.DeleteJnlLineDim(81,gRecGeneralLedgerSetup."Repartition Journal Template"
+            ,gRecGeneralLedgerSetup."Repartition Journal Batch Name",lIntDerLig,0);
+            gCuDimMgt.MoveLedgEntryDimToJnlLineDim(lRecLedgerEntryDimension,lRecJournalLineDimension,81,
+            gRecGeneralLedgerSetup."Repartition Journal Template",gRecGeneralLedgerSetup."Repartition Journal Batch Name",
+            lIntDerLig,0);
+            CASE gIntAxePrincipal OF
+              1: BEGIN
+                   lRecGenJournalLine.VALIDATE("Shortcut Dimension 1 Code",gCodSection);
+                   lRecGenJournalLine.VALIDATE("Shortcut Dimension 2 Code","lRecG/LEntry"."Global Dimension 2 Code");
+                 END;
+              2: BEGIN
+                   lRecGenJournalLine.VALIDATE("Shortcut Dimension 2 Code",gCodSection);
+                   lRecGenJournalLine.VALIDATE("Shortcut Dimension 1 Code","lRecG/LEntry"."Global Dimension 1 Code");
+                 END;
+            END;
+            lRecGenJournalLine."Dimension Entry No." := "lRecG/LEntry"."Entry No.";
+            lRecGenJournalLine."Distribution Date" := TODAY;
+            lRecGenJournalLine.INSERT(TRUE);
+
+            // Ecriture de reventilation
+            lIntBoucle := 0;
+            lDecReste := 0;
+            CLEAR(lRecLigCodRep);
+            lRecLigCodRep.SETRANGE(Type,lRecLigCodRep.Type::Line);
+            lRecLigCodRep.SETRANGE("Table Code",lRecDimensionValue."Dimension Repartition Code");
+            lRecLigCodRep.SETRANGE("Dimension Code",gCodAxe);
+            lIntNbLig := lRecLigCodRep.COUNT;
+            IF lRecLigCodRep.FINDFIRST THEN
+            REPEAT
+              lIntBoucle += 1;
+              lRecGenJournalLine.VALIDATE(Amount,0);
+              lIntDerLig += 10000;
+              lRecGenJournalLine."Line No." := lIntDerLig;
+              IF lRecEntCodRep."Distribution Type" = lRecEntCodRep."Distribution Type"::"%" THEN
+                lDecMt := ABS(ROUND("lRecG/LEntry".Amount * lRecLigCodRep."% Allocation" / 100,0.01))
+              ELSE
+                lDecMt := ABS(ROUND("lRecG/LEntry".Amount * lRecLigCodRep."% Allocation"
+                / lRecLigCodRep.fIntSommeRepartition(gCodAxe),0.01));
+              lDecReste += lDecMt;
+              lDecMtVal := lDecMt;
+              IF lIntBoucle = lIntNbLig THEN BEGIN
+                // V‚rif reste
+                lDecDiff := ABS(lDecReste) - ABS("lRecG/LEntry".Amount);
+                IF lDecDiff <> 0 THEN BEGIN
+                  IF lDecDiff > 0 THEN BEGIN
+                    lDecMtVal -= ABS(lDecDiff);
+                  END ELSE BEGIN
+                    lDecMtVal += ABS(lDecDiff);
+                  END;
+                END;
+              END;
+              IF "lRecG/LEntry".Amount > 0 THEN BEGIN
+                lRecGenJournalLine.VALIDATE("Debit Amount",ABS(lDecMtVal));
+              END ELSE BEGIN
+                lRecGenJournalLine.VALIDATE("Credit Amount",ABS(lDecMtVal));
+              END;
+
+              //R‚cup‚ration autres axes analytiques
+              gCuDimMgt.DeleteJnlLineDim(81,gRecGeneralLedgerSetup."Repartition Journal Template"
+                ,gRecGeneralLedgerSetup."Repartition Journal Batch Name",lIntDerLig,0);
+              CLEAR(lRecLedgerEntryDimension);
+              lRecLedgerEntryDimension.SETRANGE("Table ID",17);
+              lRecLedgerEntryDimension.SETRANGE("Entry No.","lRecG/LEntry"."Entry No.");
+              gCuDimMgt.MoveLedgEntryDimToJnlLineDim(lRecLedgerEntryDimension,lRecJournalLineDimension,81,
+              gRecGeneralLedgerSetup."Repartition Journal Template",gRecGeneralLedgerSetup."Repartition Journal Batch Name",
+              lIntDerLig,0);
+
+              //Section analytique ventil‚e
+              CASE gIntAxePrincipal OF
+              1: BEGIN
+                   lRecGenJournalLine.VALIDATE("Shortcut Dimension 1 Code",lRecLigCodRep."Dimension Value Code");
+                   lRecGenJournalLine.VALIDATE("Shortcut Dimension 2 Code","lRecG/LEntry"."Global Dimension 2 Code");
+                 END;
+              2: BEGIN
+                   lRecGenJournalLine.VALIDATE("Shortcut Dimension 2 Code",lRecLigCodRep."Dimension Value Code");
+                   lRecGenJournalLine.VALIDATE("Shortcut Dimension 1 Code","lRecG/LEntry"."Global Dimension 1 Code");
+                 END;
+              END;
+
+              lRecGenJournalLine."Distribution Date" := TODAY;
+              lRecGenJournalLine."Dimension Entry No." := "lRecG/LEntry"."Entry No.";
+              lRecGenJournalLine.INSERT(TRUE);
+
+            UNTIL lRecLigCodRep.NEXT = 0;
+          END;
+        UNTIL "lRecG/LEntry".NEXT =0;
+      END;
+      gDiaFenetre.CLOSE;
+    END;
+
+    PROCEDURE fNulChargeDate@1100281002(pDatDeb@1100281000 : Date;pDatFin@1100281001 : Date);
+    BEGIN
+      //Charge les dates de d‚but et de fin de la r‚partition analytique.
+      //L'‚criture se fera en date de fin
+      gDatDebRep := pDatDeb;
+      gDatFinRep := pDatFin;
+      IF (gDatDebRep = 0D) OR (gDatFinRep = 0D) THEN
+        ERROR(gCstText001);
+    END;
+
+    PROCEDURE fNulChargeAxeSectionAna@1100281003(pCodAxe@1100281000 : Code[20];pCodSection@1100281001 : Code[20]);
+    VAR
+      lRecDimensionValue@1100281002 : Record 349;
+    BEGIN
+      //Charge l'axe et la section analytique … r‚partir
+      //V‚rification de l'existance
+      gCodAxe := pCodAxe;
+      gCodSection := pCodSection;
+
+      //Recherche axe principal
+      gRecGeneralLedgerSetup.GET;
+      gIntAxePrincipal := 0;
+      IF gRecGeneralLedgerSetup."Global Dimension 1 Code" = gCodAxe THEN
+        gIntAxePrincipal := 1;
+      IF gRecGeneralLedgerSetup."Global Dimension 2 Code" = gCodAxe THEN
+        gIntAxePrincipal := 2;
+      IF gIntAxePrincipal = 0 THEN
+        EXIT;
+
+      lRecDimensionValue.GET(gCodAxe,gCodSection);
+    END;
+
+    PROCEDURE fBooATraite@1100281004(pIntNoEcrCpt@1100281001 : Integer) rBooaTraite : Boolean;
+    VAR
+      "lRecG/LEntryTest"@1100281000 : Record 17;
+      lRecSourceCode@1100281002 : Record 230;
+      "lRecG/LAccount"@1100281003 : Record 15;
+    BEGIN
+      //Controle journal
+      rBooaTraite := FALSE;
+      "lRecG/LEntryTest".GET(pIntNoEcrCpt);
+      IF lRecSourceCode.GET("lRecG/LEntryTest"."Source Code") THEN
+        IF lRecSourceCode."Distribution authorized Dim" = TRUE THEN
+          rBooaTraite := TRUE;
+
+      //Controle compte imputable
+      "lRecG/LAccount".GET("lRecG/LEntryTest"."G/L Account No.");
+      IF "lRecG/LAccount"."Direct Posting" = FALSE THEN
+        rBooaTraite := FALSE;
+      //(A voir  : ‚criture compte de gestion)
+      {IF "lRecG/LAccount"."Income/Balance" = "lRecG/LAccount"."Income/Balance"::Bal THEN
+        rBooaTraite := FALSE;}
+
+      //Controle ‚criture d‚j… trait‚e
+      IF rBooaTraite = TRUE THEN BEGIN
+        "lRecG/LEntryTest".SETCURRENTKEY("lRecG/LEntryTest"."Dimension Entry No.");
+        "lRecG/LEntryTest".SETRANGE("Dimension Entry No.",pIntNoEcrCpt);
+        IF "lRecG/LEntryTest".FINDFIRST THEN
+          rBooaTraite := FALSE;
+      END;
+
+      EXIT(rBooaTraite)
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 07/03/11 @a CAP.JC @v IMH6.01.152 @s Gestion Analytique
+          @c g‚n‚ration de la feuille de r‚partition */
+    }
+    END.
+  }
+}

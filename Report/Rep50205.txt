@@ -1,0 +1,228 @@
+OBJECT Report 50205 Mantis 3166
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:03:11;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    ProcessingOnly=Yes;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50109;
+        DataItemTableView=WHERE(Document Type=CONST(Invoice));
+        OnPreDataItem=BEGIN
+                        SETRANGE("Document No.", '');
+
+                        TotalCounter := COUNT;
+                        CurrentCounter := 0;
+                        ModuloCounter := ROUND(TotalCounter * 5 / 100,1,'>');
+
+                        WDialog.OPEN(Text001);
+
+                        ExportHeaderToExcel;
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lPurchHeader@1100281000 : Record 38;
+                           lPurchInvHeader@1100281001 : Record 122;
+                           lToInsert@1100281002 : Boolean;
+                           lContact@1100281003 : Record 5050;
+                           lVendorNo@1100281004 : Code[20];
+                         BEGIN
+                           CurrentCounter += 1;
+                           IF CurrentCounter MOD ModuloCounter =  1 THEN BEGIN
+                             WDialog.UPDATE(1,ROUND(CurrentCounter / TotalCounter * 9999,1));
+                           END;
+
+                           //lPurchaseHeader.setcurretkey("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+                           lPurchHeader.RESET;
+                           lPurchHeader.SETCURRENTKEY("Document Type","Buy-from Vendor No.","No."); //IMH14.ST
+                           lPurchHeader.SETRANGE("Document Type",lPurchHeader."Document Type"::Invoice);
+                           lPurchHeader.SETRANGE("Vendor Invoice No.","Vendor Invoice No.");
+                           lPurchHeader.SETRANGE("Buy-from Vendor No.", "Contact No."); //IMH14.ST
+
+                           IF lPurchHeader.FINDFIRST THEN BEGIN
+                             InsertRow(RowNo,8,lPurchHeader."No.",'','');
+                             InsertRow(RowNo,9,lPurchHeader."Service No.",'','');
+                             InsertRow(RowNo,10,lPurchHeader."Service Header No.",'','');
+                             InsertRow(RowNo,11,FORMAT(lPurchHeader."Intervention Line No."),'','');
+                             InsertRow(RowNo,12,FORMAT(lPurchHeader.Amount),'','');
+                             InsertRow(RowNo,13,FORMAT(lPurchHeader."Amount Including VAT"),'','');
+                             lToInsert := TRUE;
+                           END;
+
+                           IF NOT lToInsert THEN BEGIN
+                             lPurchInvHeader.RESET;
+                             lPurchInvHeader.SETCURRENTKEY("Buy-from Vendor No."); //IMH14.ST
+                             lPurchInvHeader.SETRANGE("Vendor Invoice No.","Vendor Invoice No.");
+                             lPurchInvHeader.SETRANGE("Buy-from Vendor No.", "Document Queue History"."Contact No."); //IMH14.ST
+
+                             IF lPurchInvHeader.FINDFIRST THEN BEGIN
+                               InsertRow(RowNo,8,lPurchInvHeader."No.",'','');
+                               InsertRow(RowNo,9,lPurchInvHeader."Service No.",'','');
+                               InsertRow(RowNo,10,lPurchInvHeader."Service Header No.",'','');
+                               InsertRow(RowNo,11,FORMAT(lPurchInvHeader."Intervention Line No."),'','');
+                               InsertRow(RowNo,12,FORMAT(lPurchInvHeader.Amount),'','');
+                               InsertRow(RowNo,13,FORMAT(lPurchInvHeader."Amount Including VAT"),'','');
+                               lToInsert := TRUE;
+                             END;
+                           END;
+
+                           //IF lToInsert THEN BEGIN
+                             InsertRow(RowNo,1,"Document Queue History"."Service No.",'','');
+                             InsertRow(RowNo,2,"Document Queue History"."Service Header No.",'','');
+                             InsertRow(RowNo,3,FORMAT("Document Queue History"."Service Intervention Line No."),'','');
+                             InsertRow(RowNo,4,"Document Queue History"."Contact No.",'','');
+                             InsertRow(RowNo,5,"Document Queue History"."Vendor Invoice No.",'','');
+                             InsertRow(RowNo,6,FORMAT("Document Queue History".Amount),'','');
+                             InsertRow(RowNo,7,FORMAT("Document Queue History"."Amount Including VAT"),'','');
+                             InsertRow(RowNo,14,"Document Queue History"."Flow Code",'','');
+                             InsertRow(RowNo,15,FORMAT("Document Queue History"."Entry No."),'','');
+                             RowNo += 1;
+                           //END;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         WDialog.CLOSE;
+                         ViewExcel;
+                       END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      TotalCounter@1100281003 : Integer;
+      CurrentCounter@1100281002 : Integer;
+      ModuloCounter@1100281001 : Integer;
+      WDialog@1100281000 : Dialog;
+      Text001@1100281004 : TextConst 'FRA=Traitement\@1@@@@@@@@@@@@@@@@@@@';
+      ExcelBuffer@1100281018 : TEMPORARY Record 370;
+      Window@1100281017 : Dialog;
+      Filters@1100281016 : Text[1024];
+      ExcelTemplatePath@1100281015 : Text[250];
+      ExcelSheetName@1100281014 : Text[50];
+      StartRowNo@1100281013 : Integer;
+      StartColNo@1100281012 : Integer;
+      RowNo@1100281011 : Integer;
+      ColNo@1100281010 : Integer;
+      StartDate@1100281009 : Date;
+      EndDate@1100281008 : Date;
+      TotalCpt@1100281007 : Integer;
+      Cpt@1100281006 : Integer;
+      CurrCpt@1100281005 : Integer;
+
+    PROCEDURE ExportHeaderToExcel@1100281001();
+    VAR
+      lClaimRate@1100281000 : Decimal;
+      lEntryNo@1100281001 : Integer;
+      lDiff@1100281002 : Decimal;
+      lTotalInterv@1100281003 : Integer;
+      lTotalClaims@1100281004 : Integer;
+      lCode1Txt@1100281005 : Text[50];
+    BEGIN
+      RowNo := 1;
+      InsertRow(RowNo,1,'Nø service GED','','');
+      InsertRow(RowNo,2,'Nø Ligne produit GED','','');
+      InsertRow(RowNo,3,'Nø Intervention GED','','');
+      InsertRow(RowNo,4,'Nø Prestataire','','');
+      InsertRow(RowNo,5,'Nø facture fournisseur','','');
+      InsertRow(RowNo,6,'Montant HT GED','','');
+      InsertRow(RowNo,7,'Montant TTC GED','','');
+      InsertRow(RowNo,8,'Nø facture','','');
+      InsertRow(RowNo,9,'Nø service','','');
+      InsertRow(RowNo,10,'Nø Ligne produit','','');
+      InsertRow(RowNo,11,'Nø Intervention','','');
+      InsertRow(RowNo,12,'Montant HT','','');
+      InsertRow(RowNo,13,'Montant TTC','','');
+
+      InsertRow(RowNo,14,'Code flux','','');
+      InsertRow(RowNo,15,'Nø s‚quence flux','','');
+
+
+      RowNo := 2;
+      ColNo := 1;
+    END;
+
+    PROCEDURE InsertRow@1100281004(RowNo@1000000000 : Integer;ColumnNo@1000000001 : Integer;CellValue@1000000002 : Text[250];CellFormula@1100281000 : Text[250];NbFormat@1000000003 : Text[30]);
+    BEGIN
+      ExcelBuffer.INIT;
+      ExcelBuffer.VALIDATE("Row No.",RowNo);
+      ExcelBuffer.VALIDATE("Column No.",ColumnNo);
+      ExcelBuffer."Cell Value as Text" := CellValue;
+      ExcelBuffer.NumberFormat := NbFormat;
+      ExcelBuffer.Formula := CellFormula; //'';
+      ExcelBuffer.INSERT;
+    END;
+
+    PROCEDURE GetCurrCellID@1100281000() : Text[20];
+    BEGIN
+      EXIT(ExcelBuffer.xlColID + ExcelBuffer.xlRowID);
+    END;
+
+    PROCEDURE ViewExcel@1000000002();
+    BEGIN
+      ExcelBuffer.CreateBook;
+
+      ExcelBuffer.CreateSheet('Page 1','Page 1','','');
+      ExcelBuffer.GiveUserControl;
+      CLEAR(ExcelBuffer);
+    END;
+
+    PROCEDURE CreateExcelBuffer@1000000004();
+    BEGIN
+      ExcelBuffer.DELETEALL;
+      CLEAR(ExcelBuffer);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 21/05/12 @a Isat.ZW @v IMH6.01.146 @s Facturation @h 3166 */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

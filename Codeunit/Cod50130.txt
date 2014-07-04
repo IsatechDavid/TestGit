@@ -1,0 +1,710 @@
+OBJECT Codeunit 50130 EAI Sent IMA Action
+{
+  OBJECT-PROPERTIES
+  {
+    Date=16/04/14;
+    Time=14:33:51;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 5050=rm,
+                TableData 50000=rm,
+                TableData 50011=r,
+                TableData 50075=r,
+                TableData 50137=r,
+                TableData 8016700=r,
+                TableData 8016706=r;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100481001 : TextConst 'ENU=%1 %2 %3 does not exist.;FRA=%1 %2 %3 n''existe pas.';
+      Error002@1100481000 : TextConst 'ENU=%1 %2 has no settings for EAI Act %3.;FRA=Le %1 %2 n''est pas configur‚ pour l''acte EAI %3.';
+      Error003@1100481002 : TextConst 'ENU=No %2 found for EAI Act %2.;FRA=Aucun %1 trouv‚ pour %2 %3.';
+      EAISetup@1100281000 : Record 8016700;
+      EAIActMgt@1180044000 : Codeunit 8016703;
+      Error004@1100481005 : TextConst 'ENU=No %2 found for EAI Act %2.;FRA=Le document a d‚j… ‚t‚ envoy‚ par EDI.';
+      Error005@1100281001 : TextConst 'ENU=Invoicing rules are not configured for corporate no. %1, region %2, service order type %3, date %4.;FRA=La matrice de facturation n''est pas configur‚e pour grand compte %1, r‚gion %2, type produit %3, date %4.';
+
+    PROCEDURE CreateSalesOrder@1100481006(pServHeader@1100481000 : Record 5900;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lSalesHeader@1100481004 : Record 36;
+      lCont@1100281002 : Record 5050;
+      lRecRef@1100481006 : RecordRef;
+      lContRecRef@1100281004 : RecordRef;
+      lEAIDocEntryMgt@1100281001 : Codeunit 8016707;
+      lEAIPartnerMgt@1100281000 : Codeunit 8016706;
+      lEAISendSynchroAction@1100281003 : Codeunit 8016730;
+    BEGIN
+      IF NOT ReadEAISetup THEN
+        EXIT(FALSE);
+
+      IF (EAISetup."IMA Order Act Type" = '') OR (EAISetup."IMA Order Act Code" = '') THEN
+        IF pShowError THEN BEGIN
+          EAISetup.TESTFIELD("IMA Order Act Type");
+          EAISetup.TESTFIELD("IMA Order Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EAISetup."IMA Order Act Type",EAISetup."IMA Order Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(DATABASE::"Service Header",pServHeader."Document Type",pServHeader."No.",
+                                            lEAIAct."EAI Act Type Code",lEAIAct.Code) THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //on v‚rifie que le client factur‚ … est param‚tr‚ pour l'act EAI
+      {**
+      IF EDITools.GetGLNByCustomer(pSalesInvoiceHeader."Bill-to Customer No.",lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,pSalesInvoiceHeader.FIELDCAPTION("Bill-to Customer No."),pSalesInvoiceHeader."Bill-to Customer No.",lEAIAct.
+      Code)
+        ELSE
+          EXIT(FALSE);
+      **}
+
+      //<<IMH04.PC
+      {
+      IF lCont.GET(pServHeader."Contact No.") THEN BEGIN
+        IF NOT lCont."Synchronization IMA Service" THEN BEGIN
+          lCont."Synchronization IMA Service" := TRUE;
+          lCont.MODIFY;
+          lContRecRef.GETTABLE(lCont);
+          lEAISendSynchroAction.LogInsertion(lContRecRef);
+        END;
+      END;
+      }
+      // 0 = Contact
+      SynchroniseInfos(
+        pServHeader."Corporate No.",
+        pServHeader."Service Order Type",
+        pServHeader."Corporate Region Code",
+        0,
+        pServHeader."Contact No.");
+      //>>IMH04.PC
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pServHeader);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code, pServHeader."Service No.");
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateProviderSalesOrder@1100281009(pServHeader@1100281005 : Record 5900;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lProviderSetup@1100281007 : Record 50011;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lSalesHeader@1100481004 : Record 36;
+      lServIntervLine@1100281000 : Record 50075;
+      lProvider@1100281001 : Record 50000;
+      lRecRef@1100481006 : RecordRef;
+      lEAIDocEntryMgt@1100281004 : Codeunit 8016707;
+      lEAIPartnerMgt@1100281003 : Codeunit 8016706;
+      lProviderContUpdate@1100281002 : Codeunit 50010;
+      lCommissionPerc@1100281006 : Decimal;
+    BEGIN
+      IF NOT ReadEAISetup THEN
+        EXIT(FALSE);
+
+      IF (EAISetup."IMA Provider Order Act Type" = '') OR
+         (EAISetup."IMA Provider Order Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EAISetup.TESTFIELD("IMA Provider Order Act Type");
+          EAISetup.TESTFIELD("IMA Provider Order Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EAISetup."IMA Provider Order Act Type",EAISetup."IMA Provider Order Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(DATABASE::"Service Header",pServHeader."Document Type",pServHeader."No.",
+                                            lEAIAct."EAI Act Type Code",lEAIAct.Code) THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      lServIntervLine.RESET;
+      lServIntervLine.SETRANGE("Service Header No.",pServHeader."No.");
+      IF NOT lServIntervLine.FINDFIRST THEN
+        EXIT(FALSE);
+
+      lProvider.GET(lServIntervLine."Provider No.");
+
+      IF lProvider."Percentage Commission" = 0 THEN BEGIN
+        lProviderSetup.GET;
+        lCommissionPerc := lProviderSetup."Percentage Commission";
+      END ELSE
+        lCommissionPerc := lProvider."Percentage Commission";
+
+      IF lCommissionPerc <> 0 THEN BEGIN
+          // 1 = Prestataire
+          SynchroniseInfos(
+            lServIntervLine."Corporate No.",
+            lServIntervLine."Service Order Type",
+            lServIntervLine."Corporate Region Code",
+            1,
+            lServIntervLine."Provider No.");
+
+        //Insertion dans la file d'‚mission
+        lRecRef.GETTABLE(pServHeader);
+        InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code, pServHeader."Service No.");
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateProviderSalesOrder2@1100281005(pServIntervMinutes@1100481000 : Record 50084;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lProviderSetup@1100281005 : Record 50011;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lSalesHeader@1100481004 : Record 36;
+      lServIntervLine@1100281000 : Record 50075;
+      lProvider@1100281001 : Record 50000;
+      lRecRef@1100481006 : RecordRef;
+      lEAIDocEntryMgt@1100281004 : Codeunit 8016707;
+      lEAIPartnerMgt@1100281003 : Codeunit 8016706;
+      lProviderContUpdate@1100281002 : Codeunit 50010;
+      lCommissionPerc@1100281006 : Decimal;
+    BEGIN
+      IF NOT ReadEAISetup THEN
+        EXIT(FALSE);
+
+      IF (EAISetup."IMA Provider Order Act Type" = '') OR
+         (EAISetup."IMA Provider Order Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EAISetup.TESTFIELD("IMA Provider Order Act Type");
+          EAISetup.TESTFIELD("IMA Provider Order Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EAISetup."IMA Provider Order Act Type",EAISetup."IMA Provider Order Act Code");
+
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+             DATABASE::"Service Intervention Minutes",0,pServIntervMinutes."Service Header No.",
+             lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lServIntervLine.GET(pServIntervMinutes."Service Header No.",pServIntervMinutes."Service Intervention Line No.");
+      lProvider.GET(lServIntervLine."Provider No.");
+
+      IF lProvider."Percentage Commission" = 0 THEN BEGIN
+        lProviderSetup.GET;
+        lCommissionPerc := lProviderSetup."Percentage Commission";
+      END ELSE
+        lCommissionPerc := lProvider."Percentage Commission";
+
+      IF lCommissionPerc <> 0 THEN BEGIN
+        IF lServIntervLine.GET(pServIntervMinutes."Service Header No.",pServIntervMinutes."Service Intervention Line No.") THEN BEGIN
+          // 1 = Prestataire
+          SynchroniseInfos(
+            lServIntervLine."Corporate No.",
+            lServIntervLine."Service Order Type",
+            lServIntervLine."Corporate Region Code",
+            1,
+            lServIntervLine."Provider No.");
+        END;
+
+        //Insertion dans la file d'‚mission
+        lRecRef.GETTABLE(pServIntervMinutes);
+        InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code, pServIntervMinutes."Service No.");
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateSalesReturn@1100281010(pServHeader@1100281005 : Record 5900;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lSalesHeader@1100481004 : Record 36;
+      lServIntervLine@1100281000 : Record 50075;
+      lProvider@1100281001 : Record 50000;
+      lRecRef@1100481006 : RecordRef;
+      lEAIDocEntryMgt@1100281004 : Codeunit 8016707;
+      lEAIPartnerMgt@1100281003 : Codeunit 8016706;
+      lProviderContUpdate@1100281002 : Codeunit 50010;
+    BEGIN
+      IF NOT ReadEAISetup THEN
+        EXIT(FALSE);
+
+      IF (EAISetup."IMA Return Act Type" = '') OR
+         (EAISetup."IMA Return Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EAISetup.TESTFIELD("IMA Return Act Type");
+          EAISetup.TESTFIELD("IMA Return Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EAISetup."IMA Return Act Type",EAISetup."IMA Return Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+             DATABASE::"Service Header",pServHeader."Document Type",pServHeader."No.",
+             lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //<<IMH06.ISAT.EBA
+      // 0 = Contact
+      SynchroniseInfos(
+        pServHeader."Corporate No.",
+        pServHeader."Service Order Type",
+        pServHeader."Corporate Region Code",
+        0,
+        pServHeader."Contact No.");
+      //>>IMH06.ISAT.EBA
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pServHeader);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code, pServHeader."Service No.");
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateSalesReturn2@1100281000(pServIntervMinutes@1100481000 : Record 50084;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lSalesHeader@1100481004 : Record 36;
+      lServIntervLine@1100281000 : Record 50075;
+      lProvider@1100281001 : Record 50000;
+      lRecRef@1100481006 : RecordRef;
+      lEAIDocEntryMgt@1100281004 : Codeunit 8016707;
+      lEAIPartnerMgt@1100281003 : Codeunit 8016706;
+      lProviderContUpdate@1100281002 : Codeunit 50010;
+    BEGIN
+      IF NOT ReadEAISetup THEN
+        EXIT(FALSE);
+
+      IF (EAISetup."IMA Return Act Type" = '') OR
+         (EAISetup."IMA Return Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EAISetup.TESTFIELD("IMA Return Act Type");
+          EAISetup.TESTFIELD("IMA Return Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EAISetup."IMA Return Act Type",EAISetup."IMA Return Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+             DATABASE::"Service Intervention Minutes",0,pServIntervMinutes."Service Header No.",
+             lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pServIntervMinutes);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code, pServIntervMinutes."Service No.");
+
+      //**eb
+      //lServIntervLine.GET(pServIntervMinutes."Service Header No.",pServIntervMinutes."Service Intervention Line No.");
+      //lProvider.GET(lServIntervLine."Provider No.");
+
+      //IF lProvider."Percentage Commission" <> 0 THEN BEGIN
+      //  IF lServIntervLine.GET(pServIntervMinutes."Service Header No.",pServIntervMinutes."Service Intervention Line No.") THEN BEGIN
+      //    // 1 = Prestataire
+      //    SynchroniseInfos(
+      //      lServIntervLine."Corporate No.",
+      //      lServIntervLine."Service Order Type",
+      //      lServIntervLine."Corporate Region Code",
+      //      1,
+      //      lServIntervLine."Provider No.");
+      //  END;
+
+      //  lEAIAct.GET(EAISetup."IMA Provider Order Act Type",EAISetup."IMA Provider Order Act Code");
+      //  InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code, pServIntervMinutes."Service No.");
+      //END;
+      //**
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE ReadEAISetup@1100481003() : Boolean;
+    BEGIN
+      IF EAISetup.GET THEN BEGIN
+      //<<IMH03.ST
+      //  EAISetup.LOCKTABLE;
+      //  EAISetup.FINDFIRST;
+      //>>IMH03.ST
+        EXIT(TRUE);
+      END ELSE
+        EXIT(FALSE);
+    END;
+
+    PROCEDURE AutoSendMessage@1100481002() : Boolean;
+    BEGIN
+      {**eb
+      IF ReadEDISetup THEN
+        EXIT(EDISetup."Auto. Message Creation")
+      ELSE
+        EXIT(FALSE)
+      **}
+    END;
+
+    LOCAL PROCEDURE InsertEAIMessageQueue@1100481014(pRecRef@1100481008 : RecordRef;pEAIPartner@1100481000 : Code[20];pEAIActType@1100481009 : Code[20];pEAIAct@1100481007 : Code[20];pServiceNo@1100281000 : Code[20]);
+    VAR
+      lEAIProcessMgt@1100481006 : Codeunit 8016702;
+      lEAIMQBufferMgt@1100281006 : Codeunit 8016708;
+      lEAIActMgt@1100281003 : Codeunit 8016703;
+      lEAIMessageQueue@1100481005 : Record 8016704;
+      lEAIMessageQueueBuffer@1100481002 : TEMPORARY Record 8016720;
+      lEAIAct@1100481004 : Record 8016706;
+      lEAIProcessAct@1100481010 : Record 8016714;
+    BEGIN
+      // cr‚ation d'un message dans la file d'attente d'‚mission de synchro
+      lEAIAct.GET(pEAIActType,pEAIAct);
+
+      lEAIProcessMgt.GetProcessActFromEAIAct(lEAIAct,lEAIProcessAct);
+      lEAIActMgt.GetMQFromEAIAct(lEAIAct,lEAIMessageQueue);
+
+      lEAIMessageQueueBuffer.INIT;
+
+      lEAIMessageQueueBuffer.RecordId := pRecRef.RECORDID;
+
+      lEAIMessageQueueBuffer."EAI Act Type Code" := pEAIActType;
+      lEAIMessageQueueBuffer."EAI Act Code"      := pEAIAct;
+      lEAIMessageQueueBuffer."EAI Partner Code"  := pEAIPartner;
+      lEAIMessageQueueBuffer."Act Priority"      := lEAIAct."Act Priority";
+      lEAIMessageQueueBuffer."EAI MQ Code"       := lEAIMessageQueue.Code;
+      lEAIMessageQueueBuffer."EAI NAS Code"      := lEAIMessageQueue."EAI NAS Code";
+
+      lEAIMessageQueueBuffer."EAI Process Code"  := lEAIProcessAct."EAI Process Code";
+
+      lEAIMessageQueueBuffer."Date Creation" := WORKDATE;
+      lEAIMessageQueueBuffer."Time Creation" := TIME;
+      lEAIMessageQueueBuffer."User Creation" := USERID;
+      lEAIMessageQueueBuffer."Service Header No." := pServiceNo; //IMH03.ST
+
+      lEAIMessageQueueBuffer.INSERT;
+
+      //Sauvegarde dans la file de message
+      lEAIMQBufferMgt.InsertSentBufferToMQ(lEAIMessageQueue,lEAIMessageQueueBuffer);
+    END;
+
+    PROCEDURE SynchroniseInfos@1100281002(pCorporateNo@1100281008 : Code[20];pServiceOrderType@1100281007 : Code[20];pCorporateRegionCode@1100281009 : Code[20];pType@1100281002 : 'Contact,Provider';pCode@1100281001 : Code[20]);
+    VAR
+      lInvoicingMatrixSetup@1100281010 : Record 50137;
+      lProvider@1100281000 : Record 50000;
+      lCont@1100281006 : Record 5050;
+      lProviderContUpdate@1100281003 : Codeunit 50010;
+      lEAISendSynchroAction@1100281004 : Codeunit 8016730;
+      lRecRef@1100281005 : RecordRef;
+    BEGIN
+      // IMH04.PC
+      // Provoque la syncrhonisation
+
+      lInvoicingMatrixSetup.SETCURRENTKEY("Corporate No.","Service Order Type","Corporate Region Code","Entry No.");
+      lInvoicingMatrixSetup.SETRANGE("Corporate No.",pCorporateNo);
+      lInvoicingMatrixSetup.SETRANGE("Service Order Type",pServiceOrderType);
+      lInvoicingMatrixSetup.SETRANGE("Corporate Region Code",pCorporateRegionCode);
+      lInvoicingMatrixSetup.SETRANGE("IMA S. Sales Order Creation", TRUE);
+      CASE pType OF
+        pType::Contact : BEGIN
+          IF lCont.GET(pCode) THEN BEGIN
+            lInvoicingMatrixSetup.SETRANGE("Invoicing Type",lInvoicingMatrixSetup."Invoicing Type"::Member);
+            IF NOT lInvoicingMatrixSetup.ISEMPTY THEN BEGIN
+              IF NOT lCont."Synchronization IMA Service" THEN BEGIN
+                lCont."Synchronization IMA Service" := TRUE;
+                lCont.MODIFY;
+                lRecRef.GETTABLE(lCont);
+                lEAISendSynchroAction.LogInsertion(lRecRef);
+              END;
+            END;
+          END;
+        END;
+        pType::Provider : BEGIN
+          IF lProvider.GET(pCode) THEN BEGIN
+            lInvoicingMatrixSetup.SETRANGE("Invoicing Type",lInvoicingMatrixSetup."Invoicing Type"::Provider);
+            IF NOT lInvoicingMatrixSetup.ISEMPTY THEN BEGIN
+              IF NOT lProvider."Synchronization IMA Service" THEN BEGIN
+                lProvider."Synchronization IMA Service" := TRUE;
+                lProvider.MODIFY(TRUE);
+
+                lProviderContUpdate.OnModify(lProvider);
+              END;
+            END;
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE SendToIMA@1100281001(VAR pServiceHeader@1100281000 : Record 5900;Resend@1100281002 : Boolean);
+    VAR
+      lInvMatrixSetup@1100281001 : Record 50137;
+      lRecordRef@1100281005 : RecordRef;
+      lSalesReferenceDate@1100281003 : Date;
+      lFindRecord@1100281004 : Boolean;
+    BEGIN
+      WITH pServiceHeader DO BEGIN
+        //CALCFIELDS("Service Creation Date");  //IMH10 d‚sactiv‚
+      //  lService.GET(pServiceHeader."Service No.");
+        lInvMatrixSetup.SETRANGE("Corporate No.","Corporate No.");
+        lInvMatrixSetup.SETRANGE("Service Order Type","Service Order Type");
+        lInvMatrixSetup.SETRANGE("Corporate Region Code","Corporate Region Code");
+        //<<IMH08.ISAT.RC
+        //lInvMatrixSetup.SETFILTER("Starting Date",'''''|<=%1',DT2DATE("Service Creation Date"));
+        //lInvMatrixSetup.SETFILTER("Ending Date",'''''|>=%1',DT2DATE("Service Creation Date"));
+        //>>IMH08.ISAT.RC
+        lInvMatrixSetup.SETRANGE("IMA S. Sales Order Creation", TRUE);
+        //<<IMH05.ISAT.EBA
+        lInvMatrixSetup.SETRANGE(Enable,TRUE);
+        lInvMatrixSetup.SETRANGE("Invoicing Type",lInvMatrixSetup."Invoicing Type"::Member);
+        //>>IMH05.ISAT.EBA
+        //<<IMH08.ISAT.RC
+        lSalesReferenceDate:=0D ;
+        lFindRecord:=FALSE;
+        lRecordRef.GETTABLE(pServiceHeader);
+        IF  lInvMatrixSetup.FINDSET THEN
+        REPEAT
+          lSalesReferenceDate:=lInvMatrixSetup.GetSalesReferenceDate(lRecordRef);
+          IF ((lInvMatrixSetup."Starting Date" = 0D ) OR  (lInvMatrixSetup."Starting Date" <= lSalesReferenceDate )) AND
+             ((lInvMatrixSetup."Ending Date" = 0D ) OR  (lInvMatrixSetup."Ending Date" >= lSalesReferenceDate )) THEN
+            lFindRecord:= TRUE
+        UNTIL (lFindRecord=TRUE) OR (lInvMatrixSetup.NEXT=0);
+        IF NOT lFindRecord THEN
+           ERROR(STRSUBSTNO(Error005, "Corporate No.", "Corporate Region Code", "Service Order Type",lSalesReferenceDate));
+        //IF NOT lInvMatrixSetup.FINDSET THEN
+        //  ERROR(STRSUBSTNO(Error005, "Corporate No.", "Corporate Region Code", "Service Order Type",DT2DATE("Service Creation Date")));
+
+        lInvMatrixSetup.SETFILTER("Starting Date",'''''|<=%1',lSalesReferenceDate);
+        lInvMatrixSetup.SETFILTER("Ending Date",'''''|>=%1',lSalesReferenceDate);
+        IF lInvMatrixSetup.FINDSET THEN
+
+        //>>IMH08.ISAT.RC
+        REPEAT
+          CreateSalesOrder(pServiceHeader,TRUE,Resend);
+          pServiceHeader."Order Created" := TRUE;
+        UNTIL lInvMatrixSetup.NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE SendReturnToIMA@1100281003(VAR pServiceHeader@1100281000 : Record 5900;Resend@1100281002 : Boolean);
+    VAR
+      lInvMatrixSetup@1100281001 : Record 50137;
+      lRecordRef@1100281006 : RecordRef;
+      lSalesReferenceDate@1100281003 : Date;
+      lFindRecord@1100281004 : Boolean;
+    BEGIN
+      //<<IMH05.ISAT.EBA
+      WITH pServiceHeader DO BEGIN
+        //CALCFIELDS("Service Creation Date");   //IMH10 d‚sactiv‚
+        lInvMatrixSetup.SETRANGE("Corporate No.","Corporate No.");
+        lInvMatrixSetup.SETRANGE("Service Order Type","Service Order Type");
+        lInvMatrixSetup.SETRANGE("Corporate Region Code","Corporate Region Code");
+        //<<IMH08.ISAT.RC
+        //lInvMatrixSetup.SETFILTER("Starting Date",'=%1|<=%2',0D,DT2DATE("Service Creation Date"));
+        //lInvMatrixSetup.SETFILTER("Ending Date",'=%1|>=%2',0D,DT2DATE("Service Creation Date"));
+        //>>IMH08.ISAT.RC
+        lInvMatrixSetup.SETRANGE("IMA S. Sales Order Creation", TRUE);
+        lInvMatrixSetup.SETRANGE(Enable,TRUE);
+        lInvMatrixSetup.SETRANGE("Invoicing Type",lInvMatrixSetup."Invoicing Type"::Member);
+        //<<IMH08.ISAT.RC
+        lSalesReferenceDate:=0D ;
+        lFindRecord:=FALSE;
+        lRecordRef.GETTABLE(pServiceHeader);
+        IF  lInvMatrixSetup.FINDSET THEN
+        REPEAT
+          lSalesReferenceDate:=lInvMatrixSetup.GetSalesReferenceDate(lRecordRef);
+          IF ((lInvMatrixSetup."Starting Date" = 0D ) OR  (lInvMatrixSetup."Starting Date" <= lSalesReferenceDate )) AND
+             ((lInvMatrixSetup."Ending Date" = 0D ) OR  (lInvMatrixSetup."Ending Date" >= lSalesReferenceDate )) THEN
+            lFindRecord:= TRUE
+        UNTIL (lFindRecord=TRUE) OR (lInvMatrixSetup.NEXT=0);
+        IF NOT lFindRecord THEN
+          ERROR(STRSUBSTNO(Error005, "Corporate No.", "Corporate Region Code", "Service Order Type",lSalesReferenceDate));
+        //IF NOT lInvMatrixSetup.FINDSET THEN
+        //  ERROR(STRSUBSTNO(Error005, "Corporate No.", "Corporate Region Code", "Service Order Type",DT2DATE("Service Creation Date")));
+
+        lInvMatrixSetup.SETFILTER("Starting Date",'=%1|<=%2',0D,lSalesReferenceDate);
+        lInvMatrixSetup.SETFILTER("Ending Date",'=%1|>=%2',0D,lSalesReferenceDate);
+        IF lInvMatrixSetup.FINDSET THEN
+
+        //>>IMH08.ISAT.RC
+        REPEAT
+          CreateSalesReturn(pServiceHeader,TRUE,Resend);
+          //pServiceHeader."Order Created" := TRUE;
+        UNTIL lInvMatrixSetup.NEXT = 0;
+      END;
+      //>>IMH05.ISAT.EBA
+    END;
+
+    PROCEDURE SendFromSrvHeader@1100281007(VAR pServiceHeader@1100281000 : Record 5900;pResend@1100281002 : Boolean;pBeneficiary@1100281003 : Boolean;pSalesOrder@1100281004 : Boolean);
+    VAR
+      lInvMatrixSetup@1100281001 : Record 50137;
+      lRecordRef@1100281007 : RecordRef;
+      lSalesReferenceDate@1100281005 : Date;
+      lFindRecord@1100281006 : Boolean;
+    BEGIN
+      //<<IMH05.ISAT.EBA
+      WITH pServiceHeader DO BEGIN
+        //CALCFIELDS("Service Creation Date");   //IMH10 d‚sactiv‚
+        lInvMatrixSetup.SETRANGE("Corporate No.","Corporate No.");
+        lInvMatrixSetup.SETRANGE("Service Order Type","Service Order Type");
+        lInvMatrixSetup.SETRANGE("Corporate Region Code","Corporate Region Code");
+        //<<IMH08.ISAT.RC
+        //lInvMatrixSetup.SETFILTER("Starting Date",'=%1|<=%2',0D,DT2DATE("Service Creation Date"));
+        //lInvMatrixSetup.SETFILTER("Ending Date",'=%1|>=%2',0D,DT2DATE("Service Creation Date"));
+        //>>IMH08.ISAT.RC
+        lInvMatrixSetup.SETRANGE("IMA S. Sales Order Creation", TRUE);
+        lInvMatrixSetup.SETRANGE(Enable,TRUE);
+        IF pBeneficiary THEN
+          lInvMatrixSetup.SETRANGE("Invoicing Type",lInvMatrixSetup."Invoicing Type"::Member)
+        ELSE
+          lInvMatrixSetup.SETRANGE("Invoicing Type",lInvMatrixSetup."Invoicing Type"::Provider);
+
+        //<<IMH08.ISAT.RC
+        lSalesReferenceDate:=0D ;
+        lFindRecord:=FALSE;
+        lRecordRef.GETTABLE(pServiceHeader);
+        IF  lInvMatrixSetup.FINDSET THEN
+        REPEAT
+          lSalesReferenceDate:=lInvMatrixSetup.GetSalesReferenceDate(lRecordRef);
+          IF ((lInvMatrixSetup."Starting Date" = 0D ) OR  (lInvMatrixSetup."Starting Date" <= lSalesReferenceDate )) AND
+             ((lInvMatrixSetup."Ending Date" = 0D ) OR  (lInvMatrixSetup."Ending Date" >= lSalesReferenceDate )) THEN
+            lFindRecord:= TRUE
+        UNTIL (lFindRecord=TRUE) OR (lInvMatrixSetup.NEXT=0);
+        IF NOT lFindRecord THEN
+          EXIT;
+
+        //IF lInvMatrixSetup.ISEMPTY THEN
+        //  EXIT;
+        //>>IMH08.ISAT.RC
+
+        IF pBeneficiary THEN BEGIN
+          IF pSalesOrder THEN BEGIN
+            //  Facturation soci‚taire ( beneficiaire)
+             CreateSalesOrder(pServiceHeader,TRUE,pResend);
+            pServiceHeader."Order Created" := TRUE;
+          END ELSE
+            CreateSalesReturn(pServiceHeader,TRUE,pResend);
+        END ELSE BEGIN
+        // Facturation achat prestataire
+          IF pSalesOrder THEN
+            CreateProviderSalesOrder(pServiceHeader,TRUE,pResend);
+        END;
+      END;
+      //>>IMH05.ISAT.EBA
+    END;
+
+    PROCEDURE SendFromSrvIntervMin@1100281008(VAR pServIntervMinutes@1100281005 : Record 50084;pResend@1100281002 : Boolean;pBeneficiary@1100281003 : Boolean;pSalesOrder@1100281004 : Boolean);
+    VAR
+      lServiceHeader@1100281000 : Record 5900;
+      lInvMatrixSetup@1100281001 : Record 50137;
+      lRecordRef@1100281008 : RecordRef;
+      lFindRecord@1100281007 : Boolean;
+      lSalesReferenceDate@1100281006 : Date;
+    BEGIN
+      //<<IMH05.ISAT.EBA
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServIntervMinutes."Service Header No.");
+
+      WITH lServiceHeader DO BEGIN
+        //CALCFIELDS("Service Creation Date");   //IMH10 d‚sactiv‚
+        lInvMatrixSetup.SETRANGE("Corporate No.","Corporate No.");
+        lInvMatrixSetup.SETRANGE("Service Order Type","Service Order Type");
+        lInvMatrixSetup.SETRANGE("Corporate Region Code","Corporate Region Code");
+        //<<IMH08.ISAT.RC
+        //lInvMatrixSetup.SETFILTER("Starting Date",'=%1|<=%2',0D,DT2DATE("Service Creation Date"));
+        //lInvMatrixSetup.SETFILTER("Ending Date",'=%1|>=%2',0D,DT2DATE("Service Creation Date"));
+        //>>IMH08.ISAT.RC
+        lInvMatrixSetup.SETRANGE("IMA S. Sales Order Creation", TRUE);
+        lInvMatrixSetup.SETRANGE(Enable,TRUE);
+        IF pBeneficiary THEN
+          lInvMatrixSetup.SETRANGE("Invoicing Type",lInvMatrixSetup."Invoicing Type"::Member)
+        ELSE
+          lInvMatrixSetup.SETRANGE("Invoicing Type",lInvMatrixSetup."Invoicing Type"::Provider);
+
+
+        //<<IMH08.ISAT.RC
+        lSalesReferenceDate:=0D ;
+        lFindRecord:=FALSE;
+        //<<IMH09.PC
+        //lRecordRef.GETTABLE(lServiceHeader);
+        lRecordRef.GETTABLE(pServIntervMinutes);
+        //>>IMH09.PC
+        IF  lInvMatrixSetup.FINDSET THEN
+        REPEAT
+          lSalesReferenceDate:=lInvMatrixSetup.GetSalesReferenceDate(lRecordRef);
+          IF ((lInvMatrixSetup."Starting Date" = 0D ) OR  (lInvMatrixSetup."Starting Date" <= lSalesReferenceDate )) AND
+             ((lInvMatrixSetup."Ending Date" = 0D ) OR  (lInvMatrixSetup."Ending Date" >= lSalesReferenceDate )) THEN
+            lFindRecord:= TRUE
+        UNTIL (lFindRecord=TRUE) OR (lInvMatrixSetup.NEXT=0);
+        IF NOT lFindRecord THEN
+          EXIT;
+
+        //IF lInvMatrixSetup.ISEMPTY THEN
+        //  EXIT;
+        //>>IMH08.ISAT.RC
+
+
+
+        IF pBeneficiary THEN BEGIN
+          IF pSalesOrder THEN BEGIN
+
+          END ELSE
+            CreateSalesReturn2(pServIntervMinutes,TRUE,pResend);
+
+        END ELSE BEGIN
+          IF pSalesOrder THEN
+            CreateProviderSalesOrder2(pServIntervMinutes,TRUE,pResend);
+
+        END;
+      END;
+      //>>IMH05.ISAT.EBA
+    END;
+
+    BEGIN
+    {
+      /** @r IMH10 @d 16/04/14 @a ISAT.ZW @v IMH6.01.5071 @s Tri Service @h 5071
+          @c Ajout date de cr‚ation service passer de flowfield … un champ normal */
+      /** @r IMH09 @d 19/11/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3795 @c Correction */
+      /** @r IMH08 @d 28/08/2012 @a ISAT.RC @v IMH6.01.212 @s Gestion date de reference matrice @h 3795 */
+      /** @r IMH07 @d 20/01/12 @a ISAT.ST @v IMH6.01.159 @s Comptabilit‚ - IMA Service @h 2594
+          @c Ajout permission sur le codeunit :
+          @c   TableData Contact=rm,TableData Provider=rm,TableData Provider Setup=r,TableData Service Intervention Line=r,
+          @c   TableData Invoicing Matrix Setup=r,TableData EAI Setup=r,TableData EAI Act=r */
+      /** @r IMH06 @d 05/12/11 @a ISAT.EBA @v IMH6.01.159 @s Comptabilit‚ - IMA Service @c Gestion synchro */
+      /** @r IMH05 @d 03/10/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service - Service … l'habitat
+          @c Ajout fonction "SendReturnToIMA" */
+      /** @r IMH04 @d 19/09/11 @a ISAT.PC @v IMH6.01.159 @s Comptabilit‚ - IMA Service @c Gestion synchro */
+      /** @r IMH03 @d 12/08/11 @a ISAT.ST @v IMH6.01.159 @s Comptabilit‚ - IMA Service @c corrections */
+      /** @r IMH02 @d 12/07/11 @a ISAT.PC @v IMH6.01.159 @s Comptabilit‚ - IMA Service @c correction*/
+      /** @r IMH01 @d 16/05/11 @a ISAT.EBA @v IMH6.01.159 @s Comptabilit‚ - IMA Service */
+    }
+    END.
+  }
+}

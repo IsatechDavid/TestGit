@@ -1,0 +1,183 @@
+OBJECT Codeunit 8016732 EAI Sent Synchro Generat. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=16/05/11;
+    Time=17:01:39;
+    Modified=Yes;
+    Version List=ISAEAI1.02;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lSentMQBuffer@1000000000 : TEMPORARY Record 8016720;
+          BEGIN
+            lSentMQBuffer := Rec;
+            lSentMQBuffer.INSERT;
+
+            Code(lSentMQBuffer);
+
+            lSentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lSentMQBuffer."XML Source";
+            Rec := lSentMQBuffer;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAISynchroMgt@1100281000 : Codeunit 8016705;
+      EAIXmlMgt@1100281006 : Codeunit 8016710;
+      EAIXmlDocMgt@1100281001 : Codeunit 8016713;
+      EAITools@1100281005 : Codeunit 8016700;
+      EAILogMgt@1000000000 : Codeunit 8016711;
+      Tools@1100281002 : Codeunit 8016602;
+      Warning001@1000000001 : TextConst 'FRA=Aucun champs … synchroniser';
+      Warning002@1000000002 : TextConst 'FRA=Aucun partenaire param‚tr‚';
+
+    PROCEDURE Code@1100281000(VAR pSentMsgBuffer@1100481011 : Record 8016720);
+    VAR
+      lSynchroGroupTable@1100281001 : Record 8016710;
+      lSynchroGroupTableLinks@1180044000 : Record 8016754;
+      lToSynchroGroupTable@1180044006 : Record 8016710;
+      lCurrentLinkTable@1180044001 : Integer;
+      lCurrentLinkAlias@1180044002 : Code[20];
+      lXMLDocument@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLRootNode@1100481003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLDocumentsNode@1100481000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLDocumentNode@1100481001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100481002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lReturnTableName@1100281004 : Text[250];
+      lInStream@1100281005 : InStream;
+      lRecRef@1000000000 : RecordRef;
+      lRecID@1000000002 : RecordID;
+      lxRecRef@1000000001 : RecordRef;
+      lxRecID@1000000003 : RecordID;
+      lToRecRef@1180044005 : RecordRef;
+      lSourceFieldRef@1180044003 : FieldRef;
+      lToFieldRef@1180044004 : FieldRef;
+      lCont@1100281000 : Record 5050;
+    BEGIN
+
+      lSynchroGroupTable.GET(
+        pSentMsgBuffer."Synchro Group Code",
+        pSentMsgBuffer."To Synchronize Table No.",
+        pSentMsgBuffer."Synchro Group Table Alias");
+
+      lRecID := pSentMsgBuffer.RecordId;
+      lRecRef := lRecID.GETRECORD;
+      lxRecID := pSentMsgBuffer.xRecordId;
+      lxRecRef := lxRecID.GETRECORD;
+      lRecRef.LOCKTABLE;
+      IF lRecRef.FIND('=') THEN;
+
+      //<< EAI02
+      //IF (pSentMsgBuffer."Table Action Type" = lSynchroGroupTable."On Modify") AND
+      //   (lSynchroGroupTable."On Modify" = lSynchroGroupTable."On Modify"::"All Fields")
+      IF (pSentMsgBuffer."Table Action Type" = pSentMsgBuffer."Table Action Type"::Modification) AND
+         (lSynchroGroupTable."On Modify" = lSynchroGroupTable."On Modify"::"Selected Fields")
+      //>> EAI02
+      THEN
+        IF NOT EAISynchroMgt.IsExistActionOnFieldActive(lSynchroGroupTable,lRecRef) THEN
+        BEGIN
+          EAILogMgt.AddWarningToSentLog(pSentMsgBuffer."EAI MQ Code",pSentMsgBuffer."EAI Process Code",pSentMsgBuffer.
+      "EAI Act Type Code",
+             pSentMsgBuffer."EAI Act Code",pSentMsgBuffer."Entry No.",Warning001);
+          ERROR(Warning001);
+        END;
+
+      //<<IMH01.ISAT.EBA
+      lCont.INIT;
+      IF pSentMsgBuffer."To Synchronize Table No." = DATABASE::Contact THEN
+        lRecRef.SETTABLE(lCont);
+      EAIXmlDocMgt.SetSynchroIMAService(lCont."Synchronization IMA Service");
+      //>>IMH01.ISAT.EBA
+
+      lReturnTableName := '';
+
+      EAIXmlDocMgt.WriteXMLMessageHeader(lXMLDocument,lXMLNewNode,pSentMsgBuffer,lReturnTableName);
+      EAIXmlDocMgt.AddSynchroInfoToMessageHeader(lXMLDocument,pSentMsgBuffer,lReturnTableName);
+      lXMLRootNode := lXMLDocument.documentElement;
+      EAIXmlDocMgt.WriteXMLDocuments(lXMLRootNode,lXMLDocumentsNode,lReturnTableName);
+      EAIXmlDocMgt.WriteXMLDocument(lXMLDocumentsNode,lXMLDocumentNode,lReturnTableName);
+
+      CASE pSentMsgBuffer."Table Action Type"  OF
+
+        pSentMsgBuffer."Table Action Type"::Insertion :
+        BEGIN
+          EAIXmlDocMgt.WriteXMLKeys(lXMLDocumentNode,lRecRef,lReturnTableName);
+          EAIXmlDocMgt.WriteXMLFields(lXMLDocumentNode,lSynchroGroupTable,lRecRef,lReturnTableName,TRUE);
+        END;
+
+        pSentMsgBuffer."Table Action Type"::Modification :
+        BEGIN
+          EAIXmlDocMgt.WriteXMLKeys(lXMLDocumentNode,lRecRef,lReturnTableName);
+          IF lSynchroGroupTable."On Modify" = lSynchroGroupTable."On Modify"::"All Fields" THEN
+            EAIXmlDocMgt.WriteXMLFields(lXMLDocumentNode,lSynchroGroupTable,lRecRef,lReturnTableName,TRUE)
+          ELSE
+            EAIXmlDocMgt.WriteXMLFields(lXMLDocumentNode,lSynchroGroupTable,lRecRef,lReturnTableName,FALSE);
+        END;
+
+        pSentMsgBuffer."Table Action Type"::Deletion :
+          EAIXmlDocMgt.WriteXMLKeys(lXMLDocumentNode,lRecRef,lReturnTableName);
+
+        pSentMsgBuffer."Table Action Type"::Rename :
+        BEGIN
+          EAIXmlDocMgt.WriteXMLKeys(lXMLDocumentNode,lRecRef,lReturnTableName);
+          EAIXmlDocMgt.WriteXMLOldKeys(lXMLDocumentNode,lxRecRef,lReturnTableName);
+        END;
+
+      END;
+
+      //<<EAI01
+      lSynchroGroupTableLinks.SETRANGE("Synchro Group Code",lSynchroGroupTable."Synchro Group Code");
+      lSynchroGroupTableLinks.SETRANGE("Source Synchro. Table No.",lSynchroGroupTable."To Synchronize Table No.");
+      lSynchroGroupTableLinks.SETRANGE("Source Synchro. Table Alias",lSynchroGroupTable."Synchro Group Table Alias");
+      IF lSynchroGroupTableLinks.FINDSET THEN
+      REPEAT
+        lSynchroGroupTableLinks.SETRANGE("To Synchro. Table No.",lSynchroGroupTableLinks."To Synchro. Table No.");
+        lSynchroGroupTableLinks.SETRANGE("To Synchro Table Alias",lSynchroGroupTableLinks."To Synchro Table Alias");
+        lSourceFieldRef := lRecRef.FIELD(lSynchroGroupTableLinks."Source Field No.");
+        IF lSynchroGroupTableLinks.FINDSET THEN
+          REPEAT
+            lToRecRef.OPEN(lSynchroGroupTableLinks."To Synchro. Table No.");
+            lToFieldRef := lToRecRef.FIELD(lSynchroGroupTableLinks."To Field No.");
+            lToFieldRef.SETRANGE(lSourceFieldRef.VALUE);
+          UNTIL lSynchroGroupTableLinks.NEXT =0;
+        lToSynchroGroupTable.GET(
+           lSynchroGroupTable."Synchro Group Code",
+           lSynchroGroupTable."To Synchronize Table No.",
+           lSynchroGroupTable."Synchro Group Table Alias");
+        IF lToRecRef.FINDSET THEN
+        REPEAT
+          EAIXmlDocMgt.WriteXMLDocument(lXMLDocumentsNode,lXMLDocumentNode,lReturnTableName);
+          EAIXmlDocMgt.WriteXMLKeys(lXMLDocumentNode,lToRecRef,lReturnTableName);
+          EAIXmlDocMgt.WriteXMLFields(lXMLDocumentNode,lToSynchroGroupTable,lToRecRef,lReturnTableName,TRUE);
+        UNTIL lToRecRef.NEXT = 0;
+
+        lToRecRef.CLOSE;
+        lSynchroGroupTableLinks.FINDLAST;
+        lSynchroGroupTableLinks.SETRANGE("To Synchro. Table No.");
+        lSynchroGroupTableLinks.SETRANGE("To Synchro Table Alias");
+
+      UNTIL lSynchroGroupTableLinks.NEXT = 0;
+      //>>EAI01
+
+      pSentMsgBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXMLDocument.save(lInStream);
+
+      pSentMsgBuffer.MODIFY(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 16/05/11 @a ISAT.EBA @v IMH6.01.159 @s Comptabilit‚ - IMA Service */
+      /** @r EAI02 @d 07/12/10 @a ISAT.MGI @v ISAEAI5.01.01.00 @s Correction suppression */
+      /** @r EAI01 @d 15/11/10 @a ISAT.JR @v ISAEAI5.01.01.00 @s Gestion des tables li‚es */
+      /** @r EAI00 @d 28/01/09 @a ISAT.JR @v ISAEAI5.01.01.00 @s Cr‚ation de l'objet
+          @c Cr‚ation du flux XML n‚cessaire … la synchro */
+    }
+    END.
+  }
+}

@@ -1,0 +1,972 @@
+OBJECT Codeunit 50202 Extranet Qual. Web Serv.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=30/04/13;
+    Time=14:27:16;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text000@1100281000 : TextConst 'ENU=Provider %1 not found.;FRA=Cabinet expert %1 inexistant.';
+      Text023@1100281001 : TextConst 'ENU=Document don''t exist  : %1 - %2 - %3 - %4 - %5;FRA=Document inexistant : %1 - %2 - %3 - %4 - %5';
+      Text013@1100281002 : TextConst 'ENU=Error to generate Temporary File.;FRA=Erreur gÇnÇration fichier temporaire.';
+      ExtrFct@1000000000 : Codeunit 50204;
+      Text014@1000000001 : TextConst 'ENU=Status %1.;FRA=Statut %1.';
+      Text015@1000000002 : TextConst 'ENU=Node %1 expected.;FRA=Noeud %1 attendu.';
+      Text016@1000000003 : TextConst 'ENU=No reponse in file.;FRA=Aucune rÇponse dans le fichier.';
+      Text017@1000000004 : TextConst 'ENU=This intervention is already quality controlled.;FRA=Cette intervention est dÇjÖ affectÇe Ö un contrìle qualitÇ.';
+
+    PROCEDURE CreateQualityControlLine@1100281000(pExpertNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pInterventionNo@1100281002 : Integer;VAR pControlNo@1100281003 : Code[20];VAR pControlLineNo@1100281004 : Integer) : Boolean;
+    VAR
+      lQualCtrlMgt@1100281005 : Codeunit 50027;
+      lIntervLine@1100281006 : Record 50075;
+      lResultLine@1100281009 : Record 50075;
+      lGUID@1100281007 : GUID;
+      lFctName@1100281008 : Text[80];
+      lProvider@1000000000 : Record 50000;
+    BEGIN
+      // CrÇation d'une ligne de controle qualitÇ
+      lFctName := 'CreateQualityControlLine';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2',pServiceHeaderNo,pInterventionNo),
+                      lGUID);
+      IF NOT ExtrFct.GetInterv(pServiceHeaderNo, pInterventionNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+
+      IF lIntervLine."Line Quality Controlled" THEN
+        ERROR(Text017);
+
+      lProvider.GET(pExpertNo);
+      lProvider.TESTFIELD("Create Controls Manually", TRUE);
+
+      // Controle que l'expert peut crÇer sur cette ligne d'intervention
+      // par exemple GC = Matmut / Matmut
+
+      // CrÇation de la ligne de controle
+      //<<IMH02.PC
+      //lQualCtrlMgt.CreateControl(lIntervLine, lIntervLine."Quality Control Type"::Target, pExpertNo, lResultLine);
+      lQualCtrlMgt.CreateControl(lIntervLine, lIntervLine."Quality Control Type"::Target, pExpertNo, 0DT, 4, lResultLine);
+      //>>IMH02.PC
+      pControlNo := lResultLine."Service Header No.";
+      pControlLineNo := lResultLine."Line No.";
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE PlanMeetingDate@1100281002(pExpertNo@1100281000 : Code[20];pControlNo@1100281001 : Code[20];pControlLineNo@1100281002 : Integer;pMeetingDateTime@1100281003 : DateTime) : Boolean;
+    VAR
+      lIntervLine@1100281006 : Record 50075;
+      lGUID@1100281005 : GUID;
+      lFctName@1100281004 : Text[80];
+    BEGIN
+      lFctName := 'PlanMeetingDate';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3|%4',pExpertNo,pControlNo,pControlLineNo,pMeetingDateTime),
+                      lGUID);
+
+      // Renseigne la date / heure de rdv
+      ExtrFct.EvalDateTime(pMeetingDateTime);
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+      WITH lIntervLine DO BEGIN
+        TESTFIELD("Provider No.", pExpertNo);
+        IF ("Expected Previsit Date" <> DT2DATE(pMeetingDateTime)) OR
+           ("Expected Previsit Time" <> DT2TIME(pMeetingDateTime)) OR
+           ("Meeting Canceled") THEN BEGIN
+          "Meeting Canceled" := FALSE;
+          "Expected Previsit Time" := 0T;
+          VALIDATE("Expected Previsit Date", DT2DATE(pMeetingDateTime));
+          VALIDATE("Expected Previsit Time", DT2TIME(pMeetingDateTime));
+          MODIFY(TRUE);
+        END;
+      END;
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CancelMeetingDate@1100281004(pExpertNo@1100281000 : Code[20];pControlNo@1100281001 : Code[20];pControlLineNo@1100281002 : Integer) : Boolean;
+    VAR
+      lIntervLine@1100281005 : Record 50075;
+      lGUID@1100281004 : GUID;
+      lFctName@1100281003 : Text[80];
+    BEGIN
+      // Annulation du rdv
+      lFctName := 'CancelMeetingDate';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+      WITH lIntervLine DO BEGIN
+        TESTFIELD("Provider No.", pExpertNo);
+        IF NOT "Meeting Canceled" THEN BEGIN
+          VALIDATE("Meeting Canceled", TRUE);
+          MODIFY(TRUE);
+        END;
+      END;
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ContactByCompany@1100281003(pExpertNo@1100281003 : Code[20];pControlNo@1100281002 : Code[20];pControlLineNo@1100281001 : Integer) : Boolean;
+    VAR
+      lIntervLine@1100281005 : Record 50075;
+      lGUID@1100281004 : GUID;
+      lFctName@1100281000 : Text[80];
+      lInterfaceSetup@1100281006 : Record 50139;
+    BEGIN
+      // Demande de prise de contact IMH
+      // CrÇation d'une activitÇ corbeille
+      lFctName := 'ContactByCompany';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+      lIntervLine.CALCFIELDS("Process Status Description");
+      lInterfaceSetup.GET;
+      lInterfaceSetup.TESTFIELD("Contact Provider Task Code");
+      //<<IMH03.ST
+      //ExtrFct.CreateTrayLineIntervReturn(lIntervLine, lInterfaceSetup."Contact Provider Task Code");
+      ExtrFct.CreateTrayLineIntervReturn(lIntervLine, lInterfaceSetup."Contact Provider Task Code",
+                                         STRSUBSTNO(Text014, lIntervLine."Process Status Description"));
+      //>>IMH03.ST
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetDownloadComplete@1100281005(pExpertNo@1100281002 : Code[20];pControlNo@1100281001 : Code[20];pControlLineNo@1100281000 : Integer) : Boolean;
+    VAR
+      lIntervLine@1100281008 : Record 50075;
+      lGUID@1100281007 : GUID;
+      lFctName@1100281006 : Text[80];
+    BEGIN
+      // Positionnement du flag tÇlÇchargement effectuÇ
+      lFctName := 'SetDownloadComplete';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+      WITH lIntervLine DO BEGIN
+        TESTFIELD("Provider No.", pExpertNo);
+        IF NOT "File Download Complete" THEN BEGIN
+          VALIDATE("File Download Complete", TRUE);
+          MODIFY(TRUE);
+        END;
+      END;
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateReport@1000000000(pExpertNo@1000000002 : Code[20];pControlNo@1000000001 : Code[20];pControlLineNo@1000000000 : Integer) : Boolean;
+    VAR
+      lQualCtrlMgt@1000000003 : Codeunit 50027;
+      lIntervLine@1000000006 : Record 50075;
+      lGUID@1000000005 : GUID;
+      lFctName@1000000004 : Text[80];
+    BEGIN
+      // CrÇation des donnÇes de rapport
+      lFctName := 'CreateReport';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+      WITH lIntervLine DO BEGIN
+        TESTFIELD("Provider No.", pExpertNo);
+        lQualCtrlMgt.InitReportLine(lIntervLine, TRUE);
+        IF lIntervLine.AutoStep THEN
+          lIntervLine.MODIFY(TRUE);
+      END;
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetReportResponse@1100281001(pExpertNo@1100281002 : Code[20];pControlNo@1100281001 : Code[20];pControlLineNo@1100281000 : Integer;pReportLineNo@1100281003 : Integer;pResponseNo@1100281004 : Integer;pResponseValue@1100281005 : Boolean;pComment@1100281006 : Text[250]) : Boolean;
+    VAR
+      lIntervLine@1000000002 : Record 50075;
+      lGUID@1000000001 : GUID;
+      lFctName@1000000000 : Text[80];
+      lReportLine@1000000003 : Record 50091;
+    BEGIN
+      // Positionnement d'une rÇponse Ö une gestion report
+      lFctName := 'SetReportResponse';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+
+      lIntervLine.TESTFIELD("Provider No.", pExpertNo);
+
+      WITH lReportLine DO BEGIN
+        IF NOT GET("Control Type"::Control, lIntervLine."Service Header No.", lIntervLine."Line No.", pReportLineNo) THEN
+          EXIT(FALSE);
+        CASE pResponseNo OF
+          1 : BEGIN
+            TESTFIELD("Answer 1 Enabled");
+            IF ("Answer 1 Result" <> pResponseValue) OR
+               (Comment <> pComment) THEN BEGIN
+              VALIDATE("Answer 1 Result", pResponseValue);
+              Comment := pComment;
+              MODIFY(TRUE);
+            END;
+          END;
+          2 : BEGIN
+            TESTFIELD("Answer 2 Enabled");
+            IF ("Answer 2 Result" <> pResponseValue) OR
+               (Comment <> pComment) THEN BEGIN
+              VALIDATE("Answer 2 Result", pResponseValue);
+              Comment := pComment;
+              MODIFY(TRUE);
+            END;
+          END;
+          3 : BEGIN
+            TESTFIELD("Answer 3 Enabled");
+            IF ("Answer 3 Result" <> pResponseValue) OR
+               (Comment <> pComment) THEN BEGIN
+              VALIDATE("Answer 3 Result", pResponseValue);
+              Comment := pComment;
+              MODIFY(TRUE);
+            END;
+          END;
+          4 : BEGIN
+            TESTFIELD("Answer 4 Enabled");
+            IF ("Answer 4 Result" <> pResponseValue) OR
+               (Comment <> pComment) THEN BEGIN
+              VALIDATE("Answer 4 Result", pResponseValue);
+              Comment := pComment;
+              MODIFY(TRUE);
+            END;
+          END;
+          5 : BEGIN
+            TESTFIELD("Answer 5 Enabled");
+            IF ("Answer 5 Result" <> pResponseValue) OR
+               (Comment <> pComment) THEN BEGIN
+              VALIDATE("Answer 5 Result", pResponseValue);
+              Comment := pComment;
+              MODIFY(TRUE);
+            END;
+          END;
+        END;
+      END; // WITH
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetLineReportResponse@1100281013(pExpertNo@1100281002 : Code[20];pControlNo@1100281001 : Code[20];pControlLineNo@1100281000 : Integer;pReportLineNo@1100281003 : Integer;pResponseValue1@1100281016 : Boolean;pResponseValue2@1100281014 : Boolean;pResponseValue3@1100281012 : Boolean;pResponseValue4@1100281010 : Boolean;pResponseValue5@1100281008 : Boolean;pComment@1100281007 : Text[250]) : Boolean;
+    VAR
+      lIntervLine@1000000002 : Record 50075;
+      lGUID@1000000001 : GUID;
+      lFctName@1000000000 : Text[80];
+      lReportLine@1000000003 : Record 50091;
+    BEGIN
+      // IMH02.PC
+      // Positionnement de tous les rÇponses Ö une gestion report
+      lFctName := 'SetLineResponse';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+
+      lIntervLine.TESTFIELD("Provider No.", pExpertNo);
+      lReportLine.GET(lReportLine."Control Type"::Control, lIntervLine."Service Header No.", lIntervLine."Line No.", pReportLineNo);
+      IF UpdateReportLine(lReportLine, pResponseValue1, pResponseValue2, pResponseValue3, pResponseValue4, pResponseValue5, pComment) THEN
+        lReportLine.MODIFY(TRUE);
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetReportResponseList@1000000008(pExpertNo@1000000009 : Code[20];pControlNo@1000000008 : Code[20];pControlLineNo@1000000007 : Integer;pResponseList@1000000000 : BigText) : Boolean;
+    VAR
+      lIntervLine@1100281017 : Record 50075;
+      lTempReportLine@1100281016 : TEMPORARY Record 50091;
+      lTempBLOB@1100281015 : TEMPORARY Record 99008535;
+      lReportLine@1100281014 : Record 50091;
+      lXMLMgt@1100281013 : Codeunit 8016710;
+      lToolsMgt@1100281012 : Codeunit 8016602;
+      lXMLDoc@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNode1@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode2@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode3@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeList@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      i@1100281006 : Integer;
+      lInStream@1100281005 : InStream;
+      lFirstFileToDelete@1100281004 : Text[1024];
+      lSecondFileToDelete@1100281003 : Text[1024];
+      lGUID@1100281002 : GUID;
+      lFctName@1100281001 : Text[80];
+      lFile@1100281000 : File;
+    BEGIN
+      //IMH04.ST
+      lFctName := 'SetListResponse';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+
+      lIntervLine.TESTFIELD("Provider No.", pExpertNo);
+
+      //<<IMH08.ST
+      CheckXMLCodePage(pResponseList);
+      lTempBLOB.CopyFromBigText(pResponseList);
+      lTempBLOB.Blob.CREATEINSTREAM(lInStream);
+      CREATE(lXMLDoc,TRUE);
+      lXMLDoc.load(lInStream);
+      { //DÇsactivÇ IMH08
+      CLEAR(lXMLNode1);
+      CLEAR(lXMLNode2);
+      CLEAR(lXMLNode3);
+      CLEAR(lXMLDoc);
+
+      //<<IMH06.PC
+      // Gestion de l'encoding
+      {
+      lTempBLOB.CopyFromBigText(pResponseList);
+      lTempBLOB.Blob.CREATEINSTREAM(lStream);
+      CREATE(lXMLDoc,TRUE);
+      lXMLDoc.load(lStream);
+      }
+      ManageReceiptXML(pResponseList,lFirstFileToDelete,lSecondFileToDelete);
+      lFile.OPEN(lSecondFileToDelete);
+      lFile.CREATEINSTREAM(lInStream);
+      IF ISCLEAR(lXMLDoc) THEN BEGIN
+        CREATE(lXMLDoc);
+      END;
+
+      IF NOT lXMLDoc.load(lInStream) THEN BEGIN
+        lFile.CLOSE;
+        IF ERASE(lFirstFileToDelete) THEN;
+        IF ERASE(lSecondFileToDelete) THEN;
+        ERROR(lText002);
+      END;
+      lFile.CLOSE;
+      IF ERASE(lFirstFileToDelete) THEN;
+      IF ERASE(lSecondFileToDelete) THEN;
+      //>>IMH06.PC
+      } //>>IMH08.ST
+
+      // Mise Ö jour des lignes
+      WITH lXMLMgt DO BEGIN
+        FindRootNode(lXMLDoc, lXMLNode1);
+        IF lXMLNode1.nodeName <> 'REPORTRESPONSES' THEN
+          ERROR(Text015, 'REPORTRESPONSES');
+
+        IF NOT FindNodes(lXMLNode1, 'RESPONSELINE',lXMLNodeList) THEN
+          ERROR(Text016);
+        IF lXMLNodeList.length=0 THEN
+          ERROR(Text016);
+        FOR i := 0 TO lXMLNodeList.length-1 DO BEGIN
+          lTempReportLine.INIT;
+          lXMLNode2 := lXMLNodeList.item(i);
+          IF NOT lXMLMgt.FindFirstNode(lXMLNode2,'LINENO',lXMLNode3) THEN
+            ERROR(Text015, 'LINENO');
+          lTempReportLine."Line No." := lToolsMgt.TextToInteger(lXMLNode3.text);
+          IF lXMLMgt.FindFirstNode(lXMLNode2,'RESPONSE1',lXMLNode3) THEN
+            lTempReportLine."Answer 1 Result" := lToolsMgt.TextToBoolean2(lXMLNode3.text);
+          IF lXMLMgt.FindFirstNode(lXMLNode2,'RESPONSE2',lXMLNode3) THEN
+            lTempReportLine."Answer 2 Result" := lToolsMgt.TextToBoolean2(lXMLNode3.text);
+          IF lXMLMgt.FindFirstNode(lXMLNode2,'RESPONSE3',lXMLNode3) THEN
+            lTempReportLine."Answer 3 Result" := lToolsMgt.TextToBoolean2(lXMLNode3.text);
+          IF lXMLMgt.FindFirstNode(lXMLNode2,'RESPONSE4',lXMLNode3) THEN
+            lTempReportLine."Answer 4 Result" := lToolsMgt.TextToBoolean2(lXMLNode3.text);
+          IF lXMLMgt.FindFirstNode(lXMLNode2,'RESPONSE5',lXMLNode3) THEN
+            lTempReportLine."Answer 5 Result" := lToolsMgt.TextToBoolean2(lXMLNode3.text);
+          IF lXMLMgt.FindFirstNode(lXMLNode2,'RESPONSECOMMENT',lXMLNode3) THEN
+            //<<IMH06.PC
+            //lTempReportLine.Comment := COPYSTR(lXMLNode3.text,1,MAXSTRLEN(lTempReportLine.Comment));
+            lTempReportLine.Comment := COPYSTR(FormatImportAccent(lXMLNode3.text),1,MAXSTRLEN(lTempReportLine.Comment));
+            //>>IMH06.PC
+          lTempReportLine.INSERT;
+        END; // For
+      END; // WITH
+      CLEAR(lXMLNode1);
+      CLEAR(lXMLNode2);
+      CLEAR(lXMLNode3);
+      CLEAR(lXMLDoc);
+
+
+      WITH lTempReportLine DO BEGIN
+        IF FINDSET THEN BEGIN
+          REPEAT
+            lReportLine.GET("Control Type"::Control, lIntervLine."Service Header No.",
+                            lIntervLine."Line No.", lTempReportLine."Line No.");
+            IF UpdateReportLine(lReportLine,
+                      "Answer 1 Result", "Answer 2 Result", "Answer 3 Result", "Answer 4 Result", "Answer 5 Result", Comment) THEN
+              lReportLine.MODIFY(TRUE);
+          UNTIL lTempReportLine.NEXT=0;
+        END;
+      END;
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE UpdateReportLine@1000000004(VAR pControlLine@1000000009 : Record 50091;pResponseValue1@1000000005 : Boolean;pResponseValue2@1000000004 : Boolean;pResponseValue3@1000000003 : Boolean;pResponseValue4@1000000002 : Boolean;pResponseValue5@1000000001 : Boolean;pComment@1000000000 : Text[250]) rValue : Boolean;
+    BEGIN
+      //IMH04.ST
+      rValue := FALSE;
+      WITH pControlLine DO BEGIN
+        IF ("Answer 1 Result" <> pResponseValue1) AND "Answer 1 Enabled" THEN BEGIN
+          VALIDATE("Answer 1 Result", pResponseValue1);
+          rValue := TRUE;
+        END;
+        IF ("Answer 2 Result" <> pResponseValue2) AND "Answer 2 Enabled" THEN BEGIN
+          VALIDATE("Answer 2 Result", pResponseValue2);
+          rValue := TRUE;
+        END;
+        IF ("Answer 3 Result" <> pResponseValue3) AND "Answer 3 Enabled" THEN BEGIN
+          VALIDATE("Answer 3 Result", pResponseValue3);
+          rValue := TRUE;
+        END;
+        IF ("Answer 4 Result" <> pResponseValue4) AND "Answer 4 Enabled" THEN BEGIN
+          VALIDATE("Answer 4 Result", pResponseValue4);
+          rValue := TRUE;
+        END;
+        IF ("Answer 5 Result" <> pResponseValue5) AND "Answer 5 Enabled" THEN BEGIN
+          VALIDATE("Answer 5 Result", pResponseValue5);
+          rValue := TRUE;
+        END;
+        IF Comment <> pComment THEN BEGIN
+          Comment := pComment;
+          rValue := TRUE;
+        END;
+      END; // WITH
+    END;
+
+    PROCEDURE PostReport@1100281007(pExpertNo@1100281002 : Code[20];pControlNo@1100281001 : Code[20];pControlLineNo@1100281000 : Integer) : Boolean;
+    VAR
+      lIntervLine@1000000002 : Record 50075;
+      lGUID@1000000001 : GUID;
+      lFctName@1000000000 : Text[80];
+    BEGIN
+      // Validation du rapport
+      lFctName := 'PostReport';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT(FALSE);
+      WITH lIntervLine DO BEGIN
+        TESTFIELD("Provider No.", pExpertNo);
+        IF NOT "Report Posted" THEN BEGIN
+          VALIDATE("Report Posted", TRUE);
+          MODIFY(TRUE);
+        END;
+      END;
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ListDocumentToDownload@1100281008(pExpertNo@1100281004 : Code[20];pControlNo@1100281003 : Code[20];pControlLineNo@1100281002 : Integer;VAR pDocumentList@1100281000 : BigText) : Boolean;
+    VAR
+      lIntervLine@1100281006 : Record 50075;
+      lSourceInterv@1100281007 : Record 50075;
+      lGUID@1100281005 : GUID;
+      lFctName@1100281001 : Text[80];
+      lXMLMgt@1100281010 : Codeunit 8016710;
+      lInterfaceSetup@1100281008 : Record 50139;
+      lTableFilterGroupLines@1100281011 : Record 50025;
+      lXMLDoc@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNode1@1100281014 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lInterLogEntry@1100281015 : Record 5065;
+      lDocAttach@1100281016 : Record 50021;
+      lFileName@1100281017 : Text[1024];
+      lFile@1100281009 : File;
+      lInStream@1100281012 : InStream;
+      lTempFilterLines@1000000000 : TEMPORARY Record 50025;
+      lAddLine@1000000001 : Boolean;
+      lTempInterLogEntry@1000000002 : TEMPORARY Record 5065;
+      lTempAttach@1000000003 : TEMPORARY Record 50021;
+      lRecRef@1000000004 : RecordRef;
+      lRecRef2@1000000005 : RecordRef;
+    BEGIN
+      // Liste des documents d'un dossier
+      lFctName := 'ListDocumentToDownload';
+      ExtrFct.Initial(4,lFctName,
+                      STRSUBSTNO('%1|%2|%3',pExpertNo,pControlNo,pControlLineNo),
+                      lGUID);
+
+      // RÇcupÇrer l'intervention
+      IF NOT ExtrFct.GetInterv(pControlNo, pControlLineNo, TRUE, lIntervLine) THEN
+        EXIT;
+
+      // Intervention d'origine
+      IF NOT ExtrFct.GetInterv(lIntervLine."Source Service Header No.", lIntervLine."Source Interv. Line No.", TRUE, lSourceInterv) THEN
+        EXIT;
+
+      lInterfaceSetup.GET;
+      // ST TODO
+
+      // CrÇation de la liste de document
+      lXMLMgt.CreateXml(lXMLDoc,'<DocumentList />',lXMLNode1);
+
+      WITH lTableFilterGroupLines DO BEGIN
+        SETRANGE("Table Filter Group Code", lInterfaceSetup."Quality Document List Filter");
+        SETRANGE(Enabled, TRUE);
+        IF FINDSET THEN
+          REPEAT
+            lTempFilterLines := lTableFilterGroupLines;
+            lTempFilterLines.INSERT;
+          UNTIL NEXT = 0;
+      END;
+      lTempFilterLines.SETRANGE("Source Table", DATABASE::"Interaction Log Entry");
+      IF NOT lTempFilterLines.ISEMPTY THEN BEGIN
+        lInterLogEntry.FILTERGROUP(2);
+        lInterLogEntry.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+        lInterLogEntry.SETRANGE("Service No.", lSourceInterv."Service No.");
+        lInterLogEntry.SETRANGE("Service Header No.", lSourceInterv."Service Header No.");
+        lInterLogEntry.SETRANGE("Intervention Line No.", lSourceInterv."Line No.");
+        lInterLogEntry.FILTERGROUP(0);
+        IF lInterLogEntry.FINDSET(FALSE) THEN BEGIN
+          REPEAT
+            lAddLine := FALSE;
+            lTempInterLogEntry := lInterLogEntry;
+            lTempInterLogEntry.INSERT;
+            lRecRef.GETTABLE(lTempInterLogEntry);
+            lTempFilterLines.FINDSET;
+            REPEAT
+              IF lTempFilterLines.TestRecInFilters(lRecRef,lTempFilterLines.GetRecFilters(FALSE),
+                                                   lTempFilterLines."Source Table Flowfields") THEN BEGIN
+                lAddLine := TRUE;
+                lDocAttach.SETCURRENTKEY("Interaction Log Entry No.");
+                lDocAttach.SETRANGE("Interaction Log Entry No.", lInterLogEntry."Entry No.");
+                lDocAttach.SETRANGE("Referent Table No.", DATABASE::"Interaction Log Entry"); // ???
+                IF lDocAttach.FINDSET THEN BEGIN
+                  REPEAT
+                    // Test de la table secondaire
+                    IF lTempFilterLines."Second Table" = DATABASE::"Document Attachment" THEN BEGIN
+                      lTempAttach := lDocAttach;
+                      lTempAttach.INSERT;
+                      lRecRef2.GETTABLE(lTempAttach);
+                      IF lTempFilterLines.TestRecInFilters(lRecRef2, lTempFilterLines.GetRecFilters2(FALSE),
+                                                           lTempFilterLines."Second Table Flowfields") THEN
+                        AddOneAttach(lDocAttach, lInterLogEntry, TRUE,lXMLNode1);
+                      lRecRef2.CLOSE;
+                      lTempAttach.DELETE;
+                    END
+                    ELSE
+                      AddOneAttach(lDocAttach, lInterLogEntry, TRUE,lXMLNode1);
+                  UNTIL lDocAttach.NEXT = 0;
+                END;
+              END; // Interaction in filters
+            UNTIL (lTempFilterLines.NEXT = 0) OR lAddLine;
+            lRecRef.CLOSE;
+            lTempInterLogEntry.DELETE;
+          UNTIL lInterLogEntry.NEXT = 0;
+        END;
+      END;
+      // AJout des RDD
+      lTempFilterLines.SETRANGE("Source Table", DATABASE::"Document Attachment");
+      IF NOT lTempFilterLines.ISEMPTY THEN BEGIN
+        lDocAttach.FILTERGROUP(2);
+        lDocAttach.SETRANGE("Referent Table No.", DATABASE::"Service Header");
+        lDocAttach.SETRANGE("Service Document No.", lSourceInterv."Service Header No.");
+        lDocAttach.SETRANGE("Service Intervention Line No.", lSourceInterv."Line No.");
+        lDocAttach.FILTERGROUP(0);
+        IF lDocAttach.FINDSET THEN BEGIN
+          CLEAR(lInterLogEntry);
+          REPEAT
+            lAddLine := FALSE;
+            lTempAttach := lDocAttach;
+            lTempAttach.INSERT;
+            lRecRef.GETTABLE(lTempAttach);
+            lTempFilterLines.FINDSET;
+            REPEAT
+              IF lTempFilterLines.TestRecInFilters(lRecRef, lTempFilterLines.GetRecFilters(FALSE),
+                                                   lTempFilterLines."Source Table Flowfields") THEN BEGIN
+                lAddLine := TRUE;
+                AddOneAttach(lDocAttach, lInterLogEntry, FALSE,lXMLNode1);
+              END;
+            UNTIL (lTempFilterLines.NEXT = 0) OR lAddLine;
+            lTempAttach.DELETE;
+          UNTIL lDocAttach.NEXT = 0;
+        END;
+      END;
+
+      lFileName := ExtrFct.GetTempFilename('xml');
+      lXMLDoc.save(lFileName);
+      IF lFile.OPEN(lFileName) THEN BEGIN
+        lFile.CREATEINSTREAM(lInStream);
+        pDocumentList.READ(lInStream);
+        lFile.CLOSE;
+        ERASE(lFileName);
+      END ELSE BEGIN
+        ERROR(Text013);
+      END;
+
+      ExtrFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetDocumentBinary@1100281032(pExpertNo@1100281006 : Code[20];pTableID@1100281000 : Integer;pKeyInteger1@1100281001 : Integer;pKeyInteger2@1100281002 : Integer;pKeyCode1@1100281003 : Code[20];pKeyCode2@1100281004 : Code[20];pKeyEntryNo@1100281005 : Integer;VAR pDocBinaryContent@1100281018 : BigText;VAR pFileExtension@1100281020 : Text[30];VAR pErrorDescription@1100281019 : Text[1024]) : Boolean;
+    VAR
+      lProvider@1100281007 : Record 50000;
+      lDocumentAttachment@1100281009 : Record 50021;
+      lXMLMgt@1100281008 : Codeunit 8016710;
+      lAttachmentMgt@1100281014 : Codeunit 50002;
+      lXMLDoc@1100281017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNode1@1100281016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode2@1100281015 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lFileName@1100281010 : Text[1024];
+      lFilePath@1100281013 : Text[1024];
+      lFile@1100281012 : File;
+      lInstream@1100281011 : InStream;
+    BEGIN
+      // RÇcupÇration du contenu binaire d'un document
+      {
+      0001746 : RÇcupÇration du contenu binaire d'un document
+
+      Colonnes attendues :
+      - Contenu binaire du document
+
+      Critäres de filtrage : Identifiant systäme du document rÇcupÇrÇ au prÇalable via la requàte SQL
+
+      Paramätres dÇfinitifs :
+      - En entrÇe
+        - pProviderNo : N¯ prestataire
+        - pTableID, pKeyInteger1, pKeyInteger2, pKeyCode1, pKeyCode2, pKeyEntryNo : clÇ d'accäs au document
+        - pDocBinaryContent : mettre vide en passage de paramätre
+      - En sortie
+        - pDocBinaryContent : contient un flux xml avec le contenu binaire du document
+          - Utilisation du schÇma document.xsd
+          - Document
+            - pDocBinaryContent : contenu binaire du document
+      }
+      GLOBALLANGUAGE(1036);
+      // RÇcupÇrer le prestataire
+      IF NOT lProvider.GET(pExpertNo) THEN BEGIN
+        pErrorDescription := STRSUBSTNO(Text000,pExpertNo);
+        EXIT(FALSE);
+      END;
+
+      IF NOT lDocumentAttachment.GET(pTableID,pKeyInteger1,pKeyInteger2,pKeyCode1,pKeyCode2,pKeyEntryNo) THEN BEGIN
+        pErrorDescription := STRSUBSTNO(Text023,pTableID,pKeyInteger1,pKeyInteger2,pKeyCode1,pKeyCode2,pKeyEntryNo);
+        EXIT(FALSE);
+      END;
+
+      lFilePath := lAttachmentMgt.GetFilePath2(lDocumentAttachment);
+      IF lFilePath = '' THEN BEGIN
+        pErrorDescription := STRSUBSTNO(Text023,pTableID,pKeyInteger1,pKeyInteger2,pKeyCode1,pKeyCode2,pKeyEntryNo);
+        EXIT(FALSE);
+      END;
+
+      //<<IMH09.PC
+      IF lDocumentAttachment."PDF Exist" THEN BEGIN
+        pFileExtension := 'pdf';
+      END ELSE BEGIN
+      //>>IMH09.PC
+        pFileExtension := lDocumentAttachment."File Extension"; //IMH07
+      END;
+
+      IF NOT EXISTS(lFilePath) THEN BEGIN
+        IF (USERID = 'ISAT-ST') AND (COMPANYNAME = 'IMH - Recette') AND
+           (COPYSTR(lFilePath,1,30) = '\\imha.local\imha\GED_Recette\') THEN BEGIN
+          lFilePath := '\\imha.local\imha\GED\' + COPYSTR(lFilePath, 31);
+          IF NOT EXISTS(lFilePath) THEN BEGIN
+            pErrorDescription := STRSUBSTNO(Text023,pTableID,pKeyInteger1,pKeyInteger2,pKeyCode1,pKeyCode2,pKeyEntryNo);
+            EXIT(FALSE);
+          END;
+        END
+        ELSE BEGIN
+          pErrorDescription := STRSUBSTNO(Text023,pTableID,pKeyInteger1,pKeyInteger2,pKeyCode1,pKeyCode2,pKeyEntryNo);
+          EXIT(FALSE);
+        END;
+      END;
+      //error('GetDocBinaryWithFullKey - chemin ' + lfilepath);
+      // GÇnÇrer le contenu binaire du document
+      lXMLMgt.CreateXml(lXMLDoc,'<Document />',lXMLNode1);
+      lXMLMgt.AddFileElement(lXMLNode1,'pDocBinaryContent',lFilePath,'',lXMLNode2);
+      lFileName := ExtrFct.GetTempFilename('xml');
+      //ERROR('GetDocBinaryWithFullKey - fichier temp ' + lFileName);
+      lXMLDoc.save(lFileName);
+      IF lFile.OPEN(lFileName) THEN BEGIN
+        lFile.CREATEINSTREAM(lInstream);
+        pDocBinaryContent.READ(lInstream);
+        lFile.CLOSE;
+        ERASE(lFileName);
+      END ELSE BEGIN
+        pErrorDescription := Text013;
+        EXIT(FALSE);
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE AddInterLogEntriesToList@1100281006(VAR pInterLogEntry@1100281000 : Record 5065;pFilter@1100281001 : Text[1024];VAR pToNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lDocAttach@1100281003 : Record 50021;
+    BEGIN
+      IF pFilter <> '' THEN BEGIN
+        pInterLogEntry.SETVIEW(pFilter);
+      END;
+      IF NOT pInterLogEntry.FINDSET THEN
+        EXIT;
+      REPEAT
+        WITH lDocAttach DO BEGIN
+          RESET;
+          SETCURRENTKEY("Interaction Log Entry No.");
+          SETRANGE("Interaction Log Entry No.",pInterLogEntry."Entry No.");
+          SETRANGE("Referent Table No.",DATABASE::"Interaction Log Entry"); // ???
+          IF NOT ISEMPTY THEN BEGIN
+            FINDSET;
+            REPEAT
+              AddOneAttach(lDocAttach, pInterLogEntry, TRUE, pToNode);
+            UNTIL NEXT = 0;
+          END;
+        END; // WITH
+      UNTIL pInterLogEntry.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE AddDocAttachToList@1100281009(VAR pDocAttach@1100281002 : Record 50021;pFilter@1100281001 : Text[1024];VAR pToNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lInterLogEntry@1100281003 : Record 5065;
+    BEGIN
+      // Parcours des documents attachÇs sans intervention
+      IF pFilter <> '' THEN BEGIN
+        pDocAttach.SETVIEW(pFilter);
+      END;
+      IF NOT pDocAttach.FINDSET THEN
+        EXIT;
+      REPEAT
+        AddOneAttach(pDocAttach, lInterLogEntry, FALSE, pToNode);
+      UNTIL pDocAttach.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE AddOneAttach@1100281010(VAR pDocAttach@1100281002 : Record 50021;VAR pInterLogEntry@1100281004 : Record 5065;pFromInterLogEntry@1100281005 : Boolean;VAR pToNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lXMLMgt@1100281003 : Codeunit 8016710;
+      lNode1@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lDocSource@1100281006 : Code[20];
+    BEGIN
+      WITH pDocAttach DO BEGIN
+        IF "PDF Exist" THEN
+          "File Extension" := 'PDF';
+
+        lXMLMgt.IsAddElement(pToNode,'Document','','',lNode1);
+        IF pFromInterLogEntry THEN
+          lXMLMgt.IsAddElement4(lNode1,'pDocEntryNo',FORMAT("Interaction Log Entry No."),'')
+        ELSE
+          lXMLMgt.IsAddElement4(lNode1,'pDocEntryNo',FORMAT("Key Integer 2"),'');
+        lXMLMgt.IsAddElement4(lNode1,'pAttachEntryNo',FORMAT("Entry No."),'');
+        IF Description <> '' THEN
+          lXMLMgt.IsAddElement4(lNode1,'pDocName',Description,'')
+        ELSE
+          lXMLMgt.IsAddElement4(lNode1,'pDocName',"Description 2",'');
+        IF "File Size" <> 0 THEN
+          lXMLMgt.IsAddElement4(lNode1,'pDocSize',FORMAT("File Size"),'');
+        lXMLMgt.IsAddElement4(lNode1,'pDocType',"File Extension",'');
+        IF pFromInterLogEntry THEN
+          lDocSource := pInterLogEntry."Interaction Group Code"
+        ELSE
+          lDocSource := "Attach. Template Code";
+        IF lDocSource <> '' THEN
+          lXMLMgt.IsAddElement4(lNode1,'pDocSource',lDocSource,'');
+
+        IF "Creation Date" <> 0DT THEN
+          lXMLMgt.IsAddElement4(lNode1,'pDocDate',FORMAT("Creation Date",0,9),'');
+        lXMLMgt.IsAddElement4(lNode1,'pTableID',FORMAT("Referent Table No.",0,1),'');
+        lXMLMgt.IsAddElement4(lNode1,'pKeyInteger1',FORMAT("Key Integer 1",0,1),'');
+        lXMLMgt.IsAddElement4(lNode1,'pKeyInteger2',FORMAT("Key Integer 2",0,1),'');
+        IF "Key Code 1" <> '' THEN BEGIN
+          lXMLMgt.IsAddElement4(lNode1,'pKeyCode1',"Key Code 1",'');
+        END;
+        IF "Key Code 2" <> '' THEN BEGIN
+          lXMLMgt.IsAddElement4(lNode1,'pKeyCode2',"Key Code 2",'');
+        END;
+        lXMLMgt.IsAddElement4(lNode1,'pKeyEntryNo',FORMAT("Entry No.",0,1),'');
+        IF "Service Document No." <> '' THEN
+          lXMLMgt.IsAddElement4(lNode1,'pServiceHeaderNo',"Service Document No.",'');
+        lXMLMgt.IsAddElement4(lNode1,'pInterventionLineNo',FORMAT("Service Intervention Line No.",0,1),'');
+        lXMLMgt.IsAddElement4(lNode1,'pInterventionQuoteLineNo',FORMAT("Intervention Quote Line No.",0,1),'');
+        lXMLMgt.IsAddElement4(lNode1,'pDocumentType',FORMAT("Document Queue Type",0,9),'');
+      END;
+    END;
+
+    PROCEDURE AddDocList@1000000001();
+    BEGIN
+    END;
+
+    LOCAL PROCEDURE FormatImportAccent@1100281021(pText@8016600 : Text[1024]) rValue : Text[1024];
+    VAR
+      lFromChar@1100281001 : Text[30];
+      lToChar@1100281000 : Text[30];
+    BEGIN
+      // IMH06.PC
+      lFromChar := '¥˙≥√ü√≤øª„º‡¡û¿ù ÉŒâÕà±⁄∫¯';
+      lToChar := 'Ö∑ÑéÉéÇäà“â”å◊ãÿì‚óÎñÍÅöá∞';
+
+      rValue := CONVERTSTR(pText,lFromChar,lToChar);
+    END;
+
+    LOCAL PROCEDURE ManageReceiptXML@1100281016(VAR pOriginXML@1000000000 : BigText;VAR pFirstFileToDelete@1100281005 : Text[1024];VAR pSecondFileToDelete@1100281006 : Text[1024]);
+    VAR
+      lOutStream@1100281002 : OutStream;
+      lFile@1100281004 : File;
+      lFile2@1000000001 : File;
+      lCount@1000000006 : Integer;
+      lPos@1000000008 : Integer;
+      lTextBuffer@1000000010 : Text[1024];
+    BEGIN
+      // IMH06.PC
+      // Gestion des caractäres spÇciaux dans les XMLs reáus
+      lFile.CREATETEMPFILE;
+      pFirstFileToDelete := lFile.NAME + '1.xml';
+      pSecondFileToDelete := lFile.NAME + '2.xml';
+      lFile.CLOSE;
+      lTextBuffer := '';
+      lFile.WRITEMODE := TRUE;
+      lFile.TEXTMODE := TRUE;
+      lFile.CREATE(pFirstFileToDelete);
+      lFile.CREATEOUTSTREAM(lOutStream);
+      pOriginXML.WRITE(lOutStream);
+      lFile.CLOSE;
+      lFile.WRITEMODE(FALSE);
+      lFile.OPEN(pFirstFileToDelete);
+
+      lFile2.WRITEMODE := TRUE;
+      lFile2.TEXTMODE := TRUE;
+      lFile2.CREATE(pSecondFileToDelete);
+      lCount := 1;
+      WHILE lFile.READ(lTextBuffer) <> 0 DO BEGIN
+        IF (lCount = 1) AND (COPYSTR(lTextBuffer,1,1) = '?') THEN BEGIN
+          lTextBuffer := COPYSTR(lTextBuffer,2);
+        END;
+        lPos := STRPOS(lTextBuffer,'UTF-8');
+        IF lPos = 0 THEN BEGIN
+          lPos := STRPOS(lTextBuffer,'utf-8');
+        END;
+        IF lPos <> 0 THEN BEGIN
+          lTextBuffer := COPYSTR(lTextBuffer,1,lPos - 1) + 'windows-1252' + COPYSTR(lTextBuffer,lPos + 5);
+        END;
+        lPos := STRPOS(lTextBuffer,'UTF-16');
+        IF lPos = 0 THEN BEGIN
+          lPos := STRPOS(lTextBuffer,'utf-16');
+        END;
+        IF lPos <> 0 THEN BEGIN
+          lTextBuffer := COPYSTR(lTextBuffer,1,lPos - 1) + 'windows-1252' + COPYSTR(lTextBuffer,lPos + 6);
+        END;
+
+        lFile2.WRITE(lTextBuffer);
+        lCount += 1;
+      END;
+      lFile.CLOSE;
+      lFile2.CLOSE;
+    END;
+
+    PROCEDURE CheckXMLCodePage@1000000005(VAR pBigText@1000000000 : BigText);
+    VAR
+      lLen@1000000003 : Integer;
+      lBigText@1000000001 : BigText;
+      lText@1000000002 : Text[1024];
+      lText2@1000000005 : Text[1024];
+      lReadPos@1000000004 : Integer;
+      lHasEncoding@1000000007 : Boolean;
+    BEGIN
+      lLen := pBigText.LENGTH;
+      IF lLen = 0 THEN
+        EXIT;
+      lReadPos := 0;
+      REPEAT
+        lReadPos += pBigText.GETSUBTEXT(lText, lReadPos+1, MAXSTRLEN(lText));
+        IF NOT lHasEncoding THEN BEGIN
+          IF ConvertXML(lText, lText2) THEN BEGIN
+            lBigText.ADDTEXT(lText+lText2);
+            lHasEncoding := TRUE;
+          END
+          ELSE
+            lBigText.ADDTEXT(lText);
+        END
+        ELSE
+          lBigText.ADDTEXT(lText);
+      UNTIL lReadPos >= lLen;
+      IF NOT lHasEncoding THEN
+        lBigText.ADDTEXT('<?xml version="1.0" encoding="windows-1252"?>',1);
+      pBigText := lBigText;
+    END;
+
+    PROCEDURE ConvertXML@1000000006(VAR pSourceText@1000000000 : Text[1024];VAR pComplText@1000000001 : Text[1024]) : Boolean;
+    VAR
+      lSubPos@1000000002 : ARRAY [5] OF Integer;
+      lResultText@1000000004 : BigText;
+      lTempStr@1000000005 : Text[1024];
+      lInt@1000000006 : Integer;
+      lTextBegin@1000000007 : Boolean;
+    BEGIN
+      lTempStr := UPPERCASE(pSourceText);
+      lSubPos[1] := STRPOS(lTempStr, '<?XML');
+      IF lSubPos[1] = 0 THEN
+        EXIT(FALSE);
+      lSubPos[2] := STRPOS(lTempStr, '?>');
+      IF lSubPos[2] = 0 THEN
+        EXIT(FALSE);// note : peut se terminer ligne suivante ?
+      lTempStr := UPPERCASE(COPYSTR(pSourceText, lSubPos[1], lSubPos[2] - lSubPos[1]+2));
+      lSubPos[3] := STRPOS(lTempStr, 'ENCODING=');
+      IF lSubPos[3] = 0 THEN BEGIN
+        // Pas d'encoding dans la balise -> ajout dans la chaine avant la fin
+        lResultText.ADDTEXT(pSourceText);
+        lResultText.ADDTEXT(' encoding="windows-1252"', lSubPos[2]);
+      END
+      ELSE BEGIN
+        lTextBegin := FALSE;
+        lInt := lSubPos[3] + 9;
+        REPEAT
+          IF lTempStr[lInt] = '"' THEN BEGIN
+            IF lTextBegin THEN
+              lSubPos[5] := lInt
+            ELSE BEGIN
+              lSubPos[4] := lInt;
+              lTextBegin := TRUE;
+            END;
+          END;
+          lInt += 1;
+        UNTIL (lInt > STRLEN(lTempStr)) OR (lSubPos[5] <> 0);
+        IF (lSubPos[4] = 0) OR (lSubPos[5] = 0) THEN
+          EXIT;
+        lSubPos[4] += lSubPos[1]-1;
+        lSubPos[5] += lSubPos[1]-1;
+        lResultText.ADDTEXT(DELSTR(pSourceText,lSubPos[4]+1,lSubPos[5]-lSubPos[4]-1));
+        lResultText.ADDTEXT('windows-1252', lSubPos[4]+1);
+      END;
+
+      lResultText.GETSUBTEXT(pSourceText,1,MAXSTRLEN(pSourceText));
+      IF lResultText.LENGTH > 1024 THEN
+        lResultText.GETSUBTEXT(pComplText,1025,MAXSTRLEN(pComplText))
+      ELSE
+        pComplText := '';
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH09 @d 07/02/13 @a ISAT.PC @v IMH6.01.218 @s NEP00009 @h 4253 @c Gestion des extensions incorrectes */
+      /** @r IMH08 @d 27/11/12 @a ISAT.ST @v IMH6.01.218 @s NEP00009 @h 3855 @c Modification IMH06 / Gestion de codepage */
+      /** @r IMH07 @a 23/10/12 @a ISAT.ZW @v IMH6.01.217 @s NEP00008 @h 4049
+          @c Ajout paramätre Extension dans la fonction GetDocumentBinary */
+      /** @r IMH06 @a 12/10/12 @a ISAT.PC @v IMH6.01.218 @s NEP00009 @h 3855 */
+      /** @r IMH04 @d 15/05/12 @a ISAT.ST @v IMH6.01.105 @s Extranet qualitÇ @h 3104
+          @c Modification IMH02 + Ajout SetListReportResponse, UpdateReportLine */
+      /** @r IMH03 @a 30/04/12 @a ISAT.ST @v IMH6.01.105 @s Extranet qualitÇ @h 3100 @c Ajout du statut intervention */
+      /** @r IMH02 @d 20/04/12 @a ISAT.PC @v IMH6.01.105 @s Extranet qualitÇ @h 3104
+          @c Creation fonction SetAllReportResponse */
+      /** @r IMH01 @d 20/03/12 @a ISAT.ST @v IMH6.01.105 @s Extranet qualitÇ @c CrÇation objet */
+    }
+    END.
+  }
+}

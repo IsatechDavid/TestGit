@@ -1,0 +1,689 @@
+OBJECT Codeunit 50295 Correct Invoice Before To Post
+{
+  OBJECT-PROPERTIES
+  {
+    Date=15/02/12;
+    Time=15:22:34;
+    Modified=Yes;
+    Version List=A supprimer;
+  }
+  PROPERTIES
+  {
+    TableNo=50175;
+    Permissions=TableData 38=rimd,
+                TableData 39=rimd,
+                TableData 120=rimd,
+                TableData 121=rimd,
+                TableData 122=rimd,
+                TableData 123=rimd;
+    OnRun=BEGIN
+            CorrectInvoiceBeforeToPostFct(Rec,FALSE);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281004 : TextConst 'FRA=Souhaitez-vous lancer la correction des factures ?';
+      Text002@1000000001 : TextConst 'ENU=Invoice no. %1 not found;FRA=Nombre de ligne article sup‚rieur … 1';
+      Text003@1000000002 : TextConst 'ENU=Invoice no. %1 not found;FRA=Nombre de ligne compte comptable sup‚rieur … 1';
+      Text004@1000000003 : TextConst 'FRA="Impossible de d‚duire l''article "';
+      Text005@1100281005 : TextConst 'ENU=Invoice no. %1 not found;FRA=Facture %1 non trouv‚e';
+      Text006@1100281001 : TextConst 'ENU=Service header no. %1 not found;FRA=Nø ligne de produit %1 non trouv‚e';
+      Text007@1100281002 : TextConst 'ENU=Intervention no. %1 not found;FRA=Nø intervention %1 non trouv‚e';
+      Text008@1100281000 : TextConst 'ENU=Before posting;FRA=Correction avant validation';
+      Text009@1100281003 : TextConst 'ENU=Invoice line generate;FRA=G‚n‚ration ligne facture';
+      Text011@1100281013 : TextConst 'ENU=Amounts from Minutes are different than invoice;FRA=Les montants du PV sont diff‚rents de ceux de la facture';
+      Text012@1100281006 : TextConst 'ENU=Impossible to deduct VAT posting group (VAT d‚duit %1) %2;FRA=Impossible de d‚duire le groupe compta. produit TVA (taux TVA d‚duite %1) %2';
+      Text013@1100281014 : TextConst 'ENU="""Arrival Date"" or/and ""End of work date"" are not fill on intervention";FRA="""Date arriv‚e"" et/ou ""Date fin travaux"" non renseign‚e(s) sur intervention"';
+      Text014@1000000000 : TextConst 'FRA=PV';
+      Text015@1100281007 : TextConst 'FRA=Commande';
+      Text016@1100281008 : TextConst 'FRA=R‚ception';
+      Text017@1100281009 : TextConst 'FRA=Facture';
+      Text020@1000000004 : TextConst 'FRA=Traitement compta %1';
+      Text018@1100281010 : TextConst 'FRA=Doublon sur intervention';
+      Text019@1100281011 : TextConst 'FRA=Le PV a des r‚serves non lev‚es.';
+      Text021@1100281012 : TextConst 'FRA=Les montants ne sont pas saisis sur la facture.';
+      Text022@1100281015 : TextConst 'FRA=Facture %1 (%2) du %3 de %4 °';
+      Text023@1100281016 : TextConst 'FRA=Type produit %1 non autoris‚.';
+
+    PROCEDURE CorrectInvoiceBeforeToPostFct@1100281000(pInvoiceReconError@1100281010 : Record 50175;pWithConfirm@1100281017 : Boolean) rValue : Boolean;
+    VAR
+      lInvoiceReconError@1100281000 : Record 50175;
+      lInvoiceReconError2@1100281019 : Record 50175;
+      lPurchaseHeader@1100281011 : Record 38;
+      lPurchLine@1100281003 : Record 39;
+      lPurchLine2@1100281018 : Record 39;
+      lPurchRcptLine@1100281001 : Record 121;
+      lServMinutes@1100281005 : Record 50084;
+      lServiceInterventionLine@1100281004 : Record 50075;
+      lServiceHeader@1100281007 : Record 5900;
+      lVendor@1000000000 : Record 23;
+      lTempFromLineDim@1100281014 : TEMPORARY Record 357;
+      lTempToLineDim@1100281013 : TEMPORARY Record 357;
+      lDimMgt@1100281016 : Codeunit 408;
+      lVATPostingSetup@1100281009 : Code[20];
+      lItemNo@1100281008 : Code[20];
+      lReceiptExist@1100281006 : Boolean;
+      lLastLineNo@1100281012 : Integer;
+      lAmountIncludingVAT@1100281015 : Decimal;
+      lVATFound@1100281002 : Decimal;
+      lMinutesAmtExclVAT@1100281020 : Decimal;
+      lMinutesAmtInclVAT@1100281021 : Decimal;
+    BEGIN
+      // V‚rifie qu'il existe une r‚ception … la facture d'achat
+
+      IF pWithConfirm THEN BEGIN
+        IF NOT CONFIRM(Text001) THEN BEGIN
+          EXIT;
+        END;
+      END;
+
+      IF (pInvoiceReconError."Posted Invoice No." <> '') OR
+         (pInvoiceReconError."Error Step" <> '') OR
+         (pInvoiceReconError.Error <> '') OR
+         (pInvoiceReconError.Type <> pInvoiceReconError.Type::"Force Validation")
+      THEN BEGIN
+        EXIT;
+      END;
+
+      lInvoiceReconError := pInvoiceReconError;
+      IF NOT lPurchaseHeader.GET(lPurchaseHeader."Document Type"::Invoice,lInvoiceReconError."Current Invoice No.") THEN BEGIN
+        lInvoiceReconError."Error Step" := Text008;
+        lInvoiceReconError.Error := STRSUBSTNO(Text005,lInvoiceReconError."Current Invoice No.");
+        lInvoiceReconError.MODIFY;
+        EXIT;
+      END;
+      IF (lPurchaseHeader."Enter Amount" = 0) OR (lPurchaseHeader."Enter Amount Including VAT" = 0) THEN BEGIN
+        lInvoiceReconError."Error Step" := Text008;
+        lInvoiceReconError.Error := Text021;
+        lInvoiceReconError.MODIFY;
+        EXIT;
+      END;
+
+      lInvoiceReconError2.SETRANGE("Service Header No.",lInvoiceReconError."Service Header No.");
+      lInvoiceReconError2.SETRANGE("Service Intervention Line No.",lInvoiceReconError."Service Intervention Line No.");
+      lInvoiceReconError2.SETFILTER("Current Invoice No.", '<>%1',lInvoiceReconError."Current Invoice No.");
+      lInvoiceReconError2.SETRANGE("Apply Correction", TRUE);
+      IF NOT lInvoiceReconError2.ISEMPTY THEN BEGIN
+        lInvoiceReconError."Error Step" := Text008;
+        lInvoiceReconError.Error := Text018;
+        lInvoiceReconError.MODIFY;
+        EXIT;
+      END;
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,lInvoiceReconError."Service Header No.")
+      THEN BEGIN
+        lInvoiceReconError."Error Step" := Text008;
+        lInvoiceReconError.Error := STRSUBSTNO(Text006,lInvoiceReconError."Service Header No.");
+        lInvoiceReconError.MODIFY;
+        EXIT;
+      END;
+      IF lServiceHeader."Service Order Type" IN ['SCE_HAB'] THEN BEGIN
+        lInvoiceReconError."Error Step" := Text008;
+        lInvoiceReconError.Error := STRSUBSTNO(Text023,lServiceHeader."Service Order Type");
+        lInvoiceReconError.MODIFY;
+        EXIT;
+      END;
+      IF NOT lServiceInterventionLine.GET(lInvoiceReconError."Service Header No.",lInvoiceReconError."Service Intervention Line No.")
+      THEN BEGIN
+        lInvoiceReconError."Error Step" := Text008;
+        lInvoiceReconError.Error := STRSUBSTNO(Text007,lInvoiceReconError."Service Intervention Line No.");
+        lInvoiceReconError.MODIFY;
+        EXIT;
+      END;
+
+      // Correction franchise/v‚tust‚ de la facture en fonction de l'intervention
+      WITH lServiceInterventionLine DO BEGIN
+      { ST20120215 D‚sactivation de la mise … jour
+        // Montant franchsie
+        IF "Deductible Amount" <> lPurchaseHeader."Deductible Amount" THEN BEGIN
+          lPurchaseHeader."Deductible Amount" := "Deductible Amount";
+          lPurchaseHeader.MODIFY;
+        END;
+        // Montant v‚tust‚
+        IF "Unsecured Depreciation Amount" <> lPurchaseHeader."Depreciation Amount" THEN BEGIN
+          lPurchaseHeader."Depreciation Amount" := "Unsecured Depreciation Amount";
+          lPurchaseHeader.MODIFY;
+        END;
+      }
+      END;
+      AddComment(lServiceInterventionLine, lPurchaseHeader);
+      //<<ST20120215 Montant PV = Montant facture franchise d‚duite
+      WITH lPurchaseHeader DO BEGIN
+        lMinutesAmtExclVAT := "Enter Amount" - "Deductible Amount" - "Depreciation Amount";
+        lMinutesAmtInclVAT := "Enter Amount Including VAT" - "Deductible Amount" - "Depreciation Amount";
+      END;
+      //>>ST20120215
+
+      // V‚rification s'il existe un PV valid‚
+      WITH lServMinutes DO BEGIN
+        SETRANGE("Service Header No.",lPurchaseHeader."Service Header No.");
+        SETRANGE("Service Intervention Line No.",lPurchaseHeader."Intervention Line No.");
+        SETRANGE("Current Minutes", TRUE);
+        SETRANGE(Type,Type::"End of work");
+        // Aucun PV existant
+        IF NOT FINDFIRST THEN BEGIN
+          // V‚rifie certain champ de l'intervention avant de cr‚er le PV
+          ModifyInterventionForMinutes(lServiceInterventionLine);
+
+          // Cr‚ation d'un PV avec les montants saisie en facture
+          INIT;
+          VALIDATE("Service Header No.",lPurchaseHeader."Service Header No.");
+          VALIDATE("Service Intervention Line No.",lPurchaseHeader."Intervention Line No.");
+          IF lServiceInterventionLine."Assigned Date" > lPurchaseHeader."Document Date" THEN BEGIN
+            VALIDATE("Receipt Date",lServiceInterventionLine."Assigned Date");
+          END ELSE BEGIN
+            VALIDATE("Receipt Date",lPurchaseHeader."Document Date");
+          END;
+          VALIDATE("Current Minutes",TRUE);
+          VALIDATE(Type,lServMinutes.Type::"End of work");
+          INSERT(TRUE);
+          lVATPostingSetup := GetVATPostingSetup("VAT Bus. Posting Group",
+                                                 lPurchaseHeader."Enter Amount Including VAT",
+                                                 lPurchaseHeader."Enter Amount",
+                                                 lVATFound);
+          IF "VAT Prod. Posting Group" <> lVATPostingSetup THEN
+            VALIDATE("VAT Prod. Posting Group", lVATPostingSetup);
+          VALIDATE(Amount,lPurchaseHeader."Enter Amount");
+          VALIDATE("Amount Incl. VAT",lPurchaseHeader."Enter Amount Including VAT");
+          MODIFY;
+          VALIDATE("Post Minute",TRUE);
+          "Last Modification User ID" := LastModifyIndication;
+          MODIFY;
+        END ELSE BEGIN
+          // Si le PV n'est pas valid‚, on le valide en PV fin de travaux
+          IF Status <> Status::Validated THEN BEGIN
+            // Contr“le des r‚serves
+            IF (lServMinutes.Reserves) AND (lServMinutes."Closing Reserve Date"=0D) THEN BEGIN
+              lInvoiceReconError."Error Step" := Text008;
+              lInvoiceReconError.Error := Text019;
+              lInvoiceReconError.MODIFY;
+              EXIT;
+            END;
+
+            // V‚rifie certain champ de l'intervention avant de cr‚er le PV
+            ModifyInterventionForMinutes(lServiceInterventionLine);
+            IF (Amount <> lPurchaseHeader."Enter Amount") OR
+               ("Amount Incl. VAT" <> lPurchaseHeader."Enter Amount Including VAT")
+            THEN BEGIN
+              // Recherche du groupe de comptabilisation march‚ du prestataire
+              lVendor.GET(lServiceInterventionLine."Provider No.");
+              VALIDATE("VAT Bus. Posting Group",lVendor."Gen. Bus. Posting Group");
+              lVATPostingSetup :=
+                GetVATPostingSetup(
+                  "VAT Bus. Posting Group",
+                  lPurchaseHeader."Enter Amount Including VAT",
+                  lPurchaseHeader."Enter Amount",
+                  lVATFound);
+              IF lVATPostingSetup = '' THEN BEGIN
+                lInvoiceReconError."Error Step" := Text008;
+                lInvoiceReconError.Error := STRSUBSTNO(Text012,lVATFound,Text014);
+                lInvoiceReconError.MODIFY;
+                EXIT;
+              END;
+              VALIDATE("VAT Prod. Posting Group",lVATPostingSetup);
+              VALIDATE(Amount,lPurchaseHeader."Enter Amount");
+              VALIDATE("Amount Incl. VAT",lPurchaseHeader."Enter Amount Including VAT");
+              MODIFY(TRUE);
+              "Last Modification User ID" := LastModifyIndication;
+              MODIFY;
+            END;
+            IF lServiceInterventionLine."Assigned Date" > lPurchaseHeader."Document Date" THEN BEGIN
+              VALIDATE("Receipt Date",lServiceInterventionLine."Assigned Date");
+            END ELSE BEGIN
+              VALIDATE("Receipt Date",lPurchaseHeader."Document Date");
+            END;
+      //      VALIDATE(Type,lServMinutes.Type::"End of work");
+            VALIDATE("Post Minute",TRUE);
+            MODIFY(TRUE);
+            "Last Modification User ID" := LastModifyIndication;
+            MODIFY;
+          END ELSE BEGIN
+            // Si les montants sont … 0, on applique les montants de la facture
+            IF (Amount <> lPurchaseHeader."Enter Amount") OR
+               ("Amount Incl. VAT" <> lPurchaseHeader."Enter Amount Including VAT")
+            THEN BEGIN
+              // Recherche du groupe de comptabilisation march‚ du prestataire
+              lVendor.GET(lServiceInterventionLine."Provider No.");
+              VALIDATE("VAT Bus. Posting Group",lVendor."Gen. Bus. Posting Group");
+              lVATPostingSetup :=
+                GetVATPostingSetup(
+                  "VAT Bus. Posting Group",
+                  lPurchaseHeader."Enter Amount Including VAT",
+                  lPurchaseHeader."Enter Amount",
+                  lVATFound);
+              IF lVATPostingSetup = '' THEN BEGIN
+                lInvoiceReconError."Error Step" := Text008;
+                lInvoiceReconError.Error := STRSUBSTNO(Text012,lVATFound,Text014);
+                lInvoiceReconError.MODIFY;
+                EXIT;
+              END;
+              VALIDATE("VAT Prod. Posting Group",lVATPostingSetup);
+              VALIDATE(Amount,lPurchaseHeader."Enter Amount");
+              VALIDATE("Amount Incl. VAT",lPurchaseHeader."Enter Amount Including VAT");
+              MODIFY(TRUE);
+              "Last Modification User ID" := LastModifyIndication;
+              MODIFY;
+            END;
+          END;
+        END;
+      END;
+
+      // Si une ligne de commande d'achat existe, les montants sont mis … jour avec ceux de la facture
+      WITH lPurchLine DO BEGIN
+        SuspendStatusCheck(TRUE);
+        SETCURRENTKEY("Service No.", "Service Header No.", "Intervention Line No.");
+        SETRANGE("Service No.",lPurchaseHeader."Service No.");
+        SETRANGE("Service Header No.",lPurchaseHeader."Service Header No.");
+        SETRANGE("Intervention Line No.",lPurchaseHeader."Intervention Line No.");
+        SETRANGE("Document Type","Document Type"::Order);
+        SETRANGE(Type, Type::Item);
+        IF FINDFIRST THEN BEGIN
+          SuspendStatusCheck(TRUE);
+          lVATFound := 0;
+          lVATPostingSetup :=
+            GetVATPostingSetup(
+              "VAT Bus. Posting Group",
+              lPurchaseHeader."Enter Amount Including VAT",
+              lPurchaseHeader."Enter Amount",
+              lVATFound);
+          IF lVATPostingSetup = '' THEN BEGIN
+            VALIDATE("Direct Unit Cost",0);
+            VALIDATE(Amount,0);
+            VALIDATE("Qty. to Invoice",0);
+            MODIFY(TRUE);
+            lInvoiceReconError."Error Step" := Text008;
+            lInvoiceReconError.Error := STRSUBSTNO(Text012,lVATFound,Text015);
+            lInvoiceReconError.MODIFY;
+            EXIT;
+          END;
+          VALIDATE("Direct Unit Cost",lPurchaseHeader."Enter Amount");
+          VALIDATE("Unit Price (LCY)",lPurchaseHeader."Enter Amount");
+          VALIDATE("VAT Prod. Posting Group",lVATPostingSetup);
+          VALIDATE("Depreciation Amount",lPurchaseHeader."Depreciation Amount");
+          VALIDATE("Deductible Amount",lPurchaseHeader."Deductible Amount");
+          MODIFY(TRUE);
+        END;
+      END;
+
+      lReceiptExist := FALSE;
+      // Si une ligne de r‚ception achat existe, les montants sont mis … jour avec ceux de la facture
+      // la r‚ception est marqu‚e comme factur‚e
+      WITH lPurchRcptLine DO BEGIN
+        SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+        SETRANGE("Service No.",lPurchaseHeader."Service No.");
+        SETRANGE("Service Header No.",lPurchaseHeader."Service Header No.");
+        SETRANGE("Intervention Line No.",lPurchaseHeader."Intervention Line No.");
+        SETRANGE(Type,Type::Item);
+        IF FINDFIRST THEN BEGIN
+          lReceiptExist := TRUE;
+          lVATFound := 0;
+          lVATPostingSetup :=
+            GetVATPostingSetup(
+              "VAT Bus. Posting Group",
+              lPurchaseHeader."Enter Amount Including VAT",
+              lPurchaseHeader."Enter Amount",
+              lVATFound);
+          IF lVATPostingSetup = '' THEN BEGIN
+            lInvoiceReconError."Error Step" := Text008;
+            lInvoiceReconError.Error := STRSUBSTNO(Text012,lVATFound,Text016);
+            lInvoiceReconError.MODIFY;
+            EXIT;
+          END;
+          VALIDATE("Direct Unit Cost",lPurchaseHeader."Enter Amount");
+          VALIDATE("Unit Price (LCY)",lPurchaseHeader."Enter Amount");
+          VALIDATE("VAT Prod. Posting Group",lVATPostingSetup);
+          VALIDATE("Depreciation Amount",lPurchaseHeader."Depreciation Amount");
+          VALIDATE("Deductible Amount",lPurchaseHeader."Deductible Amount");
+          //VALIDATE("Qty. Rcd. Not Invoiced",0);
+          MODIFY(TRUE);
+        END;
+      END;
+
+      lItemNo := '';
+      // V‚rification de la ligne de facture
+      WITH lPurchLine DO BEGIN
+        RESET;
+        SETRANGE("Document Type",lPurchaseHeader."Document Type");
+        SETRANGE("Document No.",lPurchaseHeader."No.");
+        SETRANGE("Service No.",lServiceHeader."Service No.");
+        SETRANGE("Service Header No.",lServiceHeader."No.");
+        SETRANGE("Intervention Line No.",lServiceInterventionLine."Line No.");
+        SETRANGE(Type,Type::"G/L Account");
+        IF COUNT > 1 THEN BEGIN
+          lInvoiceReconError."Error Step" := Text008;
+          lInvoiceReconError.Error := STRSUBSTNO(Text003);
+          lInvoiceReconError.MODIFY;
+          EXIT;
+        END;
+        SETRANGE(Type,Type::Item);
+        IF COUNT > 1 THEN BEGIN
+          lInvoiceReconError."Error Step" := Text008;
+          lInvoiceReconError.Error := STRSUBSTNO(Text002);
+          lInvoiceReconError.MODIFY;
+          EXIT;
+        END;
+        IF ISEMPTY THEN BEGIN
+          // Si Aucune ligne d'article n'existe dans la facture, on cr‚‚ cette ligne
+          lLastLineNo := 0;
+          lPurchLine2.SETRANGE("Document Type",lPurchaseHeader."Document Type");
+          lPurchLine2.SETRANGE("Document No.",lPurchaseHeader."No.");
+          lPurchLine2.LOCKTABLE;
+          IF lPurchLine2.FINDLAST THEN BEGIN
+            lLastLineNo := lPurchLine2."Line No.";
+            RESET;
+          END;
+          lLastLineNo += 10000;
+
+          IF NOT lReceiptExist THEN BEGIN
+            // Si aucun r‚ception n'existe, on cr‚e la ligne
+            // Recherche de l'article
+            GetPurchItemNo(
+              lServiceHeader."Service No.",
+              lServiceHeader."No.",
+              lServiceInterventionLine."Line No.",
+              lServiceInterventionLine."Corporate No.",
+              lServiceInterventionLine."Service Order Type",
+              lServiceInterventionLine.Urgent,
+              lItemNo);
+
+            IF lItemNo = '' THEN BEGIN
+              lInvoiceReconError."Error Step" := Text009;
+              lInvoiceReconError.Error := STRSUBSTNO(Text004);
+              lInvoiceReconError.MODIFY;
+              EXIT;
+            END;
+
+            // Cr‚ation de la ligne d'info
+            SuspendStatusCheck(TRUE);
+            INIT;
+            VALIDATE("Document Type",lPurchaseHeader."Document Type");
+            VALIDATE("Document No.",lPurchaseHeader."No.");
+            VALIDATE("Line No.",lLastLineNo);
+            VALIDATE(Type,Type::" ");
+            Description := LastModifyIndication;
+            INSERT(TRUE);
+            lLastLineNo += 10000;
+
+            // Cr‚ation de la ligne article
+            INIT;
+            VALIDATE("Document Type",lPurchaseHeader."Document Type");
+            VALIDATE("Document No.",lPurchaseHeader."No.");
+            VALIDATE("Line No.",lLastLineNo);
+            VALIDATE(Type,Type::Item);
+            VALIDATE("No.",lItemNo);
+            VALIDATE(Quantity,1);
+            VALIDATE("Qty. to Invoice",1);
+            VALIDATE("Service No.",lServiceHeader."Service No.");
+            VALIDATE("Service Header No.",lServiceHeader."No.");
+            VALIDATE("Intervention Line No.",lServiceInterventionLine."Line No.");
+            VALIDATE("Corporate No.",lServiceInterventionLine."Corporate No.");
+            VALIDATE("Corporate Region Code",lServiceInterventionLine."Corporate Region Code");
+            VALIDATE("Service Order Type",lServiceInterventionLine."Service Order Type");
+            lVATFound := 0;
+            lVATPostingSetup :=
+              GetVATPostingSetup(
+                "VAT Bus. Posting Group",
+                lPurchaseHeader."Enter Amount Including VAT",
+                lPurchaseHeader."Enter Amount",
+                lVATFound);
+            IF lVATPostingSetup = '' THEN BEGIN
+              lInvoiceReconError."Error Step" := Text008;
+              lInvoiceReconError.Error := STRSUBSTNO(Text012,lVATFound,Text017);
+              lInvoiceReconError.MODIFY;
+              EXIT;
+            END;
+            VALIDATE("VAT Prod. Posting Group",lVATPostingSetup);
+            VALIDATE("Direct Unit Cost",lPurchaseHeader."Enter Amount");
+            VALIDATE("Unit Price (LCY)",lPurchaseHeader."Enter Amount");
+            VALIDATE("Depreciation Amount",lPurchaseHeader."Depreciation Amount");
+            VALIDATE("Deductible Amount",lPurchaseHeader."Deductible Amount");
+            lAmountIncludingVAT := ROUND("Unit Price (LCY)" * "VAT %" / 100,0.01);
+            IF lAmountIncludingVAT <> lPurchaseHeader."Enter Amount VAT" THEN BEGIN
+              VALIDATE("VAT Difference",lPurchaseHeader."Enter Amount VAT" - lAmountIncludingVAT);
+            END;
+            INSERT(TRUE);
+          END ELSE BEGIN
+            // r‚cup‚ration de la ligne en fonction de la r‚ception
+            SuspendStatusCheck(TRUE);
+            "Document Type" := lPurchaseHeader."Document Type";
+            "Document No." := lPurchaseHeader."No.";
+            lPurchRcptLine.InsertInvLineFromRcptLine(lPurchLine,lTempFromLineDim);
+            lDimMgt.MoveTempFromDimToTempToDim(lTempFromLineDim,lTempToLineDim);
+            VALIDATE("Document Type",lPurchaseHeader."Document Type");
+            VALIDATE("Document No.",lPurchaseHeader."No.");
+            VALIDATE("Service No.",lServiceHeader."Service No.");
+            VALIDATE("Service Header No.",lServiceHeader."No.");
+            VALIDATE("Intervention Line No.",lServiceInterventionLine."Line No.");
+            VALIDATE("Corporate No.",lServiceInterventionLine."Corporate No.");
+            VALIDATE("Corporate Region Code",lServiceInterventionLine."Corporate Region Code");
+            VALIDATE("Service Order Type",lServiceInterventionLine."Service Order Type");
+            lVATFound := 0;
+            IF Type = Type::Item THEN BEGIN
+              lVATPostingSetup :=
+                GetVATPostingSetup(
+                  "VAT Bus. Posting Group",
+                  lPurchaseHeader."Enter Amount Including VAT",
+                  lPurchaseHeader."Enter Amount",
+                  lVATFound);
+              IF lVATPostingSetup = '' THEN BEGIN
+                VALIDATE("Direct Unit Cost",0);
+                VALIDATE(Amount,0);
+                VALIDATE("Qty. to Invoice",0);
+                MODIFY(TRUE);
+                lInvoiceReconError."Error Step" := Text009;
+                lInvoiceReconError.Error := STRSUBSTNO(Text012,lVATFound,Text017);
+                lInvoiceReconError.MODIFY;
+                EXIT;
+              END;
+              VALIDATE(Quantity,1);
+              VALIDATE("Qty. to Invoice",1);
+              VALIDATE("Direct Unit Cost",lPurchaseHeader."Enter Amount");
+              VALIDATE("Unit Price (LCY)",lPurchaseHeader."Enter Amount");
+              VALIDATE("VAT Prod. Posting Group",lVATPostingSetup);
+              VALIDATE("Depreciation Amount",lPurchaseHeader."Depreciation Amount");
+              VALIDATE("Deductible Amount",lPurchaseHeader."Deductible Amount");
+            END;
+            lAmountIncludingVAT := ROUND("Unit Price (LCY)" * "VAT %" / 100,0.01);
+            IF lAmountIncludingVAT <> lPurchaseHeader."Enter Amount VAT" THEN BEGIN
+              VALIDATE("VAT Difference",lPurchaseHeader."Enter Amount VAT" - lAmountIncludingVAT);
+            END;
+            MODIFY(TRUE);
+          END;
+        END ELSE BEGIN
+          // Si la ligne article de type article existe dans la facture, on applique les montants de l'en-tˆte
+          FINDFIRST;
+          lVATFound := 0;
+          SuspendStatusCheck(TRUE);
+          IF Type = Type::Item THEN BEGIN
+            lVATPostingSetup :=
+              GetVATPostingSetup(
+                "VAT Bus. Posting Group",
+                lPurchaseHeader."Enter Amount Including VAT",
+                lPurchaseHeader."Enter Amount",
+                lVATFound);
+            IF lVATPostingSetup = '' THEN BEGIN
+              VALIDATE("Direct Unit Cost",0);
+              VALIDATE(Amount,0);
+              VALIDATE("Qty. to Invoice",0);
+              MODIFY(TRUE);
+              lInvoiceReconError."Error Step" := Text009;
+              lInvoiceReconError.Error := STRSUBSTNO(Text012,lVATFound,Text017);
+              lInvoiceReconError.MODIFY;
+              EXIT;
+            END;
+            VALIDATE("Qty. to Invoice",1);
+            VALIDATE("Direct Unit Cost",lPurchaseHeader."Enter Amount");
+            VALIDATE("Unit Price (LCY)",lPurchaseHeader."Enter Amount");
+            VALIDATE("VAT Prod. Posting Group",lVATPostingSetup);
+            VALIDATE("Depreciation Amount",lPurchaseHeader."Depreciation Amount");
+            VALIDATE("Deductible Amount",lPurchaseHeader."Deductible Amount");
+            lAmountIncludingVAT := ROUND("Unit Price (LCY)" * "VAT %" / 100,0.01);
+            IF lAmountIncludingVAT <> lPurchaseHeader."Enter Amount VAT" THEN BEGIN
+              VALIDATE("VAT Difference",lPurchaseHeader."Enter Amount VAT" - lAmountIncludingVAT);
+            END;
+            MODIFY(TRUE);
+          END;
+        END;
+      END;
+      lInvoiceReconError."Apply Correction" := TRUE;
+      lInvoiceReconError.MODIFY;
+    END;
+
+    PROCEDURE GetVATPostingSetup@1100281011(pVATBusPostingGroup@1100281003 : Code[10];pAmountInclVAT@1100281001 : Decimal;pAmountExclVAT@1100281002 : Decimal;VAR pVATFound@1100281005 : Decimal) : Code[10];
+    VAR
+      lVATPostingSetup@1100281000 : Record 325;
+      lTempVAT@1100281004 : Decimal;
+    BEGIN
+      // Recherche du groupe de compta produit TVA
+      pVATFound := 0;
+      lTempVAT := ROUND(((pAmountInclVAT / pAmountExclVAT) - 1) * 100,0.1);
+
+      lVATPostingSetup.SETRANGE("VAT Bus. Posting Group",pVATBusPostingGroup);
+      lVATPostingSetup.SETRANGE("VAT %",lTempVAT);
+      IF lVATPostingSetup.FINDFIRST THEN BEGIN
+        EXIT(lVATPostingSetup."VAT Prod. Posting Group");
+      END;
+      pVATFound := lTempVAT;
+    END;
+
+    LOCAL PROCEDURE GetPurchItemNo@1100281016(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pLineNo@1100281002 : Integer;pCorporateNo@1100281007 : Code[20];pServiceOrderType@1100281008 : Code[20];pEmergency@1100281009 : Boolean;VAR pItemNo@1100281003 : Code[20]) rValue : Boolean;
+    VAR
+      lServiceCode@1100281006 : Record 50040;
+      lSpecialization@1100281004 : Record 50005;
+      lProductCatalog@1100281005 : Record 50060;
+      lServiceOrderType@1100281010 : Record 5903;
+    BEGIN
+      // Si plusieurs sp‚cialit‚ : article sur Produit
+      // Sinon article sur sp‚cialisation
+
+      //<<IMH07.ST
+      IF pEmergency THEN BEGIN
+        IF lServiceOrderType.GET(pServiceOrderType) THEN
+          IF NOT lServiceOrderType."Apply Emergency Price" THEN
+            pEmergency := FALSE;
+      END;
+      //>>IMH07.ST
+
+      rValue := FALSE;
+
+      lServiceCode.SETRANGE("Service Type",lServiceCode."Service Type"::Intervention);
+      lServiceCode.SETRANGE("Service No.",pServiceNo);
+      lServiceCode.SETRANGE("Service Header No.",pServiceHeaderNo);
+      lServiceCode.SETRANGE("Intervention Line No.",pLineNo);
+      lServiceCode.SETRANGE("Code Type",lServiceCode."Code Type"::Speciality);
+      IF NOT lServiceCode.ISEMPTY THEN BEGIN
+        IF lServiceCode.COUNT = 1 THEN BEGIN
+          lServiceCode.FINDFIRST;
+          IF lSpecialization.GET(lServiceCode.Code) THEN BEGIN
+            IF pEmergency THEN BEGIN
+              pItemNo := lSpecialization."Emergency Purchase Item No.";
+            END ELSE BEGIN
+              pItemNo := lSpecialization."Purchase Item No.";
+            END;
+          END;
+          rValue := pItemNo <> '';
+          IF rValue THEN BEGIN
+            EXIT;
+          END;
+        END;
+      END;
+
+      IF NOT lProductCatalog.GET(pCorporateNo,pServiceOrderType) THEN BEGIN
+        EXIT;
+      END;
+
+      IF pEmergency THEN BEGIN
+        pItemNo := lProductCatalog."Multi Spe. Em. Purch. Item No.";
+      END ELSE BEGIN
+        pItemNo := lProductCatalog."Multi Spe. Purch. Item No.";
+      END;
+
+      //<<IMH05.PC
+      IF pItemNo = '' THEN BEGIN
+        lServiceOrderType.GET(pServiceOrderType);
+        //pItemNo := lServiceOrderType."Generic Item No.";
+        IF pEmergency THEN BEGIN
+          pItemNo := lServiceOrderType."Multi Spe. Em. Purch. Item No.";
+        END ELSE BEGIN
+          pItemNo := lServiceOrderType."Multi Spe. Purch. Item No.";
+        END;
+      END;
+      //>>IMH05.PC
+      rValue := pItemNo <> '';
+    END;
+
+    PROCEDURE LastModifyIndication@1100281007() : Text[20];
+    BEGIN
+      EXIT('Correctif-' + FORMAT(TODAY,0,'<Year><Month,2><Day,2>'));
+    END;
+
+    PROCEDURE ModifyInterventionForMinutes@1100281003(pServiceInterventionLine@1100281001 : Record 50075);
+    VAR
+      lServiceOrderType@1100281000 : Record 5903;
+      lToModify@1100281002 : Boolean;
+    BEGIN
+      // Mets … jour les informations du PV en fonction de certains critŠres
+      lToModify := FALSE;
+
+      lServiceOrderType.GET(pServiceInterventionLine."Service Order Type");
+      IF lServiceOrderType."Apply Emergency Price" AND pServiceInterventionLine.Urgent THEN BEGIN
+        IF pServiceInterventionLine."Arrival Date" = 0D THEN BEGIN
+          pServiceInterventionLine.VALIDATE("Arrival Date",TODAY);
+          lToModify := TRUE;
+        END;
+        IF pServiceInterventionLine."Work End Date" = 0D THEN BEGIN
+          pServiceInterventionLine.VALIDATE("Work End Date",TODAY);
+          lToModify := TRUE;
+        END;
+      END;
+      IF pServiceInterventionLine."Moisture %" >= 20 THEN BEGIN
+        pServiceInterventionLine.VALIDATE("Next Appointment Date",TODAY);
+        lToModify := TRUE;
+      END;
+      IF lToModify THEN BEGIN
+        pServiceInterventionLine.MODIFY;
+      END;
+    END;
+
+    PROCEDURE AddComment@1100281002(pIntervLine@1000000000 : Record 50075;pPurchHeader@1000000004 : Record 38);
+    VAR
+      lAdvCommentLine@1000000001 : Record 50056;
+      lTextMgt@1000000002 : Codeunit 50085;
+      lCrLF@1000000003 : Text[2];
+    BEGIN
+      WITH lAdvCommentLine DO BEGIN
+        "Source Table ID" := DATABASE::"Service Intervention Line";
+        "Source No." := pIntervLine."Service No.";
+        "Source No. 2" := pIntervLine."Service Header No.";
+        "Source No. 3" := pIntervLine."Line No.";
+        "Source No. 4" := '';
+        "Source No. 5" := 0;
+        Date := WORKDATE;
+        Code := '';
+        Publication := 0;
+        Reception := 0;
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+        "Last Modification Date" := "Creation Date";
+        "Last Modification User ID" := "Creation User ID";
+      END;
+      lCrLF[1] := 13;
+      lCrLF[2] := 10;
+      lTextMgt.SaveText(lAdvCommentLine,DT2DATE(lAdvCommentLine."Creation Date"),
+                        STRSUBSTNO(Text020, TODAY) + lCrLF +
+                        STRSUBSTNO(Text022, pPurchHeader."No.", pPurchHeader."Vendor Invoice No.",
+                                            pPurchHeader."Document Date",
+                                            pPurchHeader."Enter Amount Including VAT" - pPurchHeader."Depreciation Amount" -
+                                            pPurchHeader."Deductible Amount")
+                        );
+    END;
+
+    BEGIN
+    {
+      codeunit pour valider un ensemble de facture (autour de 6000) pour aider IMH
+    }
+    END.
+  }
+}

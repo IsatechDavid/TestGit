@@ -1,0 +1,396 @@
+OBJECT Dataport 8016704 ADP GSI Pay Interface
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/09;
+    Time=16:46:37;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 4=r,
+                TableData 80=r,
+                TableData 81=rimd,
+                TableData 98=r,
+                TableData 232=r,
+                TableData 356=rimd,
+                TableData 8006259=r,
+                TableData 8006260=r;
+    CaptionML=[ENU=ADP GSI Pay Interface;
+               FRA=ADP GSI Interface Paie];
+    FileFormat=Fixed;
+    OnPreDataport=BEGIN
+                    CurrDataport.FILENAME := FileName;
+                  END;
+
+    OnPostDataport=BEGIN
+                     MESSAGE(Text8016602);
+                   END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table81;
+        DataItemVarName=GenJnlLine;
+        AutoSave=No;
+        AutoUpdate=No;
+        DataItemTableView=SORTING(Journal Template Name,Journal Batch Name,Line No.);
+        OnPreDataItem=BEGIN
+                        IF (GenJnlTemplateName = '') OR (GenJnlBatchName = '') THEN
+                          ERROR(Text8016600);
+
+                        IF (GenJnlTemplateNameError = '') OR (GenJnlBatchNameError = '') THEN
+                          ERROR(Text8016601);
+
+                        GenJnlTemplate.GET(GenJnlTemplateName);
+                        GenJnlTemplateError.GET(GenJnlTemplateNameError);
+                        GenJnlBatch.GET(GenJnlTemplateName,GenJnlBatchName);
+                        GenJnlBatchError.GET(GenJnlTemplateNameError,GenJnlBatchNameError);
+
+                        DocNo := NoSeriesMgt.GetNextNo(GenJnlBatch."No. Series","Posting Date",FALSE);
+                        DocNoError := NoSeriesMgt.GetNextNo(GenJnlBatchError."No. Series","Posting Date",FALSE);
+
+                        WITH GenJnlLine DO BEGIN
+                          SETCURRENTKEY("Journal Template Name","Journal Batch Name","Line No.");
+                          SETRANGE("Journal Template Name",GenJnlTemplateName);
+                          SETRANGE("Journal Batch Name",GenJnlBatchName);
+                          DELETEALL(TRUE);
+                        END;
+
+                        WITH GenJnlLineError DO BEGIN
+                          SETCURRENTKEY("Journal Template Name","Journal Batch Name","Line No.");
+                          SETRANGE("Journal Template Name",GenJnlTemplateNameError);
+                          SETRANGE("Journal Batch Name",GenJnlBatchNameError);
+                          DELETEALL(TRUE);
+                        END;
+
+                        NextLineNo := 0;
+                        NextLineNoError := 0;
+                      END;
+
+        OnBeforeImportRecord=BEGIN
+                               GenJnlLine.INIT;
+                               GenJnlLineError.INIT;
+                               COMMIT;
+                             END;
+
+        OnAfterImportRecord=BEGIN
+                              IF RecType <> 'D' THEN CurrDataport.SKIP;
+
+                              VALIDATE("Journal Template Name",GenJnlTemplateName);
+                              VALIDATE("Journal Batch Name",GenJnlBatchName);
+                              "Source Code" := GenJnlTemplate."Source Code";
+
+                              "Currency Code" := CurrencyCode;
+
+                              "Document No." := DocNo;
+
+                              "Posting Date" := DMY2DATE(DDPayDate,MMPayDate,CCPayDate*100+YYPayDate);
+
+                              "Account Type" := "Account Type"::"G/L Account";
+
+                              IF CorrespPayInterface.GET(GLAccountNo,DimAffectNo) THEN BEGIN
+                                "Account No." := CorrespPayInterface."New Account No.";
+                              END ELSE
+                                "Account No." := GLAccountNo+'KO';
+
+
+                              // Exist lines with debit amount and credit amount
+                              // --> Generate 2 lines
+
+                              IF DebitAmt <> 0 THEN BEGIN
+                                Amount := ConvertAmount(DebitAmt,"Currency Code");
+
+                                IF NOT ControlPayInterface.RUN(GenJnlLine) THEN BEGIN
+                                  InsertErrorLine;
+                                  CurrDataport.SKIP;
+
+                                END ELSE BEGIN
+                                  NextLineNo := NextLineNo + 10000;
+                                  "Line No." := NextLineNo;
+                                  "Gen. Posting Type" := "Gen. Posting Type" :: " ";
+                                  "Gen. Bus. Posting Group" := '';
+                                  "Gen. Prod. Posting Group" := '';
+                                  "VAT Bus. Posting Group" := '';
+                                  "VAT Prod. Posting Group" := '';
+                                  Description := COPYSTR(LineDescription,1,30);
+
+                                  INSERT(TRUE);
+
+                                  InsertOtherDim(DATABASE::"ADP GSI Corresp Pay Interface",
+                                                 GLAccountNo,
+                                                 DimAffectNo,
+                                                 '');
+                                END;
+                              END;
+                              COMMIT;
+
+                              IF CreditAmt <> 0 THEN BEGIN
+                                Amount := ConvertAmount(-CreditAmt,"Currency Code");
+
+                                IF NOT ControlPayInterface.RUN(GenJnlLine) THEN BEGIN
+                                  InsertErrorLine;
+                                  CurrDataport.SKIP;
+
+                                END ELSE BEGIN
+                                  NextLineNo := NextLineNo + 10000;
+                                  "Line No." := NextLineNo;
+                                  "Gen. Posting Type" := "Gen. Posting Type" :: " ";
+                                  "Gen. Bus. Posting Group" := '';
+                                  "Gen. Prod. Posting Group" := '';
+                                  "VAT Bus. Posting Group" := '';
+                                  "VAT Prod. Posting Group" := '';
+                                  Description := COPYSTR(LineDescription,1,30);
+
+                                  INSERT(TRUE);
+
+                                  InsertOtherDim(DATABASE::"ADP GSI Corresp Pay Interface",
+                                                 GLAccountNo,
+                                                 DimAffectNo,
+                                                 '');
+                                END;
+                              END;
+                              COMMIT;
+                            END;
+
+        OnPostDataItem=BEGIN
+                         // Update dimension values
+                         WITH TempJnlLineDim DO
+                           IF FIND('-') THEN
+                             REPEAT
+                               JnlLineDim := TempJnlLineDim;
+                               JnlLineDim.INSERT;
+
+                               UpdateShortcutDim(JnlLineDim);
+
+                             UNTIL NEXT = 0;
+                       END;
+
+      }
+      FIELDS
+      {
+        { 1    ;2    ;TempRecCode          }
+        { 3    ;6    ;TempPayProcessCode   }
+        { 9    ;1    ;TempCurrencyCode     }
+        { 10   ;3    ;TempZADIGType        }
+        { 13   ;2    ;MMPayDate            }
+        { 15   ;2    ;YYPayDate            }
+        { 17   ;3    ;TempSourceCode       }
+        { 20   ;2    ;TempConstant         }
+        { 22   ;1    ;RecType              }
+        { 23   ;2    ;DDPayDate            }
+        { 25   ;12   ;GLAccountNo          }
+        { 37   ;18   ;DimAffectNo          }
+        { 55   ;13   ;DebitAmt             }
+        { 68   ;13   ;CreditAmt            }
+        { 81   ;60   ;LineDescription      }
+        { 141  ;6    ;TempLegalComp        }
+        { 147  ;12   ;TempFreeZone         }
+        { 159  ;2    ;CCPayDate            }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9680;
+      Height=4620;
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 1   ;TextBox      ;4840 ;0    ;4840 ;440  ;AssistEdit=Yes;
+                                                   CaptionML=[ENU=File Name;
+                                                              FRA=Nom du fichier];
+                                                   SourceExpr=FileName }
+      { 4   ;Label        ;0    ;0    ;4730 ;440  ;ParentControl=1 }
+      { 5   ;TextBox      ;4840 ;2420 ;3960 ;440  ;CaptionML=[ENU=Gen. Journal Batch Name;
+                                                              FRA=Nom feuille];
+                                                   SourceExpr=GenJnlBatchName;
+                                                   TableRelation="Gen. Journal Batch".Name;
+                                                   OnLookup=BEGIN
+                                                              IF GenJnlBatch.GET(GenJnlTemplateName,Text) THEN;
+                                                              GenJnlBatch.SETRANGE("Journal Template Name",GenJnlTemplateName);
+                                                              IF FORM.RUNMODAL(FORM::"General Journal Batches",GenJnlBatch) = ACTION::LookupOK THEN
+                                                                GenJnlBatchName := GenJnlBatch.Name;
+                                                            END;
+                                                             }
+      { 6   ;Label        ;0    ;2420 ;4730 ;440  ;ParentControl=5 }
+      { 2   ;TextBox      ;4840 ;1870 ;3960 ;440  ;CaptionML=[ENU=Gen. Journal Template Name;
+                                                              FRA=Nom modŠle feuille de saisie];
+                                                   SourceExpr=GenJnlTemplateName;
+                                                   TableRelation="Gen. Journal Template".Name WHERE (Type=CONST(General),
+                                                                                                     Recurring=CONST(No)) }
+      { 3   ;Label        ;0    ;1870 ;4730 ;440  ;ParentControl=2 }
+      { 7   ;Label        ;0    ;1320 ;4730 ;440  ;FontSize=9;
+                                                   FontBold=Yes;
+                                                   LeaderDots=No;
+                                                   CaptionML=[ENU=Posting Gen. Journal;
+                                                              FRA=Feuille … valider] }
+      { 8   ;Label        ;0    ;3080 ;4730 ;440  ;FontSize=9;
+                                                   FontBold=Yes;
+                                                   LeaderDots=No;
+                                                   CaptionML=[ENU=Reject Gen. Journal;
+                                                              FRA=Feuille de rejet] }
+      { 9   ;TextBox      ;4840 ;3630 ;3960 ;440  ;CaptionML=[ENU=Rejects Gen. Journal Template Name;
+                                                              FRA=Nom modŠle feuille de saisie rejet];
+                                                   SourceExpr=GenJnlTemplateNameError;
+                                                   TableRelation="Gen. Journal Template".Name WHERE (Type=CONST(General),
+                                                                                                     Recurring=CONST(No)) }
+      { 10  ;Label        ;0    ;3630 ;4730 ;440  ;ParentControl=9 }
+      { 11  ;TextBox      ;4840 ;4180 ;3960 ;440  ;CaptionML=[ENU=Rejects Gen. Journal Batch Name;
+                                                              FRA=Nom feuille rejets];
+                                                   SourceExpr=GenJnlBatchNameError;
+                                                   TableRelation="Gen. Journal Batch".Name;
+                                                   OnLookup=BEGIN
+                                                              IF GenJnlBatchError.GET(GenJnlTemplateNameError,Text) THEN;
+                                                              GenJnlBatchError.SETRANGE("Journal Template Name",GenJnlTemplateNameError);
+                                                              IF FORM.RUNMODAL(FORM::"General Journal Batches",GenJnlBatchError) = ACTION::LookupOK THEN
+                                                                GenJnlBatchNameError := GenJnlBatchError.Name;
+                                                            END;
+                                                             }
+      { 12  ;Label        ;0    ;4180 ;4730 ;440  ;ParentControl=11 }
+      { 1000000000;TextBox;4840 ;660  ;1700 ;440  ;CaptionML=[ENU=Currency Code;
+                                                              FRA=Code devise];
+                                                   SourceExpr=CurrencyCode;
+                                                   TableRelation=Currency }
+      { 1000000001;Label  ;0    ;660  ;4730 ;440  ;ParentControl=1000000000 }
+    }
+  }
+  CODE
+  {
+    VAR
+      FileName@8016601 : Text[250];
+      CurrencyCode@8016617 : Code[20];
+      GenJnlTemplateName@8016602 : Code[10];
+      GenJnlTemplateNameError@8016603 : Code[10];
+      GenJnlBatchName@8016604 : Code[10];
+      GenJnlBatchNameError@8016605 : Code[10];
+      GenJnlBatch@8016606 : Record 232;
+      GenJnlBatchError@8016607 : Record 232;
+      GenJnlTemplate@8016608 : Record 80;
+      GenJnlTemplateError@8016609 : Record 80;
+      NoSeriesMgt@8016611 : Codeunit 396;
+      NextLineNo@8016613 : Integer;
+      NextLineNoError@8016614 : Integer;
+      GenJnlLineError@8016615 : Record 81;
+      ControlPayInterface@8016619 : Codeunit 8016605;
+      DocNo@8016620 : Code[20];
+      DocNoError@8016621 : Code[20];
+      TempRecCode@8016616 : Text[2];
+      TempPayProcessCode@8016623 : Text[6];
+      TempCurrencyCode@8016624 : Text[1];
+      TempZADIGType@8016625 : Text[3];
+      MMPayDate@8016626 : Integer;
+      YYPayDate@8016627 : Integer;
+      TempSourceCode@8016628 : Text[3];
+      TempConstant@8016629 : Text[2];
+      RecType@8016630 : Text[1];
+      DDPayDate@8016631 : Integer;
+      GLAccountNo@8016632 : Code[12];
+      DimAffectNo@8016633 : Text[18];
+      DebitAmt@8016634 : Decimal;
+      CreditAmt@8016635 : Decimal;
+      LineDescription@8016636 : Text[60];
+      TempLegalComp@8016637 : Text[6];
+      TempFreeZone@8016638 : Text[12];
+      CCPayDate@8016639 : Integer;
+      CorrespPayInterface@8016640 : Record 8016608;
+      TempJnlLineDim@8016641 : TEMPORARY Record 356;
+      JnlLineDim@8016618 : Record 356;
+      Text8016600@8016650 : TextConst 'ENU=Please select a Gen. Journal Batch.;FRA=Veuillez s‚lectionner une feuille de saisie.';
+      Text8016601@8016651 : TextConst 'ENU=Please select a Gen. Journal Batch for rejects.;FRA=Veuillez s‚lectionner une feuille de saisie pour les rejets.';
+      Text8016602@8016652 : TextConst 'ENU=Process finished.;FRA=Traitement termin‚.';
+
+    PROCEDURE ConvertAmount@8016601(Amount@8016600 : Decimal;CurrencyCode@8016601 : Code[10]) : Decimal;
+    VAR
+      GLSetup@8016602 : Record 98;
+      Currency@8016603 : Record 4;
+    BEGIN
+      IF CurrencyCode = '' THEN BEGIN
+        GLSetup.GET;
+        EXIT(Amount * GLSetup."Amount Rounding Precision");
+      END ELSE BEGIN
+        Currency.GET(CurrencyCode);
+        EXIT(Amount * Currency."Amount Rounding Precision");
+      END;
+    END;
+
+    PROCEDURE InsertOtherDim@8016600(TableID@8016600 : Integer;No1@8016601 : Code[20];No2@8016602 : Code[20];No3@8016603 : Code[20]);
+    VAR
+      OtherDim@8016604 : Record 8016609;
+    BEGIN
+      WITH OtherDim DO BEGIN
+        RESET;
+        SETRANGE("Table ID",TableID);
+        SETRANGE("No. 1",No1);
+        SETRANGE("No. 2",No2);
+        SETRANGE("No. 3",No3);
+
+        IF FIND('-') THEN BEGIN
+          REPEAT
+            CLEAR(TempJnlLineDim);
+            TempJnlLineDim."Table ID" := DATABASE::"Gen. Journal Line";
+            TempJnlLineDim."Journal Template Name" := GenJnlLine."Journal Template Name";
+            TempJnlLineDim."Journal Batch Name" := GenJnlLine."Journal Batch Name";
+            TempJnlLineDim."Journal Line No." := GenJnlLine."Line No.";
+            TempJnlLineDim."Dimension Code" := OtherDim."Dimension Code";
+            TempJnlLineDim."Dimension Value Code" := OtherDim."Dimension Value Code";
+
+            TempJnlLineDim.INSERT;
+
+          UNTIL NEXT = 0;
+
+        END;
+      END;
+    END;
+
+    PROCEDURE UpdateShortcutDim@8016602(TempJnlLineDim@8016606 : Record 356);
+    VAR
+      GLSetup@8016600 : Record 98;
+      GenJnlLine2@8016601 : Record 81;
+    BEGIN
+      GLSetup.GET;
+
+      GenJnlLine2.GET(TempJnlLineDim."Journal Template Name",TempJnlLineDim."Journal Batch Name",TempJnlLineDim."Journal Line No.");
+
+      IF TempJnlLineDim."Dimension Code" = GLSetup."Shortcut Dimension 1 Code" THEN BEGIN
+        GenJnlLine2."Shortcut Dimension 1 Code" := TempJnlLineDim."Dimension Value Code";
+        GenJnlLine2.MODIFY;
+      END;
+
+      IF TempJnlLineDim."Dimension Code" = GLSetup."Shortcut Dimension 2 Code" THEN BEGIN
+        GenJnlLine2."Shortcut Dimension 2 Code" := TempJnlLineDim."Dimension Value Code";
+        GenJnlLine2.MODIFY;
+      END;
+    END;
+
+    PROCEDURE InsertErrorLine@8016603();
+    BEGIN
+      NextLineNoError := NextLineNoError + 10000;
+
+      GenJnlLineError := GenJnlLine;
+
+      WITH GenJnlLineError DO BEGIN
+        "Journal Template Name" := GenJnlTemplateNameError;
+        "Journal Batch Name" := GenJnlBatchNameError;
+        "Line No." := NextLineNoError;
+        "Source Code" := GenJnlTemplateError."Source Code";
+
+        "Document No." := DocNoError;
+        Description := COPYSTR(LineDescription,1,30);
+
+        INSERT(TRUE);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r ISA01 @d 07/07/09 @a ISAT.MA @v ISA6.00.00.01 @s Migration v6 **/
+    }
+    END.
+  }
+}

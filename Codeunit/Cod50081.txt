@@ -1,0 +1,917 @@
+OBJECT Codeunit 50081 Check Invoice Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/02/14;
+    Time=16:02:56;
+    Modified=Yes;
+    Version List=IMH6.01,SUPPORT;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 23=r,
+                TableData 25=rim,
+                TableData 38=rimd,
+                TableData 39=rimd,
+                TableData 98=r,
+                TableData 121=rim,
+                TableData 122=rim,
+                TableData 123=rim,
+                TableData 5054=r,
+                TableData 5900=rim,
+                TableData 5903=r,
+                TableData 50075=rim,
+                TableData 50103=rim,
+                TableData 50137=rm;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      PostInvMgt@1000000003 : Codeunit 50082;
+      PurchInvMgt@1100281015 : Codeunit 50080;
+      GLSetup@1100281000 : Record 98;
+      GLSetupOK@1100281001 : Boolean;
+      Text098@1100281019 : TextConst 'ENU=Service Header %1 doesn''t exists.;FRA=La ligne produit %1 n''existe pas';
+      Text100@1100281002 : TextConst 'ENU=No purchase order.;FRA=Pas de commande d''achat.';
+      Text101a@1100281018 : TextConst 'ENU=No posted minute.;FRA=Pas de PV au statut valid‚.';
+      Text101b@1100281003 : TextConst 'ENU=No posted minute uninvoiced.;FRA=Pas de PV au statut valid‚ non factur‚.';
+      Text102@1100281004 : TextConst 'ENU=No posted receipt to invoice.;FRA=Pas de r‚ception enregistr‚e.';
+      Text103@1100281006 : TextConst 'ENU=No lines to invoice.;FRA=Pas de lignes … facturer.';
+      Text104@1100281007 : TextConst 'ENU=No lines to invoice (last invoice %1).;FRA=Pas de lignes … facturer (deniŠre facture %1).';
+      Text105@1100281008 : TextConst 'ENU=Vendor''s invoice %1 has already been accounted (%2).;FRA=La facture fournisseur %1 a d‚j… ‚t‚ comptabilis‚e (%2).';
+      Text106@1100281009 : TextConst 'ENU=There''s an approximate invoice on this service (%1).;FRA=Une facture de montant proche a ‚t‚ trouv‚ sur ce service (%1).';
+      Text099@1100281005 : TextConst 'ENU=Entered amount/calculated %1 - %2.;FRA=(saisi/calcul‚ %1 - %2)';
+      Text107@1100281011 : TextConst 'ENU=Input error : Amount Incl. VAT <> VAT Base Amount + VAT Amount. Difference : %1;FRA=Erreur de saisie : montant TTC <> Montant HT + Montant TVA. Ecart constat‚ : %1';
+      Text108@1100281010 : TextConst 'ENU=%1 can''t be before %2.;FRA=%1 ne doit pas ˆtre inf‚rieur …%2.';
+      Text109@1100281013 : TextConst 'ENU=Vendor %1 is not linked with intervention %2 provider.;FRA=Le fournisseur %1 ne correspond au prestataire de l''intervention %2.';
+      Text110@1100281012 : TextConst 'ENU=Provider % is not linked to a vendor.;FRA=Le prestataire %1 n''est pas li‚ … un fournisseur.';
+      Text111@1000000000 : TextConst 'ENU=Service Header %1 doesn''t exists.;FRA=La ligne produit %1 n''existe pas.';
+      Text112@1100281014 : TextConst 'ENU=No posted voucher uninvoiced.;FRA=Pas de justificatif valid‚ non factur‚.';
+      Text113@1000000001 : TextConst 'ENU=Intervention line is missing.;FRA=La ligne d''intervention est absente.';
+      Text114@1000000002 : TextConst 'ENU=Purchase invoice is not allowed in invoicing matrix.;FRA=La facturation achat n''est pas autoris‚e dans la matrice de facturation.';
+      Text115@1100281016 : TextConst 'ENU=VAT Product Posting Group can''t be deducted (VAT : %1);FRA=Le groupe compta produit TVA ne peut ˆtre d‚duit (TVA : %1)';
+      Text116@1000000004 : TextConst 'ENU=VAT Posting group difference (invoice : %1-%2, Minutes : %3-%4);FRA=Diff‚rence de groupe compta TVA (facture : %1-%2, PV : %3-%4)';
+      Text117@1100281017 : TextConst 'FRA=La facturation achat n''est pas autoris‚e.';
+      Text118@1100281021 : TextConst 'ENU=VAT difference amount %1 must not be greater than %2.;FRA=La diff‚rence de TVA %1 ne doit pas ˆtre sup‚rieur(e) … %2.';
+      Text119@1100281020 : TextConst 'ENU=VAT difference amount do not allowed;FRA=La diff‚rence de TVA n''est pas autoris‚e';
+
+    PROCEDURE CheckInvoicable@1100281000(VAR pPurchHeader@1100281000 : Record 38) rValue : Boolean;
+    VAR
+      lServHeader@1000000001 : Record 5900;
+      lRejectReason@1000000000 : Text[1024];
+      lRejectCode@1000000005 : Code[10];
+    BEGIN
+      GetGLSetup;
+      WITH pPurchHeader DO BEGIN
+        IF NOT lServHeader.GET(lServHeader."Document Type"::Invoice, pPurchHeader."Service Header No.") THEN BEGIN
+          GLSetup.TESTFIELD("No Reconciliation Reason Code");
+          RejectPurch(pPurchHeader, GLSetup."No Reconciliation Reason Code",
+                      STRSUBSTNO(Text098, "Service Header No."));
+          EXIT(FALSE);
+        END;
+
+        IF IsDuplicate(pPurchHeader, lRejectReason) THEN BEGIN
+          GLSetup.TESTFIELD("Invoice Duplicate Reason Code");
+          RejectPurch(pPurchHeader, GLSetup."Invoice Duplicate Reason Code", lRejectReason);
+          EXIT(FALSE);
+        END;
+
+        IF NOT AffectSourceData(pPurchHeader, lServHeader."Service Order Type", TRUE, TRUE) THEN
+          EXIT(FALSE);
+      END; // WITH
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE AffectSourceData@1000000008(VAR pPurchHeader@1100281000 : Record 38;pServOrderType@1000000006 : Code[10];pAutoSelect@1100281001 : Boolean;pTestOnly@1000000008 : Boolean) rValue : Boolean;
+    VAR
+      lServHeader@1000000001 : Record 5900;
+      lServOrderType@1000000002 : Record 5903;
+      lServInterv@1000000003 : Record 50075;
+      lServiceHeader@1100281002 : Record 5900;
+      lRejectReason@1000000000 : Text[1024];
+      lRejectCode@1000000005 : Code[10];
+      lInvoicingMatrixSetup@1000000004 : Record 50137;
+    BEGIN
+      IF pServOrderType = '' THEN BEGIN
+        lServHeader.GET(lServHeader."Document Type"::Invoice, pPurchHeader."Service Header No.");
+        pServOrderType := lServHeader."Service Order Type";
+      END;
+      IF lServOrderType.GET(pServOrderType) THEN;
+
+      //Pr‚voir le cas de l'affectation libre
+      // IF lServOrderType."Purch. Invoice Recon. Check" = lServOrderType."Purch. Invoice Recon. Check"::" " THEN EXIT(TRUE);
+
+      GetGLSetup;
+      //Test de la facturation
+      IF lServOrderType."No Intervention" THEN BEGIN
+        IF lServHeader."No." = '' THEN
+          lServHeader.GET(lServHeader."Document Type"::Invoice, pPurchHeader."Service Header No.");
+        //<<IMH10.ISAT.RC
+        //IF NOT PurchInvMgt.CheckCreationAvailable(lInvoicingMatrixSetup,
+        //                   lServHeader."Corporate No.",
+        //                   lServHeader."Service Order Type",
+        //                   lServHeader."Corporate Region Code",
+        //                   lServHeader."Service No.",
+        //                   '')
+        IF NOT PurchInvMgt.CheckCreationAvailable(lInvoicingMatrixSetup,
+                           lServHeader."Corporate No.",
+                           lServHeader."Service Order Type",
+                           lServHeader."Corporate Region Code",
+                           lServHeader."Service No.",
+                           '',lServHeader)
+         //<<IM10.ISAT.RC
+                           THEN BEGIN
+          GLSetup.TESTFIELD("No Reconciliation Reason Code");
+          RejectPurch(pPurchHeader, GLSetup."No Reconciliation Reason Code", Text114);
+          EXIT(FALSE);
+        END;
+      END
+      ELSE BEGIN
+        IF NOT lServInterv.GET(pPurchHeader."Service Header No.", pPurchHeader."Intervention Line No.") THEN BEGIN
+          GLSetup.TESTFIELD("No Reconciliation Reason Code");
+          RejectPurch(pPurchHeader, GLSetup."No Reconciliation Reason Code", Text113);
+          EXIT(FALSE);
+        END;
+        //<<IMH10.ISAT.RC
+        lServiceHeader.GET(lServHeader."Document Type"::Invoice, pPurchHeader."Service Header No.");
+        //IF NOT PurchInvMgt.CheckCreationAvailable(lInvoicingMatrixSetup,
+        //                   lServInterv."Corporate No.",
+        //                   lServInterv."Service Order Type",
+       //                    lServInterv."Corporate Region Code",
+       //                    lServInterv."Service No.",
+       //                    lServInterv."Provider No.") THEN BEGIN
+        IF NOT PurchInvMgt.CheckCreationAvailable(lInvoicingMatrixSetup,
+                           lServInterv."Corporate No.",
+                           lServInterv."Service Order Type",
+                           lServInterv."Corporate Region Code",
+                           lServInterv."Service No.",
+                           lServInterv."Provider No.",lServiceHeader) THEN BEGIN
+          //>>IMH10.ISAT.RC
+          GLSetup.TESTFIELD("No Reconciliation Reason Code");
+          RejectPurch(pPurchHeader, GLSetup."No Reconciliation Reason Code", Text114);
+          EXIT(FALSE);
+        END;
+      END;
+
+      // Contr“le & affectation PV/Justificatif
+      CASE lServOrderType."Purch. Invoice Recon. Check" OF
+        lServOrderType."Purch. Invoice Recon. Check"::NoInvoice : BEGIN
+          GLSetup.TESTFIELD("No Reconciliation Reason Code");
+          RejectPurch(pPurchHeader, GLSetup."No Reconciliation Reason Code", Text117);
+        END;
+        lServOrderType."Purch. Invoice Recon. Check"::Voucher : BEGIN
+          IF NOT GetInvoicableVoucher(pPurchHeader, pAutoSelect, lRejectCode, lRejectReason, pTestOnly) THEN BEGIN
+            RejectPurch(pPurchHeader, lRejectCode, lRejectReason);
+            EXIT(FALSE);
+          END;
+        END;
+        ELSE BEGIN
+      //  lServOrderType."Purch. Invoice Recon. Check"::Minutes :
+          IF NOT GetInvoicableMinute(pPurchHeader, pAutoSelect, lRejectCode, lRejectReason, pTestOnly) THEN BEGIN
+            RejectPurch(pPurchHeader, lRejectCode, lRejectReason);
+            EXIT(FALSE);
+          END;
+        END;
+      END; // CASE
+
+      //<<IMH12.PC
+      // V‚rif TVA difference
+      IF NOT CheckVATDifference(pPurchHeader) THEN BEGIN
+        EXIT(FALSE);
+      END;
+      //>>IMH12.PC
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE _CheckReceipt@1100281004(VAR pPurchHeader@1100281000 : Record 38) rValue : Boolean;
+    VAR
+      lPurchLine@1100281003 : Record 39;
+      lPurchRcptLine@1100281001 : Record 121;
+      lGLSetup@1100281002 : Record 98;
+      lReject@1100281004 : Text[250];
+      lServMinutes@1100281005 : Record 50084;
+      lPurchInvLine@1100281006 : Record 123;
+      lPurchInvHeader@1100281007 : Record 122;
+      lTempText@1100281008 : Text[250];
+      lDuplicate@1000000000 : Boolean;
+      lVendLedgEntry@1100281009 : Record 25;
+      lServHeader@1000000001 : Record 5900;
+      lServOrderType@1000000002 : Record 5903;
+    BEGIN
+      // V‚rifie qu'il existe une r‚ception … la facture d'achat
+      rValue := TRUE;
+      lDuplicate := FALSE;
+      IF NOT lServHeader.GET(lServHeader."Document Type"::Invoice, pPurchHeader."Service Header No.") THEN BEGIN
+        rValue := FALSE;
+        lReject := STRSUBSTNO(Text098, pPurchHeader."Service Header No.");
+      END;
+      IF lServOrderType.GET(lServHeader."Service Order Type") THEN;
+
+      IF rValue AND (NOT lServOrderType."No Minutes") THEN BEGIN
+        WITH lServMinutes DO BEGIN
+          SETRANGE("Service Header No.", pPurchHeader."Service Header No.");
+          SETRANGE("Service Intervention Line No.", pPurchHeader."Intervention Line No.");
+          SETRANGE("Current Minutes", TRUE);
+
+          SETRANGE(Status, Status::Validated);
+          IF ISEMPTY THEN BEGIN
+            rValue := FALSE;
+            lReject := Text101a;
+          END;
+        END;
+      END;
+
+      IF rValue THEN BEGIN
+        // Doublon Facture fournisseur
+        IF pPurchHeader."Vendor Invoice No." <> '' THEN BEGIN
+          lPurchInvHeader.SETCURRENTKEY("Vendor Invoice No.");
+          lPurchInvHeader.SETRANGE("Vendor Invoice No.", pPurchHeader."Vendor Invoice No.");
+          lPurchInvHeader.SETRANGE("Pay-to Vendor No.", pPurchHeader."Pay-to Vendor No.");
+          IF lPurchInvHeader.FINDFIRST THEN BEGIN
+            rValue := FALSE;
+            lDuplicate := TRUE;
+            lReject := STRSUBSTNO(Text105, pPurchHeader."Vendor Invoice No.", lPurchInvHeader."No.");
+          END
+          ELSE BEGIN
+            lVendLedgEntry.SETCURRENTKEY("External Document No.");
+            lVendLedgEntry.SETRANGE("Document Type",lVendLedgEntry."Document Type"::Invoice);
+            lVendLedgEntry.SETRANGE("External Document No.",pPurchHeader."Vendor Invoice No.");
+            lVendLedgEntry.SETRANGE("Vendor No.",pPurchHeader."Pay-to Vendor No.");
+            IF lVendLedgEntry.FINDFIRST THEN BEGIN
+              rValue := FALSE;
+              lDuplicate := TRUE;
+              lReject := STRSUBSTNO(Text105, pPurchHeader."Vendor Invoice No.", lVendLedgEntry."Document No.");
+            END;
+          END;
+        END;
+      END;
+      IF rValue THEN BEGIN
+        // Facture proche sur le mˆme service
+        lPurchInvHeader.RESET;
+        lPurchInvHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+        lPurchInvHeader.SETRANGE("Service No.", pPurchHeader."Service No.");
+        lPurchInvHeader.SETRANGE("Service Header No.", pPurchHeader."Service Header No.");
+        lPurchInvHeader.SETRANGE("Intervention Line No.", pPurchHeader."Intervention Line No.");
+        IF lPurchInvHeader.FINDSET THEN BEGIN
+          REPEAT
+            lPurchInvHeader.CALCFIELDS("Amount Including VAT");
+            IF CheckAmount(pPurchHeader."Enter Amount Including VAT",lPurchInvHeader."Amount Including VAT", TRUE,lTempText) THEN BEGIN
+              rValue := FALSE;
+              lDuplicate := TRUE;
+              lReject := STRSUBSTNO(Text106, lPurchInvHeader."No.");
+            END;
+          UNTIL (lPurchInvHeader.NEXT=0) OR (rValue = FALSE)
+        END;
+      END;
+
+      IF rValue THEN
+        WITH lPurchLine DO BEGIN
+          SETCURRENTKEY("Service No.", "Service Header No.", "Intervention Line No.");
+          SETRANGE("Service No.",pPurchHeader."Service No.");
+          SETRANGE("Service Header No.",pPurchHeader."Service Header No.");
+          SETRANGE("Intervention Line No.",pPurchHeader."Intervention Line No.");
+          SETRANGE("Document Type", "Document Type"::Order);
+          SETRANGE(Type, Type::Item);
+          IF ISEMPTY THEN BEGIN
+            rValue := FALSE;
+            lReject := Text100;
+          END;
+        END;
+      IF rValue THEN
+        WITH lPurchRcptLine DO BEGIN
+          SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+          SETRANGE("Service No.",pPurchHeader."Service No.");
+          SETRANGE("Service Header No.",pPurchHeader."Service Header No.");
+          SETRANGE("Intervention Line No.",pPurchHeader."Intervention Line No.");
+          SETRANGE(Type,Type::Item);
+          IF ISEMPTY THEN BEGIN
+            rValue := FALSE;
+            lReject := Text102;
+          END;
+          SETFILTER("Qty. Rcd. Not Invoiced",'<>%1',0);
+          IF ISEMPTY THEN BEGIN
+            IF rValue THEN BEGIN
+              lPurchInvLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+              lPurchInvLine.SETRANGE("Service No.",pPurchHeader."Service No.");
+              lPurchInvLine.SETRANGE("Service Header No.",pPurchHeader."Service Header No.");
+              lPurchInvLine.SETRANGE("Intervention Line No.",pPurchHeader."Intervention Line No.");
+              lPurchInvLine.SETRANGE(Type,lPurchInvLine.Type::Item);
+              lPurchInvLine.SETFILTER(Quantity, '<>%1', 0);
+              IF lPurchInvLine.FINDLAST THEN BEGIN
+                rValue := FALSE;
+                lReject := STRSUBSTNO(Text104, lPurchInvLine."Document No.");
+              END
+              ELSE BEGIN
+                rValue := FALSE;
+                lReject := Text103;
+              END;
+            END;
+          END;
+        END;
+      IF rValue THEN
+        EXIT;
+
+      GetGLSetup;
+      WITH pPurchHeader DO BEGIN
+        IF lDuplicate THEN BEGIN
+          GLSetup.TESTFIELD("Invoice Duplicate Reason Code");
+          "Reconciliation Reject Code" := GLSetup."Invoice Duplicate Reason Code";
+        END
+        ELSE BEGIN
+          GLSetup.TESTFIELD("No Reconciliation Reason Code");
+          "Reconciliation Reject Code" := GLSetup."No Reconciliation Reason Code";
+        END;
+        "Last Reconcil. Reject Date" := WORKDATE;
+        "Reconciliation Reject Detail" := lReject;
+        MODIFY(TRUE);
+      END;
+    END;
+
+    LOCAL PROCEDURE _CheckConsistency@1100281001(VAR pPurchHeader@1100281000 : Record 38) rValue : Boolean;
+    VAR
+      lServiceHeader@1100281002 : Record 5900;
+      lPurchRcptLine@1100281005 : Record 121;
+      lTrayLineMgt@1100281001 : Codeunit 50050;
+      lRejectCode@1100281004 : Code[20];
+      lAmountIncludingVAT@1100281003 : Decimal;
+      lAmountExclVAT@1100281010 : Decimal;
+      lDepreciationAmount@1100281006 : Decimal;
+      lDeductibleAmount@1100281007 : Decimal;
+      lPurchLine@1000000000 : Record 39;
+      lRejectReason@1100281008 : Text[1024];
+      lCurrentReason@1100281009 : Text[1024];
+    BEGIN
+      // V‚rifie la coh‚rence des montants entre facture et intervention
+
+      rValue := FALSE;
+
+      lPurchRcptLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lPurchRcptLine.SETRANGE("Service No.",pPurchHeader."Service No.");
+      lPurchRcptLine.SETRANGE("Service Header No.",pPurchHeader."Service Header No.");
+      lPurchRcptLine.SETRANGE("Intervention Line No.",pPurchHeader."Intervention Line No.");
+      lPurchRcptLine.SETRANGE(Type,lPurchRcptLine.Type::Item);
+      //<<IMH03.ISAT.EBA
+      lPurchRcptLine.SETRANGE("Quantity Invoiced",0);
+      //>>IMH03.ISAT.EBA
+      lPurchRcptLine.SETFILTER(Quantity, '<>%1', 0);
+      IF lPurchRcptLine.ISEMPTY THEN
+        EXIT;
+
+      //<<IMH02.PC
+      lAmountIncludingVAT := 0;
+      lDepreciationAmount := 0;
+      lDeductibleAmount := 0;
+      lPurchRcptLine.FINDFIRST;
+      REPEAT
+      //<<IMH04.ST
+        IF lPurchLine.GET(lPurchLine."Document Type"::Order, lPurchRcptLine."Order No.", lPurchRcptLine."Order Line No.") THEN BEGIN
+          lAmountIncludingVAT += lPurchLine."Amt. Rcd. Not Invoiced";
+          lAmountExclVAT += ROUND(lPurchLine."Amt. Rcd. Not Invoiced" / (1+lPurchLine."VAT %"/100),0.01);
+          lDepreciationAmount += lPurchLine."Depreciation Amount";
+          lDeductibleAmount += lPurchLine."Deductible Amount";
+        END
+        ELSE BEGIN
+      //>>IMH04.ST
+          lAmountIncludingVAT += lPurchRcptLine."Amount Including VAT";
+          lAmountExclVAT += ROUND(lPurchRcptLine."Amount Including VAT" / (1+lPurchRcptLine."VAT %"/100),0.01);
+          lDepreciationAmount += lPurchRcptLine."Depreciation Amount";
+          lDeductibleAmount += lPurchRcptLine."Deductible Amount";
+        END; //IMH04.ST
+      UNTIL lPurchRcptLine.NEXT = 0;
+      //>>IMH02.PC
+
+      GetGLSetup;
+
+      lRejectCode := '';
+      lRejectReason := '';
+      lCurrentReason := '';
+      // Contr“le des montants
+      // Net … payer
+      IF NOT CheckAmount(pPurchHeader."Enter Amount Including VAT",lAmountIncludingVAT,TRUE,lRejectReason) THEN BEGIN
+        GLSetup.TESTFIELD("Inc. Amt. To Pay Reason Code");
+        lRejectCode := GLSetup."Inc. Amt. To Pay Reason Code";
+        lCurrentReason := pPurchHeader.FIELDCAPTION("Enter Amount Including VAT") + ' ' +
+                          lRejectReason;
+      END;
+      // Montant HT
+      IF NOT CheckAmount(pPurchHeader."Enter Amount",lAmountExclVAT,TRUE,lRejectReason) THEN BEGIN
+        IF lRejectCode = '' THEN BEGIN
+          GLSetup.TESTFIELD("Inc. Amt. To Pay Reason Code");
+          lRejectCode := GLSetup."Inc. Amt. To Pay Reason Code";
+        END;
+        IF lCurrentReason <> '' THEN
+          lCurrentReason := lCurrentReason + '; ';
+        lCurrentReason := lCurrentReason + pPurchHeader.FIELDCAPTION("Enter Amount") + ' ' +
+                          lRejectReason;
+      END;
+
+      // V‚tust‚
+      IF NOT CheckAmount(pPurchHeader."Depreciation Amount",lDepreciationAmount,FALSE, lRejectReason) THEN BEGIN
+        IF lRejectCode = '' THEN BEGIN
+          GLSetup.TESTFIELD("Inc. Dprct. Amt. Reason Code");
+          lRejectCode := GLSetup."Inc. Dprct. Amt. Reason Code";
+        END;
+        IF lCurrentReason <> '' THEN
+          lCurrentReason := lCurrentReason + '; ';
+        lCurrentReason := lCurrentReason + pPurchHeader.FIELDCAPTION("Depreciation Amount") + ' ' +
+                          lRejectReason;
+      END;
+      IF NOT CheckAmount(pPurchHeader."Deductible Amount",lDeductibleAmount,FALSE,lRejectReason) THEN BEGIN
+        IF lRejectCode = '' THEN BEGIN
+          GLSetup.TESTFIELD("Inc. Deduc. Amt. Reason Code");
+          lRejectCode := GLSetup."Inc. Deduc. Amt. Reason Code";
+        END;
+        IF lCurrentReason <> '' THEN
+          lCurrentReason := lCurrentReason + '; ';
+        lCurrentReason := lCurrentReason + pPurchHeader.FIELDCAPTION("Deductible Amount") + ' ' +
+                          lRejectReason;
+      END;
+      IF lRejectCode <> '' THEN BEGIN
+        pPurchHeader."Reconciliation Reject Code" := lRejectCode;
+        pPurchHeader."Last Reconcil. Reject Date" := WORKDATE;
+        pPurchHeader."Reconciliation Reject Detail" := COPYSTR(lCurrentReason, 1, MAXSTRLEN(pPurchHeader."Reconciliation Reject Detail"));
+        pPurchHeader.MODIFY(TRUE);
+
+        IF GLSetup."Inc. Dprct. Amt. Task" <> '' THEN BEGIN
+          IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pPurchHeader."Service Header No.") THEN BEGIN
+            lTrayLineMgt.CreateTLFromServHeader(
+              lServiceHeader,
+              //<<IMH14
+              //lServiceHeader."Default Team Code",
+              lServiceHeader.GetTeamByServiceTask(lServiceHeader, GLSetup."Inc. Dprct. Amt. Task"),
+              //IMH14
+              GLSetup."Inc. Dprct. Amt. Task",
+              FALSE);
+          END;
+        END;
+        EXIT;
+      END
+      ELSE BEGIN
+        //<<IMH03.ISAT.EBA
+        IF (pPurchHeader."Reconciliation Reject Code" <> '') OR (pPurchHeader."Reconciliation Reject Detail" <> '') THEN BEGIN
+          pPurchHeader."Reconciliation Reject Code" := '';
+          pPurchHeader."Reconciliation Reject Detail" := '';
+          pPurchHeader."Last Reconcil. Reject Date" := 0D;
+          pPurchHeader.MODIFY(TRUE);
+        END;
+        //>>IMH03.ISAT.EBA
+      END;
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CheckAmount@1100281005(pAmount@1100281000 : Decimal;pAmount2@1100281001 : Decimal;pAllowTolerance@1100281004 : Boolean;VAR pRejectReason@1100281003 : Text[250]) rValue : Boolean;
+    VAR
+      lPaymentTol@1100281002 : Decimal;
+    BEGIN
+      rValue := TRUE;
+      pRejectReason := '';
+      GetGLSetup;
+
+      IF pAmount = pAmount2 THEN BEGIN
+        EXIT;
+      END;
+      //<<IMH05.ST
+      {
+      pAmount := pAmount + (pAmount * GLSetup."Invoicing Tolerance %" / 100);
+      IF ABS(pAmount - pAmount2) < GLSetup."Invoicing Max Amount" THEN BEGIN
+        EXIT;
+      END;
+      }
+      IF pAllowTolerance THEN BEGIN
+        lPaymentTol :=(pAmount * GLSetup."Invoicing Tolerance %" / 100);
+        IF lPaymentTol > GLSetup."Invoicing Max Amount" THEN
+          lPaymentTol := GLSetup."Invoicing Max Amount";
+        IF ABS(pAmount - pAmount2) < ABS(lPaymentTol) THEN
+          EXIT;
+      END;
+      //>>IMH05.ST
+      pRejectReason := STRSUBSTNO(Text099, pAmount, pAmount2);
+
+      rValue := FALSE;
+    END;
+
+    PROCEDURE GetGLSetup@1100281002();
+    BEGIN
+      IF GLSetupOK THEN BEGIN
+        EXIT;
+      END;
+      GLSetupOK := TRUE;
+      GLSetup.GET;
+    END;
+
+    PROCEDURE CheckRecordConsistency@1100281003(VAR pPurchHeader@1100281000 : Record 38) : Boolean;
+    VAR
+      lDiff@1100281001 : Decimal;
+      lDate@1100281002 : Date;
+      lVendor@1100281003 : Record 23;
+      lContBusRel@1100281004 : Record 5054;
+      lIntervLine@1100281005 : Record 50075;
+      lError@1100281006 : Boolean;
+      lErrorDesc@1100281007 : Text[1024];
+    BEGIN
+      // V‚rifie la coh‚rence des montants dans la facture
+      lError := FALSE;
+      WITH pPurchHeader DO BEGIN
+        //<<IMH08.PC
+        // Blocage des factures < 14/11/2011
+        //lDate := DMY2DATE(14,11,2011);
+        // Blocage des factures < 15/09/2011
+        lDate := DMY2DATE(15,9,2011);
+        //>>IMH08.PC
+        IF "Document Date" < lDate THEN BEGIN
+          lError := TRUE;
+          lErrorDesc := STRSUBSTNO(Text108, FIELDCAPTION("Document Date"), lDate);
+        END;
+      //<<IMH07.ST
+        IF (NOT lError) AND ("Intervention Line No." <> 0) THEN BEGIN
+          lIntervLine.GET("Service Header No.", "Intervention Line No.");
+          lContBusRel.SETRANGE("Contact No.", lIntervLine."Provider No.");
+          lContBusRel.SETRANGE("Link to Table", lContBusRel."Link to Table"::Vendor);
+          IF lContBusRel.FINDFIRST THEN BEGIN
+            lVendor.GET(lContBusRel."No.");
+            IF NOT ("Buy-from Vendor No." IN [lVendor."No.", lVendor."Pay-to Vendor No."]) THEN BEGIN
+              lError := TRUE;
+              lErrorDesc := STRSUBSTNO(Text109, "Buy-from Vendor No.", lIntervLine."Provider No.");
+            END;
+          END
+          ELSE BEGIN
+            lError := TRUE;
+            lErrorDesc := STRSUBSTNO(Text110, lIntervLine."Provider No.");
+          END;
+        END;
+      //>>IMH07.ST
+        IF lError THEN BEGIN
+          GetGLSetup;
+          GLSetup.TESTFIELD("No Reconciliation Reason Code");
+          "Reconciliation Reject Code" := GLSetup."No Reconciliation Reason Code";
+          "Last Reconcil. Reject Date" := WORKDATE;
+          "Reconciliation Reject Detail" := COPYSTR(lErrorDesc,1, MAXSTRLEN("Reconciliation Reject Detail"));
+          MODIFY(TRUE);
+          EXIT(FALSE);
+        END;
+
+        lDiff := "Enter Amount Including VAT" - "Enter Amount" - "Enter Amount VAT";
+        IF lDiff <> 0 THEN BEGIN
+          GetGLSetup;
+          GLSetup.TESTFIELD("Inc. Amt. To Pay Reason Code");
+          "Reconciliation Reject Code" := GLSetup."Inc. Amt. To Pay Reason Code";
+          "Last Reconcil. Reject Date" := WORKDATE;
+          "Reconciliation Reject Detail" := STRSUBSTNO(Text107, lDiff);
+          MODIFY(TRUE);
+          EXIT(FALSE);
+        END;
+        // Calcul de taux de TVA th‚orique
+        lDiff := 0;
+        IF PostInvMgt.GetVATPostingSetup("VAT Bus. Posting Group", "Enter Amount Including VAT", "Enter Amount", lDiff) = '' THEN BEGIN
+          GetGLSetup;
+          GLSetup.TESTFIELD("Inc. Amt. To Pay Reason Code");
+          "Reconciliation Reject Code" := GLSetup."Inc. Amt. To Pay Reason Code";
+          "Last Reconcil. Reject Date" := WORKDATE;
+          "Reconciliation Reject Detail" := STRSUBSTNO(Text115, lDiff);
+          MODIFY(TRUE);
+          EXIT(FALSE);
+        END;
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetInvoicableMinute@1100281018(VAR pPurchHeader@1100281000 : Record 38;pAutoSelect@1100281002 : Boolean;VAR pRejectCode@1000000000 : Code[10];VAR pErrorText@1000000001 : Text[1024];pTestOnly@1000000002 : Boolean) : Boolean;
+    VAR
+      lServMinutes@1100281001 : Record 50084;
+      lOldPurchHeader@1100281003 : Record 38;
+      lServMin2@1000000003 : Record 50084;
+      lLineFound@1100281004 : Boolean;
+      lRejectCode@1100281006 : Code[10];
+      lErrorText@1100281005 : Text[1024];
+      lVATProdGroup@1000000004 : Code[10];
+      lDiff@1000000005 : Decimal;
+    BEGIN
+      //IMH18.ST
+      IF NOT GUIALLOWED THEN
+        pAutoSelect := TRUE;
+      lVATProdGroup := PostInvMgt.GetVATPostingSetup(pPurchHeader."VAT Bus. Posting Group", pPurchHeader."Enter Amount Including VAT",
+                                                     pPurchHeader."Enter Amount", lDiff);
+      WITH lServMinutes DO BEGIN
+        FILTERGROUP(2);
+        SETRANGE("Service Header No.", pPurchHeader."Service Header No.");
+        SETRANGE("Service Intervention Line No.", pPurchHeader."Intervention Line No.");
+        SETRANGE(Status, Status::Validated);
+        IF ISEMPTY THEN BEGIN
+          GetGLSetup;
+          pRejectCode := GLSetup."No Reconciliation Reason Code";
+          pErrorText := Text101a;
+          EXIT(FALSE);
+        END;
+      //  SETRANGE("Current Minutes", TRUE);
+        SETFILTER("Last Purch. Invoice Type", '%1|%2', "Last Purch. Invoice Type"::" ", "Last Purch. Invoice Type"::Invoice);
+        SETFILTER("Last Purch. Invoice No.", '%1|%2', '', pPurchHeader."No.");
+        FILTERGROUP(0);
+        IF ISEMPTY THEN BEGIN
+          GetGLSetup;
+          pRejectCode := GLSetup."No Reconciliation Reason Code";
+          pErrorText := Text101b;
+          EXIT(FALSE);
+        END;
+        IF pAutoSelect THEN BEGIN
+          // Recherche du premier de montant proche
+          FINDSET;
+          lServMin2 := lServMinutes;
+          REPEAT
+            IF (lVATProdGroup = "VAT Prod. Posting Group") OR (pPurchHeader."VAT Bus. Posting Group" = "VAT Bus. Posting Group") THEN
+              IF CheckSourceAmount(pPurchHeader, Amount, "Amount Incl. VAT",
+                                   "Deductible Amount (LCY)", "Unsecured Depr. Amount (LCY)", lRejectCode, lErrorText) THEN BEGIN
+                lServMin2 := lServMinutes;
+                lLineFound := TRUE;
+              END;
+          UNTIL lLineFound OR (NEXT = 0);
+          lServMinutes := lServMin2;
+        END
+        ELSE BEGIN
+          IF FORM.RUNMODAL(0, lServMinutes) <> ACTION::LookupOK THEN
+            EXIT(FALSE);
+        END;
+        IF (lVATProdGroup <> "VAT Prod. Posting Group") OR (pPurchHeader."VAT Bus. Posting Group" <> "VAT Bus. Posting Group") THEN BEGIN
+          GetGLSetup;
+          GLSetup.TESTFIELD("Inc. Amt. To Pay Reason Code");
+          pRejectCode := GLSetup."Inc. Amt. To Pay Reason Code";
+          pErrorText := STRSUBSTNO(Text116, pPurchHeader."VAT Bus. Posting Group", lVATProdGroup,
+                                            "VAT Bus. Posting Group", "VAT Prod. Posting Group");
+          EXIT(FALSE);
+        END;
+        IF NOT CheckSourceAmount(pPurchHeader, Amount, "Amount Incl. VAT",
+                                "Deductible Amount (LCY)", "Unsecured Depr. Amount (LCY)", pRejectCode, pErrorText) THEN
+          EXIT(FALSE);
+        IF NOT pTestOnly THEN BEGIN
+          lOldPurchHeader := pPurchHeader;
+          pPurchHeader."Minutes Document No." := "Document No.";
+          pPurchHeader."Minutes Line No." := "Line No.";
+          pPurchHeader.UpdateMinutes(lOldPurchHeader, FALSE);
+        END;
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetInvoicableVoucher@1100281017(VAR pPurchHeader@1100281001 : Record 38;pAutoSelect@1100281000 : Boolean;VAR pRejectCode@1000000001 : Code[10];VAR pErrorText@1000000000 : Text[1024];pTestOnly@1000000002 : Boolean) : Boolean;
+    VAR
+      lServVoucher@1100281002 : Record 50103;
+      lOldPurchHeader@1100281003 : Record 38;
+      lVATProdGroup@1000000004 : Code[10];
+      lDiff@1000000003 : Decimal;
+    BEGIN
+      //IMH18.ST
+      IF NOT GUIALLOWED THEN
+        pAutoSelect := TRUE;
+      lVATProdGroup := PostInvMgt.GetVATPostingSetup(pPurchHeader."VAT Bus. Posting Group", pPurchHeader."Enter Amount Including VAT",
+                                                     pPurchHeader."Enter Amount", lDiff);
+      WITH lServVoucher DO BEGIN
+        FILTERGROUP(2);
+        SETRANGE("Service Header No.", pPurchHeader."Service Header No.");
+        SETRANGE(Post, TRUE);
+        SETRANGE("Last Purch. Invoice Type", "Last Purch. Invoice Type"::" ");
+        SETFILTER("Reimbursement Receipt Date", '<>%1', 0D);
+        FILTERGROUP(0);
+        IF ISEMPTY THEN BEGIN
+          GetGLSetup;
+          pRejectCode := GLSetup."No Reconciliation Reason Code";
+          pErrorText := Text112;
+          EXIT(FALSE);
+        END;
+        IF pAutoSelect THEN
+          FINDFIRST
+        ELSE BEGIN
+          IF FORM.RUNMODAL(0, lServVoucher) <> ACTION::LookupOK THEN
+            EXIT(FALSE);
+        END;
+        IF (lVATProdGroup <> "VAT Prod. Posting Group") OR (pPurchHeader."VAT Bus. Posting Group" <> "VAT Bus. Posting Group") THEN BEGIN
+          GetGLSetup;
+          GLSetup.TESTFIELD("Inc. Amt. To Pay Reason Code");
+          pRejectCode := GLSetup."Inc. Amt. To Pay Reason Code";
+          pErrorText := STRSUBSTNO(Text116, pPurchHeader."VAT Bus. Posting Group", lVATProdGroup,
+                                            "VAT Bus. Posting Group", "VAT Prod. Posting Group");
+          EXIT(FALSE);
+        END;
+        IF NOT CheckSourceAmount(pPurchHeader, "Amount To Pay Excl. VAT", "Amount To Pay Incl. VAT",
+                                0, 0, pRejectCode, pErrorText) THEN
+          EXIT(FALSE);
+        IF NOT pTestOnly THEN BEGIN
+          lOldPurchHeader := pPurchHeader;
+          pPurchHeader."Service Header Voucher No." := lServVoucher."Line No.";
+          pPurchHeader.UpdateVoucher(lOldPurchHeader, FALSE);
+        END;
+      END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE CheckSourceAmount@1000000002(pPurchHeader@1000000000 : Record 38;pAmount@1000000001 : Decimal;pAmountInclVAT@1000000002 : Decimal;pDeductAmt@1000000003 : Decimal;pDeprAmt@1000000004 : Decimal;VAR pErrorCode@1000000008 : Code[10];VAR pErrorText@1000000005 : Text[1024]) : Boolean;
+    VAR
+      lCheckInvMgt@1000000006 : Codeunit 50081;
+      lRejectReason@1000000007 : Text[1024];
+    BEGIN
+      pErrorText :=  '';
+      pErrorCode := '';
+      GetGLSetup;
+      // Montant TTC
+      IF NOT CheckAmount(pPurchHeader."Enter Amount Including VAT",pAmountInclVAT,TRUE,lRejectReason) THEN BEGIN
+        GLSetup.TESTFIELD("Inc. Amt. To Pay Reason Code");
+        pErrorCode := GLSetup."Inc. Amt. To Pay Reason Code";
+        AddText(pErrorText, pPurchHeader.FIELDCAPTION("Enter Amount Including VAT") + ' ' + lRejectReason);
+      END;
+      // Montant HT
+      IF NOT CheckAmount(pPurchHeader."Enter Amount",pAmount,TRUE,lRejectReason) THEN BEGIN
+        IF pErrorCode = '' THEN BEGIN
+          GLSetup.TESTFIELD("Inc. Amt. To Pay Reason Code");
+          pErrorCode := GLSetup."Inc. Amt. To Pay Reason Code";
+        END;
+        AddText(pErrorText, pPurchHeader.FIELDCAPTION("Enter Amount") + ' ' + lRejectReason);
+      END;
+      // Franchise
+      IF NOT CheckAmount(pPurchHeader."Deductible Amount",pDeductAmt,FALSE,lRejectReason) THEN BEGIN
+        IF pErrorCode = '' THEN BEGIN
+          GLSetup.TESTFIELD("Inc. Deduc. Amt. Reason Code");
+          pErrorCode := GLSetup."Inc. Deduc. Amt. Reason Code";
+        END;
+        AddText(pErrorText, pPurchHeader.FIELDCAPTION("Deductible Amount") + ' ' + lRejectReason);
+      END;
+      // V‚tust‚
+      IF NOT CheckAmount(pPurchHeader."Depreciation Amount",pDeprAmt,FALSE,lRejectReason) THEN BEGIN
+        IF pErrorCode = '' THEN BEGIN
+          GLSetup.TESTFIELD("Inc. Dprct. Amt. Reason Code");
+          pErrorCode := GLSetup."Inc. Dprct. Amt. Reason Code";
+        END;
+        AddText(pErrorText, pPurchHeader.FIELDCAPTION("Depreciation Amount") + ' ' + lRejectReason);
+      END;
+      EXIT(pErrorCode = '');
+    END;
+
+    PROCEDURE AddText@1000000003(VAR pText@1000000000 : Text[1024];pTextToAdd@1000000001 : Text[1024]);
+    BEGIN
+      IF STRLEN(pText) > 1022 THEN
+        EXIT;
+      IF pText <> '' THEN
+        pText := pText + '; ';
+      pText := COPYSTR(pText + pTextToAdd, 1, MAXSTRLEN(pText));
+    END;
+
+    LOCAL PROCEDURE IsDuplicate@1000000000(pPurchHeader@1000000000 : Record 38;VAR pRejectReason@1000000003 : Text[1024]) : Boolean;
+    VAR
+      lVendLedgEntry@1000000001 : Record 25;
+      lPurchInvHeader@1000000002 : Record 122;
+      lTempText@1000000004 : Text[1024];
+    BEGIN
+      // Doublon Facture fournisseur
+      IF pPurchHeader."Vendor Invoice No." <> '' THEN BEGIN
+        lPurchInvHeader.SETCURRENTKEY("Vendor Invoice No.");
+        lPurchInvHeader.SETRANGE("Vendor Invoice No.", pPurchHeader."Vendor Invoice No.");
+        lPurchInvHeader.SETRANGE("Pay-to Vendor No.", pPurchHeader."Pay-to Vendor No.");
+        IF lPurchInvHeader.FINDFIRST THEN BEGIN
+          pRejectReason := STRSUBSTNO(Text105, pPurchHeader."Vendor Invoice No.", lPurchInvHeader."No.");
+          EXIT(TRUE);
+        END
+        ELSE BEGIN
+          lVendLedgEntry.SETCURRENTKEY("External Document No.");
+          lVendLedgEntry.SETRANGE("Document Type",lVendLedgEntry."Document Type"::Invoice);
+          lVendLedgEntry.SETRANGE("External Document No.",pPurchHeader."Vendor Invoice No.");
+          lVendLedgEntry.SETRANGE("Vendor No.",pPurchHeader."Pay-to Vendor No.");
+          IF lVendLedgEntry.FINDFIRST THEN BEGIN
+            pRejectReason := STRSUBSTNO(Text105, pPurchHeader."Vendor Invoice No.", lVendLedgEntry."Document No.");
+            EXIT(TRUE);
+          END;
+        END;
+      END;
+      {
+      // Facture proche sur le mˆme service
+      lPurchInvHeader.RESET;
+      lPurchInvHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lPurchInvHeader.SETRANGE("Service No.", pPurchHeader."Service No.");
+      lPurchInvHeader.SETRANGE("Service Header No.", pPurchHeader."Service Header No.");
+      IF pPurchHeader."Intervention Line No." <> 0 THEN
+        lPurchInvHeader.SETRANGE("Intervention Line No.", pPurchHeader."Intervention Line No.");
+      IF pPurchHeader."Service Header Voucher No." <> 0 THEN
+        lPurchInvHeader.SETRANGE("Service Header Voucher No.", pPurchHeader."Service Header Voucher No.");
+      IF lPurchInvHeader.FINDSET THEN BEGIN
+        REPEAT
+          lPurchInvHeader.CALCFIELDS("Amount Including VAT");
+          IF CheckAmount(pPurchHeader."Enter Amount Including VAT",lPurchInvHeader."Amount Including VAT",lTempText) THEN BEGIN
+            pRejectReason := STRSUBSTNO(Text106, lPurchInvHeader."No.");
+            EXIT(TRUE);
+          END;
+        UNTIL lPurchInvHeader.NEXT=0;
+      END;
+      }
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE RejectPurch@1000000001(VAR pPurchHeader@1000000000 : Record 38;pRejectCode@1000000001 : Code[10];pRejectReason@1000000002 : Text[1024]);
+    BEGIN
+      WITH pPurchHeader DO BEGIN
+        "Reconciliation Reject Code" := pRejectCode;
+        "Reconciliation Reject Detail" := COPYSTR(pRejectReason, 1, MAXSTRLEN("Reconciliation Reject Detail"));
+        "Last Reconcil. Reject Date" := WORKDATE;
+      END;
+    END;
+
+    PROCEDURE CheckVATDifference@1100281006(VAR pPurchaseHeader@1000000000 : Record 38) rValue : Boolean;
+    VAR
+      lPurchaseLine@1000000001 : Record 39;
+      lPurchasesPayablesSetup@1100281003 : Record 312;
+      lGLSetup@1100281002 : Record 98;
+      lCurrency@1100281001 : Record 4;
+      lVATDifference@1100281000 : Decimal;
+      lAmountVAT@1000000002 : Decimal;
+    BEGIN
+      // IMH12.PC
+      // V‚rification si n‚cessite de diff‚rence de TVA
+      rValue := FALSE;
+
+      lAmountVAT := 0;
+
+      WITH lPurchaseLine DO BEGIN
+        SETRANGE("Document Type",pPurchaseHeader."Document Type");
+        SETRANGE("Document No.",pPurchaseHeader."No.");
+        SETRANGE(Type,Type::Item);
+        IF ISEMPTY THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF FINDSET THEN BEGIN
+          REPEAT
+            //<<IMH13.PC
+            //lAmountVAT += "Amount Including VAT" - Amount;
+            lAmountVAT += "Direct Unit Cost" * "VAT %" / 100;
+            //>>IMH13.PC
+          UNTIL NEXT = 0;
+        END;
+        //le contr“le passe mˆme s'il n 'y a pas de diff‚rence car le montant n'est pas calcul‚.
+        IF lAmountVAT <> pPurchaseHeader."Enter Amount VAT" THEN BEGIN
+          lVATDifference := ABS(pPurchaseHeader."Enter Amount VAT" - lAmountVAT);
+
+          lPurchasesPayablesSetup.GET;
+          IF NOT lPurchasesPayablesSetup."Allow VAT Difference" AND (lVATDifference <> 0) THEN BEGIN
+            RejectPurch(pPurchaseHeader,GLSetup."No Reconciliation Reason Code",Text119);
+            EXIT;
+          END;
+
+          IF pPurchaseHeader."Currency Code" <> '' THEN BEGIN
+            IF lCurrency.GET(pPurchaseHeader."Currency Code") THEN BEGIN
+              IF lVATDifference > lCurrency."Max. VAT Difference Allowed" THEN BEGIN
+                RejectPurch(
+                  pPurchaseHeader,
+                  GLSetup."No Reconciliation Reason Code",
+                  STRSUBSTNO(Text118,lVATDifference,lCurrency."Max. VAT Difference Allowed"));
+                EXIT;
+              END;
+            END;
+          END;
+
+          lGLSetup.GET;
+          IF lVATDifference > lGLSetup."Max. VAT Difference Allowed" THEN BEGIN
+            RejectPurch(
+              pPurchaseHeader,
+              GLSetup."No Reconciliation Reason Code",
+              STRSUBSTNO(Text118,lVATDifference,lGLSetup."Max. VAT Difference Allowed"));
+            EXIT;
+          END;
+        END;
+      END;
+      //<<IMH13.PC
+      rValue := TRUE;
+      //>>IMH13.PC
+    END;
+
+    BEGIN
+    {
+      /** @r IMH14 @d 24/02/14 @a ISAT.ZW @v IMH6.01.4985 @s R‚organisation DPS @c Gestion de code corbeille service par d‚faut */
+      /** @r IMH13 @d 28/11/13 @a ISAT.PC @v IMH6.01.4351 @s Rapprochement @h 4351 @c Gestion de la diff‚rence de TVA */
+      /** @r IMH12 @d 21/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3760 */
+      /** @r IMH11 @d 19/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3730
+          @a Ajout permission TableData Vendor=r,
+          @a Ajout permission TableData Vendor Ledger Entry=rim,
+          @a Ajout permission TableData Purchase Header=rimd,
+          @a Ajout permission TableData Purchase Line=rimd,
+          @a Ajout permission TableData General Ledger Setup=r,
+          @a Ajout permission TableData Purch. Rcpt. Line=rim,
+          @a Ajout permission TableData Purch. Inv. Header=rim,
+          @a Ajout permission TableData Purch. Inv. Line=rim,T
+          @a Ajout permission ableData Contact Business Relation=r,
+          @a Ajout permission TableData Service Header=rim,
+          @a Ajout permission TableData Service Order Type=r,
+          @a Ajout permission TableData Service Intervention Line=rim,
+          @a Ajout permission TableData Service Header Voucher=rim,
+          @a Ajout permission TableData Invoicing Matrix Setup=rm */
+      /** @r IMH10 @d 28/08/2012 @a ISAT.RC @v IMH6.01.212 @s Gestion date de reference matrice @h 3795
+          @c Changement de la signature de la fonction CheckCreationAvailable Rajout du paramŠtre Service Header*/
+      /** @r IMH09 @d 03/04/12 @a ISAT.ST @v IMH6.01.145 @s Rapprochement facture @c Refonte codeunit + test groupe compta TVA */
+      /** @r IMH08 @d 01/02/12 @a ISAT.PC @v IMH6.01.145 @s Rapprochement facture @c Modification test de date au 15/09/11 @h 2949 */
+      /** @r IMH07 @d 16/01/12 @a ISAT.ST @v IMH6.01.145 @s Rapprochement facture @c Controle prestataire intervention @h 2856 */
+      /** @r IMH06 @d 03/01/12 @a ISAT.ST @v IMH6.01.145 @s Rapprochement facture @c Gestion description rejet */
+      /** @r IMH05 @d 28/12/11 @a ISAT.ST @v IMH6.01.145 @s Rapprochement facture @c Correction ecart facturation */
+      /** @r IMH04 @d 19/12/11 @a ISAT.ST @v IMH6.01.145 @s Rapprochement facture @c Correction rapprochament sur ligne achat */
+      /** @r IMH03 @d 24/11/11 @a ISAT.EBA @v IMH6.01.145 @s Rapprochement facture @c Correctif */
+      /** @r IMH02 @d 12/09/11 @a ISAT.PC @v IMH6.01.145 @s Rapprochement facture @h 1440 @c Correction sur Devis suppl‚mentaire */
+      /** @r IMH01 @d 16/03/11 @a ISAT.LLT @v IMH6.01.145 @s Rapprochement facture @c Cr‚ation */
+    }
+    END.
+  }
+}

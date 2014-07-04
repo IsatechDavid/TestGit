@@ -1,0 +1,217 @@
+OBJECT Report 50131 Update Transmission Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=06/05/13;
+    Time=14:25:08;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    ProcessingOnly=Yes;
+    OnPreReport=BEGIN
+                  DocNoFilter :=  "Purch. Inv. Line".GETFILTER("Document No.");
+                  IF DocNoFilter = '' THEN
+                    ERROR(Text004);
+                END;
+
+    OnPostReport=BEGIN
+                   TransfertRepayment;
+                 END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table123;
+        DataItemTableView=SORTING(Document No.,Line No.);
+        OnPreDataItem=BEGIN
+                        CurrReport.BREAK;
+                      END;
+
+        ReqFilterFields=Document No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      CompanyInfo@1100281003 : Record 79;
+      InvoicingMatrixSetup@1100281002 : Record 50137;
+      ServiceInterventionLineBuffer@1100281001 : TEMPORARY Record 50075;
+      CallFromReport@1100281000 : Boolean;
+      WDialog@1100281004 : Dialog;
+      Text001@1100281007 : TextConst 'ENU=Do you want to launch tranfer processing ?;FRA=Souhaitez-vous lancer le traitement de transmission ?';
+      Text002@1100281006 : TextConst 'ENU=Transfer processing \Customer #1##############;FRA=Transmission en cours \Client #1##############';
+      Text003@1100281005 : TextConst 'ENU=External Cost %1 %2;FRA=Co–t externes %1 %2';
+      TransmissionMgt@1100281008 : Codeunit 50078;
+      LineFound@1100281009 : Boolean;
+      DocNoFilter@1100281010 : Text[250];
+      Text004@1100281011 : TextConst 'FRA=Saisissez un filtre au niveau du champ Nø document.';
+
+    PROCEDURE TransfertRepayment@1100281000();
+    VAR
+      lInvoicingMatrixSetup@1100281001 : Record 50137;
+      lServiceInterventionLine@1100281003 : Record 50075;
+      lTransmissionNo@1100281000 : Code[20];
+      lCreationLine@1100281005 : Boolean;
+    BEGIN
+      WITH lInvoicingMatrixSetup DO BEGIN
+        //<<IMH09.ISAT.EBA
+        IF CallFromReport THEN
+          lInvoicingMatrixSetup.COPYFILTERS(InvoicingMatrixSetup);
+        //>>IMH09.ISAT.EBA
+        SETRANGE(Enable,TRUE);
+        SETRANGE("Purchase Order Creation",TRUE);
+        //<<IMH09.ISAT.EBA
+        IF GETFILTER("Repayment Customer No.") = '' THEN
+        //<<IMH09.ISAT.EBA
+          SETFILTER("Repayment Customer No.",'<>%1','');
+
+        //<<IMH09.ISAT.EBA
+        IF GETFILTER("Provider Invoice Payment") = '' THEN
+        //>>IMH09.ISAT.EBA
+          SETFILTER("Provider Invoice Payment",'<>%1',"Provider Invoice Payment"::" ");
+        SETRANGE("Corporate Declaration",TRUE);
+        //<<IMH07.PC
+        SETFILTER("Corporate Transfer Mode",'<>%1',"Corporate Transfer Mode"::None);
+        SETFILTER("File Frequency Send",'<>%1',lInvoicingMatrixSetup."File Frequency Send"::Any);
+        //>>IMH07.PC
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+        IF GUIALLOWED THEN BEGIN
+          WDialog.OPEN(Text002);
+        END;
+
+        FINDSET;
+        REPEAT
+
+          IF GUIALLOWED THEN BEGIN
+            WDialog.UPDATE(1,"Corporate No." + '-' + "Corporate Region Code");
+          END;
+
+          //<<IMH07.PC
+          IF TransmissionMgt.CheckDateToSend("File Send Last Date","File Frequency Send") THEN BEGIN
+            //**MODIFY;
+          //>>IMH07.PC
+            //lTransmissionNo := GetNextTransmissionNo(FALSE);
+            //** lTransmissionNo := GetNextTransmissionNo(TRUE);
+            //IMH03
+            LineFound := FALSE;
+
+            // Transfert des ‚critures
+            lCreationLine := ProcessPurchInvoices(
+              "Corporate No.","Corporate Region Code","Service Order Type",
+              "Provider Invoice Payment","Repayment Customer No.");
+
+            ////IMH03
+            //IF lCreationLine THEN BEGIN
+            //  CreateHeader(lInvoicingMatrixSetup,lTransmissionNo);
+              //lTransmissionNo := GetNextTransmissionNo(TRUE);
+
+            //  COMMIT;
+
+              // G‚n‚ration du fichier
+             // GenerateFlow(lTransmissionNo,lInvoicingMatrixSetup);
+            //END;
+          END;
+        UNTIL NEXT = 0;
+
+        IF GUIALLOWED THEN BEGIN
+          WDialog.CLOSE;
+        END;
+      END;
+    END;
+
+    PROCEDURE ProcessPurchInvoices@1100281011(pCorporateNo@1100281008 : Code[20];pCorporateRegionCode@1100281009 : Code[10];pServiceOrderType@1100281010 : Code[10];pProviderInvoicePayment@1100281001 : ' ,IMH,Corporate';pRepaymentCustNo@1100281005 : Code[20]) rValue : Boolean;
+    VAR
+      lPurchInvLine@1100281004 : Record 123;
+      lGLEntry@1100281002 : Record 17;
+      lGenJnlLine@1100281003 : Record 81;
+      lTransmissionNo@1100281000 : Code[20];
+    BEGIN
+      // Parcours des lignes de factures d'achat pour transfert
+      rValue := FALSE;
+
+      //<<IMH06
+      ServiceInterventionLineBuffer.RESET;
+      ServiceInterventionLineBuffer.DELETEALL;
+      //>>IMH06
+
+      WITH lPurchInvLine DO BEGIN
+        SETCURRENTKEY("Corporate No.","Corporate Region Code","Service Order Type");
+        SETRANGE("Corporate No.",pCorporateNo);
+        SETRANGE("Corporate Region Code",pCorporateRegionCode);
+        SETRANGE("Service Order Type",pServiceOrderType);
+        //**eb
+        SETFILTER("Document No.",DocNoFilter);
+        //**
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+        //**eb
+        lTransmissionNo := GetNextTransmissionNo(TRUE);
+        //**
+        FINDSET;
+        REPEAT
+      //    TransmissionMgt.ProcessPurchInvHeader(lPurchInvLine,pProviderInvoicePayment,lTransmissionNo,pRepaymentCustNo);
+        UNTIL lPurchInvLine.NEXT = 0;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetNextTransmissionNo@1100281010(pInsert@1100281000 : Boolean) rValue : Code[20];
+    VAR
+      lGeneralLedgerSetup@1100281002 : Record 98;
+      lNoSeriesMgt@1100281001 : Codeunit 396;
+    BEGIN
+      rValue := '';
+      lGeneralLedgerSetup.GET;
+      lGeneralLedgerSetup.TESTFIELD("Transmission Nos.");
+      rValue := lNoSeriesMgt.GetNextNo(lGeneralLedgerSetup."Transmission Nos.",0D,pInsert);
+    END;
+
+    BEGIN
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

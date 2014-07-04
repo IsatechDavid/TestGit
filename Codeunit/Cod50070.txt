@@ -1,0 +1,246 @@
+OBJECT Codeunit 50070 Service Time Register Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=12/12/12;
+    Time=15:42:24;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ApplMgt@1100281009 : Codeunit 1;
+      ServTimeReg@1100281000 : Record 50067;
+      CurrStartTime@1100281008 : DateTime;
+      CurrServNo@1100281002 : Code[20];
+      CurrServHeaderNo@1100281003 : Code[20];
+      CurrIntervLine@1100281004 : Integer;
+      CurrFromQuote@1000000001 : Boolean;
+      CurrFromComment@1000000000 : Boolean;
+      CurrFromLogEntries@1000000002 : Boolean;
+      CurrFromAttachment@1000000003 : Boolean;
+      CurrFormId@1100281005 : Integer;
+      CurrRecord@1100281001 : Boolean;
+      Initialized@1100281006 : Boolean;
+      Text001@1100281007 : TextConst 'ENU=Time register instance has not been initialized;FRA=L''instance de contr“le des temps n''a pas ‚t‚ initialis‚e.';
+
+    PROCEDURE OpenObjectID@1100281012(pFormID@1100281000 : Text[250]);
+    BEGIN
+      CASE UPPERCASE(COPYSTR(pFormID, 1, 4)) OF
+        'FORM' : EVALUATE(CurrFormId, COPYSTR(pFormID, 6));
+        'PAGE' : EVALUATE(CurrFormId, COPYSTR(pFormID, 6)); // les pages sont en form....
+        ELSE
+          EVALUATE(CurrFormId, pFormID); // D‚clenche l'erreur
+      END;
+      Initialized := TRUE;
+    END;
+
+    PROCEDURE CloseObject@1100281014();
+    BEGIN
+      IF CurrRecord THEN
+        CloseCurrRecord;
+    END;
+
+    PROCEDURE TestInit@1100281013();
+    BEGIN
+      IF NOT Initialized THEN
+        ERROR(Text001);
+    END;
+
+    PROCEDURE CreateWizard@1100281000(pFormId@1100281000 : Integer;pServiceNo@1100281001 : Code[20];pServiceHeaderNo@1100281002 : Code[20];pIntervLineNo@1100281003 : Integer;pStartDateTime@1100281005 : DateTime;pEndDateTime@1100281006 : DateTime);
+    BEGIN
+      EXIT; //ISAT04.ST
+      IF pServiceNo = '' THEN
+        EXIT;
+      // Fonction pour les wizard
+      WITH ServTimeReg DO BEGIN
+        INIT;
+        "Service No." := pServiceNo;
+        "Service Header No." := pServiceHeaderNo;
+        "Intervention Line No." := pIntervLineNo;
+        //<<IMH05.PC
+        "From Quote" := CurrFromQuote;
+        "From Comment" := CurrFromComment;
+        "From Log Entries" := CurrFromLogEntries;
+        "From Attachment" := CurrFromAttachment;
+        //>>IMH05.PC
+        "User ID" := USERID;
+        "Start DateTime" := pStartDateTime;
+        "End DateTime" := pEndDateTime;
+        "Form ID" := pFormId;
+        INSERT(TRUE);
+      END;
+    END;
+
+    PROCEDURE OnAfterGetServiceRecord@1100281005(pService@1100281004 : Record 50066);
+    BEGIN
+      EXIT; //ISAT04.ST
+      IF CurrRecord THEN
+        IF (CurrServNo <> pService."Service No.") OR
+           (pService.Status IN [pService.Status::Finished, pService.Status::Canceled]) THEN BEGIN
+          // Ajout d'un closed si on change de rec ou l'on change de statut
+          CloseCurrRecord;
+        END;
+
+      IF (pService.Status IN [pService.Status::Finished, pService.Status::Canceled]) THEN
+        EXIT;
+
+      IF (pService."Service No." <> '') AND (pService."Service No." <> CurrServNo) THEN BEGIN
+        // Ouverture d'un service
+        CurrServNo := pService."Service No.";
+        OpenCurrRecord;
+      END;
+    END;
+
+    PROCEDURE OnAfterGetServiceHeaderRecord@1100281006(pServiceHeader@1100281004 : Record 5900);
+    BEGIN
+      IF CurrRecord THEN BEGIN
+        IF (CurrServHeaderNo <> pServiceHeader."No.") OR
+           ((pServiceHeader.Status <> pServiceHeader.Status::Pending) AND
+            (pServiceHeader.Status <> pServiceHeader.Status::"In Process"))
+        THEN BEGIN
+          // Ajout d'un closed si on change de rec ou l'on change de statut
+          CloseCurrRecord;
+        END;
+      END;
+
+      IF (pServiceHeader.Status <> pServiceHeader.Status::Pending) AND
+         (pServiceHeader.Status <> pServiceHeader.Status::"In Process")
+      THEN BEGIN
+        EXIT;
+      END;
+
+      IF (pServiceHeader."No." <> '') AND (pServiceHeader."No." <> CurrServHeaderNo) THEN BEGIN
+        // Ouverture d'un service header
+        CurrServNo := pServiceHeader."Service No.";
+        CurrServHeaderNo := pServiceHeader."No.";
+        OpenCurrRecord;
+      END;
+    END;
+
+    PROCEDURE OnAfterGetServiceIntervRecord@1100281007(pIntervention@1100281004 : Record 50075);
+    BEGIN
+      IF CurrRecord THEN BEGIN
+        IF (CurrServHeaderNo <> pIntervention."Service Header No.") OR
+           (CurrIntervLine <> pIntervention."Line No.") OR
+           pIntervention.Closed
+        THEN BEGIN
+          // Ajout d'un closed si on change de rec ou l'on change de statut
+          CloseCurrRecord;
+        END;
+      END;
+
+      IF pIntervention.Closed THEN BEGIN
+        EXIT;
+      END;
+
+      IF (pIntervention."Service Header No." <> '') AND (pIntervention."Line No." <> 0) THEN BEGIN
+        IF (pIntervention."Service Header No." <> CurrServHeaderNo) OR (pIntervention."Line No." <> CurrIntervLine) THEN BEGIN
+          // Ouverture d'une intervention
+          CurrServNo := pIntervention."Service No.";
+          CurrServHeaderNo := pIntervention."Service Header No.";
+          CurrIntervLine := pIntervention."Line No.";
+          OpenCurrRecord;
+        END;
+      END;
+    END;
+
+    PROCEDURE CloseCurrRecord@1100281010();
+    BEGIN
+      IF NOT ApplMgt.ServTimeReg THEN
+        EXIT;
+      TestInit;
+
+      IF (CurrServNo <> '') OR (CurrServHeaderNo <> '') THEN BEGIN
+        WITH ServTimeReg DO BEGIN
+          INIT;
+          "Service No." := CurrServNo;
+          "Service Header No." := CurrServHeaderNo;
+          "Intervention Line No." := CurrIntervLine;
+          //<<IMH05.PC
+          "From Quote" := CurrFromQuote;
+          "From Comment" := CurrFromComment;
+          "From Log Entries" := CurrFromLogEntries;
+          "From Attachment" := CurrFromAttachment;
+          //>>IMH05.PC
+          "Form ID" := CurrFormId;
+          "User ID" := USERID;
+          "Start DateTime" := CurrStartTime;
+          "End DateTime" := CURRENTDATETIME;
+          INSERT(TRUE);
+        END;
+      END;
+      CurrServNo := '';
+      CurrServHeaderNo := '';
+      CurrIntervLine := 0;
+      //<<IMH05.PC
+      CurrFromQuote := FALSE;
+      CurrFromComment := FALSE;
+      CurrFromLogEntries := FALSE;
+      CurrFromAttachment := FALSE;
+      //>>IMH05.PC
+      CurrStartTime := 0DT;
+      CurrRecord := FALSE;
+    END;
+
+    PROCEDURE OpenCurrRecord@1100281011();
+    BEGIN
+      WITH ServTimeReg DO BEGIN
+        CurrStartTime := CURRENTDATETIME;
+      END;
+      CurrRecord := TRUE;
+    END;
+
+    PROCEDURE SetFromQuote@1000000000(pFromQuote@1000000000 : Boolean);
+    BEGIN
+      // IMH05.PC
+
+      CurrFromQuote := pFromQuote;
+    END;
+
+    PROCEDURE SetFromComment@1000000001(pFromComment@1000000000 : Boolean);
+    BEGIN
+      // IMH05.PC
+
+      CurrFromComment := pFromComment;
+    END;
+
+    PROCEDURE SetFromLogEntries@1000000002(pFromLogEntries@1000000000 : Boolean);
+    BEGIN
+      // IMH05.PC
+
+      CurrFromLogEntries := pFromLogEntries;
+    END;
+
+    PROCEDURE SetFromAttachment@1000000003(pFromAttachment@1000000000 : Boolean);
+    BEGIN
+      // IMH05.PC
+
+      CurrFromAttachment := pFromAttachment;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 05/12/12 @a ISAT.PC @v IMH6.01.334 @s Mantis 4004 @h 4004
+          @c Comptabilisation service sur devis, commentaires et interaction
+          @c ajout fonction SetFromQuote, SetFromComment & SetFromLogEntries */
+          @c on tient plus compte des statuts info */
+      /** @r IMH04 @d 10/12/10 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c On n'historise plus les temps sur service */
+      /** @r IMH03 @d 09/11/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Passage du nø service de integer … code(20) */
+      /** @r IMH02 @d 27/10/10 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Suppression des commit
+          @c R‚gorganisation du code */
+      /** @r IMH01 @d 19/10/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Cr‚ation */
+    }
+    END.
+  }
+}

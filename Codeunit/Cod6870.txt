@@ -1,0 +1,142 @@
+OBJECT Codeunit 6870 EP Trust Handler
+{
+  OBJECT-PROPERTIES
+  {
+    Date=17/04/13;
+    Time=14:22:56;
+    Modified=Yes;
+    Version List=NAVW16.00,IMH6.01;
+  }
+  PROPERTIES
+  {
+    SingleInstance=Yes;
+    OnRun=VAR
+            EncodeXML@1000000000 : Codeunit 6814;
+            XMLConfig@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v3.0'.DOMDocument";
+          BEGIN
+            IF IsRunning THEN BEGIN
+              IF GUIALLOWED THEN
+                MESSAGE(Text003);
+              EXIT;
+            END;
+
+            GetNASSetup;
+
+            CREATE(XMLConfig);
+            EncodeXML.CreateListenerConfig(XMLConfig,NASID,TRUE);
+            //<<IMH01.PC
+            {
+            CREATE(QueueListener);
+            IF NOT QueueListener.StartListen(XMLConfig) THEN BEGIN
+              CLEAR(QueueListener);
+              CLEAR(XMLConfig);
+              ERROR(Text004,NASSetup."Key Exchange Request Queue");
+            END;
+            }
+            //>>IMH01.PC
+            CLEAR(XMLConfig);
+
+            //<<IMH01.PC
+            {
+            CREATE(TrustTimer);
+            IF NOT TrustTimer.StartTimerInitSeconds(10) THEN BEGIN
+              CLEAR(TrustTimer);
+              ERROR(Text000);
+            END;
+            }
+            //>>IMH01.PC
+
+            IsRunning := TRUE;
+
+            MESSAGE(Text002);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      NASSetup@1000000006 : Record 6870;
+      Text001@1000000009 : TextConst 'ENU=Could not find the configuration for %1.;FRA=Impossible de trouver la configuration de %1.';
+      Text002@1000000010 : TextConst 'ENU=Employee Portal Trust Appl. Server has been started.;FRA=Le serveur d''application de confiance Employee Portal a ‚t‚ d‚marr‚.';
+      Text000@1000 : TextConst 'ENU=There is a problem with the trust timer.;FRA=ProblŠme avec le minuteur de confiance.';
+      Text003@1001 : TextConst 'ENU=The NAS has already been started for Employee Portal.;FRA=NAS d‚j… d‚marr‚ pour Employee Portal.';
+      Text004@1002 : TextConst 'ENU=The queue listener could not open the queue %1.;FRA=Le processus d''‚coute de file d''attente n''a pas pu ouvrir la file d''attente %1.';
+      NASID@1004 : Code[20];
+      IsRunning@1005 : Boolean;
+      Text007@1000000003 : TextConst 'ENU=Error receiving Backend private key.;FRA=Erreur lors de la r‚ception de la cl‚ priv‚e principale.';
+      Text008@1000000002 : TextConst 'ENU=Error receiving Frontend public key.;FRA=Erreur lors de la r‚ception de la cl‚ publique frontale.';
+
+    PROCEDURE SetNASID@1000000003(ID@1000000000 : Code[20]);
+    BEGIN
+      NASID := ID;
+    END;
+
+    LOCAL PROCEDURE GetNASSetup@1000000000();
+    BEGIN
+      IF NOT NASSetup.GET(NASID) THEN
+        ERROR(Text001,NASID);
+    END;
+
+    PROCEDURE ProcessReqType@1000000001(VAR XMLDocIn@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v3.0'.DOMDocument";VAR XMLDocOut@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v3.0'.DOMDocument");
+    VAR
+      DecodeXML@1000000002 : Codeunit 6813;
+      TrustMgt@1000000001 : Codeunit 6871;
+      RequestType@1000000000 : Code[50];
+    BEGIN
+      // Get the request type from the Inbound Document
+      DecodeXML.GetRequestTypeStatic(XMLDocIn,RequestType);
+
+      CASE RequestType OF
+        'GETBACKENDPUBLIC':
+          BEGIN
+            TrustMgt.GetBackendPublic(XMLDocIn,XMLDocOut);
+          END;
+        'REGISTER':
+          BEGIN
+            TrustMgt.ReceiveTrustRequest(XMLDocIn);
+          END;
+      END;
+    END;
+
+    PROCEDURE GetBackendKey@1000000008(VAR XMLDoc@1000000000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v3.0'.DOMDocument");
+    VAR
+      EPSetup@1000000001 : Record 6800;
+      OutStream@1000000002 : OutStream;
+    BEGIN
+      EPSetup.GET;
+      EPSetup.CALCFIELDS("Back End Private Key");
+      IF NOT EPSetup."Back End Private Key".HASVALUE THEN
+        ERROR(Text007);
+
+      EPSetup."Back End Private Key".CREATEOUTSTREAM(OutStream);
+      XMLDoc.load(OutStream);
+    END;
+
+    PROCEDURE GetPublicKey@1000000009(VAR XMLDoc@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v3.0'.DOMDocument";PartnerID@1000000000 : Text[50]);
+    VAR
+      TrustedSites@1000000002 : Record 6872;
+      OutStream@1000000003 : OutStream;
+    BEGIN
+      TrustedSites.SETCURRENTKEY("Site Identifier");
+      TrustedSites.SETRANGE("Site Identifier",PartnerID);
+      IF NOT TrustedSites.FIND('-') THEN
+        ERROR(Text008);
+
+      TrustedSites.CALCFIELDS("Partner Public Key");
+      IF TrustedSites."Partner Public Key".HASVALUE AND TrustedSites."Site Trust" THEN BEGIN
+        TrustedSites."Partner Public Key".CREATEOUTSTREAM(OutStream);
+        XMLDoc.load(OutStream);
+      END ELSE
+        ERROR(Text008);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 17/04/13 @a ISAT.PC @v IMH6.01.346 @s Hotfix 33494
+          @c Delete QueueListener Automation
+          @c Delete QueueSender Automation
+          @c Delete TrustTimer Automation */
+    }
+    END.
+  }
+}

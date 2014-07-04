@@ -1,0 +1,173 @@
+OBJECT Codeunit 50276 CU Darva WGA Formation
+{
+  OBJECT-PROPERTIES
+  {
+    Date=27/11/13;
+    Time=17:09:20;
+    Modified=Yes;
+    Version List=;
+  }
+  PROPERTIES
+  {
+    TableNo=8016721;
+    OnRun=VAR
+            lEAIRcvdMqBuffer@1000000000 : TEMPORARY Record 8016721;
+          BEGIN
+            lEAIRcvdMqBuffer.COPY(Rec,TRUE);
+            CALCFIELDS("XML Source");
+            lEAIRcvdMqBuffer."XML Source" := "XML Source";
+            Code(lEAIRcvdMqBuffer);
+            COPY(lEAIRcvdMqBuffer,TRUE);
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE Code@1000000000(pEAIRcvdMQBuffer@1000000000 : Record 8016721);
+    VAR
+      lXMLDom@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLDom2@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInstream@1000000003 : InStream;
+      lDarvaXMLMgt@1000000004 : Codeunit 50154;
+      lXMLNode@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lCorporateNo@1000000006 : Code[20];
+      lReferenceNo@1000000007 : Code[30];
+      lDarvaMgt@1000000008 : Codeunit 50150;
+      lRefPartfenaireEAI@1000000009 : Record 8016748;
+      lCustomer@1000000010 : Record 18;
+      lCorporateRegion@1000000011 : Record 50058;
+      lCorporateRegionCode@1000000012 : Code[10];
+      lMissionNo@1000000013 : Text[50];
+      lService@1000000014 : Record 50066;
+      lServiceHeader@1000000015 : Record 5900;
+      lXMLNodeList@1000000016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      iLoop@1000000017 : Integer;
+      lXMLNode2@1000000018 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lAdvCommentLineBuffer@1000000019 : TEMPORARY Record 50056;
+      lToolsMgt@1000000020 : Codeunit 8016602;
+      lTextMgt@1000000021 : Codeunit 50085;
+      lAdvCommentLine@1000000022 : Record 50056;
+      lDocEntryMgt@1000000023 : Codeunit 8016707;
+      lTrayLineMgt@1000000024 : Codeunit 50050;
+      lEAIAct@1000000025 : Record 8016706;
+      lTrayLine@1000000026 : Record 50048;
+    BEGIN
+      // Chargement XML
+      CREATE(lXMLDom2);
+      pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+      pEAIRcvdMQBuffer."XML Source".CREATEINSTREAM(lInstream);
+      lXMLDom2.load(lInstream);
+      lDarvaXMLMgt.InitXMLDom(lXMLDom2,lXMLDom);
+
+      // D‚code XML
+
+      lXMLNode := lXMLDom.getElementsByTagName('GR010101').item(0);
+      lXMLNode := lXMLNode.selectSingleNode('SE0020101');
+      lCorporateNo := lDarvaMgt.GetNodeValue(lXMLNode,'DE00460101');
+
+      IF NOT lRefPartfenaireEAI.GetFromCrossRef(DATABASE::Customer,
+                                                pEAIRcvdMQBuffer."EAI Partner Code"
+                                                ,lCorporateNo,lRefPartfenaireEAI
+                                                ) THEN  BEGIN
+          ERROR('GTA %1 non param‚tr‚',lCorporateNo);
+      END;
+
+      lRefPartfenaireEAI.TESTFIELD("Source No.");
+      lCorporateNo := lRefPartfenaireEAI."Source No.";
+      lCustomer.GET(lCorporateNo);
+
+      IF lCustomer."Parent Customer No." <> '' THEN    BEGIN
+          lCorporateRegion.SETRANGE("Corporate No.", lCustomer."Parent Customer No.");
+          lCorporateRegion.SETRANGE("Sell-to Customer No.", lCustomer."No.");
+          IF  lCorporateRegion.FINDFIRST THEN BEGIN
+                 lCorporateNo := lCorporateRegion."Corporate No.";
+                 lCorporateRegionCode := lCorporateRegion."Region Code";
+          END;
+      END;
+
+      lReferenceNo :=  lDarvaMgt.GetNodeValue(lXMLNode,'DE00470101');
+      lMissionNo := lDarvaMgt.GetNodeValue(lXMLNode,'DE00530101');
+
+      lReferenceNo :=  lDarvaMgt.ReferenceNoWithOutZero(lReferenceNo);
+
+      // Recherche Service / LP
+      lService.SETCURRENTKEY("Reference No.","Corporate No." );
+      lService.SETFILTER("Reference No.",lReferenceNo);
+      lService.SETRANGE("Corporate No.",lCorporateNo);
+
+      IF  lCorporateRegionCode <> '' THEN BEGIN
+         lService.SETRANGE("Corporate Region Code",lCorporateRegionCode);
+      END;
+
+      lService.FINDFIRST ;
+
+      lServiceHeader.SETCURRENTKEY("Service No.");
+      lServiceHeader.SETRANGE("Service No." ,lService."Service No.");
+      lServiceHeader.SETRANGE("Your Reference",lMissionNo);
+
+      IF NOT lServiceHeader.FINDFIRST THEN BEGIN
+         lServiceHeader.SETFILTER("Your Reference",lMissionNo+'*');
+         lServiceHeader.FINDFIRST;
+      END;
+
+      // Recup Commentaires
+      lXMLNode := lXMLDom.getElementsByTagName('SE0120102LIST').item(0);
+      lXMLNodeList := lXMLNode.selectNodes('SE0120102');
+
+      FOR iLoop := 0 TO lXMLNodeList.length - 1 DO   BEGIN
+          lXMLNode2 := lXMLNodeList.item(iLoop);
+          lAdvCommentLineBuffer.Comment := lToolsMgt.FormatImport(lDarvaMgt.GetNodeValue(lXMLNode2,'DE00080201'));
+          lAdvCommentLineBuffer."Line No." := iLoop;
+          lAdvCommentLineBuffer."Source Table ID" := DATABASE::"Service Header";
+          lAdvCommentLineBuffer."Source No." := lService."Service No." ;
+          lAdvCommentLineBuffer."Source No. 2" := lServiceHeader."No.";
+          lAdvCommentLineBuffer.Reception :=   lAdvCommentLine.Reception::Darva;
+
+          lAdvCommentLineBuffer.INSERT;
+      END;
+
+
+      // Ajout   Commentaire
+
+      pEAIRcvdMQBuffer."Service Header No." :=    lServiceHeader."No.";
+      pEAIRcvdMQBuffer."Service No." := lService."Service No.";
+      pEAIRcvdMQBuffer."Reference No."  := lService."Reference No.";
+      pEAIRcvdMQBuffer."Your Reference" := lServiceHeader."Your Reference";
+
+      //
+
+
+      lTextMgt.SaveTempComment(lAdvCommentLine,lAdvCommentLineBuffer,TRUE  );
+      lDocEntryMgt.AddEntryFromRcvdBuffer(DATABASE::"Service Header",
+                                          lServiceHeader."Document Type",
+                                          lServiceHeader."No.",'',0,pEAIRcvdMQBuffer);
+
+
+      IF lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Code") THEN       BEGIN
+           IF lEAIAct."Create Tray Line On Receive" THEN BEGIN
+                lTrayLineMgt.InitTrayLine(lTrayLine);
+                IF lEAIAct."Tray Line Team Code On Receive" <> '' THEN BEGIN
+
+                     lTrayLineMgt.CreateTLFromServHeader(lServiceHeader,
+                                                         lEAIAct."Tray Line Team Code On Receive",
+                                                         lEAIAct."Tray Line Task Code On Receive",
+                                                         FALSE);
+
+                  END
+                  ELSE
+                  BEGIN
+                     lTrayLineMgt.CreateTLFromServHeader(lServiceHeader,
+                                                         lServiceHeader."Default Team Code",
+                                                         lEAIAct."Tray Line Task Code On Receive",
+                                                         FALSE);
+
+                  END;
+          END;
+      END;
+    END;
+
+    BEGIN
+    END.
+  }
+}

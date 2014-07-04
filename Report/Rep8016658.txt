@@ -1,0 +1,806 @@
+OBJECT Report 8016658 D‚tail des cessions
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:22:36;
+    Modified=Yes;
+    Version List=ISA6.00,IMISAT6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Cessions List;
+               FRA=D‚tail des cessions];
+    OnPreReport=BEGIN
+                  FAFilter := "Fixed Asset".GETFILTERS;
+                  DeprBook.GET(DeprBookCode);
+                  DeprBookText := STRSUBSTNO('%1%2 %3',DeprBook.TABLECAPTION,':',DeprBookCode);
+                END;
+
+    OnPostReport=BEGIN
+                   IF CreateXl THEN BEGIN
+                      FASetup.GET;
+                      IF ((FASetup."R50046.Filemane" <> '') AND (FASetup."R50046.Sheet" <> '')) THEN
+                         R370.OpenBook(FASetup."R50046.Filemane",FASetup."R50046.Sheet")
+                      ELSE
+                         R370.CreateBook;
+
+                      R370.CreateSheet('Cessions','D‚tail des Cessions',COMPANYNAME,USERID);
+                      R370.GiveUserControl;
+                   END;
+                 END;
+
+    Orientation=Landscape;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table5600;
+        DataItemTableView=SORTING(FA Subclass Code);
+        NewPagePerGroup=No;
+        NewPagePerRecord=No;
+        PrintOnlyIfDetail=No;
+        OnPreDataItem=BEGIN
+                        CurrReport.CREATETOTALS(FADeprBook.Depreciation,FADeprBook."Acquisition Cost",FADeprBook."Book Value",DisposalProduct);
+
+                        IF (CreateXl) THEN
+                        BEGIN
+                           XlLine(R370);
+                           R370.INIT;
+                           R370.VALIDATE("Row No.",VLine);
+                           R370.VALIDATE("Column No.",2);
+                           R370.Bold := TRUE;
+                           R370."Cell Value as Text" := 'Nø immobilisation';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",1);
+                           R370."Cell Value as Text" := 'Groupe';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",3);
+                           R370."Cell Value as Text" := 'D‚signation';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",4);
+                           R370."Cell Value as Text" := 'Fournisseur';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",5);
+                           R370."Cell Value as Text" := 'Date d''achat';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",6);
+                           R370."Cell Value as Text" := 'Date de cession';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",7);
+                           R370."Cell Value as Text" := 'Motif';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",8);
+                           R370."Cell Value as Text" := 'Type et taux';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",9);
+                           R370."Cell Value as Text" := 'Co–t d''aquisition';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",10);
+                           R370."Cell Value as Text" := 'Cumul amortissement';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",11);
+                           R370."Cell Value as Text" := 'Prix Cession';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",12);
+                           R370."Cell Value as Text" := '+/- Value';
+                           R370.INSERT;
+                           VLine += 1;
+                        END;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF NOT Vendor.GET("Vendor No.") THEN
+                             CLEAR(Vendor);
+
+                           IF Inactive THEN
+                             CurrReport.SKIP;
+
+                           //FADeprBook.SETRANGE("Acquisition Date",StartingDate,EndingDate);    10/02/06
+                           FADeprBook.SETRANGE("Disposal Date",StartingDate,EndingDate);
+                           FADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',StartingDate,EndingDate);
+                           FADeprBook.SETRANGE("FA No.","Fixed Asset"."No.");
+                           FADeprBook.SETRANGE("Depreciation Book Code",DeprBookCode);
+                           //FADeprBook.SETFILTER("Disposal Date",'>%1',0D);                     10/02/06
+                           IF NOT FADeprBook.FIND('-') THEN
+                             CurrReport.SKIP;
+
+                           FADeprBook.SETRANGE("FA Posting Date Filter");
+                           FADeprBook.SETRANGE("Disposal Date");
+                           FADeprBook.CALCFIELDS(Depreciation,"Acquisition Cost");
+                           FADeprBook.SETRANGE("Disposal Date",StartingDate,EndingDate);
+                           FADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',StartingDate,EndingDate);
+                           FADeprBook.CALCFIELDS("Book Value");
+
+                           CLEAR(Method);
+                           IF (FADeprBook."No. of Depreciation Years" <> 0) THEN
+                             CASE FADeprBook."Depreciation Method" OF
+                               FADeprBook."Depreciation Method"::"Straight-Line": Method := 'L ' +
+                                         FORMAT(ROUND(100 / FADeprBook."No. of Depreciation Years",0.01),0,'<Precision,1:1><Standard Format,0>');
+                               FADeprBook."Depreciation Method"::"Declining-Balance 1": Method := 'D ' +
+                                         FORMAT(FADeprBook."Declining-Balance %",0,'<Precision,1:1><Standard Format,0>');
+                               FADeprBook."Depreciation Method"::"DB1/SL": Method := 'DL ' +
+                                         FORMAT(FADeprBook."Declining-Balance %",0,'<Precision,1:1><Standard Format,0>');
+                             END;
+
+                           RecFALedgerEntry.SETCURRENTKEY("FA No.","Depreciation Book Code","FA Posting Category","FA Posting Type");
+                           RecFALedgerEntry.SETFILTER("FA No.","Fixed Asset"."No.");
+                           RecFALedgerEntry.SETRANGE(RecFALedgerEntry."FA Posting Type",RecFALedgerEntry."FA Posting Type"::"Proceeds on Disposal");
+                           RecFALedgerEntry.SETRANGE("Depreciation Book Code",DeprBookCode);
+                           IF RecFALedgerEntry.FIND('-') THEN BEGIN
+                             RecFALedgerEntry.CALCSUMS("Credit Amount");
+                             DisposalProduct := RecFALedgerEntry."Credit Amount";
+                           END;
+                         END;
+
+        ReqFilterFields=No.,FA Class Code,FA Subclass Code,Budgeted Asset;
+        GroupTotalFields=FA Subclass Code;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=26400;
+            SectionHeight=2961;
+          }
+          CONTROLS
+          {
+            { 1   ;Label        ;0    ;0    ;9900 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Fixed Asset - Cessions List;
+                                                                    FRA=D‚tail des cessions d'immobilisations par compte] }
+            { 2   ;TextBox      ;22650;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 3   ;TextBox      ;0    ;846  ;7500 ;423  ;FontSize=11;
+                                                         FontBold=Yes;
+                                                         SourceExpr=COMPANYNAME }
+            { 4   ;TextBox      ;25350;423  ;450  ;423  ;CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 5   ;Label        ;24600;423  ;750  ;423  ;ParentControl=4 }
+            { 6   ;TextBox      ;23550;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+            { 1100281069;TextBox;0    ;1692 ;9900 ;423  ;FontSize=9;
+                                                         SourceExpr=DeprBookText }
+            { 1100281075;TextBox;0    ;2538 ;9900 ;423  ;FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textenddate,EndingDate) }
+            { 1100281076;TextBox;0    ;2115 ;9900 ;423  ;FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textstartdate,StartingDate) }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=26400;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT((CurrReport.PAGENO = 1) AND (FAFilter <> ''));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 19  ;TextBox      ;0    ;0    ;9900 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr="Fixed Asset".TABLECAPTION + ': ' + FAFilter }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=26400;
+            SectionHeight=2115;
+          }
+          CONTROLS
+          {
+            { 1100281001;Shape  ;0    ;423  ;25950;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281012;Label  ;1950 ;846  ;3450 ;846  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontItalic=No;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=D‚signation] }
+            { 1100281013;Shape  ;1650 ;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281014;Label  ;0    ;846  ;1650 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=No.;
+                                                                    FRA=No.] }
+            { 1100281015;Label  ;5550 ;846  ;2250 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Vendor Name;
+                                                                    FRA=Fournisseur] }
+            { 1100281016;Shape  ;5250 ;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281017;Label  ;7950 ;846  ;1500 ;846  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Acquisition Date;
+                                                                    FRA=Date achat] }
+            { 1100281018;Shape  ;7650 ;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281019;Shape  ;0    ;1692 ;25950;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281020;Shape  ;9300 ;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281021;Label  ;9600 ;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Disposal Date;
+                                                                    FRA=Date Cession] }
+            { 1100281023;Shape  ;11400;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281024;Label  ;11700;846  ;2250 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Reason Code;
+                                                                    FRA=Motif] }
+            { 1100281025;Label  ;14250;846  ;2850 ;846  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Dep. Method;
+                                                                    FRA=Taux et Type] }
+            { 1100281026;Shape  ;13950;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281027;Label  ;17400;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Acquisition Cost;
+                                                                    FRA=Co–t acquisition] }
+            { 1100281028;Shape  ;17100;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281029;Shape  ;19500;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281031;Shape  ;21600;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281032;Label  ;19800;846  ;1800 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Cumul amortissements p‚riode] }
+            { 1100281033;Shape  ;23700;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281034;Label  ;24000;846  ;1800 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=+/- Value;
+                                                                    FRA=+/- Value] }
+            { 1100281035;Shape  ;25800;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281038;Shape  ;0    ;633  ;30   ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281058;Label  ;21900;846  ;1800 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Cession Price;
+                                                                    FRA=Prix Cession] }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=26400;
+            SectionHeight=2115;
+            OnPostSection=BEGIN
+                            IF (CreateXl AND XlSection) THEN
+                            BEGIN
+                               R370.INIT;
+                               R370.VALIDATE("Row No.",VLine);
+                               R370.Bold := TRUE;
+                               R370.VALIDATE("Column No.",3);
+                               R370."Cell Value as Text" := "FA Subclass Code";
+                               R370.INSERT;
+                               VLine += 1;
+                            END;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 1100281051;Shape  ;25800;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281052;Shape  ;0    ;1692 ;25950;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281053;Shape  ;23700;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281056;Label  ;17400;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Acquisition Cost;
+                                                                    FRA=Co–t acquisition] }
+            { 1100281057;Shape  ;19500;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281059;Shape  ;17100;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281060;Label  ;14250;846  ;2850 ;846  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Dep. Method;
+                                                                    FRA=Taux et Type] }
+            { 1100281061;Shape  ;13950;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281063;Shape  ;11400;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281064;Label  ;7950 ;846  ;1500 ;846  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Acquisition Date;
+                                                                    FRA=Date achat] }
+            { 1100281065;Shape  ;9300 ;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281067;Shape  ;7650 ;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281072;Shape  ;0    ;423  ;25950;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281073;Shape  ;0    ;633  ;30   ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281092;Shape  ;21600;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281095;Label  ;5550 ;846  ;2250 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Vendor Name;
+                                                                    FRA=Fournisseur] }
+            { 1100281096;Shape  ;5250 ;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281097;Label  ;1950 ;846  ;3450 ;846  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontItalic=No;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=D‚signation] }
+            { 1100281098;Shape  ;1650 ;633  ;300  ;1482 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281099;Label  ;0    ;846  ;1650 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=No.;
+                                                                    FRA=No.] }
+            { 1100281009;Label  ;19800;846  ;1800 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Cumul amortissements p‚riode] }
+            { 1100281022;Label  ;9600 ;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Disposal Date;
+                                                                    FRA=Date Cession] }
+            { 1100281030;Label  ;11700;846  ;2250 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Reason Code;
+                                                                    FRA=Motif] }
+            { 1100281062;Label  ;21900;846  ;1800 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Cession Price;
+                                                                    FRA=Prix Cession] }
+            { 1100281077;Label  ;24000;846  ;1800 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=+/- Value;
+                                                                    FRA=+/- Value] }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=26400;
+            SectionHeight=423;
+            OnPostSection=BEGIN
+                            IF (CreateXl) THEN
+                            BEGIN
+                               R370.INIT;
+                               R370.VALIDATE("Row No.",VLine);
+                               R370.VALIDATE("Column No.",2);
+                               R370.Bold := FALSE;
+                               R370."Cell Value as Text" := "No.";
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",1);
+                               R370."Cell Value as Text" := "Fixed Asset"."FA Subclass Code";
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",3);
+                               R370."Cell Value as Text" := Description;
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",4);
+                               R370."Cell Value as Text" := Vendor.Name;
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",5);
+                               R370."Cell Value as Text" := FORMAT(FADeprBook."Acquisition Date");
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",6);
+                               R370."Cell Value as Text" := FORMAT(FADeprBook."Disposal Date");
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",7);
+                               R370."Cell Value as Text" := RecFALedgerEntry."Reason Code";
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",8);
+                               R370."Cell Value as Text" := Method;
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",9);
+                               R370."Cell Value as Text" := FORMAT(FADeprBook."Acquisition Cost",0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",10);
+                               R370."Cell Value as Text" := FORMAT(FADeprBook.Depreciation,0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",11);
+                               R370."Cell Value as Text" := FORMAT(DisposalProduct,0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",12);
+                               R370."Cell Value as Text" := FORMAT(DisposalProduct - FADeprBook."Book Value",0,1);
+                               R370.INSERT;
+                               VLine += 1;
+                            END;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 1100281000;TextBox;5550 ;0    ;2100 ;423  ;FontSize=9;
+                                                         SourceExpr=Vendor.Name }
+            { 1100281002;Shape  ;7650 ;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281003;Shape  ;5250 ;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281004;TextBox;1950 ;0    ;3300 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=Description }
+            { 1100281005;Shape  ;1650 ;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281006;TextBox;150  ;0    ;1500 ;423  ;HorzAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr="No." }
+            { 1000000015;TextBox;7950 ;0    ;1350 ;423  ;HorzAlign=Center;
+                                                         FontSize=9;
+                                                         SourceExpr=FADeprBook."Acquisition Date" }
+            { 44  ;TextBox      ;9600 ;0    ;1950 ;423  ;HorzAlign=Center;
+                                                         FontSize=9;
+                                                         SourceExpr=FADeprBook."Disposal Date" }
+            { 1100281008;TextBox;11700;0    ;2250 ;423  ;HorzAlign=Center;
+                                                         FontSize=9;
+                                                         SourceExpr=RecFALedgerEntry."Reason Code" }
+            { 50  ;TextBox      ;14250;0    ;2850 ;423  ;HorzAlign=Center;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Depr. Method;
+                                                                    FRA=M‚thode amt];
+                                                         SourceExpr=Method }
+            { 1000000009;TextBox;21750;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=DisposalProduct }
+            { 1000000023;TextBox;19800;0    ;1800 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FADeprBook.Depreciation }
+            { 1000000025;TextBox;24000;0    ;1800 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=DisposalProduct-FADeprBook."Book Value" }
+            { 1100281040;Shape  ;25800;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281042;Shape  ;23700;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281044;Shape  ;21600;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281046;Shape  ;19500;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281048;Shape  ;17100;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281050;Shape  ;13950;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281066;Shape  ;11400;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281070;Shape  ;9300 ;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281039;Shape  ;0    ;0    ;30   ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281079;TextBox;17400;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=FADeprBook."Acquisition Cost" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=26400;
+            SectionHeight=846;
+            OnPostSection=BEGIN
+                            IF (CreateXl AND XlSection) THEN
+                            BEGIN
+                               R370.INIT;
+                               R370.VALIDATE("Row No.",VLine);
+                               R370.VALIDATE("Column No.",2);
+                               R370.Bold := FALSE;
+                               R370."Cell Value as Text" := 'Total';
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",3);
+                               R370."Cell Value as Text" := "FA Subclass Code";
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",9);
+                               R370."Cell Value as Text" := FORMAT(FADeprBook."Acquisition Cost",0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",10);
+                               R370."Cell Value as Text" := FORMAT(FADeprBook.Depreciation,0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",11);
+                               R370."Cell Value as Text" := FORMAT(DisposalProduct,0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",12);
+                               R370."Cell Value as Text" := FORMAT(DisposalProduct - FADeprBook."Book Value",0,1);
+                               R370.INSERT;
+                               VLine += 2;
+                            END;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 1000000020;Shape  ;0    ;0    ;25950;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281010;Label  ;0    ;0    ;1650 ;423  ;ParentControl=1100281011;
+                                                         FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=TOTAl;
+                                                                    FRA=TOTAL] }
+            { 1100281011;TextBox;1650 ;0    ;3450 ;423  ;HorzAlign=Left;
+                                                         FontSize=10;
+                                                         SourceExpr="FA Subclass Code" }
+            { 1100281080;TextBox;17400;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=FADeprBook."Acquisition Cost" }
+            { 1100281054;TextBox;19800;0    ;1800 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FADeprBook.Depreciation }
+            { 1100281074;TextBox;21750;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=DisposalProduct }
+            { 1100281082;TextBox;24000;0    ;1800 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=DisposalProduct-FADeprBook."Book Value" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransFooter;
+            SectionWidth=26400;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 1100281007;Shape  ;0    ;0    ;25650;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=26400;
+            SectionHeight=1269;
+            OnPostSection=BEGIN
+                            IF (CreateXl) THEN
+                            BEGIN
+                               R370.INIT;
+                               R370.VALIDATE("Row No.",VLine);
+                               R370.VALIDATE("Column No.",2);
+                               R370.Bold := FALSE;
+                               R370."Cell Value as Text" := 'Total cessions de la p‚riode';
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",9);
+                               R370."Cell Value as Text" := FORMAT(FADeprBook."Acquisition Cost",0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",10);
+                               R370."Cell Value as Text" := FORMAT(FADeprBook.Depreciation,0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",11);
+                               R370."Cell Value as Text" := FORMAT(DisposalProduct,0,1);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",12);
+                               R370."Cell Value as Text" := FORMAT(DisposalProduct - FADeprBook."Book Value",0,1);
+                               R370.INSERT;
+                               VLine += 2;
+                            END;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 1100281043;Label  ;0    ;0    ;6900 ;423  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=PERIOD DISPOSALS TOTAL;
+                                                                    FRA=TOTAL CESSIONS DE LA PERIODE] }
+            { 1100281045;Shape  ;0    ;0    ;25650;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1100281041;Shape  ;23700;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281047;Shape  ;21600;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281049;Shape  ;19500;0    ;300  ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281068;Shape  ;17250;0    ;8700 ;423  ;BorderWidth=1pt;
+                                                         ShapeStyle=Rectangle }
+            { 1100281037;TextBox;19800;0    ;1800 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FADeprBook.Depreciation }
+            { 1100281081;TextBox;17400;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=FADeprBook."Acquisition Cost" }
+            { 1100281078;TextBox;21750;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=DisposalProduct }
+            { 1100281083;TextBox;24000;0    ;1800 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=DisposalProduct-FADeprBook."Book Value" }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=6160;
+      Height=2860;
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 1100281004;TextBox;3410 ;1210 ;1650 ;440  ;CaptionML=[ENU=End Date;
+                                                              FRA=Date fin];
+                                                   SourceExpr=EndingDate }
+      { 1100281005;Label  ;0    ;1210 ;3300 ;440  ;ParentControl=1100281004 }
+      { 1100281006;Label  ;0    ;660  ;3300 ;440  ;ParentControl=1100281007 }
+      { 1100281007;TextBox;3410 ;660  ;1650 ;440  ;CaptionML=[ENU=Starting Date;
+                                                              FRA=Date d‚but];
+                                                   SourceExpr=StartingDate }
+      { 1100281000;TextBox;3410 ;0    ;2750 ;440  ;CaptionML=[ENU=Depreciation Book;
+                                                              FRA=Lois d'amortissement];
+                                                   SourceExpr=DeprBookCode;
+                                                   TableRelation="Depreciation Book" }
+      { 1100281001;Label  ;0    ;0    ;3300 ;440  ;ParentControl=1100281000 }
+      { 1000000000;CheckBox;3410;1870 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=FRA=Export vers Excel;
+                                                   SourceExpr=CreateXl }
+      { 1000000001;Label  ;0    ;1870 ;3300 ;440  ;ParentControl=1000000000 }
+      { 1000000002;CheckBox;3410;2420 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=FRA=Export les ruptures vers Excel;
+                                                   SourceExpr=XlSection }
+      { 1000000003;Label  ;0    ;2420 ;3300 ;440  ;ParentControl=1000000002 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      FASetup@1000 : Record 5603;
+      DeprBook@1001 : Record 5611;
+      FADeprBook@1100281008 : Record 5612;
+      RecFALedgerEntry@1100281005 : Record 5601;
+      Vendor@1100281009 : Record 23;
+      DeprBookText@1100281007 : Text[50];
+      FAFilter@1004 : Text[250];
+      Text50151@1000000004 : TextConst 'FRA=an(s)';
+      Text50152@1000000005 : TextConst 'FRA=mois';
+      DeprBookCode@1100281000 : Code[10];
+      Method@1100281001 : Code[20];
+      DeprMethod@1100281002 : 'L,D1,D2,D1L,D2L,P,M';
+      StartingDate@1100281003 : Date;
+      EndingDate@1100281004 : Date;
+      textstartdate@1100281010 : TextConst 'ENU=Starting Date : %1;FRA=Date d‚but : %1';
+      textenddate@1100281011 : TextConst 'ENU=Ending Date : %1;FRA=Date fin : %1';
+      AcquisitionCost@1100281006 : Decimal;
+      DisposalProduct@1100281012 : Decimal;
+      R370@1000000007 : TEMPORARY Record 370;
+      R370B@1000000006 : TEMPORARY Record 370;
+      VLine@1000000003 : Integer;
+      VColumn@1000000002 : Integer;
+      CreateXl@1000000001 : Boolean;
+      CreateHeader@1000000000 : Boolean;
+      XlSection@1000000008 : Boolean;
+
+    PROCEDURE "---ISAT---"@1000000000();
+    BEGIN
+    END;
+
+    PROCEDURE XlLine@1100281001(VAR me@1000000000 : Record 370);
+    VAR
+      XlHead1@1000000001 : TextConst 'FRA=Liste d''inventaire immobilisation';
+    BEGIN
+      FASetup.GET;
+      IF CreateHeader AND FASetup."R50046.Init" THEN
+      BEGIN
+         me.INIT;
+         me.VALIDATE("Row No.",1);
+         me.VALIDATE("Column No.",1);
+         me."Cell Value as Text" := XlHead1;
+         me.INSERT;
+         me.VALIDATE("Column No.",8);
+         me."Cell Value as Text" := FORMAT(TODAY,0,'<Day> <Month text> <Year4>');
+         me.Bold := TRUE;
+         me.INSERT;
+         me.VALIDATE("Row No.",2);
+         me.VALIDATE("Column No.",1);
+         me.Bold := TRUE;
+         me."Cell Value as Text" := COMPANYNAME;
+         me.Bold := TRUE;
+         me.INSERT;
+         me.Bold := FALSE;
+         me.VALIDATE("Column No.",8);
+         me."Cell Value as Text" := FORMAT(USERID);
+         me.Bold := TRUE;
+         me.INSERT;
+         me.VALIDATE("Row No.",3);
+         me.VALIDATE("Column No.",1);
+         me."Cell Value as Text" := FORMAT(USERID);
+         me.Bold := TRUE;
+         me.INSERT;
+      END;
+
+      VLine := 5;
+      CreateHeader := FALSE;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/07/11 @a ISAT.ST @v IMH6.01.151 @s Immobilisation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

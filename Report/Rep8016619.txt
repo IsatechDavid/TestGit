@@ -1,0 +1,1629 @@
+OBJECT Report 8016619 G/L Detail Trial Bal. Shortcut
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:18:56;
+    Modified=Yes;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=G/L Detail Trial Balance Shortcut;
+               FRA=Grand livre comptes g‚n‚raux analytique];
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table15;
+        DataItemTableView=SORTING(No.);
+        OnPreDataItem=BEGIN
+                        TempoTable.RESET;
+                        TempoTable.DELETEALL;
+
+                        ToCentralizeMois := FALSE;
+                        ToCentralizeMoisJournal := FALSE;
+
+
+                        //controles d'entr‚e
+                        IF GETFILTER("Date Filter") = '' THEN BEGIN
+                          ERROR(Text1120000,FIELDCAPTION("Date Filter"));
+                        END;
+                        IF COPYSTR(GETFILTER("Date Filter"),1,1) = '.' THEN BEGIN
+                          ERROR(Text1120001);
+                        END;
+
+                        //calcul de la p‚riode
+                        StartDate := GETRANGEMIN("Date Filter");
+                        EndDate := GETRANGEMAX("Date Filter");
+                        PreviousEndDate := CLOSINGDATE(StartDate-1);
+
+                        FiltreDateCalc.CreateFiscalYearFilter(TextDate,TextDate,StartDate,0);
+                        TextDate := CONVERTSTR(TextDate,'.',',');
+                        TextDate := SELECTSTR(1,TextDate);
+                        EVALUATE(PreviousStartDate,TextDate);
+                        PreviousEndDate := CLOSINGDATE(CALCDATE('-1J',PreviousStartDate));
+                        //PreviousStartDate  := CALCDATE('-1A',PreviousStartDate);
+                        PreviousStartDate := 0D;
+
+
+                        IF COPYSTR(GETFILTER("Date Filter"),STRLEN(GETFILTER("Date Filter")),1) = '.' THEN BEGIN
+                          EndDate := 0D;
+                        END ELSE BEGIN
+                          EndDate := GETRANGEMAX("Date Filter");
+                        END;
+                        TestCentralization; //ISAT03.ST
+                      END;
+
+        OnAfterGetRecord=BEGIN
+
+
+
+                           GLAccount2 := "G/L Account";
+
+                           //appliquer le filtre simulations … la table GLAccount2
+                           IF "G/L Account".GETFILTER("G/L Entry Type Filter") <> '' THEN
+                             "G/L Account".COPYFILTER("G/L Entry Type Filter",GLAccount2."G/L Entry Type Filter");
+
+                           //calcul du solde par compte
+                           IF GLAccount2."Income/Balance" = 0 THEN BEGIN
+                             GLAccount2.SETRANGE("Date Filter",PreviousStartDate,PreviousEndDate)
+                           END ELSE BEGIN
+                             GLAccount2.SETRANGE("Date Filter",0D,PreviousEndDate);
+                           END;
+                           GLAccount2.CALCFIELDS("Debit Amount","Credit Amount");
+                           Solde := GLAccount2."Debit Amount" - GLAccount2."Credit Amount";
+
+                           IF "Income/Balance" = 0 THEN BEGIN
+                             SETRANGE("Date Filter",StartDate,EndDate)
+                           END ELSE BEGIN
+                             SETRANGE("Date Filter",0D,EndDate);
+                           END;
+
+                           CALCFIELDS("Debit Amount","Credit Amount");
+
+
+                           //prendre les comptes non mouvement‚s
+                           IF (Solde = 0) AND ("Debit Amount" - "Credit Amount" = 0) THEN BEGIN
+                             IF PrintFlag THEN BEGIN
+                               TempoTable.INIT;
+                               TempoTable.JournalCode := '';
+                               TempoTable.DocNo := '';
+                               TempoTable.ExternalDocNo := '';
+                               TempoTable.EntryNo := '';
+                              // TempoTable.AccountNo := FORMAT(Level1);
+                              // TempoTable.AccountNo2 := FORMAT(Level2);
+                               TempoTable."Text 3" := '';
+                               TempoTable.PostingDate := 0D;
+                               IF (Level1 IN [0,1]) OR (Level2 IN [1]) THEN BEGIN
+
+                                 CASE Level1 OF
+                                   0 : BEGIN
+                                     TempoTable.AccountNo := "No.";
+                                   END;
+                                   1 : BEGIN
+                                     TempoTable.AccountNo := "Global Dimension 1 Code";
+                                   END;
+                                   2 : BEGIN
+                                     TempoTable.AccountNo := "Global Dimension 2 Code";
+                                   END;
+                                 END;
+
+                                 CASE Level2 OF
+                                   0 : BEGIN
+                                     TempoTable.AccountNo2 := '';
+                                   END;
+                                   1 : BEGIN
+                                     TempoTable.AccountNo2 := "No.";
+                                   END;
+                                   2 : BEGIN
+                                     TempoTable.AccountNo2 := "Global Dimension 1 Code";
+                                   END;
+                                   3 : BEGIN
+                                     TempoTable.AccountNo2 := "Global Dimension 2 Code";
+                                   END;
+                                 END;
+                                 TempoTable.INSERT;
+                               END;
+                             END;
+                             CurrReport.SKIP;
+                           END;
+                         END;
+
+        ReqFilterFields=No.,Date Filter,G/L Entry Type Filter;
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000007;
+        DataItemTableView=SORTING(Period Type,Period Start);
+        OnPreDataItem=BEGIN
+                        SETRANGE("Period Start",StartDate,CLOSINGDATE(EndDate));
+                        //<<ISA03.ST
+                        IF "G/L Account".Centralization AND (Glob_centr <> Glob_centr::Aucune) THEN
+                          SETRANGE("Period Type", "Period Type"::Month)
+                        ELSE
+                          SETRANGE("Period Type", "Period Type"::Date);
+                        //>>ISA03.ST
+                      END;
+
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table17;
+        DataItemTableView=SORTING(G/L Account No.,Posting Date,Source Code);
+        OnPreDataItem=BEGIN
+                        SETRANGE("Posting Date",Date."Period Start",Date."Period End");
+                        IF Racc1Filter <> '' THEN BEGIN
+                          SETFILTER("Global Dimension 1 Code",Racc1Filter);
+                        END;
+                        IF Racc2Filter <> '' THEN BEGIN
+                          SETFILTER("Global Dimension 2 Code",Racc2Filter);
+                        END;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+
+                           // recup des levels
+                           CASE Level1 OF
+                             0 : BEGIN
+                               Level1TextNo := "G/L Account No.";
+                               menu1 :=0;
+                             END;
+                             1 : BEGIN
+                               Level1TextNo := "Global Dimension 1 Code";
+                               menu1 :=1;
+                             END;
+                             2 : BEGIN
+                               Level1TextNo := "Global Dimension 2 Code";
+                               menu1 :=2;
+                             END;
+                           END;
+
+                           CASE Level2 OF
+                             1 : BEGIN
+                               Level2TextNo := "G/L Account No.";
+                               menu2 :=1;
+                             END;
+                             2 : BEGIN
+                               Level2TextNo := "Global Dimension 1 Code";
+                               menu2 :=2;
+                             END;
+                             3 : BEGIN
+                               Level2TextNo := "Global Dimension 2 Code";
+                               menu2 :=3;
+                             END;
+                           END;
+
+                           //controle des options
+
+                           CASE Glob_centr OF
+
+                           //pas de centralisation
+
+                             Glob_centr::Aucune : BEGIN
+                             ToCentralizeMois := FALSE;
+                             ToCentralizeMoisJournal := FALSE;
+                             NotToCentralize := TRUE;
+                             END;
+
+                           //centralisation par mois
+
+                             Glob_centr::Mois : BEGIN
+
+                               //si le dernier niveau est un cpte g‚n
+                               IF ((menu1 = 0) AND (menu2 = 0)) OR (menu2 = 1) THEN BEGIN
+                                 GLAccount2.GET("G/L Account No.");
+                                 IF GLAccount2.Centralization = TRUE THEN BEGIN
+                                   ToCentralizeMois := TRUE;
+                                   ToCentralizeMoisJournal := FALSE;
+                                   NotToCentralize := FALSE;
+                                 END ELSE BEGIN
+                                   ToCentralizeMois := FALSE;
+                                   ToCentralizeMoisJournal := FALSE;
+                                   NotToCentralize := TRUE;
+                                 END;
+                               END;
+
+                               //si le dernier niveau est un axe
+                               IF (menu2=2) OR (menu2=3) OR ((menu1=1)AND(menu2=0)) OR ((menu1=2)AND(menu2=0)) THEN BEGIN
+
+                                 GLAccount2.GET("G/L Account No.");
+                                 IF GLAccount2."Centralization Global Dim." = TRUE THEN BEGIN
+                                   ToCentralizeMois := TRUE;
+                                   ToCentralizeMoisJournal := FALSE;
+                                   NotToCentralize := FALSE;
+                                 END ELSE BEGIN
+                                   ToCentralizeMois := FALSE;
+                                   ToCentralizeMoisJournal := FALSE;
+                                   NotToCentralize := TRUE;
+                                 END;
+                               END;
+
+                              END;
+
+
+                           //centraliser par mois journal
+
+                             Glob_centr::"Journal et mois" : BEGIN
+
+                               //si le dernier niveau est un cpte g‚n
+                               IF ((menu1 = 0) AND (menu2 = 0)) OR (menu2 = 1) THEN BEGIN
+                                 GLAccount2.GET("G/L Account No.");
+                                 IF GLAccount2.Centralization = TRUE THEN BEGIN
+                                   ToCentralizeMoisJournal := TRUE;
+                                   ToCentralizeMois := FALSE;
+                                   NotToCentralize := FALSE;
+                                 END ELSE BEGIN
+                                   ToCentralizeMois := FALSE;
+                                   ToCentralizeMoisJournal := FALSE;
+                                   NotToCentralize := TRUE;
+                                 END;
+                               END;
+
+                               //si le dernier niveau est un axe
+                               IF ((menu1 > 0) AND (menu2 = 0)) OR ((menu2 > 1)) THEN BEGIN
+                                 GLAccount2.GET("G/L Account No.");
+                                 IF GLAccount2."Centralization Global Dim." = TRUE THEN BEGIN
+                                   ToCentralizeMoisJournal := TRUE;
+                                   ToCentralizeMois := FALSE;
+                                   NotToCentralize := FALSE;
+                                 END ELSE BEGIN
+                                   ToCentralizeMois := FALSE;
+                                   ToCentralizeMoisJournal := FALSE;
+                                   NotToCentralize := TRUE;
+                                 END;
+                               END;
+                             END;
+
+                           END;
+
+
+
+                           //insertion dans table temporaire
+
+                           IF ToCentralizeMois = TRUE THEN BEGIN
+                             TempoTable.EntryNo := '';
+                             TempoTable.AccountNo := Level1TextNo;
+                             TempoTable.AccountNo2 := Level2TextNo;
+                             TempoTable.PostingDate := "Posting Date";
+                             TempoTable.JournalCode := '';
+                             TempoTable.DocNo := '';
+                             TempoTable.ExternalDocNo := '';
+                             TempoTable.Description := FORMAT("Posting Date",0,'<Month Text> <Year4>');
+                             TempoTable.TotalDebit := "Debit Amount" ;
+                             TempoTable.TotalCredit := "Credit Amount";
+
+                             //verif si le mois est d‚j… ins‚r‚
+                             TempoTable.RESET;
+                             TempoTable.SETRANGE(AccountNo,Level1TextNo);
+                             TempoTable.SETRANGE(AccountNo2,Level2TextNo);
+                             TempoTable.SETRANGE(Description, FORMAT("Posting Date",0,'<Month Text> <Year4>') );
+                             IF NOT TempoTable.FIND('-') THEN BEGIN
+                               TempoTable.INSERT;
+                             END ELSE BEGIN
+                               //calcul du montant pour le mois
+                               TempoTable.TotalDebit += "Debit Amount" ;
+                               TempoTable.TotalCredit += "Credit Amount";
+                               TempoTable."Amount 3" := 1;
+                               TempoTable.MODIFY;
+                             END;
+                           END;
+
+                           IF ToCentralizeMoisJournal = TRUE THEN BEGIN
+                             TempoTable.EntryNo := '';
+                             TempoTable.AccountNo := Level1TextNo;
+                             TempoTable.AccountNo2 := Level2TextNo;
+                             TempoTable.PostingDate := "Posting Date";
+                             TempoTable.JournalCode := '';
+                             TempoTable.DocNo := '';
+                             TempoTable.ExternalDocNo := '';
+                             TempoTable.Description := FORMAT("Posting Date",0,'<Month Text> <Year4>') + ' '+ "Source Code";
+                             TempoTable.TotalDebit := "Debit Amount" ;
+                             TempoTable.TotalCredit := "Credit Amount";
+
+                             //verif si le mois est d‚j… ins‚r‚
+                             TempoTable.RESET;
+                             TempoTable.SETRANGE(AccountNo,Level1TextNo);
+                             TempoTable.SETRANGE(AccountNo2,Level2TextNo);
+                             TempoTable.SETRANGE(Description, FORMAT("Posting Date",0,'<Month Text> <Year4>') + ' '+ "Source Code" );
+
+                              IF NOT TempoTable.FIND('-') THEN BEGIN
+                                TempoTable.INSERT;
+                              END ELSE BEGIN
+                                //calcul du montant pour le mois
+                                TempoTable.TotalDebit += "Debit Amount" ;
+                                TempoTable.TotalCredit += "Credit Amount";
+                                TempoTable."Amount 3" := 1;
+                                TempoTable.MODIFY;
+                             END;
+                           END;
+
+
+
+                           IF (NotToCentralize = TRUE)  THEN BEGIN
+                             TempoTable.EntryNo :=FORMAT("Entry No.");
+                             TempoTable.AccountNo := Level1TextNo;
+                             TempoTable.AccountNo2 := Level2TextNo;
+                             TempoTable.PostingDate := "Posting Date";
+                             TempoTable.JournalCode := "Source Code";
+                             TempoTable.DocNo := "Document No.";
+                             TempoTable.ExternalDocNo := "External Document No.";
+                             TempoTable.Description := Description;
+                             TempoTable.TotalDebit := "Debit Amount";
+                             TempoTable.TotalCredit := "Credit Amount";
+                             TempoTable."Amount 3" := 1;
+                             TempoTable.INSERT;
+                           END;
+                         END;
+
+        DataItemLinkReference=G/L Account;
+        DataItemLink=G/L Account No.=FIELD(No.),
+                     Entry Type=FIELD(G/L Entry Type Filter),
+                     Global Dimension 1 Code=FIELD(Global Dimension 1 Filter),
+                     Global Dimension 2 Code=FIELD(Global Dimension 2 Filter);
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemTable=Table8016603;
+        DataItemTableView=SORTING(AccountNo,AccountNo2,PostingDate,JournalCode,Description)
+                          ORDER(Ascending);
+        DataItemVarName=TmpTable;
+        OnPreDataItem=BEGIN
+                        RESET;
+
+                        IF ExportExcel THEN BEGIN
+                          ExcelLineNo := 1;
+                          CreateExcelBuffer;
+
+                        //en tete
+                          ExcelLineNo += 1;
+                          InsertRowWithBold(ExcelLineNo,1,Text000,'');
+                          InsertRowWithBold(ExcelLineNo,5,FORMAT(TODAY,0,4),'');
+                          ExcelLineNo += 1;
+                          InsertRowWithBold(ExcelLineNo,1,COMPANYNAME,'');
+                          ExcelLineNo += 1;
+                          InsertRowWithBold(ExcelLineNo,1,STRSUBSTNO(Text1120003,PreviousStartDate),'');
+                          ExcelLineNo += 1;
+                          InsertRowWithBold(ExcelLineNo,1,"G/L Account".GETFILTERS ,'');
+                          ExcelLineNo += 1;
+
+                        //nom des colonnes excel
+                          ExcelLineNo += 1;
+                          InsertRowWithBold(ExcelLineNo,1,Text011,'');
+                          InsertRowWithBold(ExcelLineNo,2,Text012,'');
+                          InsertRowWithBold(ExcelLineNo,3,Text013,'');
+                          InsertRowWithBold(ExcelLineNo,4,Text014,'');
+                          InsertRowWithBold(ExcelLineNo,5,Text003,'');
+                          InsertRowWithBold(ExcelLineNo,6,Text004,'');
+                          InsertRowWithBold(ExcelLineNo,7,Text005,'');
+                          InsertRowWithBold(ExcelLineNo,8,Text006,'');
+                          InsertRowWithBold(ExcelLineNo,9,Text007,'');
+                          InsertRowWithBold(ExcelLineNo,10,Text008,'');
+                          InsertRowWithBold(ExcelLineNo,11,Text009,'');
+                          InsertRowWithBold(ExcelLineNo,12,Text010,'');
+                          ExcelLineNo += 1;
+
+                        END;
+                      END;
+
+        OnPostDataItem=BEGIN
+
+                         IF ExportExcel THEN BEGIN
+                           ViewExcel('ExportExcel');
+                         END;
+                       END;
+
+        TotalFields=TotalDebit,TotalCredit;
+        GroupTotalFields=AccountNo,AccountNo2;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18000;
+            SectionHeight=2115;
+          }
+          CONTROLS
+          {
+            { 1000000044;TextBox;15150;0    ;2850 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1000000045;TextBox;15150;423  ;2850 ;423  ;FontSize=8;
+                                                         SourceExpr=STRSUBSTNO(Text1120002,USERID) }
+            { 1000000046;TextBox;15150;846  ;2850 ;423  ;FontSize=8;
+                                                         SourceExpr=STRSUBSTNO(Text1120004,CurrReport.PAGENO) }
+            { 1000000047;Label  ;0    ;0    ;10650;423  ;FontSize=12;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=G/L Detail Trial Balance;
+                                                                    FRA=Grand livre comptes g‚n‚raux] }
+            { 1000000048;TextBox;0    ;423  ;10650;423  ;FontSize=8;
+                                                         SourceExpr=COMPANYNAME }
+            { 1000000049;TextBox;0    ;846  ;10650;477  ;FontSize=8;
+                                                         SourceExpr=STRSUBSTNO(Text1120003,PreviousStartDate) }
+            { 1000000113;TextBox;0    ;1269 ;17400;423  ;FontSize=8;
+                                                         SourceExpr=["G/L Account".GETFILTERS ] }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18000;
+            SectionHeight=876;
+            OnPreSection=VAR
+                           locText001@1000000000 : TextConst 'ENU="From ";FRA="Du "';
+                           locText002@1000000001 : TextConst 'ENU=" to ";FRA=" au "';
+                           locText003@1000000002 : TextConst 'ENU="Associate Accounting Period : ";FRA="P‚riode comptable associ‚e : "';
+                         BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+                           //calcul des soldes grand livre
+                                 GLEntry.RESET;
+                                 GLEntry.SETCURRENTKEY("G/L Account No.",
+                                                       "Business Unit Code",
+                                                       "Global Dimension 1 Code",
+                                                       "Global Dimension 2 Code",
+                                                       "Close Income Statement Dim. ID",
+                                                       "Posting Date",
+                                                       "Entry Type");
+
+                                 GLEntry.SETRANGE("Posting Date",PreviousStartDate,PreviousEndDate);
+                                 GLEntry.CALCSUMS("Debit Amount","Credit Amount");
+                                 SoldeCredit0 := GLEntry."Credit Amount";
+                                 SoldeDebit0 := GLEntry."Debit Amount";
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000018;Label  ;15600;0    ;2100 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Balance;
+                                                                    FRA=Solde] }
+            { 1000000019;Label  ;13200;0    ;2100 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Credit;
+                                                                    FRA=Cr‚dit] }
+            { 1000000021;Label  ;10650;0    ;2250 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Debit;
+                                                                    FRA=D‚bit] }
+            { 1000000024;Label  ;7500 ;0    ;2850 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=D‚signation] }
+            { 1000000025;Label  ;5550 ;0    ;1650 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=External Document No.;
+                                                                    FRA=Nø doc. externe] }
+            { 1000000027;Label  ;3600 ;0    ;1650 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Document No.;
+                                                                    FRA=Nø document] }
+            { 1000000029;Label  ;1950 ;0    ;1350 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Source Code;
+                                                                    FRA=Code journal] }
+            { 1000000031;Label  ;300  ;0    ;1350 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Posting Date;
+                                                                    FRA=Date comptabilisation] }
+            { 1000000033;Shape  ;0    ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000034;Shape  ;1650 ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000035;Shape  ;3300 ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000036;Shape  ;5250 ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000037;Shape  ;7200 ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000038;Shape  ;10350;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000039;Shape  ;12900;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000040;Shape  ;15300;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000041;Shape  ;17700;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000042;Shape  ;150  ;846  ;17700;30   ;ShapeStyle=HorzLine }
+            { 1000000043;Shape  ;150  ;0    ;17700;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=18000;
+            SectionHeight=453;
+            OnPreSection=BEGIN
+                           IF CurrReport.TOTALSCAUSEDBY = FIELDNO(AccountNo) THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+
+
+                             TextSoldeAu1 := STRSUBSTNO(Text1120006,PreviousEndDate);
+                             SoldeCredit1 := 0;
+                             SoldeDebit1 := 0;
+
+                             //recup du no, nom du level et soldes anterieurs si cptes g‚n
+
+                             CASE Level1 OF
+
+                               0 : BEGIN
+
+                                 IF GLAccount3.GET(AccountNo) THEN BEGIN
+                                   Level1TextNo := GLAccount3."No.";
+                                   Level1TextName := GLAccount3.Name;
+                                 END ELSE BEGIN
+                                   Level1TextNo := '';
+                                   Level1TextName := '';
+                                 END;
+
+                                 GLEntry.RESET;
+                                 GLEntry.SETCURRENTKEY("G/L Account No.",
+                                                       "Business Unit Code",
+                                                       "Global Dimension 1 Code",
+                                                       "Global Dimension 2 Code",
+                                                       "Close Income Statement Dim. ID",
+                                                       "Posting Date",
+                                                       "Entry Type");
+
+                                 GLEntry.SETRANGE("G/L Account No.",AccountNo);
+                                 GLEntry.SETRANGE("Posting Date",PreviousStartDate,PreviousEndDate);
+                                 GLEntry.CALCSUMS("Debit Amount","Credit Amount");
+
+
+                                 SoldeCredit1 := GLEntry."Credit Amount";
+                                 SoldeDebit1 := GLEntry."Debit Amount";
+
+                               END;
+
+                             //recup du no, nom du level et soldes anterieurs si axe 1
+
+                               2 : BEGIN
+
+                                 IF DimensionValue.GET('DEPARTEMENT',AccountNo) THEN BEGIN
+                                   Level1TextNo := DimensionValue.Code;
+                                   Level1TextName := DimensionValue.Name;
+                                 END ELSE BEGIN
+                                   Level1TextNo := '';
+                                   Level1TextName := '';
+                                 END;
+
+                                 GLEntry.RESET;
+                                 GLEntry.SETCURRENTKEY("G/L Account No.",
+                                                       "Business Unit Code",
+                                                       "Global Dimension 1 Code",
+                                                       "Global Dimension 2 Code",
+                                                       "Close Income Statement Dim. ID",
+                                                       "Posting Date",
+                                                       "Entry Type");
+
+                                 GLEntry.SETRANGE("Posting Date",PreviousStartDate,PreviousEndDate);
+                                 GLEntry.CALCSUMS("Debit Amount","Credit Amount");
+                                 SoldeCredit1 := GLEntry."Credit Amount";
+                                 SoldeDebit1 := GLEntry."Debit Amount";
+                                 TextSoldeAu1 := STRSUBSTNO(Text1120005,PreviousEndDate);
+                               END;
+
+                             //recup du no, nom du level et soldes anterieurs si axe 2
+
+                               3 : BEGIN
+                                 IF DimensionValue.GET('DOSSIER',AccountNo) THEN BEGIN
+                                   Level1TextNo := DimensionValue.Code;
+                                   Level1TextName := DimensionValue.Name;
+                                 END ELSE BEGIN
+                                   Level1TextNo := '';
+                                   Level1TextName := '';
+                                 END;
+
+                                 GLEntry.RESET;
+                                 GLEntry.SETCURRENTKEY("G/L Account No.",
+                                                       "Business Unit Code",
+                                                       "Global Dimension 1 Code",
+                                                       "Global Dimension 2 Code",
+                                                       "Close Income Statement Dim. ID",
+                                                       "Posting Date",
+                                                       "Entry Type");
+
+                                 GLEntry.SETRANGE("Posting Date",PreviousStartDate,PreviousEndDate);
+                                 GLEntry.CALCSUMS("Debit Amount","Credit Amount");
+                                 SoldeCredit1 := GLEntry."Credit Amount";
+                                 SoldeDebit1 := GLEntry."Debit Amount";
+                                 TextSoldeAu1 := STRSUBSTNO(Text1120005,PreviousEndDate);
+                               END;
+
+                               ELSE BEGIN
+                                 Level1TextNo := '';
+                                 Level1TextName := '';
+                               END;
+
+                             END;
+
+                             IF ExportExcel THEN BEGIN
+                               ExcelLineNo += 1;
+                               InsertRowWithBold(ExcelLineNo,1,AccountNo,'');
+                               InsertRowWithBold(ExcelLineNo,2,Level1TextName,'');
+                               InsertRowWithBold(ExcelLineNo,3,AccountNo2,'');
+                               InsertRowWithBold(ExcelLineNo,4,Level2TextName,'');
+                               InsertRowWithBold(ExcelLineNo,9,TextSoldeAu1,'');
+                               InsertRowWithBold(ExcelLineNo,10,ConvertNumber(SoldeDebit1),'');
+                               InsertRowWithBold(ExcelLineNo,11,ConvertNumber(SoldeCredit1),'');
+                               InsertRowWithBold(ExcelLineNo,12,ConvertNumber(SoldeDebit1 - SoldeCredit1),'');
+                             END;
+
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120000;TextBox   ;1800 ;0    ;5850 ;423  ;HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Level1TextName }
+            { 1120001;Shape     ;17700;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120002;Shape     ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120003;TextBox   ;300  ;0    ;1350 ;423  ;HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=AccountNo }
+            { 1120004;Shape     ;150  ;423  ;17700;30   ;ShapeStyle=HorzLine }
+            { 1120005;Shape     ;10350;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120006;Shape     ;12900;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120007;Shape     ;15300;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120008;TextBox   ;7650 ;0    ;2700 ;423  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TextSoldeAu1 }
+            { 1120009;TextBox   ;10650;0    ;2250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=SoldeDebit1 }
+            { 1120010;TextBox   ;13200;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=SoldeCredit1 }
+            { 1120011;TextBox   ;15600;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=SoldeDebit1 - SoldeCredit1 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=18000;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           TextSoldeAu2 := STRSUBSTNO(Text1120005,PreviousEndDate);
+
+                           IF CurrReport.TOTALSCAUSEDBY = FIELDNO(AccountNo2) THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+                             IF Level2 <> Level2::" " THEN BEGIN
+                               CurrReport.SHOWOUTPUT(TRUE);
+
+
+                           //recup du no, nom du level et soldes anterieurs si cptes g‚n
+
+                               CASE Level2 OF
+
+                               1 : BEGIN
+
+                                 IF GLAccount3.GET(AccountNo2) THEN BEGIN
+                                   Level2TextNo := GLAccount3."No.";
+                                   Level2TextName := GLAccount3.Name;
+                                 END ELSE BEGIN
+                                   Level2TextNo := '';
+                                   Level2TextName := '';
+                                 END;
+
+                                 GLEntry.RESET;
+                                 GLEntry.SETCURRENTKEY("G/L Account No.",
+                                                       "Business Unit Code",
+                                                       "Global Dimension 1 Code",
+                                                       "Global Dimension 2 Code",
+                                                       "Close Income Statement Dim. ID",
+                                                       "Posting Date",
+                                                       "Entry Type");
+
+                                 GLEntry.SETRANGE("G/L Account No.",AccountNo2);
+
+                                 CASE Level1 OF
+                                   0 :  BEGIN
+                                     GLEntry.SETRANGE("G/L Account No.",AccountNo);
+                                   END;
+                                   1 : BEGIN
+                                     GLEntry.SETRANGE("Global Dimension 1 Code",AccountNo);
+                                   END;
+                                   2 : BEGIN
+                                     GLEntry.SETRANGE("Global Dimension 2 Code",AccountNo);
+                                   END;
+                                 END;
+
+                                 GLEntry.SETRANGE("Posting Date",PreviousStartDate,PreviousEndDate);
+                                 GLEntry.CALCSUMS("Debit Amount","Credit Amount");
+                                 SoldeCredit2 := GLEntry."Credit Amount";
+                                 SoldeDebit2 := GLEntry."Debit Amount";
+                                 TextSoldeAu2 := STRSUBSTNO(Text1120005,PreviousEndDate);
+                               END;
+
+                           //recup du no, nom du level et soldes anterieurs si axe 1
+
+                               2 : BEGIN
+
+                                 IF DimensionValue.GET('DEPARTEMENT',AccountNo2) THEN BEGIN
+                                   Level2TextNo := DimensionValue.Code;
+                                   Level2TextName := DimensionValue.Name;
+                                 END ELSE BEGIN
+                                   Level2TextNo := '';
+                                   Level2TextName := '';
+                                 END;
+                                 GLEntry.RESET;
+                                 GLEntry.SETCURRENTKEY("G/L Account No.",
+                                                       "Business Unit Code",
+                                                       "Global Dimension 1 Code",
+                                                       "Global Dimension 2 Code",
+                                                       "Close Income Statement Dim. ID",
+                                                       "Posting Date",
+                                                       "Entry Type");
+                                 IF AccountNo2 = '' THEN BEGIN
+                                   GLEntry.SETFILTER("Global Dimension 1 Code",'=%1','');
+                                 END ELSE BEGIN
+                                   GLEntry.SETFILTER("Global Dimension 1 Code",AccountNo2);
+                                 END;
+
+                                 CASE Level1 OF
+                                   0 :  BEGIN
+                                     GLEntry.SETRANGE("G/L Account No.",AccountNo);
+                                   END;
+                                   1 : BEGIN
+                                     GLEntry.SETRANGE("Global Dimension 1 Code",AccountNo);
+                                   END;
+                                   2 : BEGIN
+                                     GLEntry.SETRANGE("Global Dimension 2 Code",AccountNo);
+                                   END;
+                                 END;
+
+                                 GLEntry.SETRANGE("Posting Date",PreviousStartDate,PreviousEndDate);
+                                 GLEntry.CALCSUMS("Debit Amount","Credit Amount");
+                                 SoldeCredit2 := GLEntry."Credit Amount";
+                                 SoldeDebit2 := GLEntry."Debit Amount";
+                                 TextSoldeAu2 := STRSUBSTNO(Text1120005,PreviousEndDate);
+                               END;
+
+                           //recup du no, nom du level et soldes anterieurs si axe 2
+
+                               3 : BEGIN
+                                 IF DimensionValue.GET('DOSSIER',AccountNo2) THEN BEGIN
+                                   Level2TextNo := DimensionValue.Code;
+                                   Level2TextName := DimensionValue.Name;
+                                 END ELSE BEGIN
+                                   Level2TextNo := '';
+                                   Level2TextName := '';
+                                 END;
+
+                                 GLEntry.RESET;
+                                 GLEntry.SETCURRENTKEY("G/L Account No.",
+                                                       "Business Unit Code",
+                                                       "Global Dimension 1 Code",
+                                                       "Global Dimension 2 Code",
+                                                       "Close Income Statement Dim. ID",
+                                                       "Posting Date",
+                                                       "Entry Type");
+                                 IF AccountNo2 = '' THEN BEGIN
+                                   GLEntry.SETFILTER("Global Dimension 2 Code",'=%1','');
+                                 END ELSE BEGIN
+                                   GLEntry.SETFILTER("Global Dimension 2 Code",AccountNo2);
+                                 END;
+
+                                 CASE Level1 OF
+                                   0 :  BEGIN
+                                     GLEntry.SETRANGE("G/L Account No.",AccountNo);
+                                   END;
+                                   1 : BEGIN
+                                     GLEntry.SETRANGE("Global Dimension 1 Code",AccountNo);
+                                   END;
+                                   2 : BEGIN
+                                     GLEntry.SETRANGE("Global Dimension 2 Code",AccountNo);
+                                   END;
+                                 END;
+
+                                 GLEntry.SETRANGE("Posting Date",PreviousStartDate,PreviousEndDate);
+                                 GLEntry.CALCSUMS("Debit Amount","Credit Amount");
+                                 SoldeCredit2 := GLEntry."Credit Amount";
+                                 SoldeDebit2 := GLEntry."Debit Amount";
+                                 TextSoldeAu2 := STRSUBSTNO(Text1120005,PreviousEndDate);
+                               END;
+
+                               ELSE BEGIN
+                                 Level2TextNo := '';
+                                 Level2TextName := '';
+                               END;
+
+                             END;
+
+                             IF ExportExcel THEN BEGIN
+                               ExcelLineNo += 1;
+                               InsertRow(ExcelLineNo,1,AccountNo,'');
+                               InsertRow(ExcelLineNo,2,Level1TextName,'');
+                               InsertRow(ExcelLineNo,3,AccountNo2,'');
+                               InsertRow(ExcelLineNo,4,Level2TextName,'');
+                               InsertRow(ExcelLineNo,9,TextSoldeAu2,'');
+                               InsertRow(ExcelLineNo,10,ConvertNumber(SoldeDebit2),'');
+                               InsertRow(ExcelLineNo,11,ConvertNumber(SoldeCredit2),'');
+                               InsertRow(ExcelLineNo,12,ConvertNumber(SoldeDebit2 - SoldeCredit2),'');
+                             END;
+
+                             END ELSE BEGIN
+                               CurrReport.SHOWOUTPUT(FALSE);
+                             END;
+
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120029;Shape     ;17700;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120030;Shape     ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120031;TextBox   ;2550 ;0    ;5100 ;423  ;FontSize=7;
+                                                         FontItalic=Yes;
+                                                         SourceExpr=Level2TextName }
+            { 1120032;TextBox   ;1050 ;0    ;1350 ;423  ;FontSize=7;
+                                                         FontItalic=Yes;
+                                                         SourceExpr=AccountNo2 }
+            { 1120033;Shape     ;150  ;393  ;17700;30   ;ShapeStyle=HorzLine }
+            { 1120034;Shape     ;10350;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120035;TextBox   ;7800 ;0    ;2550 ;423  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=7;
+                                                         FontItalic=Yes;
+                                                         SourceExpr=TextSoldeAu2 }
+            { 1120036;TextBox   ;15600;0    ;2100 ;423  ;FontItalic=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=SoldeDebit2- SoldeCredit2 }
+            { 1120037;Shape     ;15300;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120038;TextBox   ;13200;0    ;2100 ;423  ;FontItalic=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=SoldeCredit2 }
+            { 1120039;Shape     ;12900;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120040;TextBox   ;10650;0    ;2250 ;423  ;FontItalic=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=SoldeDebit2 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18000;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+
+
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+                             IF "Amount 3" > 1 THEN BEGIN
+                               Indication := 'C';
+                             END ELSE BEGIN
+                               Indication := '';
+                             END;
+
+
+                           IF NotToCentralize = TRUE THEN BEGIN
+                             ValDate := PostingDate;
+                           END ELSE BEGIN
+                             ValDate := 0D;
+                           END;
+
+                             //si solde … zero, pas d'affichage
+                             IF (TotalDebit = 0) AND (TotalCredit = 0) THEN BEGIN
+                               CurrReport.SHOWOUTPUT(FALSE);
+                             END;
+
+
+
+                             IF ExportExcel THEN BEGIN
+                               ExcelLineNo += 1;
+                               InsertRow(ExcelLineNo,1,AccountNo,'');
+                               InsertRow(ExcelLineNo,2,Level1TextName,'');
+                               InsertRow(ExcelLineNo,3,AccountNo2,'');
+                               InsertRow(ExcelLineNo,4,Level2TextName,'');
+                               InsertRow(ExcelLineNo,5,Indication + ' ' + FORMAT(ValDate),'');
+                               InsertRow(ExcelLineNo,6,JournalCode,'');
+                               InsertRow(ExcelLineNo,7,DocNo,'');
+                               InsertRow(ExcelLineNo,8,ExternalDocNo,'');
+                               InsertRow(ExcelLineNo,9,Description,'');
+                               InsertRow(ExcelLineNo,10,ConvertNumber(TotalDebit),'');
+                               InsertRow(ExcelLineNo,11,ConvertNumber(TotalCredit),'');
+                               InsertRow(ExcelLineNo,12,ConvertNumber(TotalDebit-TotalCredit),'');
+                             END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000002;TextBox;1950 ;0    ;1350 ;423  ;FontSize=7;
+                                                         SourceExpr=JournalCode }
+            { 1000000003;TextBox;3600 ;0    ;1650 ;423  ;FontSize=7;
+                                                         SourceExpr=DocNo }
+            { 1000000004;TextBox;5550 ;0    ;1650 ;423  ;FontSize=7;
+                                                         SourceExpr=ExternalDocNo }
+            { 1000000005;TextBox;600  ;0    ;1050 ;423  ;HorzAlign=Right;
+                                                         FontSize=7;
+                                                         SourceExpr=ValDate }
+            { 1000000007;TextBox;10650;0    ;2250 ;423  ;BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit }
+            { 1000000008;TextBox;13200;0    ;2100 ;423  ;BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalCredit }
+            { 1000000050;Shape  ;10350;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000051;Shape  ;7200 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000052;Shape  ;5250 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000053;Shape  ;3300 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000054;Shape  ;1650 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000055;Shape  ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000056;Shape  ;12900;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000057;Shape  ;15300;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000058;Shape  ;17700;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000017;TextBox;160  ;0    ;300  ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         SourceExpr=Indication }
+            { 1000000084;TextBox;7500 ;0    ;2850 ;423  ;SourceExpr=Description }
+            { 1000000020;TextBox;15600;0    ;2100 ;423  ;BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit-TotalCredit }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=18000;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF CurrReport.TOTALSCAUSEDBY = FIELDNO(AccountNo2) THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+                           IF Level2 <> Level2::" " THEN  BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+                             IF ExportExcel THEN BEGIN
+                               ExcelLineNo += 1;
+                               InsertRow(ExcelLineNo,1,AccountNo,'');
+                               InsertRow(ExcelLineNo,2,Level1TextName,'');
+                               InsertRow(ExcelLineNo,3,AccountNo2,'');
+                               InsertRow(ExcelLineNo,4,Level2TextName,'');
+                               InsertRow(ExcelLineNo,9,'Total ' + AccountNo2,'');
+                               InsertRow(ExcelLineNo,10,ConvertNumber(TotalDebit),'');
+                               InsertRow(ExcelLineNo,11,ConvertNumber(TotalCredit),'');
+                               InsertRow(ExcelLineNo,12,ConvertNumber(TotalDebit - TotalCredit),'');
+                             END;
+
+                             END ELSE BEGIN
+                               CurrReport.SHOWOUTPUT(FALSE);
+                             END;
+
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120041;TextBox   ;13200;0    ;2100 ;423  ;FontItalic=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalCredit }
+            { 1120049;TextBox   ;10650;0    ;2250 ;423  ;FontItalic=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit }
+            { 1120055;Shape     ;17700;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120056;Shape     ;15300;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120057;Shape     ;12900;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120058;Shape     ;10350;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120059;Shape     ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1120060;TextBox   ;5250 ;0    ;5100 ;423  ;VertAlign=Bottom;
+                                                         FontSize=7;
+                                                         FontItalic=Yes;
+                                                         SourceExpr=AccountNo2 }
+            { 1120062;Shape     ;150  ;393  ;17700;30   ;ShapeStyle=HorzLine }
+            { 1120063;Label     ;4200 ;0    ;900  ;423  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=7;
+                                                         FontItalic=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Total;
+                                                                    FRA=Total] }
+            { 1120064;TextBox   ;15600;0    ;2100 ;423  ;FontItalic=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit-TotalCredit }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=18000;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           IF CurrReport.TOTALSCAUSEDBY = FIELDNO(AccountNo) THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+                             IF ExportExcel THEN BEGIN
+                               ExcelLineNo += 1;
+                               InsertRowWithBold(ExcelLineNo,1,AccountNo,'');
+                               InsertRowWithBold(ExcelLineNo,2,Level1TextName,'');
+                               InsertRowWithBold(ExcelLineNo,3,AccountNo2,'');
+                               InsertRowWithBold(ExcelLineNo,4,Level2TextName,'');
+                               InsertRowWithBold(ExcelLineNo,9,Text1120008,'');
+                               InsertRowWithBold(ExcelLineNo,10,ConvertNumber(TotalDebit),'');
+                               InsertRowWithBold(ExcelLineNo,11,ConvertNumber(TotalCredit),'');
+                               InsertRowWithBold(ExcelLineNo,12,ConvertNumber(TotalDebit - TotalCredit),'');
+
+                               ExcelLineNo += 1;
+                               InsertRowWithBold(ExcelLineNo,1,AccountNo,'');
+                               InsertRowWithBold(ExcelLineNo,2,Level1TextName,'');
+                               InsertRowWithBold(ExcelLineNo,3,AccountNo2,'');
+                               InsertRowWithBold(ExcelLineNo,4,Level2TextName,'');
+                               InsertRowWithBold(ExcelLineNo,9,TextSoldeAu2,'');
+                               InsertRowWithBold(ExcelLineNo,10,ConvertNumber(TotalDebit+SoldeDebit1),'');
+                               InsertRowWithBold(ExcelLineNo,11,ConvertNumber(TotalCredit+SoldeCredit1),'');
+                               InsertRowWithBold(ExcelLineNo,12,ConvertNumber((TotalDebit+SoldeDebit1) - (TotalCredit+SoldeCredit1)),'');
+                               ExcelLineNo += 1;
+
+                             END;
+
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+
+                             TextSoldeAu2 := '';
+                             TextSoldeAu2 := STRSUBSTNO(Text1120006,EndDate);
+
+
+                           //recup no et nom du level
+
+                               CASE Level1 OF
+                               0 : BEGIN
+                                 IF GLAccount3.GET(AccountNo) THEN BEGIN
+                                   Level1TextNo := GLAccount3."No.";
+                                   Level1TextName := GLAccount3.Name;
+                                 END ELSE BEGIN
+                                   Level1TextNo := '';
+                                   Level1TextName := '';
+                                 END;
+                               END;
+
+                               1 : BEGIN
+                                 IF DimensionValue.GET('ANALYTIQUE',AccountNo) THEN BEGIN
+                                   Level1TextNo := DimensionValue.Code;
+                                   Level1TextName := DimensionValue.Name;
+                                 END ELSE BEGIN
+                                   Level1TextNo := '';
+                                   Level1TextName := '';
+                                 END;
+                               END;
+
+                               2 : BEGIN
+                                 IF DimensionValue.GET('GROUPE',AccountNo) THEN BEGIN
+                                   Level1TextNo := DimensionValue.Code;
+                                   Level1TextName := DimensionValue.Name;
+                                 END ELSE BEGIN
+                                   Level1TextNo := '';
+                                   Level1TextName := '';
+                                 END;
+                               END;
+
+                             END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120012;TextBox   ;13200;423  ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalCredit + SoldeCredit1 }
+            { 1120013;TextBox   ;10650;0    ;2250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit }
+            { 1120014;Shape     ;17700;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1120015;Shape     ;15300;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1120016;Shape     ;12900;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1120017;Shape     ;10350;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1120018;Shape     ;0    ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1120019;Shape     ;150  ;816  ;17700;30   ;BorderWidth=Hairline;
+                                                         ShapeStyle=HorzLine }
+            { 1120020;Label     ;300  ;423  ;900  ;423  ;HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Total;
+                                                                    FRA=Total] }
+            { 1120021;TextBox   ;1350 ;423  ;1200 ;423  ;HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Level1TextNo }
+            { 1120022;TextBox   ;2700 ;423  ;4800 ;423  ;HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Level1TextName }
+            { 1120023;TextBox   ;7650 ;423  ;2700 ;423  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextSoldeAu2 }
+            { 1120024;TextBox   ;15600;423  ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=(TotalDebit+SoldeDebit1)-(TotalCredit+SoldeCredit1) }
+            { 1120025;TextBox   ;10650;423  ;2250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit + SoldeDebit1 }
+            { 1120026;TextBox   ;13200;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalCredit }
+            { 1120027;TextBox   ;15600;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit-TotalCredit }
+            { 1120028;TextBox   ;6750 ;0    ;3600 ;423  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text1120008 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18000;
+            SectionHeight=1299;
+            OnPreSection=BEGIN
+                           IF ExportExcel THEN BEGIN
+                             ExcelLineNo += 2;
+                             InsertRowWithBold(ExcelLineNo,9,Text1120009,'');
+                             InsertRowWithBold(ExcelLineNo,10,ConvertNumber(TotalDebit),'');
+                             InsertRowWithBold(ExcelLineNo,11,ConvertNumber(TotalCredit),'');
+                             InsertRowWithBold(ExcelLineNo,12,ConvertNumber(TotalDebit - TotalCredit),'');
+                           {
+                             ExcelLineNo += 1;
+                             InsertRowWithBold(ExcelLineNo,9,Text1120010,'');
+                             InsertRowWithBold(ExcelLineNo,10,ConvertNumber(TotalDebit + SoldeDebit0),'');
+                             InsertRowWithBold(ExcelLineNo,11,ConvertNumber(TotalCredit + SoldeCredit0),'');
+                             InsertRowWithBold(ExcelLineNo,12,ConvertNumber((TotalDebit + SoldeDebit0) - (TotalCredit + SoldeCredit0)),'');
+                           }
+                           END;
+
+                           // lignes totaux g‚n‚raux avec ‚critures des p‚riodes ant‚rieures, en invisibilit‚ pour le moment
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000015;TextBox;13200;846  ;2100 ;423  ;Visible=No;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalCredit + SoldeCredit0 }
+            { 1000000016;TextBox;10650;423  ;2250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit }
+            { 1000000077;Shape  ;17700;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000078;Shape  ;15300;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000079;Shape  ;12900;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000080;Shape  ;10350;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1000000023;Shape  ;10500;846  ;7350 ;30   ;ShapeStyle=HorzLine }
+            { 1000000030;Shape  ;10500;423  ;7350 ;30   ;ShapeStyle=HorzLine }
+            { 1000000119;TextBox;15600;423  ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit-TotalCredit }
+            { 1000000115;Shape  ;10500;846  ;7350 ;30   ;ShapeStyle=HorzLine }
+            { 1000000120;TextBox;10650;846  ;2250 ;423  ;Visible=No;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalDebit+SoldeDebit0 }
+            { 1000000125;TextBox;15600;846  ;2100 ;423  ;Visible=No;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=(TotalDebit+SoldeDebit0)-(TotalCredit + SoldeCredit0) }
+            { 1000000127;TextBox;13200;423  ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankNumbers=BlankZero;
+                                                         SourceExpr=TotalCredit }
+            { 1000000114;TextBox;5250 ;423  ;5100 ;423  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text1120009 }
+            { 1000000121;TextBox;5250 ;846  ;5100 ;423  ;Visible=No;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text1120010 }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=8910;
+      Height=5500;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   SetRequestForm;
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1000000000;CheckBox;3300;1760 ;440  ;440  ;Name=MvtAcc;
+                                                   InPage=-1;
+                                                   ShowCaption=No;
+                                                   SourceExpr=PrintFlag }
+      { 1000000002;Label  ;0    ;1760 ;3190 ;440  ;CaptionML=[ENU=Print G/L Accs. without balance;
+                                                              FRA=Impr. cptes no mouvement‚s] }
+      { 1000000004;OptionButton;3300;1210;3740;440;InPage=-1;
+                                                   SourceExpr=Glob_centr;
+                                                   OptionValue=Journal et mois;
+                                                   OnValidate=BEGIN
+                                                                SetRequestForm;
+                                                              END;
+                                                               }
+      { 1000000005;OptionButton;3300;660;3740;440 ;SourceExpr=Glob_centr;
+                                                   OptionValue=Mois;
+                                                   OnValidate=BEGIN
+                                                                SetRequestForm;
+                                                              END;
+                                                               }
+      { 1000000006;Label  ;0    ;110  ;3080 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Centralized by;
+                                                              FRA=Centralisation] }
+      { 1000000007;OptionButton;3300;110;3740;440 ;SourceExpr=Glob_centr;
+                                                   OptionValue=Aucune;
+                                                   OnValidate=BEGIN
+                                                                SetRequestForm;
+                                                              END;
+                                                               }
+      { 1000000008;TextBox;3300 ;2860 ;2750 ;440  ;Name=Level1;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=Level 1;
+                                                              FRA=Niveau 1];
+                                                   OptionCaptionML=[ENU=G/L account,Global Dimension 1,Global Dimension 2;
+                                                                    FRA=Comptes g‚n‚raux,Axe 1,Axe 2];
+                                                   OptionString=G/L account,Global Dimension 1,Global Dimension 2;
+                                                   SourceExpr=Level1;
+                                                   OnAfterValidate=BEGIN
+                                                                     //<<ISA02.ST
+                                                                     IF Level2 = Level1+1 THEN
+                                                                       Level2 := 0;
+                                                                     //>>ISA02.ST
+                                                                     SetRequestForm;
+                                                                   END;
+                                                                    }
+      { 1000000009;Label  ;0    ;2860 ;3190 ;440  ;ParentControl=1000000008 }
+      { 1000000010;TextBox;3300 ;3410 ;2750 ;440  ;Name=Level2;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=Level 2;
+                                                              FRA=Niveau 2];
+                                                   OptionCaptionML=[ENU=" ,G/L account,Global Dimension 1,Global Dimension 2";
+                                                                    FRA=" ,Comptes g‚n‚raux,Axe 1,Axe 2"];
+                                                   OptionString=[ ,G/L account,Global Dimension 1,Global Dimension 2];
+                                                   SourceExpr=Level2;
+                                                   AutoCalcField=No;
+                                                   OnAfterValidate=BEGIN
+                                                                     //<<ISA02.ST
+                                                                     IF Level2 = Level1 + 1 THEN
+                                                                       ERROR('');
+                                                                     //>>ISA02.ST
+                                                                     SetRequestForm;
+                                                                   END;
+                                                                    }
+      { 1000000011;Label  ;0    ;3410 ;3190 ;440  ;ParentControl=1000000010 }
+      { 1000000012;CheckBox;3300;2310 ;440  ;440  ;InPage=-1;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Excel Export;
+                                                              FRA=Export Excel];
+                                                   SourceExpr=ExportExcel }
+      { 1000000013;Label  ;0    ;2310 ;3190 ;440  ;ParentControl=1000000012 }
+      { 1000000014;TextBox;3300 ;4070 ;2750 ;440  ;Name=FiltreAna;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=Global Dimension 1 Filter;
+                                                              FRA=Filtre axe 1];
+                                                   SourceExpr=Racc1Filter;
+                                                   CaptionClass='1,3,1';
+                                                   TableRelation="Dimension Value".Code WHERE (Global Dimension No.=CONST(1));
+                                                   OnValidate=BEGIN
+                                                                SetRequestForm;
+                                                              END;
+                                                               }
+      { 1000000015;Label  ;0    ;4070 ;3190 ;440  ;ParentControl=1000000014 }
+      { 1000000016;TextBox;3300 ;4620 ;2750 ;440  ;Name=FiltreGroup;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=Global Dimension 2 Filter;
+                                                              FRA=Filtre axe 2];
+                                                   SourceExpr=Racc2Filter;
+                                                   CaptionClass='1,3,2';
+                                                   TableRelation="Dimension Value".Code WHERE (Global Dimension No.=CONST(2));
+                                                   OnValidate=BEGIN
+                                                                SetRequestForm;
+                                                              END;
+                                                               }
+      { 1000000017;Label  ;0    ;4620 ;3190 ;440  ;ParentControl=1000000016 }
+      { 1100281000;TextBox;6160 ;2860 ;2750 ;440  ;Editable=No;
+                                                   InPage=-1;
+                                                   Border=No;
+                                                   SourceExpr=LabelLevel1 }
+      { 1100281001;TextBox;6160 ;3410 ;2750 ;440  ;Editable=No;
+                                                   Border=No;
+                                                   SourceExpr=LabelLevel2 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      GLSetup@8016602 : Record 98;
+      GLAccount2@1000000033 : Record 15;
+      GLAccount3@1000000051 : Record 15;
+      GLAccount4@1000000086 : Record 15;
+      GLEntry@1000000088 : Record 17;
+      GLEntry2@1120004 : TEMPORARY Record 17;
+      TempoTable@1120006 : Record 8016603;
+      TempoTable2@1120007 : TEMPORARY Record 8016603;
+      TempoTable3@1120008 : TEMPORARY Record 8016603;
+      ExcelBuffer@1000000020 : TEMPORARY Record 370;
+      Dimension@1000000049 : Record 348;
+      DimensionValue@1000000050 : Record 349;
+      FiltreDateCalc@1000000032 : Codeunit 358;
+      Text1120000@1000000011 : TextConst 'ENU=You must fill in the %1 field.;FRA=Vous devez renseigner le champ %1.';
+      Text1120001@1000000010 : TextConst 'ENU=You must specify a Starting Date value.;FRA=Vous devez sp‚cifier une date d‚but.';
+      Text1120002@1000000009 : TextConst 'ENU=Printed by %1;FRA=Imprim‚ par %1';
+      Text1120003@1000000008 : TextConst 'ENU=Fiscal Year Start Date : %1;FRA=D‚but exercice comptable : %1';
+      Text1120004@1000000007 : TextConst 'ENU=Page %1;FRA=Page %1';
+      Text1120005@1000000006 : TextConst 'ENU="Balance at %1 ";FRA="Solde au %1 "';
+      Text1120006@1000000005 : TextConst 'ENU=Balance at %1;FRA=Solde au %1';
+      Text1120007@1000000004 : TextConst 'ENU=Total;FRA=Total';
+      StartDate@1000000031 : Date;
+      EndDate@1000000030 : Date;
+      PreviousStartDate@1000000029 : Date;
+      PreviousEndDate@1000000028 : Date;
+      DocNumSort@1000000024 : Boolean;
+      EditerTotalMois@1000000016 : Boolean;
+      PrintFlag@1000000015 : Boolean;
+      ExportExcel@1000000026 : Boolean;
+      ShowDate@1000000064 : Boolean;
+      ToCentralizeMois@1000000048 : Boolean;
+      ToCentralizeMoisJournal@1000000058 : Boolean;
+      NotToCentralize@1120010 : Boolean;
+      InsertAcc@1000000065 : Boolean;
+      LabelLevel1@1100281001 : Text[50];
+      LabelLevel2@1100281000 : Text[50];
+      FiltreGL@1000000014 : Text[30];
+      FiltreDate@1000000013 : Text[30];
+      FiltreGestion@1000000012 : Text[30];
+      TextDate@1000000001 : Text[30];
+      Filter@1000000023 : Text[250];
+      TextSoldeAu1@1000000069 : Text[50];
+      TextSoldeAu2@1000000066 : Text[250];
+      Racc1Filter@1000000081 : Text[250];
+      Racc2Filter@1000000067 : Text[250];
+      PeriodText@1000000022 : Text[30];
+      Indication@1000000047 : Text[30];
+      ValMonth@1000000062 : Text[30];
+      Level1TextNo@1000000052 : Text[50];
+      Level1TextName@1000000054 : Text[50];
+      Level2TextNo@1000000053 : Text[50];
+      Level2TextName@1000000055 : Text[50];
+      Glob_centr@1000000021 : 'Aucune,Mois,Journal et mois';
+      Level1@1000000002 : 'G/L account,Global Dimension 1,Global Dimension 2';
+      Level2@1000000025 : ' ,G/L account,Global Dimension 1,Global Dimension 2';
+      SoldeAcc@1000000019 : Decimal;
+      SoldeCredit1@1000000018 : Decimal;
+      SoldeCredit2@1000000090 : Decimal;
+      SoldeDebit1@1000000087 : Decimal;
+      SoldeDebit2@1000000089 : Decimal;
+      SoldeDebit0@1000000045 : Decimal;
+      SoldeCredit0@1120005 : Decimal;
+      ExcelLineNo@1000000046 : Integer;
+      Text1120008@1000000078 : TextConst 'ENU=Total Date Range;FRA=Total de la p‚riode';
+      Text1120009@1000000079 : TextConst 'ENU=General Total Date Range;FRA=Total g‚n‚ral sur la p‚riode';
+      Text1120010@1000000080 : TextConst 'ENU=General Total;FRA=Total g‚n‚ral';
+      Text000@1120011 : TextConst 'ENU=G/L Detail Trial Bal.Shortcut;FRA=Grand livre comptes g‚n‚raux';
+      Text001@1000000056 : TextConst 'ENU=Please choice level 1 first.;FRA=Veuillez s‚lectionner d''abord le niveau 1.';
+      Text002@1000000057 : TextConst 'ENU=Levels must be different.;FRA=Les niveaux doivent ˆtre diff‚rents.';
+      Text003@1000000070 : TextConst 'ENU=Posting Date;FRA=Date de comptabilisation';
+      Text004@1000000071 : TextConst 'ENU=Source Code;FRA=Code journal';
+      Text005@1000000072 : TextConst 'ENU=Document No.;FRA=Nø document';
+      Text006@1000000073 : TextConst 'ENU=External Doc. No.;FRA=Nø doc. externe';
+      Text007@1000000074 : TextConst 'ENU=Description;FRA=D‚signation';
+      Text008@1000000075 : TextConst 'ENU=Debit;FRA=D‚bit';
+      Text009@1000000076 : TextConst 'ENU=Credit;FRA=Cr‚dit';
+      Text010@1000000077 : TextConst 'ENU=Balance;FRA=Solde';
+      Text011@1000000082 : TextConst 'ENU=Level 1;FRA=Niveau 1';
+      Text012@1000000083 : TextConst 'ENU=Level 1 Description;FRA=Libell‚ niveau 1';
+      Text013@1000000084 : TextConst 'ENU=Level 2;FRA=Niveau 2';
+      Text014@1000000085 : TextConst 'ENU=Level 2 Description;FRA=Libell‚ niveau 2';
+      Text015@1120001 : TextConst 'ENU=Please, select  accounts and one dimension;FRA=Veuillez renseigner le niveau …  Comptes g‚n‚raux  et un axe analytique';
+      Text016@1120009 : TextConst 'ENU=UNDEFINED;FRA=NON DEFINI';
+      Solde@1120000 : Decimal;
+      menu1@1120002 : Integer;
+      menu2@1120003 : Integer;
+      ValDate@1120012 : Date;
+      Text017@8016603 : TextConst 'ENU=Period must be full month. Do you want to print without centralisation ?;FRA=La p‚riode doit correspondre … des mois entiers. Souhaitez-vous l''‚xecuter sans centralisation ?';
+
+    PROCEDURE SetRequestForm@1000000000();
+    BEGIN
+      IF (Level1 = Level1::"Global Dimension 1") OR (Level2 = Level2::"Global Dimension 1") THEN BEGIN
+        RequestOptionsForm.FiltreAna.VISIBLE := TRUE;
+      END ELSE BEGIN
+        Racc1Filter := '';
+        RequestOptionsForm.FiltreAna.VISIBLE := FALSE;
+      END;
+
+      IF  (Level1 = Level1::"Global Dimension 2") OR (Level2 = Level2::"Global Dimension 2") THEN BEGIN
+        RequestOptionsForm.FiltreGroup.VISIBLE := TRUE;
+      END ELSE BEGIN
+        Racc2Filter := '';
+        RequestOptionsForm.FiltreGroup.VISIBLE := FALSE;
+      END;
+
+      SetLabelLevel;
+    END;
+
+    PROCEDURE SetLabelLevel@1100281000();
+    BEGIN
+      GLSetup.GET;
+      CASE Level1 OF
+        Level1::"Global Dimension 1" : LabelLevel1 := GLSetup."Global Dimension 1 Code";
+        Level1::"Global Dimension 2" : LabelLevel1 := GLSetup."Global Dimension 2 Code";
+        ELSE LabelLevel1 := '';
+      END;
+
+      CASE Level2 OF
+        Level2::"Global Dimension 1" : LabelLevel2 := GLSetup."Global Dimension 1 Code";
+        Level2::"Global Dimension 2" : LabelLevel2 := GLSetup."Global Dimension 2 Code";
+        ELSE LabelLevel2 := '';
+      END;
+    END;
+
+    PROCEDURE ConvertNumber@1000000005(Number@1000000000 : Decimal) : Text[50];
+    VAR
+      locFormat@1000000001 : Text[50];
+      locFromCar@1000000004 : TextConst 'FRA=.';
+      locToCar@1000000005 : TextConst 'FRA=,';
+    BEGIN
+      locFormat := '<Sign><Integer><Decimals>';
+
+      EXIT(FORMAT(Number,0,locFormat));
+    END;
+
+    PROCEDURE InsertRow@1000000003(RowNo@1000000000 : Integer;ColumnNo@1000000001 : Integer;CellValue@1000000002 : Text[250];NbFormat@1000000003 : Text[30]);
+    BEGIN
+      ExcelBuffer.INIT;
+      ExcelBuffer.VALIDATE("Row No.",RowNo);
+      ExcelBuffer.VALIDATE("Column No.",ColumnNo);
+      ExcelBuffer."Cell Value as Text" := CellValue;
+      ExcelBuffer.NumberFormat := NbFormat;
+      ExcelBuffer.Formula := '';
+      ExcelBuffer.INSERT;
+    END;
+
+    PROCEDURE InsertRowWithBold@1000000001(RowNo@1000000000 : Integer;ColumnNo@1000000001 : Integer;CellValue@1000000002 : Text[250];NbFormat@1000000003 : Text[30]);
+    BEGIN
+      ExcelBuffer.INIT;
+      ExcelBuffer.VALIDATE("Row No.",RowNo);
+      ExcelBuffer.VALIDATE("Column No.",ColumnNo);
+      ExcelBuffer."Cell Value as Text" := CellValue;
+      ExcelBuffer.NumberFormat := NbFormat;
+      ExcelBuffer.Bold := TRUE;
+      ExcelBuffer.Formula := '';
+      ExcelBuffer.INSERT;
+    END;
+
+    PROCEDURE ViewExcel@1000000002(Name@1000000000 : Text[30]);
+    BEGIN
+      ExcelBuffer.CreateBook;
+      ExcelBuffer.CreateSheet(Name,Name,'','');
+      ExcelBuffer.GiveUserControl;
+      CLEAR(ExcelBuffer);
+    END;
+
+    PROCEDURE CreateExcelBuffer@1000000004();
+    BEGIN
+      ExcelBuffer.DELETEALL;
+      CLEAR(ExcelBuffer);
+    END;
+
+    LOCAL PROCEDURE TestCentralization@8016603();
+    VAR
+      lAskQuestion@8016602 : Boolean;
+    BEGIN
+      //ISA03.ST
+      IF Glob_centr = Glob_centr::Aucune THEN
+        EXIT;
+
+      IF StartDate <> 0D THEN
+        IF DATE2DMY(StartDate,1) <> 1 THEN
+          lAskQuestion := TRUE;
+
+      IF EndDate <> 0D THEN
+        IF DATE2DMY(EndDate+1,1) <> 1 THEN
+          lAskQuestion := TRUE;
+
+      IF NOT lAskQuestion THEN
+        EXIT;
+      IF CONFIRM(Text017, FALSE) THEN
+        Glob_centr := Glob_centr::Aucune
+      ELSE
+        CurrReport.QUIT;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/01/11 @a ISAT.MA @v IMH6.01.040 @s Isatech+ */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

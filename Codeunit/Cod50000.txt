@@ -1,0 +1,2805 @@
+OBJECT Codeunit 50000 First Provider Search
+{
+  OBJECT-PROPERTIES
+  {
+    Date=03/06/14;
+    Time=16:42:13;
+    Modified=Yes;
+    Version List=IMH6.0,IMH6.01.P011;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 50011=rm;
+    OnRun=VAR
+            lContact@1100281000 : Record 5050;
+            lContactSearchCard@1100281001 : Form 50050;
+            lproviderCalMgt@1100281002 : Codeunit 50007;
+            ldate@1100281003 : Date;
+          BEGIN
+            //<<IMH10.isat.PC
+            lContact.RESET;
+            lContact.SETRANGE("Service Contact",lContact."Service Contact"::Provider);
+            CLEAR(lContactSearchCard);
+            lContactSearchCard.SetContactFilter(lContact);
+            lContactSearchCard.RUN;
+            //>>IMH10.isat.PC
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProviderSearchMgt@1000000018 : Codeunit 50284;
+      ProviderSetup@1100281001 : Record 50011;
+      UserSetup@1100281055 : Record 91;
+      ServiceSearchLedgerEntryTemp@1100281002 : TEMPORARY Record 50027;
+      AffectedProviderBuffer@1100281081 : TEMPORARY Record 50000;
+      SearchType@1100281000 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';
+      Text001@1100281003 : TextConst 'ENU=Search Real Distance @1@@@@@@@@@@@@@@@@@@@@@@@;FRA=Recherche distance r‚elle @1@@@@@@@@@@@@@@@@@@@@@@@';
+      Text002@1100281004 : TextConst 'ENU=Processing Search...\Please wait;FRA=Recherche en cours...\Veuillez patienter s''il vous plait.';
+      Text003@1100281005 : TextConst 'ENU=No provider has been found for the %1;FRA=Aucun prestataire n''a ‚t‚ trouv‚ pour la %1';
+      Text004@1100281010 : TextConst 'ENU=Distance (km) : #1#######;FRA=Distance (km) : #1#######';
+      Text005@1100281009 : TextConst 'ENU=Search Stopped;FRA=Recherche termin‚e';
+      Text006@1100281006 : TextConst 'ENU="Process Loading ";FRA=Chargement en cours..';
+      Text007@1100281061 : TextConst 'FRA="Vous devez definir "';
+      Text008@1000000011 : TextConst 'FRA=La vlle %1 %2 du service %3 n''existe pas dans la table des codes postaux, veuillez corriger l''adresse de MEO';
+      TextSearchType1@1100281016 : TextConst 'ENU=standard search;FRA=recherche standard';
+      TextSearchType2@1100281015 : TextConst 'ENU=advanced search;FRA=recherche avancee';
+      TextSearchType3@1100281014 : TextConst 'ENU=enlarge search;FRA=recherche elargie';
+      TextSearchType4@1100281013 : TextConst 'ENU=general enterprise search;FRA=recherche entreprise g‚n‚rale / r‚novation';
+      TextSearchType5@1100281012 : TextConst 'ENU=sequenced search;FRA=recherche sequencee';
+      TextSearchType6@1100281011 : TextConst 'ENU=DPR search;FRA=recherche DPR';
+      SearchDistance@1100281008 : Integer;
+      DebugLine@1100281017 : Integer;
+      TextDebug000@1100281037 : TextConst 'ENU=Provider search - %1;FRA=Recherche prestataire - %1';
+      TextDebug001@1100281019 : TextConst 'ENU=Reference Geo. Code found : %1;FRA=Code reference geo. trouves : %1';
+      TextDebug002@1100281020 : TextConst 'ENU=Specialization filter : %1;FRA="Filtre specialite : %1  "';
+      TextDebug003@1100281021 : TextConst 'ENU=Nb provider found before common filters : %1;FRA=-- Nb prestataires trouves avant application des filtres communs : %1';
+      TextDebug004@1100281022 : TextConst 'ENU=Nb provider after business hours filter : %1;FRA=-- Nb prestataires apres filtre heure de travail : %1';
+      TextDebug005@1100281023 : TextConst 'ENU=Nb provider after hours and calendar available filter : %1;FRA=-- Nb prestataires apres filtre disponibilite calendaire et heure de travail : %1';
+      TextDebug006@1100281024 : TextConst 'ENU=Nb provider after common filter : %1;FRA=-- Nb prestataires apres filtres communs : %1';
+      TextDebug007@1100281025 : TextConst 'ENU=Provider %1 refuse because he is outside business hours;FRA=Prestataire %1 %2 : refus car en dehors des heures d''ouverture';
+      TextDebug008@1100281026 : TextConst 'ENU=Provider %1 refuse because invisble open space, black list or disabled.;FRA=Prestataire %1 : refus car invisible plateau, black list ou non actif';
+      TextDebug009@1100281027 : TextConst 'ENU=Provider %1 refuse because global limit intervention struck (%2);FRA=Prestataire %1 : refus car limite globale d''intervention atteinte (%2)';
+      TextDebug010@1100281028 : TextConst 'ENU=Provider %1 refuse because global limit intervention + suplement struck (%2 + %3);FRA=Prestataire %1 : refus car limite globale d''intervention + supplement atteinte (%2 + %3 )';
+      TextDebug011@1100281029 : TextConst 'ENU=Provider %1 refuse because not entreprise general not entreprise renovation;FRA=Prestataire %1 : refus car ni entreprise general ni entreprise renovation';
+      TextDebug012@1100281030 : TextConst 'ENU=Provider %1 refuse because entreprise general or entreprise renovation;FRA=Prestataire %1 : refus car entreprise general ou entreprise renovation';
+      TextDebug013@1100281031 : TextConst 'ENU=Provider %1 refuse because agreement exclusion total.;FRA=Prestataire %1 - %2 : refus car exclusion total agreement';
+      TextDebug014@1100281032 : TextConst 'ENU=Provider %1 refuse because agreement exclusion (Corporate no. %2, specialization %3).;FRA=Prestataire %1 - %4 : refus car exclusion agrement (grand compte %2, specialite %3)';
+      TextDebug015@1100281033 : TextConst 'ENU=Provider %1 refuse because he haven''t all sp‚cializations;FRA=Prestataire %1 - %3 : refus car il ne couvre pas l''ensemble des specialites demandees (%2)';
+      TextDebug016@1100281034 : TextConst 'ENU=Provider %1 refuse because he haven''t all qualifications requested.;FRA=Prestataire %1 : refus car il possede pas les qualifications demandees (%2)';
+      TextDebug017@1100281035 : TextConst 'ENU=Provider %1 refuse because he is calendar inavailable (%2 authorised).;FRA=Presta %1-%7 : %2 refus car en dehors de la dispo-intervalle du %3 au %4-1ere date dispo. %5-astreinte %6';
+      TextDebug018@1100281036 : TextConst 'ENU=Max. search level : %1;FRA=Niveau de recherche maximun : %1';
+      TextDebug019@1100281038 : TextConst 'ENU=Current search level : %1;FRA=***** Niveau de recherche actuelle : %1 *****';
+      TextDebug020@1100281039 : TextConst 'ENU=--------------------------------------------------;FRA=--------------------------------------------------';
+      TextDebug020b@1100281051 : TextConst 'ENU=" ";FRA=" "';
+      TextDebug020c@1000000006 : TextConst 'ENU=--------------------------------------------------;FRA=------------';
+      TextDebug021@1100281041 : TextConst 'ENU="  Provider score %1 - %2";FRA="  Score du prestataire %1 - %2"';
+      TextDebug022@1100281042 : TextConst 'ENU="    Base : %1";FRA="    Base : %1"';
+      TextDebug023@1100281043 : TextConst 'ENU="    Main Specialization : %2";FRA="    Specialite principale : %1"';
+      TextDebug024@1100281044 : TextConst 'ENU="    Calendar avaible : %1 (first available date %2)";FRA="    Disponibilite calendaire : %1 (premiere date disponible %2)"';
+      TextDebug025@1100281045 : TextConst 'ENU="    Business hours available : %1";FRA="    Disponibilite horaire : %1"';
+      TextDebug025b@1100281075 : TextConst 'ENU="    Covered specialization(s) : %1 (%2 * %3)";FRA="    Specialite(s) couverte(s) : %1 (%2 * %3)"';
+      TextDebug026@1100281046 : TextConst 'ENU="    Staffing Score : %1";FRA="    Score occupation : %1"';
+      TextDebug026b@1100281078 : TextConst 'ENU="    Staffing Rate %1 / %2 * 100";FRA="    Taux occ. %1 / %2 * 100"';
+      TextDebug026c@1100281079 : TextConst 'FRA="    Taux occ. specialite %1"';
+      TextDebug026d@1100281084 : TextConst 'FRA="    Taux occ. type produit %1"';
+      TextDebug027@1100281047 : TextConst 'ENU="    Intervention Distance : %1, distance %2 km (%3 by km outside %4 km)";FRA="    Distance lieu intervention : %1, distance %2 km (%3 par km au dela de %4 km)"';
+      TextDebug028@1100281048 : TextConst 'ENU="    Priority : %1";FRA="    Priorite : %1"';
+      TextDebug028b@1100281074 : TextConst 'ENU="    Constrainte : %1";FRA="    Astreinte : %1"';
+      TextDebug028c@1100281080 : TextConst 'ENU="    Linked Provider : %1";FRA="    Score Prestataire lie : %1"';
+      TextDebug029@1100281049 : TextConst 'ENU="    Scoring Note : %1 (%2 * %3)";FRA="    Note scoring : %1 (%2 * %3)"';
+      TextDebug030@1100281050 : TextConst 'ENU="    Total : %1";FRA="    Total : %1"';
+      TextDebug031@1100281052 : TextConst 'ENU=Provider %1 already refused %2 reason %3;FRA=Prestataire %1 - %4 : deja refuse en recherche %2 pour le motif %3';
+      TextDebug032a@1000000001 : TextConst 'FRA=-- Criteres';
+      TextDebug032@1100281057 : TextConst 'ENU=Post Code : %1 - City : %2 - Ref. Geo. Code : %3;FRA=Ville : %1';
+      TextDebug032b@1000000008 : TextConst 'ENU=Post Code : %1 - City : %2 - Ref. Geo. Code : %3;FRA=Code postal : %1';
+      TextDebug032c@1000000007 : TextConst 'ENU=Post Code : %1 - City : %2 - Ref. Geo. Code : %3;FRA=Ref. geo. : %1';
+      TextDebug033@1100281058 : TextConst 'ENU=Emergency : %1 - Corporate Exclusion : %2 - Invisible Open Space %3;FRA=Urgent : %1';
+      TextDebug033b@1000000010 : TextConst 'ENU=Emergency : %1 - Corporate Exclusion : %2 - Invisible Open Space %3;FRA=Exclus grands comptes : %1';
+      TextDebug033c@1000000009 : TextConst 'ENU=Emergency : %1 - Corporate Exclusion : %2 - Invisible Open Space %3;FRA=Invisible plateau : %1';
+      TextDebug034@1100281040 : TextConst 'ENU=Provider %1 : intervention nb %2 - limit %3 (max : %4, supplement %5);FRA=Prestataire %1-%7 : refus car limite max atteinte(spec %2-Type prod %8-nb interv courante %3-limite max %4-supplement %5 (%6 %))';
+      TextDebug035@1100281062 : TextConst 'ENU=Provider %1 : max intervention limit at 0;FRA=Prestataire %1 - %2 : refus car limite intervention maximum a 0';
+      TextDebug036@1100281063 : TextConst 'FRA=Prestataire %1 - %2 : refus car exclu definitif ou temporaire';
+      TextDebug037@1100281064 : TextConst 'FRA=Prestataire %1 - %2 : refus car ne couvre plus toutes les specialites';
+      TextDebug038@1100281065 : TextConst 'ENU=Provider %1 refuse because agreement exclusion (Corporate no. %2, service order type %3).;FRA=Prestataire %1 - %4 : refus car exclusion agrement (grand compte %2, type produit %3)';
+      TextDebug039@1100281066 : TextConst 'ENU=Provider %1 refuse because no agreement exclusion (Corporate no. %2, service order type %3).;FRA=Prestataire %1 : refus car non exclusion agrement (grand compte %2, type produit %3)';
+      DebugTraceEnable@1100281068 : Boolean;
+      GetUserSetupOK@1100281069 : Boolean;
+      GetProviderSetupOK@1100281060 : Boolean;
+      isDistanceEntered@1100281007 : Boolean;
+      BlackList@1100281054 : Boolean;
+      Enabled@1100281053 : Boolean;
+      SearchDate@1100281059 : Date;
+      SearchTime@1100281056 : Time;
+      DebugFile@1100281018 : File;
+      GeoFilterType@1100281072 : ' ,Territory Code,Area Code,Post Code';
+      PostCodeFilter@1100281067 : Code[20];
+      CityFilter@1100281070 : Text[30];
+      AreaFilter@1100281071 : Code[10];
+      TerritoryFilter@1100281073 : Code[10];
+      TextDebug040@1100281076 : TextConst 'FRA="    Specialites liees %1"';
+      TextDebug041@1000000000 : TextConst 'FRA=Nombre de prestataires trouves en recherche inversee : %1';
+      TextDebug042@1000000003 : TextConst 'FRA=Prestataire %1 : supprime car il ne possŠde pas d''adresse op‚rationnelle';
+      TextDebug043@1000000004 : TextConst 'FRA=Prestataire %1 : pas de controle de limite d''''intervention (limite a 0)';
+      TextDebug044@1000000002 : TextConst 'FRA=-- Ordre d''affichage';
+      TextDebug045@1000000005 : TextConst 'FRA=Prestataire %1 : score %2';
+      ServiceOrderTypeAgree@1100281077 : Code[10];
+      SearchParameterSetted@1000000017 : Boolean;
+      CalendarDispo@1000000016 : ' ,Yes,No';
+      TimeDispo@1000000015 : ' ,Yes,No';
+      ExclusionTemp@1000000014 : ' ,Yes,No';
+      ExclusionDeffinitive@1000000013 : ' ,Yes,No';
+      BlackListOption@1000000012 : ' ,Yes,No';
+      EmergencyOption@1100281082 : ',Yes,No';
+      SpecialitySearch@1100281083 : Boolean;
+
+    PROCEDURE Search@1100281008(VAR pServiceInterventionLine@1100281000 : Record 50075;VAR pProviderSearchBasket@1100281007 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281010 : Record 5051) : Boolean;
+    VAR
+      lPSRBuffer@1100281004 : TEMPORARY Record 51000;
+      lRefusedProviderBuffer@1100281008 : TEMPORARY Record 50000;
+      lQualificationBuffer@1100281006 : TEMPORARY Record 50079;
+      lServiceHeader@1100281016 : Record 5900;
+      lCode@1000000000 : Record 50079;
+      lSpecialityFilter@1100281005 : Text[1024];
+      lProviderSearchWizard@1100281001 : Page 50022;
+      lProvBaskSeqSearchCard@1100281009 : Form 50158;
+      lMaxSearch@1100281003 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';
+      lCurrentSearchLevel@1100281011 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';
+      lDebugTraceLevel@1100281012 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';
+      i@1100281002 : Integer;
+      lStartSearch@1100281018 : Integer;
+      lUrgent@1100281013 : 'All,Yes,No';
+      lInvisibleOpenSpace@1100281014 : 'All,Yes,No';
+      lCorporateExclusion@1100281015 : 'All,Yes,No';
+      lGeoFilterType@1100281017 : ' ,Territory Code,Area Code,Post Code';
+      lProviderNo@1100281019 : Code[20];
+      lProviderSearchCom@1100281020 : Codeunit 50066;
+      lCpt@1000000001 : Integer;
+      lTot@1000000002 : Integer;
+    BEGIN
+      // Recherche DPS Niveau 1,2,3
+      GetUserSetup;
+      WITH pServiceInterventionLine DO BEGIN
+        IF pProviderSearchBasket.FINDSET() THEN BEGIN
+          DebugTrace(TextDebug020);
+          DebugTrace(STRSUBSTNO(TextDebug000,CURRENTDATETIME));
+          REPEAT
+            IF lSpecialityFilter <> '' THEN BEGIN
+              lSpecialityFilter += '|';
+            END;
+            lSpecialityFilter += pProviderSearchBasket."Speciality Code"
+          UNTIL pProviderSearchBasket.NEXT = 0;
+
+          DebugTrace(STRSUBSTNO(TextDebug002,lSpecialityFilter));
+
+          // Pour les recherches mono sp‚cialit‚s arret … la recherche elargie
+          IF pProviderSearchBasket.COUNT = 1 THEN BEGIN
+            lMaxSearch := SearchType::Enlarge;
+            lStartSearch := 0;
+          END ELSE BEGIN
+            lMaxSearch := SearchType::Sequenced;
+            //<<IMH35.PC
+            //lStartSearch := 4;
+            //>>IMH35.PC
+          END;
+
+          DebugTrace(STRSUBSTNO(TextDebug018,lMaxSearch));
+          FOR i := lStartSearch TO lMaxSearch DO BEGIN
+
+            lCurrentSearchLevel := i;
+            DebugTrace(STRSUBSTNO(TextDebug020b));
+            DebugTrace(STRSUBSTNO(TextDebug020b));
+            DebugTrace(STRSUBSTNO(TextDebug019,lCurrentSearchLevel));
+            lUrgent := lUrgent::No;
+            IF Urgent THEN BEGIN
+              lUrgent := lUrgent::Yes;
+            END;
+            ProviderSearch(
+              lPSRBuffer,lRefusedProviderBuffer,
+              pContactAltAddress,lSpecialityFilter,i,
+              "Corporate No.",lUrgent,lQualificationBuffer,
+              FALSE,lCorporateExclusion::Yes,lInvisibleOpenSpace::No,
+              TRUE,lGeoFilterType::" ",'',"Service Header No.");
+            lPSRBuffer.SETCURRENTKEY(Score);
+            lPSRBuffer.ASCENDING(TRUE);
+            DebugTrace(TextDebug044);
+            IF lPSRBuffer.FINDLAST THEN BEGIN
+              REPEAT
+                DebugTrace(STRSUBSTNO(TextDebug045,lPSRBuffer."Provider No.",FORMAT(lPSRBuffer.Score)));
+              UNTIL lPSRBuffer.NEXT(-1) = 0;
+            END;
+            IF lPSRBuffer.FINDLAST THEN BEGIN
+              COMMIT;
+              //<<IMH50
+              lTot := lPSRBuffer.COUNT;
+              lCpt := 0;
+              //>>IMH50
+              REPEAT
+                IF NOT lRefusedProviderBuffer.GET(lPSRBuffer."Provider No.") THEN BEGIN
+                  lProviderSearchWizard.SetRecords(lPSRBuffer);
+                  lProviderSearchWizard.SetMEOAddr(pContactAltAddress);
+                  //<<IMH50
+                  lCpt += 1;
+                  lProviderSearchWizard.SetCpt(lCpt,lTot);
+                  //>>IMH50
+                  //<<IMH63
+                  //lProviderSearchWizard.SetSpecializationFilter(lSpecialityFilter);
+                  lProviderSearchWizard.SetSpecializationFilter(lPSRBuffer."Specialization List");
+                  //>>IMH63
+                  lProviderSearchWizard.RUNMODAL;
+                  IF lProviderSearchWizard.GetIsOk THEN BEGIN
+                    lProviderNo := lProviderSearchWizard.GetProviderNo();
+                    //<<IMH63
+                    //pProviderSearchBasket.SETFILTER("Speciality Code",GetProviderSpecialization(lProviderNo,lSpecialityFilter));
+                    pProviderSearchBasket.SETFILTER("Speciality Code",
+                        //<<IMH67
+                        //GetProviderSpecialization(lProviderNo,lPSRBuffer."Specialization List"));
+                        ProviderSearchMgt.GetProviderSpecialization(lProviderNo,lPSRBuffer."Specialization List"));
+                        //>>IMH67
+                    //>>IMH63
+                    pProviderSearchBasket.MODIFYALL("Provider No.",lProviderNo);
+                    lRefusedProviderBuffer.SETRANGE("Current Interv. Limit Max.",i);
+                    //<<IMH69
+                    //Ajout DRP Search : type search = i = 5 = DRP Search
+                    //SaveRefusedProvider(lRefusedProviderBuffer,pServiceInterventionLine);
+                    SaveRefusedProvider(lRefusedProviderBuffer,pServiceInterventionLine, i = 5);
+                    //>>IMH69
+                    lRefusedProviderBuffer.SETRANGE("Current Interv. Limit Max.");
+                    lProviderSearchCom.addAffectedProviderBuffer(lProviderNo);
+                    EXIT(TRUE);
+                  END ELSE BEGIN
+                    // Traitement des refus
+                    IF NOT lRefusedProviderBuffer.GET(lPSRBuffer."Provider No.") THEN BEGIN
+                      lRefusedProviderBuffer."No." := lPSRBuffer."Provider No.";
+                      lRefusedProviderBuffer."Current Interv. Limit Max." := i;
+                      //<<IMH67
+                      //Remplacer le formulaire par la page
+                      lProviderSearchWizard.GetNonAcceptReasonCode(
+                        lRefusedProviderBuffer."Salutation Code", lRefusedProviderBuffer."Follow Up");
+                      lRefusedProviderBuffer.INSERT;
+                      //>>IMH67
+                    END;
+                  END;
+                  CLEAR(lProviderSearchWizard);
+                END;
+              UNTIL lPSRBuffer.NEXT(-1) = 0;
+              // Sauvegarde des prestataires refus‚s
+              lRefusedProviderBuffer.SETRANGE("Current Interv. Limit Max.",i);
+              //<<IMH69
+              //Ajout DRP Search : type search = i = 5 = DRP Search
+              //SaveRefusedProvider(lRefusedProviderBuffer,pServiceInterventionLine);
+              SaveRefusedProvider(lRefusedProviderBuffer,pServiceInterventionLine, i = 5);
+              //>>IMH69
+              lRefusedProviderBuffer.SETRANGE("Current Interv. Limit Max.");
+            END;
+          END;
+          DownloadDebugFile;
+        END;
+      END;
+    END;
+
+    PROCEDURE SearchResult@1100281041(VAR pServiceInterventionLine@1100281000 : Record 50075;VAR pProviderSearchBasket@1100281007 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281010 : Record 5051;VAR pPSRBuffer@1100281004 : TEMPORARY Record 51000) : Boolean;
+    VAR
+      lRefusedProviderBuffer@1100281008 : TEMPORARY Record 50000;
+      lQualificationBuffer@1100281006 : TEMPORARY Record 50079;
+      lServiceHeader@1100281016 : Record 5900;
+      lSpecialityFilter@1100281005 : Text[1024];
+      lProviderSearchWizard@1100281001 : Form 50022;
+      lProvBaskSeqSearchCard@1100281009 : Form 50158;
+      lMaxSearch@1100281003 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';
+      lCurrentSearchLevel@1100281011 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';
+      lDebugTraceLevel@1100281012 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';
+      i@1100281002 : Integer;
+      lStartSearch@1100281018 : Integer;
+      lUrgent@1100281013 : 'All,Yes,No';
+      lInvisibleOpenSpace@1100281014 : 'All,Yes,No';
+      lCorporateExclusion@1100281015 : 'All,Yes,No';
+      lGeoFilterType@1100281017 : ' ,Territory Code,Area Code,Post Code';
+      lProviderNo@1100281019 : Code[20];
+      lSearchType@1100281020 : Integer;
+      lPSRBuffer@1100281021 : TEMPORARY Record 51000;
+    BEGIN
+      // obtenir une liste des prestataires de recherche niveau 1
+
+      GetUserSetup;
+
+      WITH pServiceInterventionLine DO BEGIN
+        IF pProviderSearchBasket.FINDSET() THEN BEGIN
+          DebugTrace(TextDebug020);
+          DebugTrace(STRSUBSTNO(TextDebug000,CURRENTDATETIME));
+          REPEAT
+            IF lSpecialityFilter <> '' THEN BEGIN
+              lSpecialityFilter += '|';
+            END;
+            lSpecialityFilter += pProviderSearchBasket."Speciality Code"
+          UNTIL pProviderSearchBasket.NEXT = 0;
+
+          DebugTrace(STRSUBSTNO(TextDebug002,lSpecialityFilter));
+
+          // Pour les recherches mono sp‚cialit‚s arret … la recherche elargie
+          IF pProviderSearchBasket.COUNT = 1 THEN BEGIN
+            lMaxSearch := SearchType::Enlarge;
+            lStartSearch := 0;
+          END ELSE BEGIN
+            lMaxSearch := SearchType::Sequenced;
+            //<<IMH35.PC
+            //lStartSearch := 4;
+            //>>IMH35.PC
+          END;
+
+          DebugTrace(STRSUBSTNO(TextDebug018,lMaxSearch));
+          FOR i := lStartSearch TO lMaxSearch DO BEGIN
+            lCurrentSearchLevel := i;
+            DebugTrace(STRSUBSTNO(TextDebug020b));
+            DebugTrace(STRSUBSTNO(TextDebug019,lCurrentSearchLevel));
+            lUrgent := lUrgent::No;
+            IF Urgent THEN BEGIN
+              lUrgent := lUrgent::Yes;
+            END;
+
+            ProviderSearch(
+              pPSRBuffer,lRefusedProviderBuffer,
+              pContactAltAddress,lSpecialityFilter,i,
+              "Corporate No.",lUrgent,lQualificationBuffer,
+              FALSE,lCorporateExclusion::Yes,lInvisibleOpenSpace::No,TRUE,lGeoFilterType::" ",'',"Service Header No.");
+            pPSRBuffer.SETCURRENTKEY(Score);
+            pPSRBuffer.ASCENDING(TRUE);
+            DebugTrace(TextDebug044);
+            IF lPSRBuffer.FINDLAST THEN BEGIN
+              REPEAT
+                DebugTrace(STRSUBSTNO(TextDebug045,lPSRBuffer."Provider No.",FORMAT(lPSRBuffer.Score)));
+              UNTIL lPSRBuffer.NEXT(-1) = 0;
+            END;
+            IF pPSRBuffer.FINDLAST THEN
+              REPEAT
+                lPSRBuffer := pPSRBuffer;
+                IF pPSRBuffer.INSERT THEN;
+              UNTIL pPSRBuffer.NEXT(-1) = 0;
+          END;
+        END;
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SequencedSearch@1100281001(VAR pProviderSearchBasket@1100281000 : Record 51002;VAR pProviderSearchResultBuffer@1100281008 : Record 51000;VAR pQualificationBuffer@1100281009 : Record 50079;pContactAltAddress@1100281017 : Record 5051;pUrgent@1100281003 : ',Yes,No';pCorporateNo@1100281015 : Code[20];pSearchType@1100281010 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';pAllSpecialization@1100281012 : Boolean;pCorporateExclusion@1100281013 : ' ,Yes,No';pInvisibleOpenSpace@1100281014 : ',Yes,No';pRealKm@1100281016 : Boolean;pGeoFilterType@1100281020 : ' ,Territory Code,Area Code,Post Code';pGeoFilter@1100281001 : Text[1024];pServiceHeaderNo@1100281018 : Code[20]);
+    VAR
+      lProviderSearchResultBuffer@1100281007 : Record 51000;
+      lRefusedProviderBuffer@1100281011 : TEMPORARY Record 50000;
+      lFProviderSearchWizard@1100281005 : Form 50022;
+      lPProviderSearchWizard@1100281004 : Page 50022;
+      lSpecialityFilter@1100281006 : Text[1024];
+    BEGIN
+      GetUserSetup;
+      lSpecialityFilter := '';
+      WITH pProviderSearchBasket DO BEGIN
+        //<<IMH52
+        IF NOT ((pSearchType = pSearchType::DPR) AND SearchParameterSetted AND (NOT SpecialitySearch)) THEN
+          //IF FINDFIRST THEN BEGIN
+          IF NOT FINDFIRST THEN
+            EXIT;
+        //>>IMH52
+          DebugTrace(TextDebug020);
+          DebugTrace(STRSUBSTNO(TextDebug000,CURRENTDATETIME));
+          REPEAT
+            IF lSpecialityFilter <> '' THEN lSpecialityFilter += '|';
+            lSpecialityFilter += "Speciality Code";
+          UNTIL NEXT = 0;
+
+          DebugTrace(STRSUBSTNO(TextDebug002,lSpecialityFilter));
+
+          DebugTrace(STRSUBSTNO(TextDebug019,pSearchType));
+          ProviderSearch(
+            pProviderSearchResultBuffer,lRefusedProviderBuffer,
+            pContactAltAddress,lSpecialityFilter,pSearchType,pCorporateNo,pUrgent,pQualificationBuffer,
+            pAllSpecialization,pCorporateExclusion,pInvisibleOpenSpace,pRealKm,pGeoFilterType,pGeoFilter,pServiceHeaderNo);
+            //pAllSpecialization,pCorporateExclusion,pInvisibleOpenSpace,pRealKm,pTerritoryCode,pAreaCode);//IMH07
+          DownloadDebugFile;
+        //END;   //IMH52
+      END;
+    END;
+
+    PROCEDURE ProviderSearch@1100281010(VAR pPSRBuffer@1100281006 : Record 51000;VAR pRefusedProviderBuffer@1100281029 : Record 50000;pContactAltAddress@1100281036 : Record 5051;pSpecializationFilter@1100281004 : Text[1024];pSearchType@1100281002 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR';pCorporateNo@1100281001 : Code[20];pEmergency@1100281000 : ',Yes,No';VAR pQualificationBuffer@1100281025 : Record 50079;pAllSpecialization@1100281032 : Boolean;pCorporateExclusion@1100281031 : 'All,Yes,No';pInvisibleOpenSpace@1100281030 : 'All,Yes,No';pRealKm@1100281042 : Boolean;pGeoFilterType@1100281039 : ' ,Territory Code,Area Code,Post Code';pGeoFilter@1100281038 : Text[1024];pServiceHeaderNo@1100281037 : Code[20]);
+    VAR
+      lAbiGeoMgt@1100281033 : Codeunit 50011;
+      lProvider@1100281021 : Record 50000;
+      lProviderBuffer@1000000000 : TEMPORARY Record 50000;
+      lSpecialization@1100281020 : Record 50005;
+      lAbilityGeoProvider@1100281019 : Record 50016;
+      lAbilityGeoProvider2@1100281028 : Record 50016;
+      lProviderSpecialization@1100281018 : Record 50006;
+      lProvChgCal@1100281017 : Record 50007;
+      lPSRBuffer2@1100281003 : TEMPORARY Record 51000;
+      lContactAltAddr@1100281022 : Record 5051;
+      lTempInseeSearchResult@1100281027 : TEMPORARY Record 51001;
+      lGeoCacheBuffer@1100281041 : TEMPORARY Record 51003;
+      lGeoRef@1000000001 : Record 50013;
+      lServiceHeader@1100281023 : Record 5900;
+      lSpecialityAOK@1100281016 : Boolean;
+      lSpecialityBOK@1100281015 : Boolean;
+      lDistance@1100281014 : Decimal;
+      lSpecialityNb@1100281013 : Integer;
+      lReasonCode@1100281012 : Code[10];
+      lStartTime@1100281011 : Time;
+      lEndTime@1100281010 : Time;
+      lDescription@1100281009 : Text[50];
+      lUnavailability@1100281008 : Boolean;
+      lSpecilityFilter@1100281007 : Text[1024];
+      lReferenceGeoCode@1100281024 : Code[10];
+      lRequiredSpe@1100281026 : Integer;
+      lX@1100281040 : Integer;
+      lY@1100281034 : Integer;
+      lInversedSearchDistance@1100281035 : Integer;
+      lUrgent@1100281005 : 'All,Yes,No';
+      lGeoSearch@1100281043 : Boolean;
+    BEGIN
+      //IMH07 : Ajout paramŠtre pServiceHeaderNo
+      // GŠre la recherche standard,avanc‚e,‚largie,Entreprise,s‚quenc‚e,DPR
+      lInversedSearchDistance := -1;
+      //<<IMH52
+      IF NOT ((pSearchType = pSearchType::DPR) AND SearchParameterSetted AND (NOT SpecialitySearch)) THEN
+      //>>IMH52
+        IF pSpecializationFilter = '' THEN EXIT;
+
+
+      GetProviderSetup;
+      //<<IMH62.PC
+      {
+      //<<IMH48
+      IF (pRealKm) AND (ProviderSetup."Geoconcept Activate Search")
+      THEN BEGIN
+        lGeoSearch := CheckGeoWebService;
+      END;
+      //>>IMH48
+      }
+      //>>IMH65.PC
+      //lGeoSearch := TRUE;
+      lGeoSearch := (pRealKm) AND (ProviderSetup."Geoconcept Activate Search");
+      //<<IMH65.PC
+      //>>IMH62.PC
+
+      WITH pPSRBuffer DO BEGIN
+        RESET;
+        DELETEALL;
+        IF lContactAltAddr.GET(pContactAltAddress."Contact No.",pContactAltAddress.Code) OR
+           (pGeoFilterType > pGeoFilterType::" ") OR
+           //<<IMH20.isat.PC
+           (pContactAltAddress.Code = 'TEMP')
+           //>>IMH20.isat.PC
+        THEN BEGIN
+          //<<IMH39 isat.nfo
+          IF pServiceHeaderNo  = '' THEN BEGIN
+            lContactAltAddr := pContactAltAddress;
+            IF pContactAltAddress."Geo. Reference Code" = '' THEN BEGIN
+              lReferenceGeoCode := GetGeoCode(lContactAltAddr."Post Code",lContactAltAddr.City);
+            END ELSE BEGIN
+              lReferenceGeoCode := lContactAltAddr."Geo. Reference Code";
+            END;
+          END ELSE BEGIN
+            IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServiceHeaderNo) THEN
+              lReferenceGeoCode := GetGeoCode(lServiceHeader."Ship-to Post Code",lServiceHeader."Ship-to City");
+            IF lReferenceGeoCode = '' THEN
+              ERROR(Text008,lServiceHeader."Ship-to Post Code",lServiceHeader."Ship-to City",pServiceHeaderNo);
+            //<<IMH53
+            IF pGeoFilter = '' THEN
+              pGeoFilter := lReferenceGeoCode;
+            //>>IMH53
+          END;
+          //>>IMH39 isat.nfo
+          DebugTrace(TextDebug032a);
+          DebugTrace(STRSUBSTNO(TextDebug032,lContactAltAddr.City));
+          DebugTrace(STRSUBSTNO(TextDebug032b,lContactAltAddr."Post Code"));
+          DebugTrace(STRSUBSTNO(TextDebug032c,lReferenceGeoCode));
+          DebugTrace(STRSUBSTNO(TextDebug033,lUrgent));
+          DebugTrace(STRSUBSTNO(TextDebug033b,pCorporateExclusion));
+          DebugTrace(STRSUBSTNO(TextDebug033c,pInvisibleOpenSpace));
+          lSpecialization.RESET;
+          lSpecialization.SETFILTER(Code,pSpecializationFilter);
+          lRequiredSpe := lSpecialization.COUNT;
+          CASE pSearchType OF
+            //Recherche invers‚e
+            pSearchType::Enlarge,
+            pSearchType::Enterprise,
+            pSearchType::DPR : BEGIN
+              CASE pGeoFilterType OF
+                pGeoFilterType::"Area Code" : GetInseeByArea(pGeoFilter,lTempInseeSearchResult,TRUE);
+                pGeoFilterType::"Territory Code" : GetInseeByTerritory(pGeoFilter,lTempInseeSearchResult,TRUE);
+                pGeoFilterType::"Post Code" : BEGIN
+                  IF (PostCodeFilter <> '') AND (CityFilter <> '') THEN BEGIN
+                    IF pContactAltAddress."Post Code" = '' THEN BEGIN
+                      pContactAltAddress."Post Code" := PostCodeFilter;
+                    END;
+                    IF pContactAltAddress.City = '' THEN BEGIN
+                      pContactAltAddress.City := CityFilter;
+                    END;
+                  END;
+                  GetInseeByInsee(pGeoFilter,lTempInseeSearchResult,TRUE);
+                  lTempInseeSearchResult.FINDFIRST;
+                  lReferenceGeoCode := lTempInseeSearchResult."Ref. Geo. Code";
+                  //<<IMH22.isat.PC
+                  IF pSearchType <> pSearchType::DPR THEN
+                    lInversedSearchDistance := ProviderSetup."Inv. Search Default Distance"; //IMH12 isat.nfo
+                  IF lInversedSearchDistance = -1 THEN
+                    lInversedSearchDistance := SelectDistance();
+                  GetInseeByDistanceKm(lReferenceGeoCode,lInversedSearchDistance,lTempInseeSearchResult,TRUE);
+                  //>>IMH22.isat.PC
+                END;
+                ELSE BEGIN
+                  IF pSearchType <> pSearchType::DPR THEN
+                    lInversedSearchDistance := ProviderSetup."Inv. Search Default Distance"; //IMH12 isat.nfo
+                  IF lInversedSearchDistance = -1 THEN
+                    lInversedSearchDistance := SelectDistance();
+                  GetInseeByDistanceKm(lReferenceGeoCode,lInversedSearchDistance,lTempInseeSearchResult,TRUE);
+                END;
+              END;
+              DebugTrace(STRSUBSTNO(TextDebug001,lTempInseeSearchResult.COUNT));
+
+              // Recherche invers‚e
+              InversedProviderSearch(pPSRBuffer,lTempInseeSearchResult,pRefusedProviderBuffer,pContactAltAddress,
+                pSpecializationFilter,pEmergency,lReferenceGeoCode,pServiceHeaderNo, pSearchType);//IMH07
+              DebugTrace(STRSUBSTNO(TextDebug041,pPSRBuffer.COUNT)); //DEBUG.ST
+            END ELSE BEGIN
+              IF (pGeoFilterType = pGeoFilterType::"Post Code") AND (lReferenceGeoCode = '') THEN
+                lReferenceGeoCode := pGeoFilter;
+
+              StandardProviderSearch(pPSRBuffer,lReferenceGeoCode,pRefusedProviderBuffer,pContactAltAddress,
+                pSpecializationFilter,pEmergency,pServiceHeaderNo);//IMH07
+
+            END;
+          END;
+
+          pPSRBuffer.RESET;
+          IF pPSRBuffer.FINDSET THEN BEGIN
+            REPEAT
+              IF NOT lProviderBuffer.GET(pPSRBuffer."Provider No.") THEN BEGIN
+                lProviderBuffer."No." := pPSRBuffer."Provider No.";
+                lProviderBuffer.INSERT;
+              END;
+            UNTIL pPSRBuffer.NEXT = 0;
+          END;
+          DebugTrace(TextDebug020c);
+          DebugTrace(STRSUBSTNO(TextDebug003,lProviderBuffer.COUNT));
+
+          // Application des filtres principaux
+          //<<IMH51
+          EmergencyOption := pEmergency;
+          //>>IMH51
+          ProviderApplyFilter(
+            pPSRBuffer,pCorporateNo,pSearchType,pQualificationBuffer,
+            pCorporateExclusion,pInvisibleOpenSpace,pSpecializationFilter,
+            pServiceHeaderNo,pAllSpecialization,pRefusedProviderBuffer);
+
+          pPSRBuffer.RESET;
+          lProviderBuffer.RESET;
+          lProviderBuffer.DELETEALL;
+          IF pPSRBuffer.FINDSET THEN BEGIN
+            REPEAT
+              IF NOT lProviderBuffer.GET(pPSRBuffer."Provider No.") THEN BEGIN
+                lProviderBuffer."No." := pPSRBuffer."Provider No.";
+                lProviderBuffer.INSERT;
+              END;
+            UNTIL pPSRBuffer.NEXT = 0;
+          END;
+          DebugTrace(TextDebug020c);
+          DebugTrace(STRSUBSTNO(TextDebug006,lProviderBuffer.COUNT));
+
+          // V‚rification de la disponibilit‚ calendaire
+          ProviderCheckAvaliability(pPSRBuffer,pSearchType,pEmergency,GetSearchDate());
+          // Consolidation du nombre de sp‚cialit‚.
+          ConsolidateProvider2(pPSRBuffer,pSearchType,pAllSpecialization,lRequiredSpe);
+
+          pPSRBuffer.RESET;
+          lProviderBuffer.RESET;
+          lProviderBuffer.DELETEALL;
+          IF pPSRBuffer.FINDSET THEN BEGIN
+            REPEAT
+              IF NOT lProviderBuffer.GET(pPSRBuffer."Provider No.") THEN BEGIN
+                lProviderBuffer."No." := pPSRBuffer."Provider No.";
+                lProviderBuffer.INSERT;
+              END;
+            UNTIL pPSRBuffer.NEXT = 0;
+          END;
+          DebugTrace(TextDebug020c);
+          DebugTrace(STRSUBSTNO(TextDebug005,lProviderBuffer.COUNT));
+        END;
+
+        // Recherche de la distance r‚elle et le temps de trajet
+        //<<IMH40.PC
+        pPSRBuffer.RESET;
+        pPSRBuffer.MODIFYALL("Travel Time (min)",0);
+        //CASE pSearchType OF
+        //  pSearchType::Enlarge,
+        //  pSearchType::Enterprise,
+        //  pSearchType::DPR : BEGIN
+        //>>IMH40.PC
+        //<<IMH36 isat.nfo
+        //<<IMH48
+        IF lGeoSearch THEN BEGIN
+        CASE STRLEN(pGeoFilter) OF
+          5: BEGIN
+            IF lGeoRef.GET(pGeoFilter) THEN
+              CalcRealKm(pPSRBuffer,lGeoRef."Latitude Lambert 2E",lGeoRef."Longitude Lambert 2E");
+            END;
+          0: BEGIN
+             lAbiGeoMgt.GetProviderGeoCodeWithAddress(
+              pContactAltAddress."Contact No.",
+              pContactAltAddress,
+              lX,
+              lY)
+             ;
+             CalcRealKm(pPSRBuffer,lX,lY);
+            END;
+         END;//CASE
+        END;
+        //>>IMH48
+      // Calcul du score
+        ProviderCalcScore(pPSRBuffer,pSearchType,pEmergency);
+      END;
+    END;
+
+    PROCEDURE ProviderApplyFilter@1100281013(VAR pProviderSearchResultBuffer@1100281001 : Record 51000;pCorporateNo@1100281003 : Code[20];pSearchType@1100281000 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';VAR pQualificationBuffer@1100281007 : TEMPORARY Record 50079;pCorporateExclusion@1100281011 : ' ,Yes,No';pInvisibleOpenSpace@1100281010 : ',Yes,No';pSpecializationFilter@1100281013 : Text[1024];pServiceHeaderNo@1100281016 : Code[20];pAllSpecialization@1100281019 : Boolean;VAR pRefusedProviderBuffer@1000000002 : Record 50000);
+    VAR
+      lProvider@1100281002 : Record 50000;
+      lProviderBuffer@1000000006 : TEMPORARY Record 50000;
+      lCode@1000000000 : Record 50079;
+      lSpecializationAgreement@1100281006 : Record 50023;
+      lProviderQualification@1100281005 : Record 50008;
+      lProviderSpecialization@1100281004 : Record 50006;
+      lSpecialization@1100281008 : Record 50005;
+      lSpecialization2@1000000005 : Record 50005;
+      lProviderAgreement@1100281012 : Record 50012;
+      lServiceHeader@1100281014 : Record 5900;
+      lServiceOrderType@1100281015 : Record 5903;
+      lProviderContAltAddr@1100281020 : Record 5051;
+      lDeleted@1100281009 : Boolean;
+      lMessage@1100281017 : Text[1024];
+      lDescriptionCode@1000000001 : Text[50];
+      lMaxIntervLimit@1000000004 : Integer;
+      lProviderCurrentInterv@1000000003 : Integer;
+      lSearchType@1000000007 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';
+      lDefaultLimit@1000000008 : Boolean;
+      lExcluTemp@1000000009 : Boolean;
+    BEGIN
+      // Supprime les prestataires trouv‚s en fonction de certains critŠres
+      GetProviderSetup;
+      WITH pProviderSearchResultBuffer DO BEGIN
+        RESET;
+        //<<IMH46 les exclusions de r‚sultat en 2 ‚tapes:
+        //1 : filtrer sur les filtres simples,
+        IF FINDSET THEN BEGIN
+          REPEAT
+            lDeleted := FALSE;
+            lProvider.SETRANGE("No.","Provider No.");
+            // Ne doit pas ˆtre black list
+            //<<IMH51
+            IF SearchParameterSetted THEN BEGIN
+              CASE BlackListOption OF
+                BlackListOption::Yes : lProvider.SETRANGE("Black List",TRUE);
+                BlackListOption::No: lProvider.SETRANGE("Black List",FALSE);
+                ELSE BEGIN
+                  IF pSearchType < pSearchType::DPR THEN
+                    lProvider.SETRANGE("Black List",FALSE);
+                END;
+              END;
+            END ELSE
+            //>>IMH51
+              lProvider.SETRANGE("Black List",FALSE);
+            // Doit ˆtre actif
+            lProvider.SETRANGE(Enable,TRUE);
+            //<<IMH38 isat.nfo
+            // Doit poss‚der un code de r‚f‚rence g‚ographique
+            //lProvider.SETFILTER("Geo. Reference Code",'<>%1','');
+            //>>IMH38 isat.nfo
+            // Doit ˆtre Visible Plateau
+            CASE pInvisibleOpenSpace OF
+              pInvisibleOpenSpace::Yes : lProvider.SETRANGE("Invisible Open Space",TRUE);
+              pInvisibleOpenSpace::No : lProvider.SETRANGE("Invisible Open Space",FALSE);
+              ELSE BEGIN
+                IF pSearchType < pSearchType::DPR THEN BEGIN
+                  lProvider.SETRANGE("Invisible Open Space",FALSE);
+                END;
+              END;
+            END;
+            IF lProvider.ISEMPTY THEN BEGIN
+              IF NOT lProviderBuffer.GET("Provider No.") THEN BEGIN
+                lProviderBuffer."No." := "Provider No.";
+                lProviderBuffer.INSERT;
+                //<<IMH47
+                DebugTrace(STRSUBSTNO(TextDebug008,"Provider No."));
+                //>>IMH47
+              END;
+              DELETE;
+              lDeleted := TRUE;
+            END;
+
+            IF NOT lDeleted THEN BEGIN
+              lProvider.FINDFIRST;
+              Status := lProvider.Status;
+              //<<IMH51
+              IF NOT Exclusion THEN
+                Exclusion := lProvider."Black List";
+              //>>IMH51
+              MODIFY;
+
+              //<<IMH51
+              //Exclusion
+              IF (NOT SearchParameterSetted) OR (pSearchType < pSearchType::DPR) THEN BEGIN
+                IF ((lProvider.Exclusion) AND (WORKDATE >= lProvider."Exclusion Date")) OR
+                   (lProvider."Temp. Exclusion" AND
+                    ((lProvider."Temp. Exclusion Start Date" <= WORKDATE) AND
+                     (lProvider."Temp. Exclusion End Date" >= WORKDATE)))
+                THEN
+                  lDeleted := TRUE;
+              END ELSE BEGIN
+                CASE ExclusionDeffinitive OF
+                  ExclusionDeffinitive::Yes : lDeleted := NOT (lProvider.Exclusion AND (WORKDATE >= lProvider."Exclusion Date"));
+                  ExclusionDeffinitive::No : lDeleted := lProvider.Exclusion AND (WORKDATE >= lProvider."Exclusion Date");
+                  ELSE BEGIN
+                    Exclusion := lProvider.Exclusion AND (WORKDATE >= lProvider."Exclusion Date");
+                    IF Exclusion THEN
+                      MODIFY;
+                  END;
+                END;
+                lExcluTemp := FALSE;
+                IF NOT lDeleted THEN BEGIN
+                  IF lProvider."Temp. Exclusion" AND
+                      ((lProvider."Temp. Exclusion Start Date" <= WORKDATE) AND
+                       (lProvider."Temp. Exclusion End Date" >= WORKDATE))
+                  THEN
+                    lExcluTemp := TRUE;
+                  CASE ExclusionTemp OF
+                    ExclusionTemp::Yes : lDeleted := NOT lExcluTemp;
+                    ExclusionTemp::No : lDeleted := lExcluTemp;
+                    ELSE BEGIN
+                      Exclusion := lExcluTemp;
+                      IF Exclusion THEN
+                        MODIFY;
+                    END;
+                  END;
+                END;
+              END;
+              IF lDeleted THEN BEGIN
+              //>>IMH51
+                IF NOT lProviderBuffer.GET("Provider No.") THEN BEGIN
+                  lProviderBuffer."No." := "Provider No.";
+                  lProviderBuffer.INSERT;
+                  //<<IMH47
+                  //DebugTrace(STRSUBSTNO(TextDebug036,"Provider No."));
+                  DebugTrace(STRSUBSTNO(TextDebug036,"Provider No.",lProvider.Name));
+                  //>>IMH47
+                END;
+                DELETE;
+                lDeleted := TRUE;
+              END;
+            END;
+
+            // Entreprise generale
+            IF NOT lDeleted THEN BEGIN
+              IF pSearchType = SearchType::Enterprise THEN BEGIN
+                IF (NOT lProvider."General Company") AND (NOT lProvider."Renovation Company") THEN BEGIN
+                  IF NOT lProviderBuffer.GET("Provider No.") THEN BEGIN
+                    lProviderBuffer."No." := "Provider No.";
+                    lProviderBuffer.INSERT;
+                    //<<IMH47
+                    DebugTrace(STRSUBSTNO(TextDebug011,"Provider No.",lProvider.Name));
+                    //DebugTrace(STRSUBSTNO(TextDebug011,"Provider No."));
+                    //>>IMH47
+                  END;
+                  DELETE;
+                  lDeleted := TRUE;
+                END;
+              END;
+            END;
+
+            // Validation de l'ag‚ment du grand compte
+            IF NOT lDeleted THEN BEGIN
+              //<<IMH51
+              lDeleted := ExclusionProvider(lMessage, pSearchType, pCorporateExclusion, pServiceHeaderNo,
+                           "Provider No.", pCorporateNo, "Specialization Code");
+
+              IF pSearchType = pSearchType::DPR THEN BEGIN
+                CASE pCorporateExclusion OF
+                  pCorporateExclusion::Yes : ;
+                  pCorporateExclusion::No : lDeleted := NOT lDeleted;
+                  ELSE
+                    lDeleted := FALSE;
+                END;
+              END;
+              IF lDeleted THEN BEGIN
+              //>>IMH51
+                DebugTrace(lMessage);
+                DELETE;
+                lDeleted := TRUE;
+              END;
+            END;
+          UNTIL NEXT = 0;
+        END;
+
+        //Etape 2 : filtres complexes
+        RESET;
+        //>>IMH46
+        IF FINDSET THEN BEGIN
+          REPEAT
+            //<<IMH52
+            IF NOT ((pSearchType = pSearchType::DPR) AND SearchParameterSetted AND (NOT SpecialitySearch)) THEN
+            //lSpecialization.GET(pProviderSearchResultBuffer."Specialization Code");
+              IF NOT lSpecialization.GET(pProviderSearchResultBuffer."Specialization Code") THEN
+                CLEAR(lSpecialization);
+            //>>IMH52
+
+            lDeleted := FALSE;
+            //<<IMH46 d‚placer dans l'‚tape 1
+            //<<IMH46
+            IF NOT lProvider.GET("Provider No.") THEN
+              CLEAR(lProvider);
+
+            // Doit possŠder une adresse op‚rationnelle g‚ocod‚e
+            IF NOT lDeleted THEN BEGIN
+              lProviderContAltAddr.RESET;
+              lProviderContAltAddr.SETRANGE("Contact No.","Provider No.");
+              lProviderContAltAddr.SETRANGE("Geo. Reference Address",TRUE);
+              lProviderContAltAddr.SETFILTER("Geo. Reference Code",'<>%1','');
+              IF lProviderContAltAddr.ISEMPTY THEN BEGIN
+                IF NOT lProviderBuffer.GET("Provider No.") THEN BEGIN
+                  lProviderBuffer."No." := "Provider No.";
+                  lProviderBuffer.INSERT;
+                  DebugTrace(STRSUBSTNO(TextDebug042,"Provider No."));
+                END;
+                DELETE;
+                lDeleted := TRUE;
+              END;
+            END;
+
+            // Le prestataire ne doit pas avoir d‚pass‚ le nombre maximum dÉintervention
+            IF NOT lDeleted THEN BEGIN
+              //<<IMH54
+              //Gestion de limite nb intervention encore
+              IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN
+                CLEAR(lServiceOrderType);
+              IF NOT CheckLimteCurrInterv(lProvider, "Specialization Code", lServiceHeader."Service Order Type", pSearchType,
+                  "Current Interv. Limit Max.","Current Service Interv. Nb", "Interv. Limit Type") THEN BEGIN
+                DELETE;
+                lDeleted := TRUE;
+                IF pSearchType = pSearchType:: Standard THEN BEGIN
+                  //<<IMH47
+                  DebugTrace(
+                    STRSUBSTNO(
+                      TextDebug034,"Provider No.",lSpecialization.Description,"Current Service Interv. Nb",
+                      "Current Interv. Limit Max.",0,0
+                      ,lProvider.Name, lServiceHeader."Service Order Type"));
+                  //>>IMH47
+                END ELSE BEGIN
+                  //<<IMH47
+                  DebugTrace(
+                    STRSUBSTNO(
+                      TextDebug034,"Provider No.",lSpecialization.Description,"Current Service Interv. Nb","Current Interv. Limit Max.",
+                      ("Current Interv. Limit Max." * ProviderSetup."Supplement Max. Interv. (%)" / 100),
+                      ProviderSetup."Supplement Max. Interv. (%)",lProvider.Name, lServiceHeader."Service Order Type"));
+                  //>>IMH47
+                END;
+              END ELSE
+                MODIFY;
+            END;
+              {
+              //<<IMH40.PC
+              lDefaultLimit := FALSE;
+              "Current Interv. Limit Max." := 0;
+              //>>IMH40.PC
+
+              IF "Specialization Code" <> '' THEN BEGIN
+                lProviderSpecialization.RESET;
+                lProviderSpecialization.SETRANGE("Provider No.", lProvider."No.");
+                lProviderSpecialization.SETRANGE("Specialization Code", "Specialization Code");
+                IF lProviderSpecialization.FINDFIRST THEN BEGIN
+                  IF lProviderSpecialization."Current Interv. Limit" <> 0 THEN BEGIN
+                    "Current Interv. Limit Max." := lProviderSpecialization."Current Interv. Limit";
+                  END;
+                END;
+              END;
+              IF "Current Interv. Limit Max." = 0 THEN BEGIN
+                "Current Interv. Limit Max." := lProvider."Current Interv. Limit Max.";
+                //<<IMH40.PC
+                lDefaultLimit := TRUE;
+                //>>IMH40.PC
+              END;
+              IF "Current Interv. Limit Max." > 0 THEN BEGIN
+                lProvider.CALCFIELDS("Current Service Interv. Nb");
+                //<<IMH40.PC
+                IF lDefaultLimit THEN BEGIN
+                  lProviderCurrentInterv := lProvider.CountCurrentInterv('');
+                END ELSE BEGIN
+                //>>IMH40.PC
+                  lProviderCurrentInterv := lProvider.CountCurrentInterv("Specialization Code");
+                END;
+                IF HasMaxInterv(pSearchType, lProvider."No.",lProviderCurrentInterv,"Current Interv. Limit Max.") THEN BEGIN
+                  DELETE;
+                  lDeleted := TRUE;
+                  IF pSearchType = pSearchType:: Standard THEN BEGIN
+                    //<<IMH47
+                    DebugTrace(
+                      STRSUBSTNO(
+                        TextDebug034,"Provider No.",lSpecialization.Description,lProviderCurrentInterv,"Current Interv. Limit Max.",0,0
+                        ,lProvider.Name));
+                    //>>IMH47
+                  END ELSE BEGIN
+                    //<<IMH47
+                    DebugTrace(
+                      STRSUBSTNO(
+                        TextDebug034,"Provider No.",lSpecialization.Description,lProviderCurrentInterv,"Current Interv. Limit Max.",
+                        ("Current Interv. Limit Max." * ProviderSetup."Supplement Max. Interv. (%)" / 100),
+                        ProviderSetup."Supplement Max. Interv. (%)",lProvider.Name));
+                    //>>IMH47
+
+                  END;
+                END;
+              END;
+              }
+            //>>IMH54
+
+           //<<IMH51
+           //Controle Calendrier pour les recherche DPR
+           IF NOT lDeleted THEN BEGIN
+            IF SearchParameterSetted THEN
+              IF pSearchType = pSearchType::DPR THEN BEGIN
+                lMessage := '';
+                lDeleted := CheckCalendar(pProviderSearchResultBuffer,pSearchType,EmergencyOption,GetSearchDate(), lMessage);
+                CASE CalendarDispo OF
+                  CalendarDispo::Yes : lDeleted := NOT lDeleted;
+                  CalendarDispo::No : ;
+                  ELSE
+                    lDeleted := FALSE
+                END;
+                IF lDeleted THEN BEGIN
+                  DebugTrace(lMessage);
+                  lDeleted := TRUE;
+                  DELETE;
+                END;
+              END;
+            END;
+            //>>IMH51
+           //<<IMH51
+           //Controle l'heure d'ouverture pour les recherches DPR
+           IF NOT lDeleted THEN BEGIN
+            IF SearchParameterSetted THEN
+              IF pSearchType = pSearchType::DPR THEN BEGIN
+                lMessage := '';
+                //<<IMH67
+                //lDeleted := ProviderCheckBusinessHours("Provider No.",GetSearchDate,GetSearchTime,EmergencyOption);
+                lDeleted := ProviderSearchMgt.ProviderCheckBusinessHours("Provider No.",GetSearchDate,GetSearchTime,EmergencyOption);
+                //>>IMH67
+                pProviderSearchResultBuffer."Out Of Business Hours" := NOT lDeleted;
+                MODIFY;
+                CASE TimeDispo OF
+                  TimeDispo::Yes : lDeleted := NOT lDeleted;
+                  TimeDispo::No : ;
+                  ELSE BEGIN
+                    lDeleted := FALSE;
+                  END;
+                END;
+                IF lDeleted THEN BEGIN
+                  DebugTrace(STRSUBSTNO(TextDebug007,"Provider No.",lProvider.Name));
+                  lDeleted := TRUE;
+                  DELETE;
+                END;
+              END;
+            END;
+            //>>IMH51
+            // Le pr‚stataire doit couvrir l'ensemble des sp‚cialit‚s.
+            //<<IMH52
+            IF pSpecializationFilter <> '' THEN
+            //>>IMH52
+              IF NOT lDeleted THEN BEGIN
+                lProviderSpecialization.RESET;
+                lProviderSpecialization.SETRANGE("Provider No.","Provider No.");
+                lProviderSpecialization.SETFILTER("Specialization Code",pSpecializationFilter);
+                IF (pSearchType < pSearchType::Sequenced) OR pAllSpecialization THEN BEGIN
+                  lSpecialization2.RESET;
+                  lSpecialization2.SETFILTER(Code,pSpecializationFilter);
+                  IF lProviderSpecialization.COUNT <> lSpecialization2.COUNT THEN BEGIN
+                    //<<IMH47
+                    //DebugTrace(STRSUBSTNO(TextDebug015,"Provider No.",lSpecialization.Description));
+                    DebugTrace(STRSUBSTNO(TextDebug015,"Provider No.",lSpecialization.Description,lProvider.Name));
+                    //>>IMH47
+                    DELETE;
+                    lDeleted := TRUE;
+                  END;
+                END ELSE BEGIN
+                  lSpecialization2.RESET;
+                  lSpecialization2.SETFILTER(Code,pSpecializationFilter);
+                  "Specialization(s) Nb" := lProviderSpecialization.COUNT;
+                END;
+              END;
+
+            // si la recherche demande une qualification le prestataire doit la poss‚der
+            IF NOT lDeleted THEN BEGIN
+              pQualificationBuffer.RESET;
+              IF pQualificationBuffer.FINDSET THEN BEGIN
+                REPEAT
+                  lProviderQualification.RESET();
+                  lProviderQualification.SETRANGE("Provider No.","Provider No.");
+                  lProviderQualification.SETRANGE("Qualification Code",pQualificationBuffer.Code);
+                  lProviderQualification.SETFILTER("Start Date",'<%1|>%2',GetSearchDate(),GetSearchDate());
+                  IF lProviderQualification.ISEMPTY THEN BEGIN
+                    IF NOT lProviderBuffer.GET("Provider No.") THEN BEGIN
+                      lProviderBuffer."No." := "Provider No.";
+                      lProviderBuffer.INSERT;
+                      //<<IMH47
+                      //DebugTrace(STRSUBSTNO(TextDebug016,"Provider No."));
+                      DebugTrace(STRSUBSTNO(TextDebug016,"Provider No.",lProvider.Name));
+                      //>>IMH47
+                    END;
+                    DELETE;
+                    lDeleted := TRUE;
+                  END;
+                //<<IMH52
+                //UNTIL (lSpecialization.NEXT = 0) OR (lProviderQualification.ISEMPTY);
+                UNTIL (pQualificationBuffer.NEXT = 0) OR (lProviderQualification.ISEMPTY);
+                //>>IMH52
+              END;
+            END;
+
+            // On regarde si le prestataire n'a pas d‚j… ‚t‚ refus‚
+            IF NOT lDeleted THEN BEGIN
+              IF pRefusedProviderBuffer.GET("Provider No.") THEN BEGIN
+                IF lCode.GET(DATABASE::"Provider Search Result Buffer",10,pRefusedProviderBuffer."Salutation Code") THEN BEGIN
+                  lDescriptionCode := lCode.Description;
+                END ELSE BEGIN
+                  lDescriptionCode := pRefusedProviderBuffer."Salutation Code";
+                END;
+                lSearchType := pRefusedProviderBuffer."Current Interv. Limit Max.";
+                IF NOT lProviderBuffer.GET("Provider No.") THEN BEGIN
+                  lProviderBuffer."No." := "Provider No.";
+                  lProviderBuffer.INSERT;
+                  //<<IMH47
+                  //DebugTrace(STRSUBSTNO(TextDebug031,"Provider No.",FORMAT(lSearchType,0,1),lDescriptionCode));
+                  DebugTrace(STRSUBSTNO(TextDebug031,"Provider No.",FORMAT(lSearchType,0,1),lDescriptionCode,lProvider.Name));
+                  //>>IMH47
+                END;
+                DELETE;
+                lDeleted := TRUE;
+              END;
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE ProviderCheckAvaliability@1100281014(VAR pProviderSearchResultBuffer@1100281000 : Record 51000;pSearchType@1100281008 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';pEmergency@1100281006 : ' ,Yes,No';pDate@1100281001 : Date) rValue : Boolean;
+    VAR
+      lProviderCalMgt@1100281003 : Codeunit 50007;
+      lSpecialization@1100281005 : Record 50005;
+      lProvider@1100281009 : Record 50000;
+      lDeleted@1100281007 : Boolean;
+      lUnvailableDay@1100281004 : Integer;
+      lIsConstrainte@1100281002 : Boolean;
+    BEGIN
+
+      //Validation des disponibilit‚ Calandaire et Horaire
+
+      //<<IMH51
+      IF pSearchType = pSearchType::DPR THEN
+        EXIT(TRUE);
+      //>>IMH51
+
+      rValue := FALSE;
+      lIsConstrainte := FALSE;
+
+      GetProviderSetup;
+
+      lUnvailableDay := 0;
+      CASE pSearchType OF
+        pSearchType::Standard : BEGIN
+          lUnvailableDay := ProviderSetup."Standard Unavail. Day Used";
+        END;
+        pSearchType::Advanced : BEGIN
+          lUnvailableDay := ProviderSetup."Advanced Unavail. Day Used";
+        END;
+        pSearchType::Enlarge : BEGIN
+          lUnvailableDay := ProviderSetup."Enlarge Unavail. Day Used";
+        END;
+        pSearchType::Enterprise : BEGIN
+          lUnvailableDay := ProviderSetup."Entreprise Unavail. Day Used";
+        END;
+        pSearchType::Sequenced : BEGIN
+          lUnvailableDay := ProviderSetup."Sequenced Unavail. Day Used";
+        END;
+      END;
+
+      WITH pProviderSearchResultBuffer DO BEGIN
+        RESET;
+        IF FINDSET THEN BEGIN
+          REPEAT
+            //<<IMH52
+            //lSpecialization.GET(pProviderSearchResultBuffer."Specialization Code");
+            IF NOT lSpecialization.GET(pProviderSearchResultBuffer."Specialization Code") THEN
+              CLEAR(lSpecialization);
+            //>>IMH52
+            lProvider.GET("Provider No.");//IMH47
+            lDeleted := FALSE;
+            IF pEmergency = pEmergency::Yes THEN BEGIN
+              IF NOT lProviderCalMgt.IsProviderAvailable(
+                       "Provider No.","Specialization Code",TRUE,
+                       pDate,pDate + lUnvailableDay,
+                       "First Available Date",lIsConstrainte)
+              THEN BEGIN
+                //<<IMH47
+                DebugTrace(
+                  STRSUBSTNO(
+                    TextDebug017,"Provider No.",lSpecialization.Description,pDate,pDate + lUnvailableDay,
+                    "First Available Date",lIsConstrainte,lProvider.Name));
+
+                //>>IMH47
+                lDeleted := TRUE;
+                DELETE;
+              END ELSE BEGIN
+                Constrainte := lIsConstrainte;
+                IF NOT lIsConstrainte THEN BEGIN
+                  // V‚rification des heures d'ouverture
+                  IF CheckHours(pSearchType) THEN BEGIN
+                    //<<IMH67
+                    //IF NOT ProviderCheckBusinessHours("Provider No.",GetSearchDate,GetSearchTime,pEmergency) THEN BEGIN
+                    IF NOT ProviderSearchMgt.ProviderCheckBusinessHours("Provider No.",GetSearchDate,GetSearchTime,pEmergency) THEN BEGIN
+                    //>>IMH67
+                      //<<IMH47
+                      //DebugTrace(STRSUBSTNO(TextDebug007,"Provider No."));
+                      DebugTrace(STRSUBSTNO(TextDebug007,"Provider No.",lProvider.Name));
+                      //>>IMH47
+                      lDeleted := TRUE;
+                      DELETE;
+                    END;
+                  END;
+                END;
+              END;
+            END ELSE BEGIN
+              IF pEmergency = pEmergency::No THEN BEGIN
+                IF NOT lProviderCalMgt.IsProviderAvailable(
+                         "Provider No.","Specialization Code",FALSE,
+                         pDate,pDate + lUnvailableDay,
+                         "First Available Date",lIsConstrainte)
+                THEN BEGIN
+                  DebugTrace(
+                    STRSUBSTNO(
+                      TextDebug017,"Provider No.",lSpecialization.Description,pDate,pDate + lUnvailableDay,
+                      "First Available Date",lIsConstrainte,lProvider.Name));
+                  lDeleted := TRUE;
+                  DELETE;
+                END ELSE BEGIN
+                  Constrainte := lIsConstrainte;
+                  IF NOT lIsConstrainte THEN BEGIN
+                    // V‚rification des heures d'ouverture
+                    IF CheckHours(pSearchType) THEN BEGIN
+                      //<<IMH67
+                      //IF NOT ProviderCheckBusinessHours("Provider No.",GetSearchDate,GetSearchTime,pEmergency) THEN BEGIN
+                      IF NOT ProviderSearchMgt.ProviderCheckBusinessHours(
+                                "Provider No.",GetSearchDate,GetSearchTime,pEmergency) THEN BEGIN
+                      //>>IMH67
+                        //<<IMH47
+                        //DebugTrace(STRSUBSTNO(TextDebug007,"Provider No."));
+                        DebugTrace(STRSUBSTNO(TextDebug007,"Provider No.",lProvider.Name));
+                        //>>IMH47
+                        lDeleted := TRUE;
+                        DELETE;
+                      END;
+                    END;
+                  END;
+                END;
+              END;
+            END;
+            IF NOT lDeleted THEN BEGIN
+              MODIFY;
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE CheckCalendar@1000000002(VAR pProviderSearchResultBuffer@1100281000 : Record 51000;pSearchType@1100281008 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';pEmergency@1100281006 : ' ,Yes,No';pDate@1100281001 : Date;VAR pMessage@1100281010 : Text[1024]) rValue : Boolean;
+    VAR
+      lProviderCalMgt@1100281003 : Codeunit 50007;
+      lSpecialization@1100281005 : Record 50005;
+      lProvider@1100281009 : Record 50000;
+      lProviderSpec@1100281012 : Record 50006;
+      lDeleted@1100281007 : Boolean;
+      lUnvailableDay@1100281004 : Integer;
+      lIsConstrainte@1100281002 : Boolean;
+      lDate@1100281011 : Date;
+      lEmergencyToTreat@1100281013 : Boolean;
+    BEGIN
+      //IMH51
+      //Validation des disponibilit‚ Calandaire
+      IF pSearchType <> pSearchType::DPR THEN
+        EXIT(TRUE);
+
+      rValue := FALSE;
+      lIsConstrainte := FALSE;
+      lUnvailableDay := 365;    //1 an maximum pour la recherche de la 1er jour dispo
+
+      WITH pProviderSearchResultBuffer DO BEGIN
+        //<<IMH52
+        //lSpecialization.GET(pProviderSearchResultBuffer."Specialization Code");
+        IF lSpecialization.GET(pProviderSearchResultBuffer."Specialization Code") THEN;  //IMH57
+        //>>IMH52
+        lProvider.GET("Provider No.");//IMH47
+        lDeleted := FALSE;
+        IF lProviderCalMgt.IsProviderAvailable(
+                 "Provider No.","Specialization Code",pEmergency = pEmergency::Yes,
+                 pDate,pDate + lUnvailableDay,
+                 "First Available Date",lIsConstrainte)
+        THEN
+          rValue := TRUE;
+
+        //<<IMH57
+        IF pEmergency = pEmergency::" " THEN BEGIN
+          lEmergencyToTreat := TRUE;
+          IF lProviderSpec.GET(lProvider."No.", pProviderSearchResultBuffer."Specialization Code") THEN;
+            IF NOT lProviderSpec.Emergency THEN
+              lEmergencyToTreat := FALSE;
+          IF lEmergencyToTreat THEN
+            IF lProviderCalMgt.IsProviderAvailable(
+                     "Provider No.","Specialization Code",TRUE,
+                     pDate,pDate + lUnvailableDay,
+                     lDate,lIsConstrainte)
+            THEN BEGIN
+              rValue := TRUE;
+              IF lDate <> 0D THEN
+                IF (lDate < "First Available Date") OR ("First Available Date" = 0D) THEN
+                  "First Available Date" := lDate;
+            END;
+        END;
+        //<<IMH57
+
+        pMessage :=
+         STRSUBSTNO(
+           TextDebug017,"Provider No.",lSpecialization.Description,pDate,pDate + lUnvailableDay,
+           "First Available Date",lIsConstrainte,lProvider.Name);
+        MODIFY;
+        IF rValue THEN
+          IF "First Available Date" <> 0D THEN
+            IF "First Available Date" > pDate THEN
+              rValue := FALSE;
+      END;
+    END;
+
+    PROCEDURE CheckBusinessHours@1100281019(VAR pProviderSearchResultBuffer@1100281000 : Record 51000;pDate@1100281001 : Date;pTime@1100281002 : Time;pEmergency@1100281007 : ',Yes,No';pConstrainte@1100281003 : Boolean) : Boolean;
+    VAR
+      lProvider@1100281004 : Record 50000;
+    BEGIN
+      WITH pProviderSearchResultBuffer DO BEGIN
+        IF FINDSET THEN BEGIN
+          REPEAT
+            //<<IMH67
+            //IF NOT ProviderCheckBusinessHours("Provider No.",pDate,pTime,pEmergency) THEN BEGIN
+            IF NOT ProviderSearchMgt.ProviderCheckBusinessHours("Provider No.",pDate,pTime,pEmergency) THEN BEGIN
+            //>>IMH67
+              //<<IMH47
+              lProvider.GET("Provider No.");
+              DebugTrace(STRSUBSTNO(TextDebug007,"Provider No.",lProvider.Name));
+              //DebugTrace(STRSUBSTNO(TextDebug007,"Provider No."));
+              //>>IMH47
+              DELETE;
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE InversedProviderSearch@1100281022(VAR pPSRBuffer@1100281006 : Record 51000;VAR pTempInseeSearchResult@1100281000 : Record 51001;VAR pRefusedProviderBuffer@1100281001 : Record 50000;pContactAltAddress@1100281004 : Record 5051;pSpecializationFilter@1100281002 : Text[1024];pEmergency@1100281003 : ',Yes,No';pReferenceGeoCode@1100281007 : Code[10];pServiceHeaderNo@1100281008 : Code[20];pSearchType@1100281014 : Integer);
+    VAR
+      lAbilityGeoProvider@1100281005 : Record 50016;
+      lProviderContactAltAddr@1100281009 : Record 5051;
+      lProvider@1100281010 : Record 50000;
+      lProviderSpec@1100281011 : Record 50006;
+      lAbilityGeoProvider2@1100281012 : Record 50016;
+      lSkipRec@1100281013 : Boolean;
+      lSpecialityCode@1100281015 : Code[10];
+    BEGIN
+      //lTempInseeSearchResult,psrBuffer,pSpecializationFilter,pEmergency,pStandard
+      WITH pPSRBuffer DO BEGIN
+        IF pTempInseeSearchResult.FINDSET() THEN BEGIN
+          REPEAT
+            lAbilityGeoProvider.RESET();
+            //lAbilityGeoProvider.SETCURRENTKEY("Start Reference Code","Specialization Code",Emergency);
+            lAbilityGeoProvider.SETCURRENTKEY("End Ref. Geo. Code","Specialization Code");
+            lAbilityGeoProvider.SETRANGE("End Ref. Geo. Code",pTempInseeSearchResult."Ref. Geo. Code");
+            //lAbilityGeoProvider.SETRANGE("Start Reference Code",pTempInseeSearchResult."Ref. Geo. Code");
+            lAbilityGeoProvider.SETFILTER("Specialization Code",pSpecializationFilter);
+            IF pEmergency = pEmergency::Yes THEN BEGIN
+              lAbilityGeoProvider.SETRANGE(Emergency,TRUE);
+              lAbilityGeoProvider.SETRANGE("Emergency Exclusion",FALSE);
+            END ELSE BEGIN
+              lAbilityGeoProvider.SETRANGE(Standard,TRUE);
+              lAbilityGeoProvider.SETRANGE("Standard Exclusion",FALSE);
+            END;
+
+            IF NOT lAbilityGeoProvider.ISEMPTY() THEN BEGIN
+              IF lAbilityGeoProvider.FINDSET(FALSE,FALSE) THEN BEGIN
+                REPEAT
+                  INIT;  //IMH58
+                  //<<IMH52
+                  IF NOT ((pSearchType = 5) AND SearchParameterSetted AND (NOT SpecialitySearch)) THEN
+                    lSpecialityCode := lAbilityGeoProvider."Specialization Code"
+                  ELSE
+                    lSpecialityCode := '';
+                  //IF NOT GET(lAbilityGeoProvider."Provider No.",lAbilityGeoProvider."Specialization Code") THEN BEGIN
+                  IF NOT GET(lAbilityGeoProvider."Provider No.",lSpecialityCode) THEN BEGIN
+                  //>>IMH52
+                    IF NOT pRefusedProviderBuffer.GET(lAbilityGeoProvider."Provider No.") THEN BEGIN
+                      "Provider No." := lAbilityGeoProvider."Provider No.";
+                      //<<IMH22.isat.PC
+                      lProviderContactAltAddr.SETRANGE("Contact No.","Provider No.");
+                      lProviderContactAltAddr.SETRANGE("Geo. Reference Address",TRUE);
+                      IF lProviderContactAltAddr.FINDFIRST THEN BEGIN
+                        City := lProviderContactAltAddr.City;
+                        "Post Code" := lProviderContactAltAddr."Post Code";
+                      END;
+                      //>>IMH22.isat.PC
+                      lSkipRec := FALSE;
+                      //<<IMH54
+                      //D‚sactiv‚ : Contr“le fait dans la fonction ProviderApplyFilter
+                      {
+                      IF lProvider.GET("Provider No.") THEN BEGIN
+                        "Current Interv. Limit Max." := lProvider."Current Interv. Limit Max.";
+      //<<IMH23.ST
+                        IF lProviderSpec.GET("Provider No.", lAbilityGeoProvider."Specialization Code") THEN
+                          IF lProviderSpec."Current Interv. Limit" <> 0 THEN
+                            "Current Interv. Limit Max." := lProviderSpec."Current Interv. Limit";
+                        IF "Current Interv. Limit Max." > 0 THEN BEGIN
+                          lSkipRec := HasMaxInterv(pSearchType,"Provider No.",
+                                                   lProvider.CountCurrentInterv(lAbilityGeoProvider."Specialization Code"),
+                                                   "Current Interv. Limit Max.");
+                        END;
+      //>>IMH23.ST
+                      END;
+                      }
+                      //>>IMH54
+                      //<<IMH52
+                      IF NOT ((pSearchType = 5) AND SearchParameterSetted AND (NOT SpecialitySearch)) THEN
+                      //>>IMH52
+                        "Specialization Code" := lAbilityGeoProvider."Specialization Code";
+
+      //<<IMH23.ST
+      //                Distance := pTempInseeSearchResult.Distance;
+                      //<<IMH67
+                      //Distance := GetDistance2(lAbilityGeoProvider."Provider No.",pReferenceGeoCode);
+                      Distance := ProviderSearchMgt.GetDistance(lAbilityGeoProvider."Provider No.",pReferenceGeoCode);
+                      //>>IMH67
+      //>>IMH23.ST
+
+                      //<<IMH04
+                      //"Contact No." := pContactNo;
+                      "Contact No." := pContactAltAddress."Contact No.";
+                      //"Alt. Address Code" := pAddrCode;
+                      "Alt. Address Code" := pContactAltAddress.Code;
+                      "Service Header No." := pServiceHeaderNo;//IMH07
+                      //>>IMH04
+      //<<IMH23.ST
+                      // D‚tection des hors zones
+                      lAbilityGeoProvider2.SETCURRENTKEY("End Ref. Geo. Code");
+                      lAbilityGeoProvider2.SETRANGE("End Ref. Geo. Code", pReferenceGeoCode);
+                      lAbilityGeoProvider2.SETRANGE("Provider No.", "Provider No.");
+                      IF pEmergency = pEmergency::Yes THEN
+                        lAbilityGeoProvider.SETRANGE(Emergency,TRUE);
+                      IF pEmergency = pEmergency::No THEN
+                        lAbilityGeoProvider.SETRANGE(Standard,TRUE);
+                      //<<IMH52
+                      IF NOT ((pSearchType = 5) AND SearchParameterSetted AND (NOT SpecialitySearch)) THEN
+                      //>>IMH52
+                        lAbilityGeoProvider2.SETRANGE("Specialization Code", lAbilityGeoProvider."Specialization Code");
+                      "Out Zone" := lAbilityGeoProvider2.ISEMPTY;
+      //>>IMH23.ST
+                      INSERT();
+                    END;
+                  END;
+                UNTIL lAbilityGeoProvider.NEXT = 0;
+              END;
+            END;
+          UNTIL pTempInseeSearchResult.NEXT()=0;
+          lAbilityGeoProvider.SETRANGE("Distance (km)",0);
+        END;
+      END;
+    END;
+
+    PROCEDURE StandardProviderSearch@1100281023(VAR pPSRBuffer@1100281005 : Record 51000;VAR pReferenceGeoCode@1100281004 : Code[10];VAR pRefusedProviderBuffer@1100281003 : Record 50000;pContactAltAddress@1100281002 : Record 5051;pSpecializationFilter@1100281001 : Text[1024];pEmergency@1100281000 : ',Yes,No';pServiceHeaderNo@1100281007 : Code[20]);
+    VAR
+      lAbilityGeoProvider@1100281006 : Record 50016;
+      lAbiCampGeoProvider@1100281008 : Record 50015;
+      lServiceHeader@1100281009 : Record 5900;
+      lProvider@1100281010 : Record 50000;
+      lProviderContactAltAddr@1100281012 : Record 5051;
+      lProviderSpec@1100281011 : Record 50006;
+    BEGIN
+      //IMH07 Ajout paramŠter pServiceHeaderNp
+
+      WITH pPSRBuffer DO BEGIN
+
+        IF pServiceHeaderNo <> '' THEN
+          IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServiceHeaderNo) THEN
+            pPSRBuffer."Campaign No." := lServiceHeader."Campaign No.";
+
+        IF pPSRBuffer."Campaign No." = '' THEN BEGIN
+          lAbilityGeoProvider.RESET();
+          lAbilityGeoProvider.SETCURRENTKEY("End Ref. Geo. Code","Specialization Code");
+          lAbilityGeoProvider.SETRANGE("End Ref. Geo. Code",pReferenceGeoCode);
+          lAbilityGeoProvider.SETFILTER("Specialization Code",pSpecializationFilter);
+          IF pEmergency = pEmergency::Yes THEN BEGIN
+            lAbilityGeoProvider.SETRANGE(Emergency,TRUE);
+            lAbilityGeoProvider.SETRANGE("Emergency Exclusion",FALSE);
+          END ELSE BEGIN
+            lAbilityGeoProvider.SETRANGE(Standard,TRUE);
+            lAbilityGeoProvider.SETRANGE("Standard Exclusion",FALSE);
+          END;
+          IF lAbilityGeoProvider.FINDSET(FALSE,FALSE) THEN BEGIN
+            REPEAT
+              IF GET(lAbilityGeoProvider."Provider No.",lAbilityGeoProvider."Specialization Code") THEN BEGIN
+                IF Distance = 0 THEN BEGIN
+                  IF lAbilityGeoProvider."Setup Type" <> lAbilityGeoProvider."Setup Type"::"Ville (Distance)" THEN
+                    //<<IMH67
+                    //Distance := GetDistance2("Provider No.", pReferenceGeoCode)
+                    Distance := ProviderSearchMgt.GetDistance("Provider No.", pReferenceGeoCode)
+                    //>>IMH67
+                  ELSE
+                    //<<IMH67
+                    //Distance := GetDistance2("Provider No.", pReferenceGeoCode);
+                    Distance := ProviderSearchMgt.GetDistance("Provider No.", pReferenceGeoCode);
+                    //>>IMH67
+                  MODIFY();
+                END;
+              END ELSE BEGIN
+                INIT;  //IMH58
+                "Provider No." := lAbilityGeoProvider."Provider No.";
+                "Specialization Code" := lAbilityGeoProvider."Specialization Code";
+                //<<IMH67
+                //Distance := GetDistance2("Provider No.", pReferenceGeoCode);
+                Distance := ProviderSearchMgt.GetDistance("Provider No.", pReferenceGeoCode);
+                //>>IMH67
+                "Contact No." := pContactAltAddress."Contact No.";
+                "Alt. Address Code" := pContactAltAddress.Code;
+                "Service Header No." := pServiceHeaderNo;//IMH07
+                lProviderContactAltAddr.SETRANGE("Contact No.","Provider No.");
+                lProviderContactAltAddr.SETRANGE("Geo. Reference Address",TRUE);
+                IF lProviderContactAltAddr.FINDFIRST THEN BEGIN
+                  City := lProviderContactAltAddr.City;
+                  "Post Code" := lProviderContactAltAddr."Post Code";
+                  //<<IMH54
+                  //D‚sactiv‚ : fait dans la fonction ProviderApplyFilter
+                  {
+                  IF lProvider.GET("Provider No.") THEN BEGIN
+                    "Current Interv. Limit Max." := lProvider."Current Interv. Limit Max.";
+                    IF lProviderSpec.GET("Provider No.", lAbilityGeoProvider."Specialization Code") THEN
+                      IF lProviderSpec."Current Interv. Limit" <> 0 THEN
+                        "Current Interv. Limit Max." := lProviderSpec."Current Interv. Limit";
+                  END;
+                  }
+                  //>>IMH54
+                END;
+                INSERT();
+              END;
+            UNTIL lAbilityGeoProvider.NEXT = 0;
+          END;
+        END ELSE BEGIN
+        END;
+      END;
+    END;
+
+    PROCEDURE ConsolidateProvider@1100281021(VAR pPSRBuffer@1100281001 : Record 51000;pSearchType@1100281004 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR';pAllSpecialization@1100281003 : Boolean;pRequiredSpe@1100281002 : Integer);
+    VAR
+      lPSRBuffer2@1100281000 : TEMPORARY Record 51000;
+      lProvider@1100281005 : Record 50000;
+    BEGIN
+      //MESSAGE('Consolidate %1',pPSRBuffer.COUNT);
+      lPSRBuffer2.DELETEALL();
+      IF pPSRBuffer.FINDSET() THEN BEGIN
+        REPEAT
+          lPSRBuffer2 := pPSRBuffer;
+          lPSRBuffer2.INSERT();
+        UNTIL pPSRBuffer.NEXT() = 0;
+      END;
+      IF pPSRBuffer.FINDSET() THEN BEGIN
+        REPEAT
+          lPSRBuffer2.RESET();
+          lPSRBuffer2.SETRANGE("Provider No.",pPSRBuffer."Provider No.");
+          pPSRBuffer."Specializations Nb." := lPSRBuffer2.COUNT();
+      //<<IMH23.ST
+          IF lPSRBuffer2."Out Zone" THEN
+            pPSRBuffer."Out Zone" := lPSRBuffer2."Out Zone";
+      //>>IMH23.ST
+          pPSRBuffer.MODIFY();
+        UNTIL pPSRBuffer.NEXT() = 0;
+      END;
+      // En fonction de la recherche tous les sp‚cialit‚s doivent ˆtre pr‚sentes
+      IF (pSearchType < pSearchType::Enterprise) OR pAllSpecialization THEN BEGIN
+        IF pPSRBuffer.FINDSET() THEN BEGIN
+          REPEAT
+            IF pPSRBuffer."Specializations Nb." < pRequiredSpe THEN BEGIN
+              //<<IMH47
+              //DebugTrace(STRSUBSTNO(TextDebug037,pPSRBuffer."Provider No."));
+              lProvider.GET(pPSRBuffer."Provider No.");
+              DebugTrace(STRSUBSTNO(TextDebug037,pPSRBuffer."Provider No.",lProvider.Name));
+              //>>IMH47
+              pPSRBuffer.DELETE;
+
+            END;
+          UNTIL pPSRBuffer.NEXT() = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE ConsolidateProvider2@1100281036(VAR pPSRBuffer@1100281001 : Record 51000;pSearchType@1100281004 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR';pAllSpecialization@1100281003 : Boolean;pRequiredSpe@1100281002 : Integer);
+    VAR
+      lPSRBuffer2@1100281000 : TEMPORARY Record 51000;
+      lProvider@1100281005 : Record 50000;
+    BEGIN
+      //IMH23.ST
+      //<<IMH52
+      IF (pSearchType = pSearchType::DPR) AND SearchParameterSetted AND (NOT SpecialitySearch) THEN
+        EXIT;
+      //>>IMH52
+
+      IF NOT pPSRBuffer.FINDSET THEN
+        EXIT;
+      REPEAT
+        lPSRBuffer2.SETRANGE("Provider No.",pPSRBuffer."Provider No.");
+        IF NOT lPSRBuffer2.FINDFIRST THEN BEGIN
+          lPSRBuffer2 := pPSRBuffer;
+          lPSRBuffer2."Specializations Nb." := 1;
+          lPSRBuffer2."Specialization List" := pPSRBuffer."Specialization Code";
+          lPSRBuffer2.INSERT;
+        END
+        ELSE BEGIN
+          lPSRBuffer2."Specializations Nb." += 1;
+          lPSRBuffer2."Specialization List" := lPSRBuffer2."Specialization List" + '|' + pPSRBuffer."Specialization Code";
+          IF pPSRBuffer."Out Zone" THEN
+            lPSRBuffer2."Out Zone" := TRUE;
+          lPSRBuffer2.MODIFY;
+        END;
+      UNTIL pPSRBuffer.NEXT() = 0;
+      // En fonction de la recherche tous les sp‚cialit‚s doivent ˆtre pr‚sentes
+      IF (pSearchType < pSearchType::Enterprise) OR pAllSpecialization THEN BEGIN
+        lPSRBuffer2.SETFILTER("Specializations Nb.", '<%1', pRequiredSpe);
+        IF lPSRBuffer2.FINDSET THEN BEGIN
+          REPEAT
+            //<<IMH47
+            lProvider.GET(pPSRBuffer."Provider No.");
+            //DebugTrace(STRSUBSTNO(TextDebug037,pPSRBuffer."Provider No."));
+            DebugTrace(STRSUBSTNO(TextDebug037,pPSRBuffer."Provider No.",lProvider.Name));
+            //>>IMH47
+            lPSRBuffer2.DELETE;
+          UNTIL lPSRBuffer2.NEXT=0;
+        END;
+      END;
+      lPSRBuffer2.RESET;
+      pPSRBuffer.DELETEALL;
+      IF NOT lPSRBuffer2.FINDSET THEN
+        EXIT;
+      REPEAT
+        pPSRBuffer := lPSRBuffer2;
+        pPSRBuffer.INSERT;
+      UNTIL lPSRBuffer2.NEXT=0;
+      //MESSAGE('apres Consolidate %1',pPSRBuffer.COUNT);
+    END;
+
+    PROCEDURE SearchProvPressent@1100281007(VAR pProvider@1100281004 : Record 50000;VAR pServiceInterventionLine@1100281002 : Record 50075;VAR pProviderSearchBasket@1100281001 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281000 : Record 5051;pSpecialityFilter@1100281005 : Text[1024]) rValue : Boolean;
+    VAR
+      lPSRBuffer@1100281003 : TEMPORARY Record 51000;
+      lProvSecondSearchBuffer@1100281006 : TEMPORARY Record 51006;
+    BEGIN
+      //IMH67
+      SearchResult(pServiceInterventionLine, pProviderSearchBasket, pContactAltAddress, lPSRBuffer);
+      lPSRBuffer.SETRANGE("Provider No.",pProvider."No.");
+
+      IF lPSRBuffer.FINDFIRST THEN
+        IF CallProvider(lPSRBuffer, pSpecialityFilter) THEN
+          rValue := TRUE;
+    END;
+
+    PROCEDURE CallProvider@1100281002(VAR pPSRBuffer@1100281001 : TEMPORARY Record 51000;pSpecialityFilter@1100281002 : Text[1024]) : Boolean;
+    VAR
+      lProviderSearchWizard@1100281000 : Form 50022;
+    BEGIN
+      //IMH67
+      lProviderSearchWizard.SetRecords(pPSRBuffer);
+      lProviderSearchWizard.SetSpecializationFilter(pSpecialityFilter);
+      COMMIT;
+      lProviderSearchWizard.RUNMODAL();
+      IF (lProviderSearchWizard.GetIsOk() AND (NOT lProviderSearchWizard.GetIsCancel())) THEN
+        EXIT(TRUE)
+      ELSE
+        EXIT(FALSE);
+    END;
+
+    PROCEDURE SaveRefusedProvider@1100281011(VAR pProvider@1100281000 : Record 50000;pServiceInterventionLine@1100281002 : Record 50075;pDRPSearch@1100281003 : Boolean);
+    VAR
+      lServiceSearchLedgerEntry@1100281001 : Record 50027;
+    BEGIN
+      // Sauvegarde les prestataires refus‚s
+
+      IF pProvider.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+      pProvider.FINDSET;
+      REPEAT
+        lServiceSearchLedgerEntry.INIT;
+        lServiceSearchLedgerEntry."Service No." := pServiceInterventionLine."Service No.";
+        lServiceSearchLedgerEntry."Service Header No." := pServiceInterventionLine."Service Header No.";
+        lServiceSearchLedgerEntry."Intervention Line No." := pServiceInterventionLine."Intervention No.";
+
+        lServiceSearchLedgerEntry."Entry No." := 0;
+        lServiceSearchLedgerEntry."Provider No." := pProvider."No.";
+        lServiceSearchLedgerEntry."Non-acceptance Reason Code" := pProvider."Salutation Code";
+        lServiceSearchLedgerEntry."Non-Accept. Comments" := pProvider."Follow Up";  //IMH67
+        lServiceSearchLedgerEntry."First Search Status" := pProvider."Current Interv. Limit Max.";
+        //<<IMH68.PC
+        lServiceSearchLedgerEntry."Search Engine" := lServiceSearchLedgerEntry."Search Engine"::First;
+        //>>IMH68.PC
+        lServiceSearchLedgerEntry."DRP Search" := pDRPSearch;  //IMH69
+        lServiceSearchLedgerEntry.INSERT(TRUE);
+        //<<IMH19
+        ServiceSearchLedgerEntryTemp := lServiceSearchLedgerEntry;
+        ServiceSearchLedgerEntryTemp.INSERT;
+        //>>IMH19
+      UNTIL pProvider.NEXT = 0;
+    END;
+
+    PROCEDURE GetRefusedProvider@1100281033(VAR pServiceSearchLedgerEntryTemp@1100281000 : Record 50027);
+    BEGIN
+      //IMH19
+      IF ServiceSearchLedgerEntryTemp.FINDFIRST THEN
+        REPEAT
+          pServiceSearchLedgerEntryTemp := ServiceSearchLedgerEntryTemp;
+          IF pServiceSearchLedgerEntryTemp.INSERT THEN;   //IMH55
+        UNTIL ServiceSearchLedgerEntryTemp.NEXT = 0;
+    END;
+
+    PROCEDURE ProviderCalcScore@1100281009(VAR pProviderSearchResultBuffer@1100281000 : Record 51000;pSearchType@1100281002 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';pEmergency@1100281004 : ',Yes,No');
+    VAR
+      lProviderBuffer@1100281010 : TEMPORARY Record 50000;
+      lProvider@1100281001 : Record 50000;
+      lProviderSpecialization@1100281003 : Record 50006;
+      lLinkedProvider@1100281009 : Record 50001;
+      lSpecialization@1000000001 : Record 50005;
+      lBuffer@1100281013 : TEMPORARY Record 50143;
+      lProviderSearchCom@1100281012 : Codeunit 50066;
+      lTempScore@1100281005 : Integer;
+      lRatio@1100281006 : Decimal;
+      lNb@1100281007 : Decimal;
+      lAddScore@1100281008 : Integer;
+      lLinkedProviderOK@1100281011 : Boolean;
+      lText@1000000000 : Text[1024];
+    BEGIN
+      // D‚termination du score prestataire
+      GetProviderSetup;
+      WITH pProviderSearchResultBuffer DO BEGIN
+        RESET;
+        IF FINDSET THEN BEGIN
+          REPEAT
+            //<<IMH31.PC
+            // on stocke les prestataire pour la gestion des prestataires li‚
+            IF NOT lProviderBuffer.GET("Provider No.") THEN BEGIN
+              lProviderBuffer."No." := "Provider No.";
+              lProviderBuffer.INSERT;
+            END;
+            //>>IMH31.PC
+
+            IF NOT lProvider.GET("Provider No.") THEN BEGIN
+              lProvider.INIT;
+            END;
+            //<<IMH47
+            lBuffer.INIT;
+            lBuffer."Code 1" := lProvider."No.";
+            lBuffer."Integer 1" := 0;
+            lBuffer."Data Text 1" := STRSUBSTNO(TextDebug021,"Provider No.",lProvider.Name);
+            lBuffer.INSERT;
+            //DebugTrace(STRSUBSTNO(TextDebug021,"Provider No.",lProvider.Name));
+            //>>IMH47
+
+            // Score de base
+            Score := ProviderSetup."Base Score";
+            //<<IMH47
+            lBuffer."Integer 1" := 1;
+            lBuffer."Data Text 1" := STRSUBSTNO(TextDebug022,ProviderSetup."Base Score");
+            lBuffer.INSERT;
+            //DebugTrace(STRSUBSTNO(TextDebug022,ProviderSetup."Base Score"));
+            //>>IMH47
+            // Prise en compte de la sp‚cialit‚ de base
+            IF pSearchType < SearchType::Campaign THEN BEGIN
+              //<<IMH51
+              IF NOT lProviderSpecialization.GET("Provider No.",pProviderSearchResultBuffer."Specialization Code") THEN
+                CLEAR(lProviderSpecialization);
+              //>>IMH51
+              IF lProviderSpecialization."Main Specialization" THEN BEGIN
+                CASE pSearchType OF
+                  pSearchType::Enterprise : lAddScore := ProviderSetup."Speciality A Score Enterprise";
+                  pSearchType::Sequenced :  lAddScore := ProviderSetup."Speciality A Score Sequenced";
+                  ELSE lAddScore := ProviderSetup."Speciality A Score";
+                END;
+                //<<IMH47
+                lBuffer."Integer 1" := 2;
+                lBuffer."Data Text 1" := STRSUBSTNO(TextDebug023,lAddScore);
+                lBuffer.INSERT;
+                //DebugTrace(STRSUBSTNO(TextDebug023,lAddScore));
+                //>>IMH47
+                Score += lAddScore;
+              END;
+            END;
+
+            //<<IMH12bis.isat.PC
+            CASE pSearchType OF
+              pSearchType::Standard, pSearchType::Advanced, pSearchType::Enlarge, pSearchType::Enterprise, pSearchType::Sequenced : BEGIN
+                lTempScore := 0;
+                IF pProviderSearchResultBuffer."First Available Date" <> 0D THEN BEGIN
+                  lTempScore :=
+                    (pProviderSearchResultBuffer."First Available Date" - GetSearchDate) *
+                    ProviderSetup."Unavailable Day Score";
+                  Score += lTempScore;
+                END;
+                //<<IMH47
+                lBuffer."Integer 1" := 3;
+                lBuffer."Data Text 1" := STRSUBSTNO(TextDebug024,lTempScore,pProviderSearchResultBuffer."First Available Date");
+                lBuffer.INSERT;
+                //DebugTrace(STRSUBSTNO(TextDebug024,lTempScore,pProviderSearchResultBuffer."First Available Date"));
+                //>>IMH47
+                lTempScore := 0;
+                //<<IMH67
+                //IF NOT ProviderCheckBusinessHours("Provider No.",GetSearchDate(),TIME,pEmergency) THEN BEGIN
+                IF NOT ProviderSearchMgt.ProviderCheckBusinessHours("Provider No.",GetSearchDate(),TIME,pEmergency) THEN BEGIN
+                //>>IMH67
+                  lTempScore := ProviderSetup."Business Hours Score";
+                  Score += lTempScore;
+                END;
+                //<<IMH47
+                lBuffer."Integer 1" := 4;
+                lBuffer."Data Text 1" := STRSUBSTNO(TextDebug025,lTempScore);
+                lBuffer.INSERT;
+                //DebugTrace(STRSUBSTNO(TextDebug025,lTempScore));
+                //>>IMH47
+              END;
+            END;
+            //>>IMH12bis.isat.PC
+
+            //<<IMH26.PC
+            // Gestion multi sp‚cialit‚
+            lTempScore := 0;
+            lTempScore := ProviderSetup."By Covered Speciality Score" * pProviderSearchResultBuffer."Specializations Nb.";
+            Score += lTempScore;
+            //imhxx
+            //<<IMH47
+            lBuffer."Integer 1" := 5;
+            lBuffer."Data Text 1" :=
+            STRSUBSTNO(TextDebug025b,lTempScore,ProviderSetup."By Covered Speciality Score","Specializations Nb.");
+            lBuffer.INSERT;
+            //DebugTrace(STRSUBSTNO(TextDebug025b,lTempScore,ProviderSetup."By Covered Speciality Score","Specializations Nb."));
+            //>>IMH47
+            //>>IMH26.PC
+
+            //Taux d'occupation
+            lTempScore := 0;
+            lProvider.GET("Provider No.");
+
+
+            //<<IMH54
+            //Desactive : Gestion de Limite
+            IF pSearchType < SearchType::Campaign THEN BEGIN
+              lNb := "Current Service Interv. Nb";
+              IF "Current Interv. Limit Max." <> 0 THEN BEGIN
+                lRatio := ROUND("Current Service Interv. Nb" / "Current Interv. Limit Max." * 100,1,'=');
+              END;
+              lTempScore := ProviderSetup."Interv. Rate Base Score" - lRatio;
+              CASE "Interv. Limit Type" OF
+                "Interv. Limit Type"::Provider : BEGIN
+                  IF "Current Interv. Limit Max." <> 0 THEN BEGIN
+                    //<<IMH47
+                    lBuffer."Integer 1" := 7;
+                    lBuffer."Data Text 1" := STRSUBSTNO(TextDebug026b,lNb,"Current Interv. Limit Max.");
+                    lBuffer.INSERT;
+                    //DebugTrace(STRSUBSTNO(TextDebug026b,lNb,"Current Interv. Limit Max."));
+                    //>>IMH47
+                  END ELSE BEGIN
+                    //<<IMH47
+                    //DebugTrace(STRSUBSTNO(TextDebug035,lProvider."No."));
+                    DebugTrace(STRSUBSTNO(TextDebug035,lProvider."No.",lProvider.Name));
+                    //>>IMH47
+                  END;
+                END;
+                "Interv. Limit Type"::Speciality : BEGIN
+                  //<<IMH47
+                  lBuffer."Integer 1" := 6;
+                  lBuffer."Data Text 1" := STRSUBSTNO(TextDebug026c,lRatio);
+                  lBuffer.INSERT;
+                END;
+                "Interv. Limit Type"::ServiceOrderType : BEGIN
+                  lBuffer."Integer 1" := 8;
+                  lBuffer."Data Text 1" := STRSUBSTNO(TextDebug026d,lRatio);
+                  lBuffer.INSERT;
+                END;
+              END;
+            END;
+            {
+            lProvider.CALCFIELDS("Current Service Interv. Nb");
+      //<<IMH23.ST
+            IF lProviderSpecialization.GET("Provider No.", "Specialization Code") THEN
+              IF lProviderSpecialization."Current Interv. Limit" <> 0 THEN
+               "Current Interv. Limit Max." := lProviderSpecialization."Current Interv. Limit";
+      //>>IMH23.ST
+            IF pSearchType < SearchType::Campaign THEN BEGIN
+            //<<IMH27.isat.NFO
+              IF (lProviderSpecialization."Current Interv. Limit" <> 0) AND
+                 ("Specialization Code" = "Specialization List")
+              THEN BEGIN
+                lTempScore :=
+                  ProviderSetup."Interv. Rate Base Score" - lProviderSpecialization.CalcOccupacyRate;
+                //<<IMH47
+                lBuffer."Integer 1" := 6;
+                lBuffer."Data Text 1" := STRSUBSTNO(TextDebug026c,lProviderSpecialization.CalcOccupacyRate);
+                lBuffer.INSERT;
+                //DebugTrace(STRSUBSTNO(TextDebug026c,lProviderSpecialization.CalcOccupacyRate));
+                //>>IMH47
+              END ELSE BEGIN
+            //>>IMH27.isat.NFO
+                IF "Current Interv. Limit Max." <> 0 THEN BEGIN
+                  lNb := lProvider."Current Service Interv. Nb";
+                  lRatio := ROUND(lNb / "Current Interv. Limit Max." * 100,1,'=');
+                  lTempScore := ProviderSetup."Interv. Rate Base Score" - lRatio;
+                  //<<IMH47
+                  lBuffer."Integer 1" := 7;
+                  lBuffer."Data Text 1" := STRSUBSTNO(TextDebug026b,lNb,"Current Interv. Limit Max.");
+                  lBuffer.INSERT;
+                  //DebugTrace(STRSUBSTNO(TextDebug026b,lNb,"Current Interv. Limit Max."));
+                  //>>IMH47
+                END ELSE BEGIN
+                  //<<IMH47
+                  //DebugTrace(STRSUBSTNO(TextDebug035,lProvider."No."));
+                  DebugTrace(STRSUBSTNO(TextDebug035,lProvider."No.",lProvider.Name));
+                  //>>IMH47
+                END;
+              END;
+            END;
+            }
+
+            IF lTempScore  < 0 THEN lTempScore := 0;
+            Score += lTempScore;
+            //<<IMH47
+            lBuffer."Integer 1" := 9;
+            lBuffer."Data Text 1" := STRSUBSTNO(TextDebug026,lTempScore);
+            lBuffer.INSERT;
+            //DebugTrace(STRSUBSTNO(TextDebug026,lTempScore));
+            //>>IMH47
+            //<<IMH52
+            IF pProviderSearchResultBuffer."Specialization List" <> '' THEN BEGIN
+            //>>IMH52
+              lSpecialization.SETFILTER(Code,pProviderSearchResultBuffer."Specialization List");
+              lText := '';
+              IF lSpecialization.FINDSET THEN BEGIN
+                REPEAT
+                  IF STRLEN(lText) = 0 THEN BEGIN
+                    lText += lSpecialization.Description
+                  END ELSE BEGIN
+                    lText += ', ' + lSpecialization.Description;
+                  END;
+                UNTIL lSpecialization.NEXT = 0;
+              END;
+            END;  //IMH52
+            IF lText <> '' THEN BEGIN
+              //<<IMH47
+              lBuffer."Integer 1" := 10;
+              lBuffer."Data Text 1" := STRSUBSTNO(TextDebug040,lText);
+              lBuffer.INSERT;
+              //DebugTrace(STRSUBSTNO(TextDebug040,lText));
+              //>>IMH47
+            END;
+
+            //KilomŠtre au dela des 10 du lieu d'intervention
+            lTempScore := 0;
+            IF Distance > ProviderSetup."Distance Reference Score" THEN BEGIN
+              lTempScore := (ROUND(Distance - ProviderSetup."Distance Reference Score",1,'=') * ProviderSetup."Distance Km Score");
+              Score += lTempScore;
+            END;
+            //<<IMH47
+            lBuffer."Integer 1" := 11;
+            lBuffer."Data Text 1" :=
+              STRSUBSTNO(
+                TextDebug027,lTempScore,Distance,ProviderSetup."Distance Km Score",ProviderSetup."Distance Reference Score");
+
+            lBuffer.INSERT;
+            //DebugTrace(
+            //  STRSUBSTNO(
+            //    TextDebug027,lTempScore,Distance,ProviderSetup."Distance Km Score",ProviderSetup."Distance Reference Score"));
+            //>>IMH47
+            //Priorit‚ prestataire
+            lTempScore := 0;
+            IF lProvider.Priority = 0 THEN BEGIN
+              lTempScore := ProviderSetup."Priority 0 (Lower) Score";
+              Score += lTempScore;
+            END ELSE BEGIN
+              IF lProvider.Priority = 1 THEN BEGIN
+                lTempScore := ProviderSetup."Priority 1 (Normal) Score";
+                Score += lTempScore;
+              END ELSE BEGIN
+                lTempScore := ProviderSetup."Priority 2 (Higher) Score";
+                Score += lTempScore;
+              END;
+            END;
+            //<<IMH47
+            lBuffer."Integer 1" := 12;
+            lBuffer."Data Text 1" := STRSUBSTNO(TextDebug028,lTempScore);
+            lBuffer.INSERT;
+            //DebugTrace(STRSUBSTNO(TextDebug028,lTempScore));
+            //>>IMH47
+            //<<IMH24.PC
+            // AStreinte
+            lTempScore := 0;
+            IF Constrainte THEN BEGIN
+              lTempScore := ProviderSetup."Constrainte Score";
+              Score += lTempScore;
+            END;
+            //<<IMH47
+            lBuffer."Integer 1" := 13;
+            lBuffer."Data Text 1" := STRSUBSTNO(TextDebug028b,lTempScore);
+            lBuffer.INSERT;
+            //DebugTrace(STRSUBSTNO(TextDebug028b,lTempScore));
+            //>>IMH47
+            //>>IMH24.PC
+
+            //<<IMH31.PC
+            // Prestataire li‚
+            lLinkedProviderOK := FALSE;
+
+            //<<IMH33 isat.nfo
+            AffectedProviderBuffer.DELETEALL();
+            lProviderSearchCom.getAffectedProviderBuffer(AffectedProviderBuffer);
+            lLinkedProvider.SETRANGE("Provider No.","Provider No.");
+            IF lLinkedProvider.FINDSET THEN BEGIN
+              REPEAT
+                //lProviderBuffer.SETRANGE("No.",lLinkedProvider."Linked Provider No.");
+                AffectedProviderBuffer.SETRANGE("No.",lLinkedProvider."Linked Provider No.");
+                //lLinkedProviderOK := NOT lProviderBuffer.ISEMPTY;
+                lLinkedProviderOK := NOT AffectedProviderBuffer.ISEMPTY;
+
+                //lProviderBuffer.SETRANGE("No.");
+                AffectedProviderBuffer.SETRANGE("No.");
+              UNTIL (lLinkedProvider.NEXT = 0) OR lLinkedProviderOK;
+            END;
+            //>>IMH33 isat.nfo
+            IF lLinkedProviderOK THEN BEGIN
+              lTempScore := ProviderSetup."Linked Provider Score";
+              Score += lTempScore;
+              //<<IMH47
+              lBuffer."Integer 1" := 14;
+              lBuffer."Data Text 1" := STRSUBSTNO(TextDebug028c,lTempScore);
+              lBuffer.INSERT;
+              //DebugTrace(STRSUBSTNO(TextDebug028c,lTempScore));
+              //>>IMH47
+            END;
+            //>>IMH31.PC
+
+            // Note de scoring
+            lTempScore := 0;
+            lTempScore := (ROUND(lProvider."Provider Scoring", 1) * ProviderSetup."Provider Scoring Score");
+            Score += lTempScore;
+            //<<IMH47
+            lBuffer."Integer 1" := 15;
+            lBuffer."Data Text 1" :=
+            STRSUBSTNO(TextDebug029,lTempScore,ROUND(lProvider."Provider Scoring",0.01),ProviderSetup."Provider Scoring Score");
+            lBuffer.INSERT;
+            lBuffer."Integer 1" := 16;
+            lBuffer."Data Text 1" := STRSUBSTNO(TextDebug030,Score);
+            lBuffer.INSERT;
+            //>>IMH47
+            //<<IMH56
+            lProvider.CALCFIELDS("Current Service Interv. Nb");
+            pProviderSearchResultBuffer."Intervention Number" := lProvider."Current Service Interv. Nb";
+            pProviderSearchResultBuffer."Current Interv. Limit Max." := lProvider."Current Interv. Limit Max.";
+            //>>IMH56
+            MODIFY;
+          UNTIL NEXT = 0;
+          //<<IMH47
+          IF NOT DebugTraceEnable THEN BEGIN
+            EXIT;
+          END;
+
+          pProviderSearchResultBuffer.SETCURRENTKEY(Score);
+          pProviderSearchResultBuffer.ASCENDING(FALSE);
+          IF pProviderSearchResultBuffer.FINDFIRST THEN
+          REPEAT
+            lBuffer.RESET;
+            lBuffer.SETRANGE("Code 1","Provider No.");
+            IF lBuffer.FINDFIRST THEN
+            REPEAT
+              DebugTrace(lBuffer."Data Text 1");
+            UNTIL lBuffer.NEXT = 0;
+          UNTIL NEXT = 0;
+          //>>IMH47
+          pProviderSearchResultBuffer.SETCURRENTKEY("Provider No.");
+          pProviderSearchResultBuffer.ASCENDING(TRUE)
+        END;
+      END;
+    END;
+
+    PROCEDURE GetProviderSetup@1100281000();
+    BEGIN
+      IF GetProviderSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      ProviderSetup.GET;
+      GetProviderSetupOK := TRUE;
+    END;
+
+    PROCEDURE ExclusionProvider@1100281030(VAR pMessage@1100281009 : Text[1024];pSearchType@1100281005 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';pCorporateExclusion@1100281004 : ' ,Yes,No';pServiceHeaderNo@1100281007 : Code[20];pProviderNo@1100281000 : Code[20];pCorporateNo@1100281001 : Code[20];pSpecializationCode@1100281003 : Code[10]) rToDelete : Boolean;
+    VAR
+      lServiceHeader@1100281008 : Record 5900;
+      lServiceOrderType@1100281010 : Record 5903;
+      lProviderAgreement@1100281006 : Record 50012;
+      lSpecializationAgreement@1100281002 : Record 50023;
+      lSpecialization@1000000000 : Record 50005;
+      lProvider@1100281014 : Record 50000;
+      lCorporateRegionCode@1100281011 : Code[10];
+      lCustomer@1100281012 : Record 18;
+      lServiceOrderTypeAgree@1100281013 : Code[10];
+      lErrorType@1100281015 : 'Total,Specialization,ServiceOrderType';
+    BEGIN
+      //IMH19 isat.zw
+      rToDelete := FALSE;
+      pMessage := '';
+      //<<IMH51
+      //IF (pSearchType = pSearchType::DPR) AND (pCorporateExclusion IN [pCorporateExclusion::" ",pCorporateExclusion::No]) THEN
+      //  EXIT;
+      //>>IMH51
+
+      //<<IMH67 d‚placer dans le CU 50284
+      rToDelete := NOT ProviderSearchMgt.CheckAgreement(lErrorType, pServiceHeaderNo,
+                           pProviderNo, pCorporateNo, pSpecializationCode, ServiceOrderTypeAgree);
+
+      IF rToDelete THEN
+        CASE lErrorType OF
+          lErrorType::ServiceOrderType :
+            pMessage := STRSUBSTNO(TextDebug038,pProviderNo,pCorporateNo, lServiceOrderType.Code,lProvider.Name);
+          lErrorType::Total :
+            pMessage := STRSUBSTNO(TextDebug013,pProviderNo,lProvider.Name);
+          lErrorType::Specialization :
+            pMessage := STRSUBSTNO(TextDebug014,pProviderNo, pCorporateNo, lSpecialization.Description,lProvider.Name);
+        END;
+      //>>IMH67
+    END;
+
+    PROCEDURE GetUserSetup@1100281025();
+    BEGIN
+      IF GetUserSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT UserSetup.GET(UPPERCASE(USERID)) THEN BEGIN
+        DebugTraceEnable := FALSE;
+        EXIT;
+      END;
+
+      GetUserSetupOK := TRUE;
+      IF UserSetup."Search Trace Enable" THEN BEGIN
+        UserSetup.TESTFIELD("Search Trace Path");
+        UserSetup.TESTFIELD("Search Trace File Name");
+        IF EXISTS(UserSetup."Search Trace Path" + UserSetup."Search Trace File Name") THEN BEGIN
+          ERASE(UserSetup."Search Trace Path" + UserSetup."Search Trace File Name");
+        END;
+        DebugTraceEnable := TRUE;
+      END;
+    END;
+
+    PROCEDURE GetGeoCode@1100281012(pPostCode@1100281000 : Code[20];pCity@1100281001 : Text[30]) : Code[10];
+    VAR
+      lPostCode@1100281002 : Record 225;
+    BEGIN
+      IF pPostCode = '' THEN
+        EXIT('');
+      //<<IMH42.ST
+      //IF lPostCode.GET(pPostCode,pCity) THEN
+      //  EXIT(lPostCode."Geo. Reference Code");
+      EXIT(lPostCode.GetGeoCode(pPostCode, pCity));
+      //>>IMH42.ST
+    END;
+
+    PROCEDURE GetInseeByDistanceKm@1100281006(pInseeCode@1100481000 : Text[6];pDistanceKm@1100481001 : Integer;VAR pInseeSearchResult@1100481013 : Record 51001;pWithDialog@1100281007 : Boolean) : Integer;
+    VAR
+      lADOConn@1100481002 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000514-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Connection";
+      lADORs@1100481003 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000535-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Recordset";
+      lConnexionString@1100481004 : Text[200];
+      lSQL@1100481005 : Text[250];
+      lConnectionID@1100481007 : Integer;
+      lRecordsAffected@1100281001 : Integer;
+      lOptions@1100281000 : Integer;
+      lVariant@1100281002 : Variant;
+      lDecimal@1100281003 : Decimal;
+      lInteger@1100281004 : Integer;
+      lText@1100281005 : Text[256];
+      lDialog@1100281006 : Dialog;
+    BEGIN
+      // Coennexion ADO
+      pInseeSearchResult.DELETEALL;
+      IF GUIALLOWED AND pWithDialog THEN BEGIN
+        lDialog.OPEN(Text002);
+      END;
+      // Cr‚ation de la connexion
+      CREATE(lADOConn);
+      lConnexionString := GetConnectionString;
+      lADOConn.Open(lConnexionString);
+
+      lSQL := STRSUBSTNO('EXEC GetInsee ''%1'',%2',pInseeCode,pDistanceKm * 1000);
+
+      CREATE(lADORs);
+      lADORs := lADOConn.Execute(lSQL,lRecordsAffected,lOptions);
+      //ProcŠdure stock‚e
+      IF NOT lADORs.EOF  THEN BEGIN
+        lADORs.MoveFirst;
+        REPEAT
+          pInseeSearchResult."Ref. Geo. Code" := lADORs.Fields.Item('Insee Code').Value;
+          lText := STRSUBSTNO('%1',lADORs.Fields.Item('Distance').Value);
+          EVALUATE(lDecimal,lText);
+          lDecimal := ROUND(lDecimal/1000,1);
+          pInseeSearchResult.Distance := lDecimal;
+          pInseeSearchResult.INSERT;
+          lADORs.MoveNext;
+        UNTIL lADORs.EOF;
+      END;
+      lADORs.Close;
+      lADOConn.Close;
+      CLEAR(lADOConn);
+      CLEAR(lADORs);
+      IF GUIALLOWED AND pWithDialog THEN BEGIN
+        lDialog.CLOSE;
+      END;
+    END;
+
+    PROCEDURE GetInseeByTerritory@1100281018(pTerritoryCode@1100481001 : Text[1024];VAR pInseeSearchResult@1100481013 : Record 51001;pWithDialog@1100281007 : Boolean) : Integer;
+    VAR
+      lDialog@1100281006 : Dialog;
+      lPostCode@1100281000 : Record 225;
+    BEGIN
+      lPostCode.RESET();
+      lPostCode.SETFILTER("IMH Territory Code",pTerritoryCode);
+      //ProcŠdure stock‚e
+
+      IF lPostCode.FINDSET() THEN BEGIN
+        IF GUIALLOWED AND pWithDialog THEN BEGIN
+          lDialog.OPEN(Text002);
+        END;
+        REPEAT
+          pInseeSearchResult.INIT;
+          pInseeSearchResult."Ref. Geo. Code" := lPostCode."Geo. Reference Code";
+          IF pInseeSearchResult.INSERT() THEN;
+        UNTIL lPostCode.NEXT() = 0;
+        IF GUIALLOWED AND pWithDialog THEN BEGIN
+          lDialog.CLOSE;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetInseeByArea@1100281020(pAreaCode@1100281008 : Text[1024];VAR pInseeSearchResult@1100481013 : Record 51001;pWithDialog@1100281007 : Boolean) : Integer;
+    VAR
+      lDialog@1100281006 : Dialog;
+      lPostCode@1100281000 : Record 225;
+    BEGIN
+      lPostCode.RESET();
+      lPostCode.SETFILTER("Area Code",pAreaCode);
+      //ProcŠdure stock‚e
+
+      IF lPostCode.FINDSET() THEN BEGIN
+        IF GUIALLOWED AND pWithDialog THEN BEGIN
+          lDialog.OPEN(Text002);
+        END;
+        REPEAT
+          pInseeSearchResult.INIT;
+          pInseeSearchResult."Ref. Geo. Code" := lPostCode."Geo. Reference Code";
+          IF pInseeSearchResult.INSERT THEN;
+        UNTIL lPostCode.NEXT() = 0;
+        IF GUIALLOWED AND pWithDialog THEN BEGIN
+          lDialog.CLOSE;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetInseeByPostCode@1100281031(pGeoFilter@1100281008 : Text[1024];VAR pInseeSearchResult@1100481013 : Record 51001;pWithDialog@1100281007 : Boolean) : Integer;
+    VAR
+      lDialog@1100281006 : Dialog;
+      lPostCode@1100281000 : Record 225;
+      lPos@1100281001 : Integer;
+    BEGIN
+      lPostCode.RESET();
+      //lPos := STRPOS(pGeoFilter,'|');
+      //IF lPos > 0 THEN BEGIN
+      //  lPostCode.SETFILTER(Code,COPYSTR(pGeoFilter,1,lPos-1));
+      //  lPostCode.SETFILTER(City,COPYSTR(pGeoFilter,lPos+1));
+      //END;
+      lPostCode.SETFILTER(Code,pGeoFilter);
+      //ProcŠdure stock‚e
+
+      IF lPostCode.FINDSET() THEN BEGIN
+        IF GUIALLOWED AND pWithDialog THEN BEGIN
+          lDialog.OPEN(Text002);
+        END;
+        REPEAT
+          pInseeSearchResult.INIT;
+          pInseeSearchResult."Ref. Geo. Code" := lPostCode."Geo. Reference Code";
+          IF pInseeSearchResult.INSERT THEN;
+        UNTIL lPostCode.NEXT() = 0;
+        IF GUIALLOWED AND pWithDialog THEN BEGIN
+          lDialog.CLOSE;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetInseeByInsee@1100281032(pGeoFilter@1100281008 : Text[1024];VAR pInseeSearchResult@1100481013 : Record 51001;pWithDialog@1100281007 : Boolean) : Integer;
+    VAR
+      lDialog@1100281006 : Dialog;
+      lPostCode@1100281000 : Record 225;
+      lPos@1100281001 : Integer;
+    BEGIN
+      pInseeSearchResult.INIT;
+      //<<IMH22.isat.PC
+      //pInseeSearchResult."Ref. Geo. Code" := pGeoFilter;
+      IF GeoFilterType = GeoFilterType::"Post Code" THEN BEGIN
+        IF (CityFilter = '') OR (PostCodeFilter = '') THEN BEGIN
+          lPostCode.SETRANGE(Code,PostCodeFilter);
+        END ELSE BEGIN
+          IF PostCodeFilter <> '' THEN BEGIN
+            lPostCode.SETRANGE(Code,PostCodeFilter);
+          END;
+          IF CityFilter <> '' THEN BEGIN
+            lPostCode.SETRANGE(City,CityFilter);
+          END;
+        END;
+      END;
+      IF lPostCode.FINDFIRST THEN BEGIN
+        pInseeSearchResult."Ref. Geo. Code" := lPostCode."Geo. Reference Code";
+      END ELSE BEGIN
+        pInseeSearchResult."Ref. Geo. Code" := pGeoFilter;
+      END;
+      //>>IMH22.isat.PC
+      IF pInseeSearchResult.INSERT THEN;
+    END;
+
+    PROCEDURE GetConnectionString@1100281005() : Text[250];
+    BEGIN
+      GetProviderSetup;
+      ProviderSetup.TESTFIELD("Database Name");
+      ProviderSetup.TESTFIELD("Server Name");
+
+      EXIT(
+        'Provider=SQLOLEDB.1;Integrated Security=SSPI;Persist Security Info=False;Initial Catalog=' +
+        ProviderSetup."Database Name" + ';Data Source=' +
+        ProviderSetup."Server Name" );
+    END;
+
+    PROCEDURE GetDistance@1100281004(pInseeCodeFrom@1100281001 : Text[6];pInseeCodeTo@1100281000 : Text[6]) rValue : Decimal;
+    VAR
+      lADOConn@1100281008 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000514-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Connection";
+      lADORs@1100281007 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000535-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Recordset";
+      lConnexion@1100281006 : Text[200];
+      lPsSQL@1100281005 : Text[250];
+      lConnectionID@1100281004 : Integer;
+      lRecordsAffected@1100281003 : Integer;
+      lOptions@1100281002 : Integer;
+    BEGIN
+      // retourne la distance entre deux points Connexion ADO
+      IF NOT CREATE(lADOConn) THEN BEGIN
+        EXIT;
+      END;
+      IF NOT CREATE(lADORs) THEN BEGIN
+        EXIT;
+      END;
+
+      lConnexion := GetConnectionString();
+      lADOConn.Open(lConnexion);
+      lPsSQL := STRSUBSTNO('EXEC GetDistance ''%1'',''%2''', pInseeCodeFrom, pInseeCodeTo);
+      lADORs := lADOConn.Execute(lPsSQL,lRecordsAffected,lOptions);
+      IF NOT lADORs.EOF THEN BEGIN
+        lADORs.MoveFirst;
+        IF FORMAT(lADORs.Fields.Item(1).ActualSize) = FORMAT(0) THEN
+          rValue := -1
+        ELSE
+          IF EVALUATE(rValue,FORMAT(lADORs.Fields.Item(1).Value)) THEN;
+      END ELSE
+        rValue := 0;
+      lADORs.Close();
+      lADOConn.Close();
+      CLEAR(lADOConn);
+      CLEAR(lADORs);
+    END;
+
+    PROCEDURE UpdateInsee@1100281017(pInseeCode@1100281001 : Text[6];pLatitude@1100281000 : Decimal;pLongitude@1100281009 : Decimal) rValue : Decimal;
+    VAR
+      lADOConn@1100281008 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000514-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Connection";
+      lADORs@1100281007 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000535-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Recordset";
+      lConnexion@1100281006 : Text[200];
+      lPsSQL@1100281005 : Text[250];
+      lConnectionID@1100281004 : Integer;
+      lRecordsAffected@1100281003 : Integer;
+      lOptions@1100281002 : Integer;
+      lLongitude@1100281010 : Text[250];
+      lLatitude@1100281011 : Text[250];
+    BEGIN
+      // retourne la distance entre deux points Connexion ADO
+      IF NOT CREATE(lADOConn) THEN EXIT;
+      IF NOT CREATE(lADORs) THEN EXIT;
+      lConnexion := GetConnectionString();
+      lADOConn.Open(lConnexion);
+
+      lLatitude := CONVERTSTR(FORMAT(pLatitude), ',', '.');
+      lLongitude := CONVERTSTR(FORMAT(pLongitude), ',', '.');
+      lPsSQL := STRSUBSTNO('EXEC UpdateInsee ''%1'',%2,%3', pInseeCode, lLatitude,lLongitude);
+      lADORs := lADOConn.Execute(lPsSQL,lRecordsAffected,lOptions);
+      lADOConn.Close();
+      CLEAR(lADOConn);
+      CLEAR(lADORs);
+    END;
+
+    PROCEDURE CampaignSearch@1100281015(pCampaignNo@1100281000 : Code[20];pSpecializationCode@1100281001 : Code[20];pGeoRefCode@1100281002 : Code[20];VAR pPSB@1100281003 : TEMPORARY Record 51000;pSearchType@1100281004 : Integer;pEmergency@1100281008 : ',Yes,No';pDistanceKm@1100281011 : Integer;pRealKm@1100281012 : Boolean;pGeoFilterType@1100281017 : ' ,Territory Code,Area Code,Post Code';pGeoFilter@1100281013 : Text[1024]);
+    VAR
+      lAbiGeoMgt@1100281014 : Codeunit 50011;
+      tmpInseeSearchResult@1100281005 : TEMPORARY Record 51001;
+      lTempInseeSearchResult@1100281018 : TEMPORARY Record 51001;
+      lAbilityGeoCampProvider@1100281006 : Record 50015;
+      lAbilityGeoProvider@1100281007 : Record 50016;
+      lCampaignSpeArea@1100281009 : Record 50036;
+      lGeoCodeCount@1100281010 : Integer;
+      lX@1100281015 : Integer;
+      lY@1100281016 : Integer;
+    BEGIN
+      WITH pPSB DO BEGIN
+        IF pSearchType = 1 THEN BEGIN
+          CASE pGeoFilterType OF
+            pGeoFilterType::"Area Code":
+              GetInseeByArea(pGeoFilter,lTempInseeSearchResult,TRUE);
+            pGeoFilterType::"Territory Code":
+              GetInseeByTerritory(pGeoFilter,lTempInseeSearchResult,TRUE);
+            pGeoFilterType::"Post Code":
+              GetInseeByPostCode(pGeoFilter,lTempInseeSearchResult,TRUE);
+            ELSE BEGIN
+              GetInseeByDistanceKm(pGeoRefCode,pDistanceKm,lTempInseeSearchResult,TRUE);
+            END;
+          END;
+          IF lTempInseeSearchResult.FINDSET() THEN BEGIN
+            REPEAT
+              lAbilityGeoProvider.RESET();
+              //lAbilityGeoCampProvider.SETCURRENTKEY("Start Ref. Geo. Code","Specialization Code",Emergency);
+              lAbilityGeoProvider.SETCURRENTKEY("End Ref. Geo. Code","Specialization Code");
+              lAbilityGeoProvider.SETRANGE("End Ref. Geo. Code",lTempInseeSearchResult."Ref. Geo. Code");
+              //lAbilityGeoProvider.SETFILTER("Specialization Code",pSpecializationCode);
+              lAbilityGeoProvider.SETRANGE("Specialization Code",pSpecializationCode);
+              IF pEmergency = pEmergency::Yes THEN
+                lAbilityGeoProvider.SETRANGE(Emergency,TRUE)
+
+              ELSE
+                lAbilityGeoProvider.SETRANGE(Standard,TRUE);
+              //lAbilityGeoProvider.SETRANGE("Start Reference Code",lTempInseeSearchResult."Ref. Geo. Code");
+              IF NOT lAbilityGeoProvider.ISEMPTY() THEN BEGIN
+                IF lAbilityGeoProvider.FINDSET(FALSE,FALSE) THEN BEGIN
+                  REPEAT
+                    //MESSAGE('pro %1 spe %2',lAbilityGeoProvider."Provider No.",lAbilityGeoProvider."Specialization Code");
+                    IF NOT GET(lAbilityGeoProvider."Provider No.",lAbilityGeoProvider."Specialization Code") THEN BEGIN
+                      "Campaign No." := pCampaignNo;
+                      "Provider No." := lAbilityGeoProvider."Provider No.";
+                      "Specialization Code" := lAbilityGeoProvider."Specialization Code";
+                      Distance := lTempInseeSearchResult.Distance;
+                      INSERT();
+                    END;
+                  UNTIL lAbilityGeoProvider.NEXT = 0;
+                END;
+              END;
+            UNTIL lTempInseeSearchResult.NEXT()=0;
+          END;
+       END;
+
+        // Calcul du score
+        IF FINDSET() THEN BEGIN
+          REPEAT
+            ProviderCalcScore(pPSB,pSearchType,pEmergency);
+          UNTIL NEXT() = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE CalcRealKm@1100281016(VAR pPSRBuffer@1100281001 : Record 51000;pX@1100281004 : Integer;pY@1100281010 : Integer);
+    VAR
+      lX@1100281008 : Integer;
+      lY@1100281007 : Integer;
+      lX2@1100281006 : Integer;
+      lY2@1100281005 : Integer;
+      lDialog@1100281003 : Dialog;
+      lt@1100281002 : Integer;
+      lAbiGeoMgt@1100281000 : Codeunit 50011;
+      lCount@1100281009 : Integer;
+      lDateTime@1100281011 : DateTime;
+    BEGIN
+      lDialog.OPEN(Text001);
+      lAbiGeoMgt.SearchAround(pX,pY,pPSRBuffer);
+      lDialog.CLOSE;
+    END;
+
+    PROCEDURE SelectDistance@1100281003() rValue : Integer;
+    VAR
+      lSearchDistance@1100281000 : Integer;
+      lDialogDistance@1100281003 : Form 50149;
+    BEGIN
+      lSearchDistance := ProviderSetup."Inv. Search Default Distance";
+      IF GUIALLOWED AND (NOT isDistanceEntered) THEN BEGIN
+        COMMIT();
+        lDialogDistance.SetDistance(lSearchDistance);
+        lDialogDistance.LOOKUPMODE := TRUE;
+        IF lDialogDistance.RUNMODAL = ACTION::LookupOK THEN
+          lSearchDistance := lDialogDistance.GetDistance()
+        ELSE
+          ERROR(Text005);
+        CLEAR(lDialogDistance);
+      END;
+
+      rValue := lSearchDistance;
+    END;
+
+    PROCEDURE DebugTrace@1100481003(pText@1100481000 : Text[1024]);
+    BEGIN
+      // Fonction pour l'explication de la recherche
+      IF NOT DebugTraceEnable THEN BEGIN
+        EXIT;
+      END;
+
+      DebugFile.WRITEMODE := TRUE;
+      DebugFile.TEXTMODE := TRUE;
+      IF NOT EXISTS(UserSetup."Search Trace Path" + UserSetup."Search Trace File Name") THEN BEGIN
+        IF NOT DebugFile.CREATE(UserSetup."Search Trace Path" + UserSetup."Search Trace File Name") THEN BEGIN
+          EXIT;
+        END;
+      END ELSE BEGIN
+        DebugFile.OPEN(UserSetup."Search Trace Path" + UserSetup."Search Trace File Name");
+        DebugFile.SEEK(DebugFile.LEN);
+      END;
+      DebugLine += 1;
+      DebugFile.WRITE(pText + FORMAT(0D));
+      DebugFile.CLOSE;
+    END;
+
+    PROCEDURE DownloadDebugFile@1100281024();
+    VAR
+      lDebugFileName@1100281000 : Text[250];
+    BEGIN
+      IF NOT ISSERVICETIER THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT DebugTraceEnable THEN BEGIN
+        EXIT;
+      END;
+
+      lDebugFileName := UserSetup."Search Trace Path" + UserSetup."Search Trace File Name";
+      //<<IMH60.NFO
+      IF EXISTS(lDebugFileName) THEN BEGIN
+        HYPERLINK(lDebugFileName);
+      END;
+      //>>IMH60.NFO
+    END;
+
+    PROCEDURE SetSearchDate@1100281026(pDate@1100281000 : Date);
+    BEGIN
+      SearchDate := pDate;
+    END;
+
+    PROCEDURE GetSearchDate@1100281027() : Date;
+    BEGIN
+      IF SearchDate = 0D THEN
+        EXIT(WORKDATE)
+      ELSE
+        EXIT(SearchDate);
+    END;
+
+    PROCEDURE SetSearchTime@1100281028(pSearchTime@1100281000 : Time);
+    BEGIN
+      SearchTime := pSearchTime;
+    END;
+
+    PROCEDURE GetSearchTime@1100281029() : Time;
+    BEGIN
+      IF SearchTime = 0T THEN
+        EXIT(TIME)
+      ELSE
+        EXIT(SearchTime);
+    END;
+
+    PROCEDURE SetParametersToFilter@1100281034(pGeoFilterType@1100281002 : ' ,Territory Code,Area Code,Post Code';pPostCodeFilter@1100281000 : Code[20];pCityFilter@1100281001 : Text[30];pAreaFilter@1100281005 : Code[10];pTerritoryFilter@1100281003 : Code[10]);
+    BEGIN
+      // IMH22.isat.PC
+      // Gestion du passage des filtres
+
+      GeoFilterType := pGeoFilterType;
+      PostCodeFilter := pPostCodeFilter;
+      CityFilter := pCityFilter;
+      AreaFilter := pAreaFilter;
+      TerritoryFilter := pTerritoryFilter;
+    END;
+
+    PROCEDURE CheckHours@1100281035(pSearchType@1100281000 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR') : Boolean;
+    BEGIN
+      CASE pSearchType OF
+        pSearchType::Standard :   EXIT(ProviderSetup."Standard Business Hours Active");
+        pSearchType::Advanced :   EXIT(ProviderSetup."Advanced Business Hours Active");
+        pSearchType::Enlarge :    EXIT(ProviderSetup."Enlarge Business Hours Active");
+        pSearchType::Enterprise : EXIT(ProviderSetup."Entreprise Bus. Hours Active");
+        pSearchType::Sequenced :  EXIT(ProviderSetup."Sequenced Bus. Hours Active");
+      END; // CASE
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE HasMaxInterv@1100281037(pSearchType@1100281000 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';pProviderNo@1100281003 : Code[20];pCurrIntervNb@1100281001 : Integer;pMaxInterv@1100281002 : Integer) : Boolean;
+    VAR
+      lMaxInterv@1100281004 : Decimal;
+    BEGIN
+      IF pMaxInterv = 0 THEN BEGIN
+        DebugTrace(STRSUBSTNO(TextDebug043,pProviderNo));
+        EXIT(FALSE);
+      END;
+
+      CASE pSearchType OF
+        pSearchType::Standard : BEGIN
+          IF pCurrIntervNb >= pMaxInterv THEN BEGIN
+            EXIT(TRUE);
+          END ELSE BEGIN
+          END;
+        END;
+        pSearchType::DPR : ;   // pas de controle
+        ELSE BEGIN
+          lMaxInterv := pMaxInterv + (pMaxInterv * ProviderSetup."Supplement Max. Interv. (%)" / 100);
+          IF pCurrIntervNb >= lMaxInterv THEN BEGIN
+            EXIT(TRUE);
+          END;
+        END;
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE AddAffectedProvider@1100281056(ProviderNo@1100281000 : Code[10]);
+    BEGIN
+      IF NOT AffectedProviderBuffer.GET(ProviderNo) THEN BEGIN
+        AffectedProviderBuffer."No." := ProviderNo;
+        AffectedProviderBuffer.INSERT();
+      END;
+    END;
+
+    PROCEDURE ClearAffectedProviderBuffer@1100281057();
+    BEGIN
+      AffectedProviderBuffer.DELETEALL();
+    END;
+
+    PROCEDURE SetServOrderTypeAgree@1100281040(VAR pServiceOrderTypeAgree@1100281000 : Code[10]);
+    BEGIN
+      //IMH45
+      ServiceOrderTypeAgree := pServiceOrderTypeAgree;
+    END;
+
+    PROCEDURE CheckGeoWebService@1100281042() rValue : Boolean;
+    VAR
+      lTestHttpConnection@1100281000 : Codeunit 50212;
+      WinHttpService@1100281001 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+    BEGIN
+      //<<IMH62.PC
+      {
+      //IMH48
+      COMMIT;
+      IF NOT lTestHttpConnection.RUN THEN BEGIN
+        lTestHttpConnection.DisableProviderGeo;
+          EXIT(FALSE)      ;
+        END
+      ELSE
+        EXIT(TRUE);
+      }
+      EXIT;
+      //>>IMH62.PC
+    END;
+
+    PROCEDURE CreateProvider@1100281044(VAR pProvider@1100281000 : Record 50000;pOpenCard@1100481000 : Boolean);
+    VAR
+      lProvider@1100281001 : Record 50000;
+    BEGIN
+      //IMH49
+      // Fonction pour cr‚er un prestataire
+
+
+      lProvider.INIT;
+
+      IF pProvider.GETFILTER(Name) <> '' THEN
+        lProvider.VALIDATE(Name, pProvider.GETFILTER(Name));
+      IF pProvider.GETFILTER("Phone No.") <> '' THEN
+        lProvider.VALIDATE("Phone No.", pProvider.GETFILTER("Phone No."));
+      IF pProvider.GETFILTER("E-Mail") <> '' THEN
+        lProvider.VALIDATE("E-Mail", pProvider.GETFILTER("E-Mail"));
+      IF pProvider.GETFILTER("Fax No.") <> '' THEN
+        lProvider.VALIDATE("Fax No.", pProvider.GETFILTER("Fax No."));
+      IF pProvider.GETFILTER("VAT Registration No.") <> '' THEN
+        lProvider.VALIDATE("VAT Registration No.", pProvider.GETFILTER("VAT Registration No."));
+      IF pProvider.GETFILTER("Registration No.") <> '' THEN
+        lProvider.VALIDATE("Registration No.", pProvider.GETFILTER("Registration No."));
+
+      IF pProvider.GETFILTER("Country/Region Code") <> '' THEN
+        lProvider.VALIDATE("Country/Region Code",pProvider.GETFILTER("Country/Region Code"));
+      IF pProvider.GETFILTER("Post Code") <> '' THEN
+        lProvider.VALIDATE("Post Code",pProvider.GETFILTER("Post Code"));
+      IF pProvider.GETFILTER(City) <> '' THEN
+        lProvider.VALIDATE(City,pProvider.GETFILTER(City));
+      IF pProvider.GETFILTER(Address) <> '' THEN
+        lProvider.VALIDATE(Address,pProvider.GETFILTER(Address));
+      IF pProvider.GETFILTER("Address 2") <> '' THEN
+        lProvider.VALIDATE("Address 2",pProvider.GETFILTER("Address 2"));
+
+      lProvider.INSERT(TRUE);
+
+      IF pOpenCard THEN BEGIN
+        COMMIT;
+        FORM.RUNMODAL(FORM::"Provider Card",lProvider);
+      END;
+    END;
+
+    PROCEDURE GetWebServiceUrl@1000000003() : Text[250];
+    VAR
+      ProviderSetup@1100281000 : Record 50011;
+    BEGIN
+      ProviderSetup.GET;
+      EXIT(ProviderSetup."Geoconcept Web Service URL");
+    END;
+
+    PROCEDURE TestHttp@1000000004() : Boolean;
+    VAR
+      WinHttpService@1000000000 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+    BEGIN
+      IF ISCLEAR(WinHttpService) THEN CREATE(WinHttpService);
+      WinHttpService.Open('GET',GetWebServiceUrl + 'SearchAroundService/',0);
+      WinHttpService.Send('<Test></test>');
+      EXIT(WinHttpService.Status <> 200);
+    END;
+
+    PROCEDURE SetSearchParameter@1000000000(pCalendarDispo@1000000000 : ' ,Yes,No';pTimeDispo@1000000001 : ' ,Yes,No';pExclusionTemp@1000000002 : ' ,Yes,No';pExclusionDeffinitive@1000000003 : ' ,Yes,No';pBlackListOption@1000000004 : ' ,Yes,No';pSpecialitySearch@1100281001 : Boolean);
+    BEGIN
+      //IMH51
+      SearchParameterSetted := TRUE;
+      CalendarDispo := pCalendarDispo;
+      TimeDispo := pTimeDispo;
+      ExclusionTemp := pExclusionTemp;
+      ExclusionDeffinitive := pExclusionDeffinitive;
+      BlackListOption := pBlackListOption;
+      SpecialitySearch := pSpecialitySearch;   //IMH52
+    END;
+
+    LOCAL PROCEDURE CheckLimteCurrInterv@1100281045(pProvider@1100281000 : Record 50000;pSpecialityCode@1100281001 : Code[10];pServiceOrderType@1100281002 : Code[10];pSearchType@1100281008 : 'Standard,Advanced,Enlarge,Enterprise,Sequenced,DPR,Campaign';VAR pCurrentIntervLimitMax@1100281006 : Integer;VAR pProviderCurrentInterv@1100281007 : Integer;VAR pLimitType@1100281003 : 'Provider,Speciality,ServiceOrderType') : Boolean;
+    VAR
+      lProvServOrderTypeLimit@1100281005 : Record 50181;
+      lProviderSpecialization@1100281004 : Record 50006;
+    BEGIN
+      //IMH54
+      //<<IMH58
+      pCurrentIntervLimitMax := 0;
+      pProviderCurrentInterv := 0;
+      //>>IMH58
+      IF pServiceOrderType <> '' THEN BEGIN
+        IF lProvServOrderTypeLimit.GET(pProvider."No.", pServiceOrderType) THEN BEGIN
+          pCurrentIntervLimitMax := lProvServOrderTypeLimit."Current Interv. Limit";
+          pProviderCurrentInterv := pProvider.CountServOrdCurrentInterv(pServiceOrderType);
+          pLimitType := pLimitType::ServiceOrderType;
+        END;
+      END;
+
+      IF pCurrentIntervLimitMax = 0 THEN
+        IF pSpecialityCode <> '' THEN BEGIN
+          lProviderSpecialization.RESET;
+          lProviderSpecialization.SETRANGE("Provider No.", pProvider."No.");
+          lProviderSpecialization.SETRANGE("Specialization Code", pSpecialityCode);
+          IF lProviderSpecialization.FINDFIRST THEN BEGIN
+            IF lProviderSpecialization."Current Interv. Limit" <> 0 THEN BEGIN
+              pCurrentIntervLimitMax := lProviderSpecialization."Current Interv. Limit";
+              pProviderCurrentInterv := pProvider.CountCurrentInterv(pSpecialityCode);
+              pLimitType := pLimitType::Speciality;
+            END;
+          END;
+        END;
+
+      IF pCurrentIntervLimitMax = 0 THEN BEGIN
+        pCurrentIntervLimitMax := pProvider."Current Interv. Limit Max.";
+        pProviderCurrentInterv := pProvider.CountCurrentInterv('');
+        pLimitType := pLimitType::Provider;
+      END;
+      IF pCurrentIntervLimitMax > 0 THEN
+        EXIT(NOT HasMaxInterv(pSearchType, pProvider."No.",pProviderCurrentInterv,pCurrentIntervLimitMax));
+
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH69 @d 29/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search
+          @c add DRP search in refused provider */
+      /** @r IMH68 @d 24/04/14 @a ISAT.PC @v IMH6.01.P011 @s New Provider Search
+          @c add search engine information in refused provider */
+      /** @r IMH67 @d 09/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search
+          @c Remplacer les fonctions GetDistance2, GetProviderSpecialization, ProviderCheckBusinessHours,
+          @c ExclusionProvider, GetProviderAgreementLine par les fonctions de CU 50284
+          @c Ajout fonction SearchProvPresent + CallProvider */
+      /** @r IMH66 @d 18/02/14 @s ISAT.PC @v IMH6.01.P011 @s New Provider Search
+          @c Change Codeunit Name from "Provider Search Mgt" to "First Provider Search" */
+      /** @r IMH65 @d 15/10/13 @s ISAT.PC @v IMH6.01.4814 @s Assignations KO / Rupture WS Geoconcept @c Correction */
+      /** @r IMH64 @d 11/06/13 @s ISAT.PC @v IMH6.01.347 @s JUIN @h 4580
+          @c Modification de la taille de la variable pMessage de la fonction CheckCalendar (250 … 1024)
+          @c Modification de la taille de la variable locale lMessage de la fonction ProviderApplyFilter (250 … 1024) */
+      /** @r IMH63 @d 05/06/13 @s ISAT.ZW @v IMH6.01.347 @s JUIN @h 4551 @c Gestion de recherche : Liste des specialit‚ dispo */
+      /** @r IMH62 @d 22/04/13 @s ISAT.PC @v IMH6.01.345 @s Mantis @h 3336 @c Suppression */
+      /** @r IMH61 @d 27/03/13 @s ISAT.ZW @v IMH6.01.342 @s NEP IMH 4 @h 3731 @c correction longeur texte TextDebug017 TextDebug034 */
+      /** @r IMH60 @d 31/01/13 @s ISAT.NFO @v IMH6.01.218 @s NEP00009 @h 3840 @c correction */
+      /** @r IMH59 @d 15/01/13 @s ISAT.ZW @v IMH6.01.340 @s NEPIMH4 @h 4175 @c correction */
+      /** @r IMH58 @d 14/12/12 @s ISAT.ZW @v IMH6.01.333 @s NEP00012 @h 4151 @c correction */
+      /** @r IMH57 @d 11/12/12 @s ISAT.ZW @v IMH6.01.214 @s NEP00005 @h 3853 @c correction */
+      /** @r IMH56 @d 12/11/12 @s ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 2968 @c Limite sur les types produit : correction */
+      /** @r IMH55 @d 24/10/12 @s ISAT.ZW @v IMH6.01.215 @s NEP00006 @h 3995 @c Correction */
+      /** @r IMH54 @d 27/08/12 @s ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 2968 @c Limite sur les types produit */
+      /** @r IMH53 @d 24/05/12 @s ISAT.ZW @v IMH6.01.020 @s Recherche prestataire @h 3522 @c correction Pb distancier */
+      /** @r IMH52 @d 09/05/12 @s ISAT.ZW @v IMH6.01.020 @s Recherche prestataire @h 2406 @c Recherche sans sp‚cialit‚ */
+      /** @r IMH51 @d 04/05/12 @a ISAT.ZW @v IMH6.01.020 @s Gestion des contacts @h 494 @c Ajout CritŠres de recherche */
+      /** @r IMH50 @d 04/05/12 @a ISAT.LLT @v IMH6.01.020 @s Gestion des contacts @h 2551 @c Ajout compteur */
+      /** @r IMH49 @d 03/05/12 @s ISAT.LLT @v IMH6.01.020 @s Recherche prestataire @h 2013 @c Ajout creation prestataire  */
+      /** @r IMH48 @d 24/04/12 @a ISAT.LLT @v IMH6.01.020 @s Calcul distance @h 3336 @c Test r‚ponse geoconcept */
+      /** @r IMH47 @d 23/04/12 @a ISAT.LLT @v IMH6.01.020 @s Recherche prestataire @h 2685 @c Tri par score dans la trace */
+      /** @r IMH46 @d 18/04/12 @a ISAT.ZW @v IMH6.01.020 @s Recherche prestataire @h 2855
+          @c Gestion exclusion prestataire aprŠs la recherche */
+      /** @r IMH45 @d 13/04/12 @a ISAT.ZW @v IMH6.01.020 @s Recherche prestataire @h 3203
+          @c Correction exclusion par d‚faut : r‚gion GC/TYpe produit */
+      /** @r IMH44 @d 10/04/12 @a ISAT.PC @v IMH6.01.020 @s Calcul distance @h 3002 @c Ajout fonction GetProviderGeoCodeWithAddress */
+      /** @r IMH43 @d 06/03/12 @a ISAT.ZW @v IMH6.01.020 @s Recherche prestataire @h 2360 @c Correction exclusion par d‚faut */
+      /** @r IMH42 @d 22/02/12 @a ISAT.ST @v IMH6.01.020 @s Recherche prestataire @h 2360 @c G‚ocodage approximatif */
+      /** @r IMH41 @d 31/01/12 @s ISAT.ZW @v IMH6.01.020 @s Recherche prestataire @h 2683 @c Gestion Exclusion */
+      /** @r IMH40 @d 14/01/12 @s ISAT.PC @v IMH6.01.020 @s Recherche prestataire @h 2683 @c Gestion des limites */
+      /** @r IMH39 @d 05/01/12 @s ISAT.NFO @v IMH6.01.020 @s Recherche prestataire @h 2729 @c Utilisation de l'@ MEO pour intline */
+      /** @r IMH38 @d 05/01/12 @s ISAT.NFO @v IMH6.01.020 @s Recherche prestataire @h 2809 @c suppression du test geocodeage */
+      /** @r IMH37 @d 13/12/11 @s ISAT.PC @v IMH6.01.020 @s Recherche prestataire @h 2665 */
+      /** @r IMH36 @d 09/12/11 @s ISAT.PC @v IMH6.01.020 @s Recherche prestataire @c Calcul distance reel a partir de la ville si dpr */
+      /** @r IMH35 @d 05/12/11 @s ISAT.PC @v IMH6.01.020 @s Recherche prestataire @c Gestion de la recheche s‚quenc‚e */
+      /** @r IMH34 @d 29/11/11 @s ISAT.NFO @v IMH6.01.020 @s Recherche prestataire @c Prestataire Li‚ ajout du buffer */
+      /** @r IMH33 @d 02/11/11 @s ISAT.NFO @v IMH6.01.020 @s Recherche prestataire @c Prestataire Li‚ */
+      /** @r IMH32 @d 28/09/11 @a ISAT.ZW  @v IMH6.01.028 @s Recherche prestataire @h 350 @c ajout fonction SearchResult */
+      /** @r IMH31 @d 24/09/11 @a ISAT.PC  @v IMH6.01.028 @s Recherche prestataire @h 1346 @c score prestataire li‚ */
+      /** @r IMH30 @d 08/09/11 @a ISAT.EBA  @v IMH6.01.028 @s Recherche prestataire @c Filtre sur code ref. geo. de l'adresse op‚r.*/
+      /** @r IMH29 @d 05/09/11 @a ISAT.LLT  @v IMH6.01.028 @s Recherche prestataire @c Filtre sur code ref. geo. */
+      /** @r IMH28 @d 09/08/11 @a ISAT.ST @v IMH6.01.028 @s Recherche prestataire @c R‚activation test entreprise g‚n‚ral/r‚no */
+      /** @r IMH27 @d 04/08/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire
+          @c Prise en compte du taux d'occupation par spe si defini */
+      /** @r IMH26 @d 04/08/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire @c Prise en compte du filtre allspecialization */
+      /** @r IMH25 @d 26/07/11 @a ISAT.PC @v IMH6.01.028 @s Recherche prestataire @c D‚sactivation entreprise generale */
+      /** @r IMH24 @d 21/07/11 @a ISAT.PC @v IMH6.01.028 @s Recherche prestataire @c Gestion de l'astreinte */
+      /** @r IMH23 @d 06/07/11 @a ISAT.ST @v IMH6.01.028 @s Recherche prestataire
+          @c Correction gestion Max Intervention, heures, distance */
+      /** @r IMH22 @d 30/06/11 @a ISAT.ZW @v IMH6.01.028 @s Recherche prestataire @c Ajout fonction setparameters */
+      /** @r IMH21 @d 28/06/11 @a ISAT.ZW @v IMH6.01.028 @s Recherche prestataire @c Recalcule distance Geo */
+      /** @r IMH20 @d 20/06/11 @a ISAT.PC @v IMH6.01.028 @s Recherche prestataire @c Gestion des adresses de d‚m‚nagement */
+      /** @r IMH19 @d 22/05/11 @a ISAT.ZW @v IMH6.01.028 @s Recherche prestataire @c Gestion agr‚ment
+          @c fonction GetRefusedProvider*/
+      /** @r IMH18 @d 02/05/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire @c Correction cas multi specialit‚s */
+      /** @r IMH17 @d 18/04/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire @c mise … jour du statut prestataire */
+      /** @r IMH16 @d 15/04/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire
+          @c Prise en compte des exclusions temporaires et des dates d'exclusions */
+      /** @r IMH15 @d 23/03/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire @c Correction filtre multisp‚cialit‚ */
+      /** @r IMH14 @d 14/03/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire
+          @c Remplacement de la fonction getusersetup par istraceenabled */
+      /** @r IMH13 @d 23/02/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire
+          @c Ajout des fonctions getSearchDate et setSearchDate
+          @c Ajout des fonctions getSearchTime et SetSearchTime */
+      /** @r IMH12bis @d 17/02/11 @a ISAT.PC @v IMH6.01.028 @s Recherche prestataire @c Gestion des refus */
+      /** @r IMH12 @d 17/02/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire @c Ne pas demander la distance quand <> DPR ... */
+      /** @r IMH11 @d 17/02/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire
+          @c Ajout info debug, urgent, geo invisible plateau ... */
+      /** @r IMH10 @d 14/02/11 @a ISAT.PC @v IMH6.01.028 @s Recherche prestataire @c Gestion de la v‚rification des contacts */
+      /** @r IMH09 @d 11/02/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire
+          @c modification des filtres pour la recherche invers‚e */
+      /** @r IMH08 @d 08/02/11 @a ISAT.ZW @v IMH6.01.028 @s Recherche prestataire
+          @c optimisation StandardProviderSearch : Changer index */
+      /** @r IMH07 @d 24/01/11 @a ISAT.LLT @v IMH6.01.028 @s Recherche prestataire @c Gestion Nø ligne produit */
+      /** @r IMH06 @d 18/01/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire
+          @c Prise en compte du parametre "Activate Search Geoconcept"   */
+      /** @r IMH05 @d 04/01/11 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire @c Gestion des horaires par defaut*/
+      /** @r IMH04 @d 20/12/10 @a ISAT.LLT @v IMH6.01.028 @s Recherche prestataire @c Ajout paramŠtre  */
+      /** @r IMH03 @d 25/11/10 @a ISAT.NFO @v IMH6.01.028 @s Recherche prestataire @c Recherche climatique */
+      /** @r IMH02 @d 16/11/10 @a ISAT.LLT @v IMH6.01.028 @s Recherche prestataire @c Corrections*/
+      /** @r IHM01 @d 23/09/10 @a ISAT.PC @v IMH6.01.028 @s Recherche prestataire @c Creation */
+    }
+    END.
+  }
+}

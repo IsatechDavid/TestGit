@@ -1,0 +1,183 @@
+OBJECT Codeunit 50279 Formation ST
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/11/13;
+    Time=17:48:12;
+    Modified=Yes;
+    Version List=;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+            TestListDocumentToDownload('C:\Temp\TestST347403T', '347403T','',TRUE);
+            TestListDocumentToDownload('C:\Temp\TestST347403TREN', '347403T','REN*',TRUE);
+            TestListDocumentToDownload('C:\Temp\TestST214323F', '214323F','',TRUE);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ExtFct@1000000000 : Codeunit 50204;
+
+    PROCEDURE GetProvIntervList1@1000000002(pProviderNo@1000000000 : Code[20];VAR pIntervList@1000000002 : BigText) : Boolean;
+    VAR
+      lGUID@1000000004 : GUID;
+      lIntervention@1000000005 : Record 50075;
+      lProvider@1000000006 : Record 50000;
+    BEGIN
+      EXIT(GetProvIntervList(pProviderNo, '','',TRUE,pIntervList));
+    END;
+
+    PROCEDURE GetProvIntervList2@1000000003(pProviderNo@1000000000 : Code[20];VAR pIntervList@1000000002 : BigText) : Boolean;
+    VAR
+      lGUID@1000000004 : GUID;
+      lIntervention@1000000005 : Record 50075;
+      lProvider@1000000006 : Record 50000;
+    BEGIN
+      EXIT(GetProvIntervList(pProviderNo, '','',TRUE,pIntervList));
+    END;
+
+    PROCEDURE GetProvIntervList@1000000000(pProviderNo@1000000000 : Code[20];pServOrderTypeFilter@1000000001 : Text[250];pCorpFilter@1000000007 : Text[250];pIncludeClosed@1000000003 : Boolean;VAR pIntervList@1000000002 : BigText) : Boolean;
+    VAR
+      lGUID@1000000004 : GUID;
+      lIntervention@1000000005 : Record 50075;
+      lProvider@1000000006 : Record 50000;
+    BEGIN
+      // Renvoi la liste des interventions pour un prestataire
+      ExtFct.Initial(2,'GetProvIntervList',
+                     STRSUBSTNO('%1-%2-%3', pProviderNo, pServOrderTypeFilter, pIncludeClosed),
+                     lGUID);
+
+      lProvider.GET(pProviderNo);
+      lIntervention.SETCURRENTKEY("Provider No.");
+      lIntervention.SETRANGE("Provider No.", pProviderNo);
+      IF pServOrderTypeFilter <> '' THEN
+        lIntervention.SETFILTER("Service Order Type", pServOrderTypeFilter);
+      IF pCorpFilter <> '' THEN
+        lIntervention.SETFILTER("Corporate No.", pCorpFilter);
+      IF NOT pIncludeClosed THEN
+        lIntervention.SETRANGE(Closed, FALSE);
+
+
+
+      EncodeIntervList(lIntervention, pIntervList);
+
+      ExtFct.Finish(lGUID);
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE EncodeIntervList@1000000004(VAR pIntervList@1000000000 : Record 50075;VAR pBigTextResult@1000000001 : BigText);
+    VAR
+      lXMLDoc@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNode1@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode2@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLMgt@1000000005 : Codeunit 8016710;
+      lProcStatus@1000000006 : Record 50042;
+      lToolsMgt@1000000007 : Codeunit 8016602;
+      lFileName@1000000008 : Text[1024];
+      lInstream@1000000009 : InStream;
+      lFIle@1000000010 : File;
+    BEGIN
+      // Structure XML
+      // INTERVENTION_LIST
+      //   INTERVENTION
+      //     SERVICE_NO
+      //     SERVICE_HEADER_NO
+      //     INTERVENTION_NO
+      //     CONTACT_NO
+      //     ASSIGNED_DATE
+      //     SERVICE_ORDER_TYPE
+      //     EXTRANET_CODE
+      IF NOT lXMLMgt.CreateXml(lXMLDoc,'<INTERVENTION_LIST />',lXMLNode1) THEN
+        ERROR('Cr‚ation XML');
+
+      WITH pIntervList DO BEGIN
+        IF FINDSET THEN
+          REPEAT
+            lXMLMgt.IsAddElement(lXMLNode1,'INTERVENTION','','',lXMLNode2);
+            lXMLMgt.IsAddElement4(lXMLNode2,'SERVICE_NO',"Service No.",'');
+            lXMLMgt.IsAddElement4(lXMLNode2,'SERVICE_HEADER_NO',"Service Header No.",'');
+            lXMLMgt.IsAddElement4(lXMLNode2,'INTERVENTION_NO',lToolsMgt.IntegerToText("Intervention No."),'');
+            lXMLMgt.IsAddElement4(lXMLNode2,'CONTACT_NO',"Contact No.",'');
+            lXMLMgt.IsAddElement4(lXMLNode2,'ASSIGNED_DATE',lToolsMgt.DateToText("Assigned Date"),'');
+            lXMLMgt.IsAddElement4(lXMLNode2,'SERVICE_ORDER_TYPE',"Service Order Type",'');
+      //      IF NOT lProcStatus.GET("Process Code", "Process Status No.") THEN
+      //        lProcStatus."Extranet Code" := '[ND]';
+      //      lXMLMgt.IsAddElement4(lXMLNode2,'EXTRANET_CODE',lProcStatus."Extranet Code",'');
+
+            IF lProcStatus.GET("Process Code", "Process Status No.") THEN
+              lXMLMgt.IsAddElement4(lXMLNode2,'EXTRANET_CODE',lProcStatus."Extranet Code",'')
+            ELSE
+              lXMLMgt.IsAddElement4(lXMLNode2,'EXTRANET_CODE','[ND]','');
+          UNTIL NEXT = 0;
+      END; // WITH
+
+      lFileName := ExtFct.GetTempFilename('xml');
+      lXMLDoc.save(lFileName);
+      IF lFIle.OPEN(lFileName) THEN BEGIN
+        lFIle.CREATEINSTREAM(lInstream);
+        pBigTextResult.READ(lInstream);
+        lFIle.CLOSE;
+        ERASE(lFileName);
+      END ELSE BEGIN
+        ERROR('Ouverture Fichier');
+      END;
+    END;
+
+    PROCEDURE TestListDocumentToDownload@1100281000(pFileNameToExport@1000000011 : Text[1024];pProviderNo@1000000002 : Code[20];pServOrderTypeFilter@1000000001 : Text[1024];pIncludeClosed@1000000000 : Boolean);
+    VAR
+      lSentMQBuffer@1000000014 : Record 8016720;
+      lwinHTTPService@1000000013 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000007 : InStream;
+      lOutStream@1000000015 : OutStream;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<GetProvIntervList xmlns="urn:microsoft-dynamics-schemas/codeunit/FormationST">');
+      lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      lOutStream.WRITETEXT('<pServOrderTypeFilter>' + pServOrderTypeFilter + '</pServOrderTypeFilter>');
+      IF pIncludeClosed THEN
+        lOutStream.WRITETEXT('<pIncludeClosed>true</pIncludeClosed>')
+      ELSE
+        lOutStream.WRITETEXT('<pIncludeClosed>false</pIncludeClosed>');
+      lOutStream.WRITETEXT('<pIntervList/>');
+      lOutStream.WRITETEXT('</GetProvIntervList>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST','http://simhns07:7061/NST2009R2_Dev_IMH/WS/IMH%20-%20Dev/Codeunit/FormationST',0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'ListDocumentToDownload_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'ListDocumentToDownload_Response.xml');
+    END;
+
+    BEGIN
+    END.
+  }
+}

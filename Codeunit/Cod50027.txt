@@ -1,0 +1,1445 @@
+OBJECT Codeunit 50027 Quality Control Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=11/12/12;
+    Time=13:43:55;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 5900=rim,
+                TableData 50000=r,
+                TableData 50016=r,
+                TableData 50066=rim,
+                TableData 50075=rim,
+                TableData 50090=rimd,
+                TableData 50091=rimd;
+    OnRun=VAR
+            lQualityControl@1100281000 : Record 50090;
+            lInterv@1000000000 : Record 50075;
+          BEGIN
+            {
+            lQualityControl.FINDFIRST();
+            GenerateQualityControlList(lQualityControl);
+            EXIT;
+            CalculateScore('0000022',80000);
+            EXIT;
+            lQualityControl."Provider No." := '0000099';
+            lQualityControl."Period Start" := 010190D;
+            lQualityControl."Period Stop" := 01012050D;
+            GenerateQualityControlList(lQualityControl);
+            EXIT;
+            }
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text0001@1100281000 : TextConst 'FRA=Vous devez renseigner le pourcentage de contr“les al‚atoires';
+      Text0002@1100281001 : TextConst 'ENU=You can not create a control in this period, another check is in progress;FRA=Vous ne pouvez pas cr‚er un contr“le sur cette p‚riode, un autre contr“le est en cours';
+      Text0003@1100281002 : TextConst 'ENU=The extraction has already been done, remove the lines if you want to extract again.;FRA=L''extraction a d‚j… ‚t‚ faite, supprimez les lignes si vous voulez extraire … nouveau';
+      Text0004@1100281003 : TextConst 'FRA=Recherche en cours \@1@@@@@@@@@@@@@@@@@';
+      ProviderSetup@1100281004 : Record 50011;
+      ProviderSetupRead@1100281005 : Boolean;
+      Text100@1100281006 : TextConst 'ENU=%1 controls have been created.;FRA=%1 contr“les ont d‚j… ‚t‚ g‚n‚r‚s.';
+      Text101@1100281007 : TextConst 'FRA=Incoh‚rence sur les dates de prise en compte (d‚but %1 fin %2)';
+      ServIntervLine@1100281008 : Record 50075;
+      ServIntervLine2@1100281009 : Record 50075;
+      TempInclList@1100281010 : TEMPORARY Record 50079;
+      ServCode@1000000001 : Record 50040;
+      Service@1000000002 : Record 50066;
+      Text102@1100281011 : TextConst 'ENU=Provider %1 doesn''t have %2 speciality.;FRA=Le prestataire %1 n''a pas la sp‚cialit‚ %2.';
+      HideDlg@1000000000 : Boolean;
+      Window@1000000003 : Dialog;
+      Text200@1000000004 : TextConst 'ENU=Task #1################\#2####################;FRA=Tƒche #1########################################\#2########################################';
+      Text201@1000000005 : TextConst 'ENU=Search providers;FRA=recherche des prestataires';
+      Text202a@1100281015 : TextConst 'ENU=%1 providers found.;FRA=Prestataire %1 : %2';
+      Text202@1000000006 : TextConst 'ENU=%1 providers found.;FRA=%1 prestataires trouv‚s.';
+      Text203@1000000007 : TextConst 'ENU=searching interventions;FRA=recherche des interventions';
+      Text204@1000000008 : TextConst 'ENU=creating targeted controls;FRA=cr‚ation des contr“les cibl‚s';
+      Text205@1000000009 : TextConst 'ENU=creating random controls;FRA=cr‚ation des contr“les al‚atoires';
+      Text206@1000000010 : TextConst 'ENU=%1 random controls and %2 targeted controls have been created.;FRA=%1 contr“les al‚atoires et %2 contr“les cibl‚s cr‚‚s.';
+      Text207@1000000011 : TextConst 'ENU=%1 interventions found;FRA=%1 interventions trouv‚es';
+      Text208@1000000012 : TextConst 'ENU=Provider %1.;FRA=prestataire %1.';
+      Text209@1100281012 : TextConst 'ENU=No provider to control;FRA=Aucun prestataire … contr“ler.';
+      Text210@1100281013 : TextConst 'ENU=No intervention to control.;FRA=Aucune intervention … contr“ler.';
+      Text300@1000000013 : TextConst 'ENU=Response to "%1" is mandatory.;FRA=La r‚ponse … "%1" est obligatoire.';
+      LogActive@1000000014 : Boolean;
+      LogMgt@1000000015 : Codeunit 50092;
+      QualCtrlObj@1000000016 : Record 50090;
+
+    LOCAL PROCEDURE GenerateQualityControlList@1100281000(VAR pQualityControl@1100281000 : Record 50090);
+    VAR
+      lQualityControlLine@1100281001 : Record 50091;
+      lServiceInterventionLine@1100281002 : Record 50075;
+      lServiceInterventionLine2@1100281022 : Record 50075;
+      lAbiGeoProvider@1100281003 : Record 50016;
+      lProvider@1100281006 : Record 50000;
+      lProviderSetup@1100281004 : Record 50011;
+      lPostCode@1100281007 : Record 225;
+      lServiceOrderType@1100281012 : Record 5903;
+      TmpQualityControlLine@1100281008 : TEMPORARY Record 50091;
+      lLineNo@1100281005 : Integer;
+      lServiceInterLineCount@1100281009 : Integer;
+      lServiceInterLineCountRequired@1100281010 : Integer;
+      i@1100281011 : Integer;
+      lServiceInterLineSelected@1100281013 : Integer;
+      lServInterTrialPerLineCount@1100281014 : Integer;
+      lAreaCode@1100281015 : Code[10];
+      lDialog@1100281016 : Dialog;
+      lCurrentCounter@1100281019 : Integer;
+      lTotalCounter@1100281018 : Integer;
+      lModuloCounter@1100281017 : Integer;
+      lToInsert@1100281020 : Boolean;
+      lNbInterProv@1100281021 : Integer;
+    BEGIN
+      {
+      //lServiceOrderType.MODIFYALL("Quality Control Allowed",TRUE);
+      //lProvider.MODIFYALL(lProvider."Max Number of Control Prov.",500);
+      lQualityControlLine.RESET();
+      lQualityControlLine.SETRANGE("Intervention Line No.",pQualityControl."No.");
+      IF NOT lQualityControlLine.ISEMPTY() THEN
+        ERROR(Text0003);
+      IF NOT CheckQualityControlAllowed(pQualityControl) THEN
+        ERROR(Text0002);
+      //pQualityControl.INSERT(TRUE);
+      IF lProviderSetup.GET() THEN;
+      lProviderSetup.TESTFIELD("Quality Control Specialization");
+      lLineNo := 10000;
+
+      IF GUIALLOWED THEN lDialog.OPEN(Text0004);
+      WITH lServiceInterventionLine DO BEGIN
+        SETRANGE(Closed, TRUE);
+        SETRANGE("Intervention Status", "Intervention Status"::Closed);
+        SETRANGE("Closed DateTime", CREATEDATETIME(pQualityControl."Period Start",0T),CREATEDATETIME(pQualityControl."Period Stop",0T));
+        SETRANGE("Quality Control Processed",FALSE);
+        SETFILTER("Service Order Type",'<>%1', '');
+        IF FINDSET() THEN BEGIN
+          IF GUIALLOWED THEN BEGIN
+            lCurrentCounter := 0;
+            lTotalCounter := COUNT;
+            lModuloCounter := ROUND(lTotalCounter * 5 / 100,1,'>');
+            lDialog.OPEN(Text0004);
+          END;
+
+      //    MESSAGE('Nombre de lignes d''intervention close %1',COUNT());
+          REPEAT
+            IF GUIALLOWED THEN BEGIN
+              lCurrentCounter +=1;
+              IF lCurrentCounter MOD lModuloCounter = 1 THEN BEGIN
+                lDialog.UPDATE(1,ROUND(lCurrentCounter / lTotalCounter * 9999,1));
+              END;
+            END;
+            IF lProvider.GET("Provider No.") THEN BEGIN
+              lServiceInterventionLine2.SETCURRENTKEY("Provider No.");
+              lServiceInterventionLine2.SETRANGE("Provider No.", lProvider."No.");
+              lNbInterProv := lServiceInterventionLine2.COUNT;
+              IF (lProvider."Control Count in Period" <= lProvider."Max Number of Control Prov.") AND
+                (lNbInterProv >= lProvider."Min. Inter. Before Control")  AND
+                (lProvider.Status >= lProvider.Status::"Trial Period")
+              THEN BEGIN
+                lToInsert := FALSE;
+                lServiceOrderType.GET("Service Order Type");
+                IF lServiceOrderType."Quality Control Allowed" THEN BEGIN
+                  IF lPostCode.GET(lServiceInterventionLine."Post Code", lServiceInterventionLine.City) THEN
+                    IF pQualityControl."Area Code" = '' THEN BEGIN
+                      lAbiGeoProvider.SETRANGE("Provider No.",pQualityControl."Provider No.");
+                      lAbiGeoProvider.SETRANGE("End Ref. Geo. Code", lPostCode."Geo. Reference Code");
+                      IF NOT lAbiGeoProvider.ISEMPTY THEN
+                        lToInsert := TRUE;
+                    END ELSE BEGIN
+                      IF lPostCode."Area Code" = '' THEN
+                        lPostCode."Area Code" := COPYSTR(lPostCode.Code, 1,2);
+                      IF lPostCode."Area Code" = pQualityControl."Area Code" THEN
+                        lToInsert := TRUE;
+                    END;
+
+                  IF lToInsert THEN BEGIN
+                      TmpQualityControlLine."Answer 5 Result" := (lProvider.Status = lProvider.Status::"Trial Period") AND
+                        (lProvider."Control Count in Period" < lProviderSetup."Nb. interventions to Control");
+                      TmpQualityControlLine."Intervention Line No." := pQualityControl."No.";
+                      TmpQualityControlLine."Line No." := lLineNo;
+                      TmpQualityControlLine."Service Header No." := "Service Header No.";
+                      TmpQualityControlLine."Answer 1 Enabled" := "Line No.";
+                      TmpQualityControlLine."Answer 1 Description" := "Intervention No.";
+                      TmpQualityControlLine."Answer 1 Result" := lProvider."No.";
+                      TmpQualityControlLine."Answer 1 Score" := lProvider.Name;
+                      TmpQualityControlLine."Answer 1 Comment Mandatory" := lProvider."Phone No.";
+                      TmpQualityControlLine.City := lProvider.City;
+                      TmpQualityControlLine."Answer 2 Enabled" := lProvider."Post Code";
+                      TmpQualityControlLine."Answer 5 Comment Mandatory" := lProvider.Status;
+                      TmpQualityControlLine.INSERT(TRUE);
+                      lLineNo += 10000;
+                    //END;
+                  END;
+                END;
+              END;
+            END;
+          UNTIL (NEXT()=0);
+        END;
+
+        lLineNo := 10000;
+        lServiceInterLineCount := TmpQualityControlLine.COUNT();
+        lServiceInterLineSelected := 0;
+        lProviderSetup.TESTFIELD("Number Tasks Control Coef.");
+        lProviderSetup.TESTFIELD("% Control Random");
+        lServiceInterLineCountRequired := ROUND(lServiceInterLineCount / 100 * lProviderSetup."% Control Random",1,'=');
+        pQualityControl."Appointements to Take Count" := lServiceInterLineCountRequired;
+        pQualityControl.MODIFY(TRUE);
+        lServiceInterLineCountRequired *= lProviderSetup."Number Tasks Control Coef.";
+
+        // Traitement des contr“les obligatoires
+        // Cherche le nombre souhait‚ d'intervention periode d'essai
+        lServInterTrialPerLineCount :=ROUND((TmpQualityControlLine.COUNT() /100) * lProviderSetup."% Trail Period Provider",1,'=');
+
+        TmpQualityControlLine.RESET();
+        TmpQualityControlLine.SETCURRENTKEY("Answer 5 Comment Mandatory","Answer 5 Result","Answer 1 Result");
+        TmpQualityControlLine.SETRANGE("Answer 5 Comment Mandatory",TmpQualityControlLine."Answer 5 Comment Mandatory"::"3");
+        lServiceInterLineCount := TmpQualityControlLine.COUNT();
+        IF lServInterTrialPerLineCount > lServiceInterLineCount THEN
+          lServInterTrialPerLineCount :=  lServiceInterLineCount;
+
+        FOR i := 1 TO lServInterTrialPerLineCount DO BEGIN
+          lServiceInterLineCount := TmpQualityControlLine.COUNT();
+          TmpQualityControlLine.FINDFIRST();
+          IF TmpQualityControlLine.NEXT(RANDOM(lServiceInterLineCount)-1) > 0 THEN BEGIN
+             lQualityControlLine := TmpQualityControlLine;
+             lQualityControlLine."Line No." := lLineNo;
+             lLineNo += 10000;
+             lServiceInterLineSelected += 1;
+             lQualityControlLine.INSERT();
+             TmpQualityControlLine.DELETE();
+          END;
+        END;
+        // Traitement des autres lignes
+        lServiceInterLineCountRequired -= lServiceInterLineSelected;
+        TmpQualityControlLine.RESET();
+        FOR i := 1 TO lServiceInterLineCountRequired DO BEGIN
+          TmpQualityControlLine.FINDFIRST();
+          lServiceInterLineCount := TmpQualityControlLine.COUNT();
+          IF TmpQualityControlLine.NEXT(RANDOM(lServiceInterLineCount)-1) > 0 THEN BEGIN
+             lQualityControlLine := TmpQualityControlLine;
+             lQualityControlLine."Line No." := lLineNo;
+             lLineNo += 10000;
+             lQualityControlLine.INSERT();
+             TmpQualityControlLine.DELETE();
+          END;
+        END;
+      END;
+      }
+    END;
+
+    LOCAL PROCEDURE CalculateScore@1100281001(pQCNo@1100281000 : Code[10];pQCLineNo@1100281001 : Integer);
+    VAR
+      lProviderSetup@1100281008 : Record 50011;
+      lQCSheet@1100281002 : Record 50093;
+      lQCLine@1100281007 : Record 50091;
+      lCount@1100281003 : Integer;
+      lScore@1100281004 : Decimal;
+      lUnacceptableCount@1100281005 : Integer;
+      lBase@1100281006 : Decimal;
+      lCurrCoef@1100281009 : Decimal;
+      lDeducePoint@1100281010 : Decimal;
+    BEGIN
+      {
+      //MESSAGE('%1 %2',pQCNo,pQCLineNo);
+      lProviderSetup.GET();
+      lQCSheet.RESET();
+      lQCSheet.SETRANGE("Quality Control No.",pQCNo);
+      lQCSheet.SETRANGE("Quality Control Line No.",pQCLineNo);
+      lQCSheet.SETRANGE(Type,lQCSheet.Type::Question);
+      lQCSheet.SETRANGE(lQCSheet."Use For Calculate the Score",TRUE);
+
+      //IF lQCSheet.COUNT() > 0 THEN EXIT;
+      lCount := lQCSheet.COUNT();
+      //MESSAGE('%1',lCount);
+      lQCSheet.RESET();
+      lQCSheet.SETRANGE("Quality Control No.",pQCNo);
+      lQCSheet.SETRANGE("Quality Control Line No.",pQCLineNo);
+      lQCSheet.SETFILTER(Type,'%1|%2',lQCSheet.Type::Question,lQCSheet.Type::YesNo);
+      lQCSheet.SETRANGE(lQCSheet."Use For Calculate the Score",TRUE);
+      //lQCSheet.SETRANGE(Unknown,FALSE);
+      lScore := 0;
+      lDeducePoint := 0;
+
+      IF lCount = 0 THEN EXIT;
+      lBase := 0;
+      lUnacceptableCount := 0;
+      IF lQCSheet.FINDSET() THEN
+        REPEAT
+          CASE lQCSheet.Section OF
+            1: lCurrCoef := lProviderSetup."Coef Section 1";
+            2: lCurrCoef := lProviderSetup."Coef Section 2";
+            3: lCurrCoef := lProviderSetup."Coef Section 3";
+          END;
+          IF NOT (lQCSheet.Type = lQCSheet.Type::YesNo) THEN
+            lBase += (lCurrCoef * lProviderSetup."Very Good Point Value");
+          IF lQCSheet.Unacceptable OR lQCSheet.Yes THEN BEGIN
+            //lUnacceptableCount += (lProviderSetup."Unknow Point Valie" * lCurrCoef);
+            //lUnacceptableCount += 1;
+            CASE lQCSheet.Section OF
+              1: lDeducePoint += lProviderSetup."Unacceptable Section 1";
+              2: lDeducePoint += lProviderSetup."Unacceptable Section 2";
+              3: lDeducePoint += lProviderSetup."Unacceptable Section 3";
+              4: lDeducePoint += lProviderSetup."Unacceptable Section 4";
+            END;
+          END;
+          IF NOT lQCSheet.Yes AND NOT lQCSheet.No THEN BEGIN
+            IF lQCSheet.Unknown  THEN lScore += (lProviderSetup."Unknow Point Valie" * lCurrCoef);
+            IF lQCSheet.Acceptable THEN lScore += (lProviderSetup."Acceptable Point Value" * lCurrCoef);
+            IF lQCSheet.Good THEN lScore += (lProviderSetup."Good Point Value" * lCurrCoef);
+            IF lQCSheet."Very Good" THEN lScore += (lProviderSetup."Very Good Point Value" * lCurrCoef);
+          END;
+        UNTIL lQCSheet.NEXT()=0;
+      //IF lUnacceptableCount > 2 THEN
+      //  lScore /= 2;
+      IF (lBase = 0) THEN EXIT;
+      lScore /= lBase;
+      lScore *= 20;
+      IF lScore > 20 THEN lScore := 20;
+      lScore += lDeducePoint;
+      //IF UPPERCASE(USERID)= 'ADMINISTRATOR' THEN MESSAGE('%1',lScore);
+      lQCLine.RESET();
+      IF lQCLine.GET(pQCNo,pQCLineNo) THEN BEGIN
+        lQCLine."Answer 5 Score" := lScore;
+        lQCLine.MODIFY();
+      END;
+      }
+    END;
+
+    LOCAL PROCEDURE CheckQualityControlAllowed@1100281002(pQualityControlHeader@1100281000 : Record 50090) : Boolean;
+    VAR
+      lQualityControlHeader@1100281004 : Record 50090;
+    BEGIN
+      {
+      WITH lQualityControlHeader DO BEGIN
+        RESET();
+        //MESSAGE(pProviderNo);
+        SETRANGE("Provider No.",pQualityControlHeader."Provider No.");
+
+        SETRANGE("Area Code",pQualityControlHeader."Area Code");
+        SETFILTER("No.",'<>%1',pQualityControlHeader."No.");
+        SETFILTER("Period Start",'<=%1',pQualityControlHeader."Period Start");
+        SETFILTER("Period Stop",'>=%1',pQualityControlHeader."Period Start");
+        //MESSAGE('%1',COUNT);
+        IF NOT ISEMPTY() THEN
+          EXIT(FALSE);
+        SETFILTER("Period Start",'<=%1',pQualityControlHeader."Period Stop");
+        SETFILTER("Period Stop",'>=%1',pQualityControlHeader."Period Stop");
+        IF NOT ISEMPTY() THEN
+          EXIT(FALSE);
+      EXIT(TRUE);
+      END;
+      }
+    END;
+
+    PROCEDURE GetSetup@1100281004();
+    BEGIN
+      IF ProviderSetupRead THEN
+        EXIT;
+      ProviderSetup.GET;
+      ProviderSetupRead := TRUE;
+      ProviderSetup.TESTFIELD("Max Number of Control Prov.");
+    END;
+
+    PROCEDURE SetInclusionList@1100281022(VAR pCodeList@1100281000 : Record 50079);
+    BEGIN
+      TempInclList.RESET;
+      TempInclList.DELETEALL;
+      IF NOT pCodeList.FINDSET THEN
+        EXIT;
+      REPEAT
+        TempInclList := pCodeList;
+        TempInclList.INSERT;
+      UNTIL pCodeList.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE TempIncExclListExist@1100281023(pTableId@1100281000 : Integer;pCode@1100281001 : Code[20]) : Boolean;
+    BEGIN
+      WITH TempInclList DO BEGIN
+        RESET;
+        SETRANGE("Table ID", pTableId);
+        SETRANGE(Code, pCode);
+        IF ISEMPTY THEN
+         EXIT(FALSE);
+      END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE IsBuildTradeExcluded@1000000001(pServNo@1000000000 : Code[20];pServHeaderNo@1000000001 : Code[20];pIntervLineNo@1000000002 : Integer) : Boolean;
+    VAR
+      lTableId@1000000003 : Integer;
+    BEGIN
+      lTableId := DATABASE::"Building Trade";
+      WITH ServCode DO BEGIN
+        RESET;
+        SETRANGE("Service Type", "Service Type"::Intervention);
+        SETRANGE("Service No.", pServNo);
+        SETRANGE("Service Header No.", pServHeaderNo);
+        SETRANGE("Intervention Line No.", pIntervLineNo);
+        IF NOT FINDSET(FALSE) THEN
+          EXIT(FALSE);
+        REPEAT
+          IF TempIncExclListExist(lTableId, ServCode."Building Trade No.") THEN
+            EXIT(TRUE);
+        UNTIL (NEXT = 0)
+      END;
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE GetDateTimeFilter@1000000007(pFromDate@1000000000 : Date;pToDate@1000000001 : Date) : Text[80];
+    BEGIN
+      EXIT(STRSUBSTNO('>=%1&<%2',
+                      CREATEDATETIME(pFromDate, 0T),
+                      CREATEDATETIME(pToDate, 0T)));
+    END;
+
+    PROCEDURE CalcControlLines@1100281003(pForProviderNo@1100281001 : Code[20];pControlType@1100281002 : Integer) : Integer;
+    VAR
+      lServIntervLine@1100281000 : Record 50075;
+    BEGIN
+      IF pForProviderNo <> '' THEN
+        lServIntervLine.SETCURRENTKEY("Provider No.");
+      // Filtre ann‚e civile
+      lServIntervLine.SETRANGE("Report Posting Date",
+         DMY2DATE(1,1,DATE2DMY(WORKDATE, 3)),
+         DMY2DATE(1,1,DATE2DMY(WORKDATE, 3)+1)-1);
+      lServIntervLine.SETRANGE("Quality Control", TRUE);
+      IF pForProviderNo <> '' THEN
+        lServIntervLine.SETRANGE("Provider No.", pForProviderNo);
+      IF pControlType <> -1 THEN
+        lServIntervLine.SETRANGE("Quality Control Type", pControlType);
+      EXIT(lServIntervLine.COUNT);
+    END;
+
+    PROCEDURE Start@1100281007(VAR pProvider@1100281006 : Record 50000;pExtractMode@1100281002 : 'PreviousYear,Period';pNbOfMonth@1100281003 : Integer;pIntervLimitDate@1100281007 : Date;pRandomControlRate@1100281008 : Decimal);
+    VAR
+      lNb@1100281000 : Integer;
+      lTempProvider@1100281001 : TEMPORARY Record 267;
+      lFromDate@1100281004 : Date;
+      lToDate@1100281005 : Date;
+      lLotDate@1000000000 : Date;
+      lCtrlObj@1000000001 : Record 50090;
+    BEGIN
+      IF NOT GUIALLOWED THEN
+        HideDlg := TRUE;
+      GetSetup;
+      IF NOT ISSERVICETIER THEN
+        LogActive := USERID = 'ISAT-ST';
+      lNb := CalcControlLines('',-1); // controles de l'ann‚e en cours
+      IF lNb >= ProviderSetup."Max Number of Control Prov." THEN BEGIN
+        IF GUIALLOWED THEN
+          MESSAGE(STRSUBSTNO(Text100, lNb));
+        EXIT;
+      END;
+
+      CASE pExtractMode OF
+        pExtractMode::PreviousYear : BEGIN
+          lFromDate := DMY2DATE(1,1,DATE2DMY(WORKDATE, 3)-1);
+          lToDate := DMY2DATE(31,12,DATE2DMY(WORKDATE, 3)-1);
+        END;
+        pExtractMode::Period : BEGIN
+          lFromDate := CALCDATE('<-' + FORMAT(pNbOfMonth) + 'M>', WORKDATE);
+      //<<IMH04.ST
+      //    lFromDate := DMY2DATE(1,DATE2DMY(lFromDate, 2),DATE2DMY(lFromDate, 3));
+      //>>IMH04.ST
+          lToDate := WORKDATE;
+        END;
+      END;
+      IF (lFromDate = 0D) OR (lToDate = 0D) OR (lFromDate > lToDate) THEN
+        ERROR(Text101, lFromDate, lToDate);
+
+      IF NOT HideDlg THEN
+        Window.OPEN(Text200);
+      IF LogActive THEN
+        LogMgt.InitLogFile;
+      MakeProviderList(pProvider, lTempProvider, lFromDate, lToDate);
+      IF NOT AssignProviderList(lTempProvider, pIntervLimitDate, pRandomControlRate, lLotDate) THEN BEGIN
+        lCtrlObj."Expert No." := '';
+        lCtrlObj."Lot Date" := WORKDATE;
+        lCtrlObj."Provider No." := '';
+        lCtrlObj.INSERT(FALSE);
+      END;
+      CheckCampaigns(lLotDate);
+      COMMIT;
+      IF NOT HideDlg THEN
+        Window.CLOSE;
+      IF LogActive THEN
+        LogMgt.ShowLogFile;
+    END;
+
+    LOCAL PROCEDURE MakeProviderList@1100281008(VAR pFromProviderList@1100281001 : Record 50000;VAR pToProviderList@1100281000 : Record 267;pFromDate@1100281002 : Date;pToDate@1100281003 : Date);
+    VAR
+      lCnt@1000000000 : Integer;
+    BEGIN
+      IF NOT HideDlg THEN
+        Window.UPDATE(1, Text201);
+      WITH pFromProviderList DO BEGIN
+        SETRANGE("Black List", FALSE);
+        SETRANGE(Exclusion, FALSE);
+        IF NOT FINDSET(FALSE) THEN
+          EXIT;
+        REPEAT
+          ProviderControlToDo(pFromProviderList, pFromDate, pToDate,
+                              pToProviderList."Amount (LCY)",pToProviderList."Amount 2 (LCY)");
+          IF pToProviderList."Amount (LCY)" > 0 THEN BEGIN
+            // Ajout dans le buffer
+            pToProviderList."Vendor No." := "No.";
+            pToProviderList.INSERT;
+            IF LogActive THEN
+              LogMgt.AddLogFile(STRSUBSTNO(Text202a, "No.",pToProviderList."Amount (LCY)"));
+            IF NOT HideDlg THEN BEGIN
+              lCnt += 1;
+              IF lCnt MOD 10 = 0 THEN
+                Window.UPDATE(2, STRSUBSTNO(Text202, lCnt));
+            END;
+          END;
+        UNTIL NEXT = 0;
+      END; // WITH
+      IF NOT HideDlg THEN
+        IF lCnt MOD 10 <> 0 THEN
+          Window.UPDATE(2, STRSUBSTNO(Text202, lCnt));
+      IF LogActive THEN
+        LogMgt.AddLogFile(STRSUBSTNO(Text202, lCnt));
+    END;
+
+    PROCEDURE ProviderControlToDo@1100281012(pProvider@1100281000 : Record 50000;pFromDate@1100281001 : Date;pToDate@1100281002 : Date;VAR pNbControlToDo@1100281005 : Decimal;VAR pCurrRate@1100281006 : Decimal);
+    VAR
+      lCount@1100281003 : Integer;
+      lRate@1100281004 : Decimal;
+      lExpectedControl@1100281007 : Integer;
+      lRealControl@1100281008 : Integer;
+    BEGIN
+      pNbControlToDo := 0;
+      pCurrRate := 0;
+      IF pProvider."Black List" OR pProvider.Exclusion OR (pProvider."No." = '') THEN
+        EXIT;
+      ServIntervLine.RESET;
+      ServIntervLine.SETCURRENTKEY("Provider No.");
+      ServIntervLine.SETRANGE("Provider No.", pProvider."No.");
+
+      // Cas particuliers, avec sortie directe
+      CASE TRUE OF
+        pProvider."Targeted Control" : BEGIN
+          // Calcul du nombre de controles cibl‚s
+          IF pProvider."Targeted Controls Min." = 0 THEN
+            EXIT;
+          pNbControlToDo := pProvider."Targeted Controls Min." - GetProviderControls(pProvider."No.",
+                                                                                     pProvider."Targeted Control Start Date", 0D);
+          pCurrRate := -2;
+          EXIT;
+        END;
+        pProvider.Status = pProvider.Status::"Trial Period" : BEGIN
+          // Gestion prestataire p‚riode d'essai
+          GetSetup;
+          IF ProviderSetup."Trial Period - Min Controls" = 0 THEN
+            EXIT;
+          // Prestaire en p‚riode d'essai, changement des dates
+          pFromDate := CALCDATE(ProviderSetup."Trial Period - Quality Control", WORKDATE);
+          pToDate := WORKDATE;
+          IF pFromDate > pToDate THEN
+            ProviderSetup.FIELDERROR("Trial Period - Quality Control");
+          lCount := GetProviderControls(pProvider."No.", pFromDate, pToDate);
+          IF lCount > ProviderSetup."Trial Period - Min Controls" THEN
+            EXIT;
+          pNbControlToDo := ProviderSetup."Trial Period - Min Controls"-lCount;
+          pCurrRate := -1; // TODO voir la priorit‚ ?
+          EXIT;
+        END;
+        pProvider.Status IN [pProvider.Status::Prospect, pProvider.Status::Casual] :
+          EXIT;
+      END;
+
+      //Cas g‚n‚ral
+      GetSetup;
+      // Compteurs interventions pr‚c‚dentes
+      ServIntervLine.SETRANGE(Closed, TRUE);
+      ServIntervLine.SETRANGE("Intervention Status", ServIntervLine."Intervention Status"::Closed);
+      ServIntervLine.SETFILTER("Closed DateTime", GetDateTimeFilter(pFromDate, pToDate));
+      lCount := CountInterv(ServIntervLine,TRUE, ProviderSetup."Min. Inter. Before Control"); //IMH04.ST
+
+      // Minimum d'interventions
+      IF (lCount < ProviderSetup."Min. Inter. Before Control") OR (lCount=0) THEN
+        EXIT;
+
+      IF pProvider.Status = pProvider.Status::Approval THEN
+        lRate := ProviderSetup."Approved Provider Control Rate"
+      ELSE
+        lRate := ProviderSetup."Unappr. Provider Control Rate";
+      lExpectedControl := ROUND(lCount * lRate / 100, 1); // TODO Gestion d'arrondi ?
+      IF lExpectedControl = 0 THEN
+        EXIT;
+
+      //<<IMH04.ST
+      {
+      // Compteurs contr“les ann‚e en cours
+      pFromDate := DMY2DATE(1,1,DATE2DMY(WORKDATE, 3));
+      pToDate := DMY2DATE(31,12,DATE2DMY(WORKDATE, 3));
+      ServIntervLine2.RESET;
+      ServIntervLine2.SETCURRENTKEY("Source Provider No.");
+      ServIntervLine2.SETRANGE("Quality Control", TRUE);
+      ServIntervLine2.SETRANGE("Source Provider No.", pProvider."No.");
+      ServIntervLine2.SETRANGE("Report Posting Date", pFromDate, pToDate);
+      lRealControl := ServIntervLine2.COUNT;
+      pNbControlToDo := lExpectedControl - lRealControl;
+      }
+      pNbControlToDo := lExpectedControl;
+      //>>IMH04.ST
+      pCurrRate := (lRealControl / lCount) * 100;
+    END;
+
+    PROCEDURE AssignProviderList@1100281009(VAR pProviderList@1100281000 : Record 267;pFromClosure@1100281010 : Date;pRandomControlRate@1000000000 : Decimal;VAR pLotDate@1000000002 : Date) : Boolean;
+    VAR
+      lNb@1100281001 : Integer;
+      lRemainingControls@1100281002 : Integer;
+      lTempInterv@1100281004 : TEMPORARY Record 50075;
+      lTempIntervOrder@1100281006 : TEMPORARY Record 357;
+      lTempInterv2@1100281008 : TEMPORARY Record 50075;
+      lTempIntervOrder2@1100281007 : TEMPORARY Record 357;
+      lTotalInterv@1000000001 : ARRAY [3] OF Integer;
+      lMaxControls@1100281005 : Integer;
+      lCreatedControls@1100281012 : ARRAY [3] OF Integer;
+      lTargetControls@1100281011 : Integer;
+      lRandomControls@1100281014 : Integer;
+      lCnt@1000000003 : Integer;
+      lLotDate@1100281013 : Date;
+      lint@1100281003 : Integer;
+      lDirectControl@1100281009 : Boolean;
+    BEGIN
+      lLotDate := WORKDATE; // cr‚ation du lot
+      pLotDate := lLotDate;
+
+      // Doit-on recontroler les max ?
+      GetSetup;
+      lNb := CalcControlLines('',-1); // controles de l'ann‚e en cours
+      IF lNb >= ProviderSetup."Max Number of Control Prov." THEN BEGIN
+        IF GUIALLOWED THEN
+          MESSAGE(STRSUBSTNO(Text100, lNb));
+        EXIT(FALSE);
+      END;
+      lRemainingControls := ProviderSetup."Max Number of Control Prov." - lNb;
+
+      IF NOT HideDlg THEN BEGIN
+        Window.UPDATE(1, Text203);
+        Window.UPDATE(2,'');
+      END;
+      IF LogActive THEN
+        LogMgt.AddLogFile(STRSUBSTNO('%1 controles restants', lRemainingControls));
+
+      //interventions cibl‚s
+      GetTargetedInterv(lTempInterv2, lTempIntervOrder2);
+      lTempInterv2.RESET;
+      pProviderList.RESET;
+      IF pProviderList.ISEMPTY AND lTempInterv2.ISEMPTY THEN BEGIN
+        MESSAGE(Text209);
+        EXIT(FALSE);
+      END;
+
+      // Selection des interventions … controller
+      GetControllableInterv(pProviderList, pFromClosure, lTempInterv, lTempIntervOrder);
+
+      IF lTempInterv.ISEMPTY AND lTempInterv2.ISEMPTY THEN BEGIN
+        MESSAGE(Text210);
+        EXIT(FALSE);
+      END;
+
+      lTotalInterv[1] := lTempInterv.COUNT;
+      IF lTotalInterv[1] > lRemainingControls THEN
+        lTotalInterv[1] := lRemainingControls;
+      //IF lTotalInterv[1] <= 0 THEN BEGIN
+      //  MESSAGE(Text210);
+      //  EXIT(FALSE);
+      //END;
+      pRandomControlRate := pRandomControlRate / 100;
+      lTotalInterv[3] := ROUND(lTotalInterv[1] * pRandomControlRate,1); // contr“les al‚atoires
+      lTotalInterv[2] := lTotalInterv[1] - lTotalInterv[3]; // contr“les cibl‚s
+      // Cr‚ation des contr“les cibl‚s sur interventions cibl‚es
+      IF NOT lTempInterv2.ISEMPTY THEN BEGIN
+        lNb := lTempInterv2.COUNT;
+        IF LogActive THEN
+          LogMgt.AddLogFile(STRSUBSTNO('%1 controles cibl‚s intervention … cr‚er', lNb));
+        lTargetControls := CreateControlsForProvider('', 1, 1, lNb, lLotDate, lTempIntervOrder2, lTempInterv2)
+      END;
+
+      WITH pProviderList DO BEGIN
+        RESET;
+        // Contr“les cibl‚s
+        IF lTotalInterv[2] > 0 THEN BEGIN
+          IF NOT HideDlg THEN BEGIN
+            Window.UPDATE(1, Text204);
+            Window.UPDATE(2,'');
+            lCnt := 0;
+          END;
+
+          IF LogActive THEN
+            LogMgt.AddLogFile(STRSUBSTNO('%1 controles cibl‚s … cr‚er', lTotalInterv[2]));
+          // Boucle des prestataires cibl‚s puis p‚riode d'essai -> cr‚ation des contr“les cibl‚s
+          FOR lint := -2 TO -1 DO BEGIN
+            IF lCreatedControls[2] < lTotalInterv[2] THEN BEGIN
+              SETRANGE("Amount 2 (LCY)", lint);
+              IF FIND('+') THEN BEGIN
+                REPEAT
+                  lMaxControls := "Amount (LCY)"; // Pas de *2
+      {pas de gestion de seuil (depassement autoris‚)
+                  IF lMaxControls > (lTotalInterv[2] - lCreatedControls[2]) THEN
+                    lMaxControls := lTotalInterv[2] - lCreatedControls[2];
+      }
+                  IF lint = -2 THEN
+                    lCreatedControls[2] +=
+                      CreateControlsForProvider("Vendor No.", 1, 2, lMaxControls, lLotDate, lTempIntervOrder, lTempInterv)
+                  ELSE
+                    lCreatedControls[2] +=
+                      CreateControlsForProvider("Vendor No.", 1, 3, lMaxControls, lLotDate, lTempIntervOrder, lTempInterv);
+                  IF NOT HideDlg THEN BEGIN
+                    lCnt += 1;
+                    IF lCnt MOD 10 = 0 THEN
+                      Window.UPDATE(2, STRSUBSTNO(Text208, "Vendor No."));
+                  END;
+                UNTIL (NEXT(-1) = 0) OR (lCreatedControls[2]>=lTotalInterv[2]);
+                DELETEALL;
+              END;
+            END;
+          END;
+        END;
+        // Boucle des prestataires en r‚seau -> cr‚ation des contr“les al‚atoires
+        SETFILTER("Amount 2 (LCY)",'>=%1', 0);
+        IF lTotalInterv[3] > 0 THEN BEGIN
+          IF LogActive THEN
+            LogMgt.AddLogFile(STRSUBSTNO('%1 controles al‚atoires … cr‚er', lTotalInterv[3]));
+
+          IF FIND('+') THEN BEGIN
+            IF NOT HideDlg THEN BEGIN
+              Window.UPDATE(1, Text204);
+              Window.UPDATE(2,'');
+              lCnt := 0;
+            END;
+            REPEAT
+              lMaxControls := "Amount (LCY)";
+      {pas de gestion de seuil (depassement autoris‚)
+              IF lMaxControls > (lTotalInterv[3] - lCreatedControls[3]) THEN
+                lMaxControls := lTotalInterv[3] - lCreatedControls[3];
+      }
+              lCreatedControls[3] +=
+                CreateControlsForProvider("Vendor No.", 0,0,lMaxControls, lLotDate, lTempIntervOrder, lTempInterv);
+              IF NOT HideDlg THEN BEGIN
+                lCnt += 1;
+                IF lCnt MOD 10 = 0 THEN
+                  Window.UPDATE(2, STRSUBSTNO(Text208, "Vendor No."));
+              END;
+            UNTIL (NEXT(-1) = 0) OR (lCreatedControls[3]>=lTotalInterv[3]);
+          END;
+        END;
+        DELETEALL;
+      END;
+      IF NOT HideDlg THEN
+        MESSAGE(Text206,lCreatedControls[3],lCreatedControls[2]+lTargetControls);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetTargetedInterv@1100281011(VAR pIntervList@1100281001 : Record 50075;VAR pIntervOrder@1100281002 : Record 357);
+    VAR
+      lIntervLine@1100281000 : Record 50075;
+    BEGIN
+      WITH lIntervLine DO BEGIN
+        // Interventions … cibler
+        SETRANGE("Quality Control", FALSE);
+        SETRANGE("Line Quality Controlled", FALSE);
+        SETRANGE("Target Type", "Target Type"::Intervention);
+        IF ISEMPTY THEN
+          EXIT;
+        FINDSET;
+        RANDOMIZE;
+        REPEAT
+          pIntervList := lIntervLine;
+          pIntervList.INSERT(FALSE);
+          pIntervOrder."Table ID" := RANDOM(10000);
+          pIntervOrder."Document No." := "Service Header No.";
+          pIntervOrder."Line No." := "Line No.";
+          pIntervOrder."Dimension Code" := '';
+          pIntervOrder.INSERT;
+        UNTIL NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE GetControllableInterv@1100281010(VAR pProviderList@1100281000 : Record 267;pFromClosure@1100281008 : Date;VAR pIntervList@1100281011 : Record 50075;VAR pIntervOrder@1100281012 : Record 357);
+    VAR
+      lCheckCause@1100281003 : Boolean;
+      lCheckServOrderType@1100281002 : Boolean;
+      lCheckBuildTrade@1100281001 : Boolean;
+      lWindowCnt@1100281005 : Integer;
+      lIntervFound@1100281006 : Boolean;
+      lInsertLine@1100281009 : Boolean;
+      lInterv@1100281007 : Record 50075;
+      lAbGeoProv@1100281010 : Record 50016;
+    BEGIN
+      WITH TempInclList DO BEGIN
+        RESET;
+        SETRANGE("Table ID", DATABASE::"Fault Reason Code");
+        lCheckCause := NOT ISEMPTY;
+        SETRANGE("Table ID", DATABASE::"Service Order Type");
+        lCheckServOrderType := NOT ISEMPTY;
+        SETRANGE("Table ID", DATABASE::"Building Trade");
+        lCheckBuildTrade := NOT ISEMPTY;
+      END;
+      lWindowCnt := 0;
+      // Selection des interventions … controller
+      RANDOMIZE;
+      WITH pProviderList DO BEGIN
+        IF NOT FINDSET THEN
+          EXIT;
+        REPEAT
+          lIntervFound := FALSE;
+          lInterv.SETCURRENTKEY("Provider No.");
+          lInterv.SETRANGE("Provider No.", "Vendor No.");
+          lInterv.SETRANGE("Line Quality Controlled", FALSE);
+          lInterv.SETRANGE("Quality Control", FALSE);
+          lInterv.SETFILTER("Target Type", '<>%1', lInterv."Target Type"::Intervention);
+          IF pFromClosure <> 0D THEN BEGIN
+            lInterv.SETRANGE(Closed, TRUE);
+            lInterv.SETFILTER("Closed DateTime",'>=%1', CREATEDATETIME(pFromClosure,0T));
+            lInterv.SETRANGE("Intervention Status", lInterv."Intervention Status"::Closed);
+          END;
+          IF lInterv.FINDSET(FALSE) THEN
+            REPEAT
+              lInsertLine := TRUE;
+              IF lCheckBuildTrade AND lInsertLine THEN
+                lInsertLine := NOT IsBuildTradeExcluded(lInterv."Service No.", lInterv."Service Header No.", lInterv."Line No.");
+              IF lCheckServOrderType AND lInsertLine THEN BEGIN
+                lInsertLine := TempIncExclListExist(DATABASE::"Service Order Type", lInterv."Service Order Type");
+              END;
+              IF lCheckCause AND lInsertLine THEN BEGIN
+                IF Service.GET(lInterv."Service No.") THEN
+                  lInsertLine := TempIncExclListExist(DATABASE::"Fault Reason Code", Service."Service Cause")
+                ELSE
+                  lInsertLine := FALSE;
+              END;
+              IF lInsertLine AND (lInterv."Geo. Reference Code" <> '') THEN BEGIN
+                lAbGeoProv.SETCURRENTKEY("End Ref. Geo. Code","Specialization Code");
+                lAbGeoProv.SETRANGE("End Ref. Geo. Code", lInterv."Geo. Reference Code");
+                lAbGeoProv.SETRANGE("Specialization Code", ProviderSetup."Quality Control Specialization");
+                lInsertLine := NOT lAbGeoProv.ISEMPTY;
+              END;
+              IF lInsertLine THEN BEGIN
+                pIntervList := lInterv;
+                pIntervList.INSERT;
+                pIntervOrder."Table ID" := RANDOM(10000);
+                pIntervOrder."Document No." := pIntervList."Service Header No.";
+                pIntervOrder."Line No." := pIntervList."Line No.";
+                pIntervOrder."Dimension Code" := pIntervList."Provider No.";
+                pIntervOrder.INSERT;
+                lIntervFound := TRUE;
+                IF NOT HideDlg THEN BEGIN
+                  lWindowCnt += 1;
+                  IF lWindowCnt MOD 50 = 0 THEN
+                    Window.UPDATE(2, STRSUBSTNO(Text207, lWindowCnt));
+                END;
+              END;
+            UNTIL lInterv.NEXT=0;
+          IF NOT lIntervFound THEN
+            DELETE;
+        UNTIL NEXT=0;
+      END;
+    END;
+
+    PROCEDURE CreateControlsForProvider@1000000014(pProviderNo@1000000000 : Code[20];pControlType@1000000003 : 'Random,Target';pSourceType@1100281004 : ' ,Interv,Provider,Trial';pMaxControls@1100281001 : Integer;pLotDate@1100281003 : Date;VAR pIntervOrder@1000000001 : Record 357;VAR pIntervList@1000000002 : Record 50075) rValue : Integer;
+    VAR
+      lControllerNo@1000000004 : Code[20];
+      lTempIntervLine@1100281000 : TEMPORARY Record 50075;
+      lTempResult@1000000005 : TEMPORARY Record 51000;
+      lMaxControls@1000000006 : Integer;
+      lLotDate@1000000007 : DateTime;
+    BEGIN
+      // Cr‚ation des contr“les pour un prestataire
+      IF pMaxControls = 0 THEN
+        EXIT;
+      IF pControlType = pControlType::Target THEN
+        lMaxControls := pMaxControls
+      ELSE
+        lMaxControls := pMaxControls*2;
+      lLotDate := CREATEDATETIME(pLotDate,0T);
+      rValue := 0;
+      pIntervOrder.RESET;
+      IF pProviderNo <> '' THEN
+        pIntervOrder.SETRANGE("Dimension Code", pProviderNo);
+      IF NOT pIntervOrder.FINDSET THEN
+        EXIT;
+      REPEAT
+        pIntervList.GET(pIntervOrder."Document No.", pIntervOrder."Line No.");
+        IF FindController(pIntervList, lTempResult) THEN BEGIN
+          lControllerNo := lTempResult."Provider No.";
+          IF CreateControl(pIntervList, pControlType, lControllerNo, lLotDate, pSourceType,lTempIntervLine) THEN BEGIN
+            rValue += 1;
+            IF rValue <= pMaxControls THEN
+              UpdateQualCtrlObj(lControllerNo, pLotDate, pIntervList."Provider No.", pControlType);
+          END;
+        END
+        ELSE BEGIN
+          IF LogActive THEN
+            LogMgt.AddLogFile(STRSUBSTNO('Intervention %1-%2 : aucun controlleur',
+                                         pIntervList."Service Header No.", pIntervList."Intervention No."));
+        END;
+        pIntervList.DELETE;
+      UNTIL (pIntervOrder.NEXT = 0) OR (rValue >= lMaxControls);
+      pIntervOrder.DELETEALL;
+    END;
+
+    PROCEDURE FindController@1000000016(pIntervLine@1000000000 : Record 50075;VAR pPRSB@1000000001 : Record 51000) : Boolean;
+    VAR
+      lAbGeoProv@1000000002 : Record 50016;
+      lTempPRSB@1000000004 : TEMPORARY Record 51000;
+      lPostCode@1000000005 : Record 225;
+      lProvSpec@1000000003 : Record 50006;
+      lProvider@1000000006 : Record 50000;
+      lRemControls@1000000007 : Integer;
+    BEGIN
+      // Recherche d'un cabinet pour contr“ler l'intervention
+      IF pIntervLine."Geo. Reference Code" = '' THEN BEGIN
+        pIntervLine."Geo. Reference Code" := lPostCode.GetGeoCode(pIntervLine."Post Code", pIntervLine.City);
+        IF pIntervLine."Geo. Reference Code" = '' THEN
+          EXIT;
+      END;
+
+      CLEAR(pPRSB);
+      GetSetup;
+      WITH lAbGeoProv DO BEGIN
+        SETCURRENTKEY("End Ref. Geo. Code","Specialization Code");
+        SETRANGE("End Ref. Geo. Code", pIntervLine."Geo. Reference Code");
+        SETRANGE("Specialization Code", ProviderSetup."Quality Control Specialization");
+        IF ISEMPTY THEN
+          EXIT(FALSE);
+        FINDSET(FALSE,FALSE);
+        REPEAT
+          IF "Provider No." <> pIntervLine."Provider No." THEN BEGIN
+            IF NOT lTempPRSB.GET("Provider No.", "Specialization Code") THEN BEGIN
+              lTempPRSB."Provider No." := "Provider No.";
+              lTempPRSB."Specialization Code" := "Specialization Code";
+      //        lTempPRSB.Distance := GetDistance2("Provider No.", pReferenceGeoCode);
+              lTempPRSB.INSERT;
+            END;
+          END;
+        UNTIL NEXT = 0;
+      END; // WITH
+      IF lTempPRSB.ISEMPTY THEN
+        EXIT(FALSE);
+
+      // Controle des nb max sur les controllers
+      lTempPRSB.FINDSET;
+      REPEAT
+        IF lProvider.GET(lTempPRSB."Provider No.") THEN BEGIN
+          IF lProvider.Enable AND (lProvider."Max Number of Controls" > 0) THEN BEGIN
+            // calcul du nombre de contr“le restant
+            lTempPRSB.Score := lProvider."Max Number of Controls" - CalcControlLines(lProvider."No.",-1);
+            IF lTempPRSB.Score <= 0 THEN
+              lTempPRSB.DELETE
+            ELSE
+              lTempPRSB.MODIFY;
+          END
+          ELSE
+            lTempPRSB.DELETE;
+        END
+        ELSE
+          lTempPRSB.DELETE;
+      UNTIL lTempPRSB.NEXT = 0;
+
+      // Affectation au cabinet ayant le plus d'interventions restante
+      lTempPRSB.SETCURRENTKEY(Score);
+      IF lTempPRSB.FINDLAST THEN BEGIN
+        pPRSB := lTempPRSB;
+        EXIT(TRUE);
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE CreateControl@1000000015(pIntervLine@1000000000 : Record 50075;pControlType@1100281007 : Integer;pControllerNo@1000000001 : Code[20];pLotDate@1100281008 : DateTime;pTargetType@1000000005 : Integer;VAR pReturnIntervLine@1100281006 : Record 50075) : Boolean;
+    VAR
+      lServHeader@1000000002 : Record 5900;
+      lServMgtSetup@1000000003 : Record 5911;
+      lServOrderType@1000000004 : Record 5903;
+      lIntervLine@1100281001 : Record 50075;
+      lDate@1100281000 : Date;
+      lintervMgt@1100281002 : Codeunit 50014;
+      lTempIntervResult@1100281003 : TEMPORARY Record 50075;
+      lTempSearchBasket@1100281004 : TEMPORARY Record 51002;
+      lProvSpec@1100281005 : Record 50006;
+      lLotDate@1000000006 : Date;
+      lLotTime@1000000007 : Time;
+    BEGIN
+      // Cr‚ation d'une ligne de contr“le correspond … l'intervention
+
+      lDate := WORKDATE; // date prise en compte = date de travail
+      // Recherche de type produit
+      lServOrderType.SETRANGE("Quality Control", TRUE);
+      lServOrderType.FINDFIRST;
+
+      GetSetup;
+      IF ProviderSetup."Quality Control Specialization" = '' THEN
+        ProviderSetup.FIELDERROR("Quality Control Specialization");
+      lProvSpec.SETRANGE("Provider No.", pControllerNo);
+      lProvSpec.SETRANGE("Specialization Code", ProviderSetup."Quality Control Specialization");
+      IF NOT lProvSpec.FINDFIRST THEN
+        ERROR(STRSUBSTNO(Text102, pControllerNo, ProviderSetup."Quality Control Specialization"));
+
+      lLotDate := DT2DATE(pLotDate);
+      lLotTime := DT2TIME(pLotDate);
+      // Recherche du service … affecter
+      WITH Service DO BEGIN
+        RESET;
+        SETCURRENTKEY("Contact No.");
+        SETRANGE("Contact No.", pControllerNo);
+        SETRANGE("Service Type", "Service Type"::Expert);
+        SETRANGE(Status, Status::"In Process");
+        SETFILTER("Creation Date", GetDateTimeFilter(DMY2DATE(1,1,DATE2DMY(lDate,3)),
+                                                     DMY2DATE(1,1,DATE2DMY(lDate,3)+1)));
+        IF NOT FINDFIRST THEN BEGIN
+          INIT;
+          "Service No." := '';
+          "Service Type" := "Service Type"::Expert;
+          VALIDATE("Contact No.", pControllerNo);
+      //    VALIDATE("Corporate No.", pIntervLine."COrporate No.");
+      //    VALIDATE("Corporate Region Code", pIntervLine."Corporate Region Code");
+          "Event Date" := WORKDATE;
+          INSERT(TRUE);
+          lServMgtSetup.GET;
+          VALIDATE("Process Code", lServMgtSetup."Service Process Code");
+          VALIDATE("Process Status No.", lServMgtSetup."Service Start Status");
+          MODIFY(TRUE);
+        END;
+      END;
+      // Recherche de ligne produit … affecter
+      WITH lServHeader DO BEGIN
+        RESET;
+        SETCURRENTKEY("Service No.");
+        SETRANGE("Service No.", Service."Service No.");
+        SETRANGE("Service Order Type", lServOrderType.Code);
+        IF pLotDate <> 0DT THEN BEGIN
+          SETRANGE("Document Date", lLotDate);
+      //    SETRANGE("Order Time", lLotTime);
+        END
+        ELSE BEGIN
+      //<<IMH05.ST
+          lDate := DMY2DATE(1,DATE2DMY(lDate,2),DATE2DMY(lDate,3));
+          SETFILTER("Creation Date", GetDateTimeFilter(lDate,
+                                                       CALCDATE('<CM>',lDate)+1));
+      //>>IMH05.ST
+        END;
+        IF NOT FINDFIRST THEN BEGIN
+          CLEAR(lServHeader);
+          Service.SetHideMessage(TRUE);
+          Service.CreateServiceHeader(lServHeader, lServOrderType.Code);
+          IF (pLotDate <> 0DT) THEN
+            IF (lServHeader."Document Date" <> lLotDate)
+      //         (lServHeader."Order Time" <> lLotTime)
+            THEN BEGIN
+            lServHeader."Document Date" := lLotDate; // affectation du lot … la mˆme date
+      //      lServHeader."Order Time" := lLotTime);
+            lServHeader.MODIFY;
+          END;
+        END;
+      END;
+
+      // Cr‚ation de la ligne d'intervention
+      WITH lIntervLine DO BEGIN
+        "Quality Control" := TRUE;
+        "Source Service Header No." := pIntervLine."Service Header No.";
+        "Source Interv. Line No." := pIntervLine."Line No.";
+        "Source Provider No." := pIntervLine."Provider No.";
+        "Quality Control Type" := pControlType;
+        lTempSearchBasket."Speciality Code" := lProvSpec."Specialization Code";
+        lTempSearchBasket."Main Specialization" := lProvSpec."Main Specialization";
+        lTempSearchBasket."Building Trade No." := lProvSpec."Building Trade No.";
+        lTempSearchBasket."Provider No." := lProvSpec."Provider No.";
+        lTempSearchBasket.INSERT(FALSE);
+        lintervMgt.CreateInterventionByBasket(lIntervLine, lServHeader, lTempSearchBasket,
+                                              lTempIntervResult, TRUE);
+        lIntervLine := lTempIntervResult;
+        "Alt. Address Code" := '';
+        "Contact Name" := pIntervLine."Contact Name";
+        Address := pIntervLine.Address;
+        "Address 2" := pIntervLine."Address 2";
+        "Address 3" := pIntervLine."Address 3";
+        City := pIntervLine.City;
+        "Post Code" := pIntervLine."Post Code";
+        County := pIntervLine.County;
+        "Country/Region Code" := pIntervLine."Country/Region Code";
+        "Target Type" := pTargetType;
+        MODIFY;
+      END;
+
+      // Mise … jour de l'intervention d'origine pour la marquer
+      WITH pIntervLine DO BEGIN
+        "Line Quality Controlled" := TRUE;
+        "Quality Control Type" := lIntervLine."Quality Control Type";
+        MODIFY(FALSE);
+      END;
+
+      pReturnIntervLine := lIntervLine;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InitReportLine@1100281005(pInterv@1100281000 : Record 50075;pAutoRefresh@1100281003 : Boolean);
+    VAR
+      lIntervReportLine@1100281001 : Record 50091;
+      lIntervReportLine2@1100281002 : Record 50091;
+    BEGIN
+      WITH lIntervReportLine DO BEGIN
+        IF pAutoRefresh THEN BEGIN
+          SETRANGE("Control Type", "Control Type"::Control);
+          SETRANGE("Control No.", pInterv."Service Header No.");
+          SETRANGE("Intervention Line No.", pInterv."Line No.");
+          IF NOT ISEMPTY THEN
+            DELETEALL(TRUE);
+          RESET;
+        END;
+        SETRANGE("Control Type", "Control Type"::ControlTemplate);
+        SETRANGE("Control No.", pInterv."Service Order Type");
+        IF FINDSET THEN
+          REPEAT
+            lIntervReportLine2 := lIntervReportLine;
+            lIntervReportLine2."Control Type" := "Control Type"::Control;
+            lIntervReportLine2."Control No." := pInterv."Service Header No.";
+            lIntervReportLine2."Intervention Line No." := pInterv."Line No.";
+            lIntervReportLine2.INSERT(FALSE);
+          UNTIL NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE CheckReportLines@1000000000(pInterv@1000000001 : Record 50075);
+    VAR
+      lIntervReportLine@1000000000 : Record 50091;
+      lAlert@1000000002 : Boolean;
+    BEGIN
+      // Test des lignes de rapport
+      WITH lIntervReportLine DO BEGIN
+        SETRANGE("Control Type", "Control Type"::Control);
+        SETRANGE("Control No.", pInterv."Service Header No.");
+        SETRANGE("Intervention Line No.", pInterv."Line No.");
+        IF NOT FINDSET THEN
+          EXIT;
+        REPEAT
+          CheckValues;
+          IF "Line Answer Mandatory" THEN BEGIN
+            IF "Line Type" IN ["Line Type"::QuestionUniqueChoice, "Line Type"::QuestionMultipleChoice] THEN BEGIN
+              IF NOT ("Answer 1 Result" OR "Answer 2 Result" OR "Answer 3 Result" OR
+                      "Answer 4 Result" OR "Answer 5 Result") THEN
+                ERROR(STRSUBSTNO(Text300, Description));
+            END
+            ELSE
+              IF Comment = '' THEN
+                ERROR(STRSUBSTNO(Text300, Description));
+          END;
+          IF NOT lAlert THEN BEGIN
+            IF "Answer 1 Result" AND "Answer 1 Alert" THEN
+              lAlert := TRUE;
+          END;
+        UNTIL NEXT=0;
+      END;// WITH
+      IF lAlert THEN BEGIN
+        // G‚n‚ration du document en pdf
+        // Envoi de mail
+      END;
+    END;
+
+    PROCEDURE GetProviderControls@1100281006(pProviderNo@1100281000 : Code[20];pFromAssDate@1100281001 : Date;pToAssDate@1100281002 : Date) rValue : Integer;
+    VAR
+      lControlLine@1100281003 : Record 50075;
+      lIntervLine@1100281005 : Record 50075;
+      lDateFilter@1100281004 : Text[250];
+    BEGIN
+      // Calcul des lignes de contr“les nombre def ois pu un presta a ‚t‚ control‚
+      lControlLine.SETCURRENTKEY("Source Provider No.");
+      lControlLine.SETRANGE("Source Provider No.", pProviderNo);
+      IF lControlLine.ISEMPTY THEN
+        EXIT;
+      lControlLine.SETRANGE("Quality Control Type", lControlLine."Quality Control Type"::Target);
+      lControlLine.SETRANGE("Report Posted", TRUE);
+      IF pFromAssDate <> 0D THEN
+        lControlLine.SETFILTER("Assigned Date", STRSUBSTNO('>=%1', pFromAssDate));
+
+      CASE TRUE OF
+        (pFromAssDate <> 0D) AND (pToAssDate <> 0D) : lDateFilter := STRSUBSTNO('>=%1&<=%2', pFromAssDate, pToAssDate);
+        pFromAssDate <> 0D : lDateFilter := STRSUBSTNO('>=%1', pFromAssDate);
+        pToAssDate <> 0D : lDateFilter := STRSUBSTNO('<=%1', pFromAssDate);
+      END;
+      IF lDateFilter <> '' THEN
+        lIntervLine.SETFILTER("Assigned Date", lDateFilter);
+      IF lControlLine.FINDSET THEN BEGIN
+        REPEAT
+          lIntervLine.SETRANGE("Service Header No.", lControlLine."Source Service Header No.");
+          lIntervLine.SETRANGE("Line No.", lControlLine."Source Interv. Line No.");
+          IF NOT lIntervLine.ISEMPTY THEN
+            rValue += 1;
+        UNTIL lControlLine.NEXT = 0;
+      END;
+    END;
+
+    LOCAL PROCEDURE UpdateQualCtrlObj@1000000003(pExpertNo@1000000000 : Code[20];pLotDate@1000000001 : Date;pProviderNo@1000000002 : Code[20];pControlType@1000000003 : 'Random,Target');
+    VAR
+      lInsert@1000000004 : Boolean;
+    BEGIN
+      // Gestion des objectifs de controle
+      WITH QualCtrlObj DO BEGIN
+        IF ("Expert No." <> pExpertNo) OR
+           ("Lot Date" <> pLotDate) OR
+           ("Provider No." <> pProviderNo) THEN BEGIN
+          IF NOT GET(pExpertNo,pLotDate, pProviderNo) THEN BEGIN
+            INIT;
+            "Expert No." := pExpertNo;
+            "Lot Date" := pLotDate;
+            "Provider No." := pProviderNo;
+            "Random Controls" := 0;
+            "Targeted Controls" := 0;
+            lInsert := TRUE;
+          END;
+        END;
+        IF pControlType = pControlType::Random THEN BEGIN
+          "Random Controls" += 1;
+          "History Random Controls" += 1;
+        END
+        ELSE BEGIN
+          "Targeted Controls" += 1;
+          "History Targeted Controls" += 1;
+        END;
+        IF lInsert THEN
+          INSERT
+        ELSE
+          MODIFY;
+      END;
+    END;
+
+    PROCEDURE GenerateReport@1000000002(VAR pServIntervLine@1000000000 : Record 50075);
+    VAR
+      lDelayLaunch@1000000001 : Record 50178;
+      lRecRef@1000000002 : RecordRef;
+      lServInterv@1000000003 : Record 50075;
+    BEGIN
+      pServIntervLine.MODIFY(TRUE);
+      IF ISSERVICETIER AND (NOT GUIALLOWED) THEN BEGIN
+        // Appel en WS -> report d‚l‚gu‚ au NAS
+        WITH lDelayLaunch DO BEGIN
+          "Group Code" := 'QUAL';
+          "Object Type" := "Object Type"::Report;
+          "Object Id" := REPORT::"Quality Control - Post Report";
+          "Use Record ID" := TRUE;
+          lRecRef.GETTABLE(pServIntervLine);
+          RecordID := lRecRef.RECORDID;
+          "Table ID" := lRecRef.NUMBER;
+          Status := Status::ToRun;
+          INSERT(TRUE);
+        END; // WITH
+      END
+      ELSE BEGIN
+        lServInterv := pServIntervLine;
+        lServInterv.FILTERGROUP(2);
+        lServInterv.SETRECFILTER;
+        lServInterv.FILTERGROUP(0);
+        REPORT.RUN(REPORT::"Quality Control - Post Report",FALSE, FALSE, lServInterv);
+      END;
+    END;
+
+    LOCAL PROCEDURE CheckCampaigns@1000000004(pCurrCampDate@1000000000 : Date);
+    VAR
+      lControlObj@1000000001 : Record 50090;
+    BEGIN
+      // Suppression des controles al‚toires en campagne n - 1 et n - 2
+      // en n - 1 suppression si objectif atteint
+      // en n - 2 suppression complŠte
+      lControlObj.SETCURRENTKEY("Lot Date");
+      lControlObj.SETFILTER("Lot Date", '<%1', pCurrCampDate);
+      IF NOT lControlObj.FINDLAST THEN
+        EXIT;
+      // Suppression des lignes objectifs atteints
+      DropServHdr(lControlObj."Lot Date",TRUE);
+      lControlObj.SETFILTER("Lot Date", '<%1', lControlObj."Lot Date");
+      IF NOT lControlObj.FINDLAST THEN
+        EXIT;
+      DropServHdr(lControlObj."Lot Date", FALSE);
+    END;
+
+    PROCEDURE DropServHdr@1000000005(pLotDate@1000000000 : Date;pCheckObj@1000000001 : Boolean);
+    VAR
+      lServOrderType@1000000002 : Record 5903;
+      lServHeader@1000000003 : Record 5900;
+      lCtrlObj@1000000004 : Record 50090;
+      lObj@1000000005 : Integer;
+      lServHdrTest@1000000006 : Codeunit 50031;
+      lServHdrAct@1000000008 : Codeunit 50036;
+      lDrop@1000000007 : Boolean;
+    BEGIN
+      lServOrderType.SETRANGE("Quality Control", TRUE);
+      IF lServOrderType.FINDSET THEN
+        REPEAT
+          lServHeader.SETCURRENTKEY("Service Order Type");
+          lServHeader.SETRANGE("Service Order Type", lServOrderType.Code);
+          lServHeader.SETRANGE("Document Date", pLotDate);
+      //    lServHeader.SETRANGE("Order Time", DT2TIME(pLotDate));
+          IF lServHeader.FINDSET THEN
+            REPEAT
+              IF pCheckObj THEN
+                lDrop := TestControlsObj(lServHeader)
+              ELSE
+                lDrop := TRUE;
+              IF lDrop THEN
+                DropRandomCtrl(lServHeader."No.",pLotDate);
+            UNTIL lServHeader.NEXT=0;
+        UNTIL lServOrderType.NEXT=0;
+    END;
+
+    PROCEDURE DropRandomCtrl@1000000006(pServHdrNo@1000000000 : Code[20];pLotDate@1000000004 : Date);
+    VAR
+      lIntervLine@1000000001 : Record 50075;
+      lTempObj@1000000002 : TEMPORARY Record 50090;
+      lObj@1000000003 : Record 50090;
+      lIncrement@1000000005 : Integer;
+    BEGIN
+      WITH lIntervLine DO BEGIN
+        SETRANGE("Service Header No.", pServHdrNo);
+        SETRANGE("Quality Control", TRUE);
+        SETRANGE("Quality Control Type", "Quality Control Type"::Random);
+        IF NOT FINDSET THEN
+          EXIT;
+        REPEAT
+          IF NOT lTempObj.GET("Provider No.", pLotDate, "Source Provider No.") THEN BEGIN
+            lTempObj."Expert No." := "Provider No.";
+            lTempObj."Lot Date" := pLotDate;
+            lTempObj."Provider No." := "Source Provider No.";
+            lTempObj."Random Controls" := 0;
+            lTempObj.INSERT;
+          END;
+          IF ("Expected Previsit Date" = 0D) OR "Meeting Canceled" THEN
+            DELETE(TRUE)
+          ELSE BEGIN
+            lTempObj."Random Controls" += 1;
+            lTempObj.MODIFY;
+          END;
+        UNTIL NEXT = 0;
+      END;
+      IF NOT lTempObj.FINDSET THEN
+        EXIT;
+      REPEAT
+        IF lObj.GET(lTempObj."Expert No.", lTempObj."Lot Date", lTempObj."Provider No.") THEN BEGIN
+          IF lObj."Random Controls" <> lTempObj."Random Controls" THEN BEGIN
+            lObj."Random Controls" := lTempObj."Random Controls";
+            lObj.MODIFY;
+          END;
+        END;
+      UNTIL lTempObj.NEXT = 0;
+    END;
+
+    PROCEDURE TestControlsObj@1000000008(pServHdr@1100281000 : Record 5900) : Boolean;
+    VAR
+      lControlObj@1100281002 : Record 50090;
+      lIntervLine@1100281004 : Record 50075;
+      lRandomObj@1100281005 : Integer;
+      lRandomCtrl@1100281001 : Integer;
+    BEGIN
+      WITH lIntervLine DO BEGIN
+        SETRANGE("Service Header No.", pServHdr."No.");
+        SETRANGE("Quality Control", TRUE);
+        SETRANGE("Quality Control Type", "Quality Control Type"::Random);
+        SETFILTER("Expected Previsit Date", '<>%1', 0D);
+        SETRANGE("Meeting Canceled", FALSE);
+        lRandomCtrl := COUNT;
+      END;
+      lControlObj.SETRANGE("Expert No.", pServHdr."Contact No.");
+      lControlObj.SETRANGE("Lot Date", pServHdr."Document Date");
+      //lControlObj.SETRANGE("Lot Date", pServHdr."Document Date");
+      lControlObj.SETFILTER("Random Controls", '<>%1', 0);
+      IF lControlObj.FINDSET THEN
+        REPEAT
+          lRandomObj += lControlObj."Random Controls";
+        UNTIL lControlObj.NEXT=0;
+      EXIT(lRandomCtrl >= lRandomObj);
+    END;
+
+    PROCEDURE CountInterv@1000000011(VAR pIntervline@1000000000 : Record 50075;pUseFilters@1000000001 : Boolean;pMinCount@1000000003 : Integer) rValue : Integer;
+    VAR
+      lCheckCause@1000000009 : Boolean;
+      lCheckServOrderType@1000000008 : Boolean;
+      lCheckBuildTrade@1000000007 : Boolean;
+      lInsertLine@1000000004 : Boolean;
+      lTextFilter@1000000002 : Text[1024];
+      lCount@1000000005 : Integer;
+    BEGIN
+      IF NOT pUseFilters THEN
+        EXIT(pIntervline.COUNT);
+
+      WITH TempInclList DO BEGIN
+        RESET;
+        SETRANGE("Table ID", DATABASE::"Fault Reason Code");
+        lCheckCause := NOT ISEMPTY;
+        SETRANGE("Table ID", DATABASE::"Service Order Type");
+        lCheckServOrderType := NOT ISEMPTY;
+        SETRANGE("Table ID", DATABASE::"Building Trade");
+        lCheckBuildTrade := NOT ISEMPTY;
+      END;
+
+      IF lCheckServOrderType THEN
+        IF MakeInclFilter(DATABASE::"Service Order Type", lTextFilter) THEN BEGIN
+          pIntervline.SETFILTER("Service Order Type", lTextFilter);
+          lCheckServOrderType := FALSE;
+        END;
+
+      IF NOT (lCheckCause OR lCheckServOrderType OR lCheckBuildTrade) THEN
+        EXIT(pIntervline.COUNT);
+      WITH pIntervline DO BEGIN
+        lCount := COUNT;
+        IF (lCount = 0) OR (lCount < pMinCount) THEN
+          EXIT;
+        FINDSET(FALSE);
+        REPEAT
+          lInsertLine := TRUE;
+          IF lCheckServOrderType AND lInsertLine THEN
+            lInsertLine := TempIncExclListExist(DATABASE::"Service Order Type", "Service Order Type");
+          IF lCheckBuildTrade AND lInsertLine THEN
+            lInsertLine := NOT IsBuildTradeExcluded("Service No.", "Service Header No.", "Line No.");
+          IF lCheckCause AND lInsertLine THEN BEGIN
+            IF Service.GET("Service No.") THEN
+              lInsertLine := TempIncExclListExist(DATABASE::"Fault Reason Code", Service."Service Cause")
+            ELSE
+              lInsertLine := FALSE;
+          END;
+          IF lInsertLine THEN
+            rValue += 1;
+        UNTIL NEXT = 0;
+      END; // WITH
+    END;
+
+    PROCEDURE MakeInclFilter@1000000009(pTableID@1000000000 : Integer;VAR pTextFilter@1000000001 : Text[1024]) : Boolean;
+    BEGIN
+      pTextFilter := '';
+      WITH TempInclList DO BEGIN
+        RESET;
+        SETRANGE("Table ID", pTableID);
+        IF ISEMPTY THEN
+          EXIT(FALSE);
+        FINDSET;
+        REPEAT
+          IF pTextFilter = '' THEN
+            pTextFilter := Code
+          ELSE BEGIN
+            IF STRLEN(pTextFilter) > 1000 THEN
+              EXIT(FALSE)
+            ELSE
+              pTextFilter := pTextFilter + '|' + Code;
+          END;
+        UNTIL NEXT = 0;
+      END;
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 05/12/12 @a ISAT.ST @v IMH6.01.331 @s Control Qualit‚ @h 3964 @c Correction calcul date mois d‚cembre */
+      /** @r IMH04 @d 22/10/12 @a ISAT.ST @v IMH6.01.331 @s Control Qualit‚  v1.1 @c Modification version transitoire */
+      /** @r IMH03 @d 13/04/11 @a ISAT.ST @v IMH6.01.105 @s Control Qualit‚ @h 3266 @c Exclusion corps de m‚tiers au lieu d'inclusion */
+      /** @r IMH02 @d 13/03/11 @a ISAT.ST @v IMH6.01.105 @s Control Qualit‚
+          @c r‚-‚criture du contr“le qualit‚ */
+      /** @r IMH01 @d 25/01/11 @a ISAT.NFO @v IMH6.01.105 @s Control Qualit‚
+          @c Cr‚ation */
+    }
+    END.
+  }
+}

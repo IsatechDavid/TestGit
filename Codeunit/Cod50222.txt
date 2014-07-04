@@ -1,0 +1,155 @@
+OBJECT Codeunit 50222 EDM Send Ack. Val. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/09/12;
+    Time=12:00:00;
+    Modified=Yes;
+    Version List=IMH6.01,GED;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+
+            lEAISentMQBuffer := Rec;
+            Code(lEAISentMQBuffer);
+            lEAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+            Rec := lEAISentMQBuffer;
+            IF NOT INSERT(TRUE) THEN
+              MODIFY;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      InterfaceSetup@1100281003 : Record 50139;
+      NASHandler@1100281002 : Codeunit 8016720;
+      EAIExchangeTypeMgt@1100281001 : Codeunit 8016712;
+      EDMManagement@1100281000 : Codeunit 50214;
+      Text001@1100281004 : TextConst 'ENU=Error Web Service;FRA=Erreur Web Service';
+
+    PROCEDURE Code@1100281000(VAR pEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720);
+    VAR
+      lExchangeType@1100281017 : Record 8016717;
+      lReturnExchangeType@1100281016 : Record 8016719;
+      lEAIMQBufferMgt@1100281002 : Codeunit 8016708;
+      lwinHTTPService@1100281014 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDoc@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1100281007 : InStream;
+      Error001@1100281018 : TextConst 'ENU=No %1 found.;FRA=Aucun %1 trouv‚.';
+      lOutStream@1100281001 : OutStream;
+    BEGIN
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      IF NOT EAIExchangeTypeMgt.GetExchangeTypePerSendMQ(pEAISentMQBuffer,lReturnExchangeType) THEN BEGIN
+        ERROR(Error001,lReturnExchangeType.TABLECAPTION);
+      END;
+      lExchangeType.GET(lExchangeType.Type::Outbound,lReturnExchangeType."EAI Exchange Type Code");
+
+      InterfaceSetup.GET;
+      lwinHTTPService.Open('POST',lExchangeType."Outgoing Queue Label",0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=utf-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','http://tempuri.org/IGedService/ValidationLotIntegration');
+
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      CREATE(lXmlDoc);
+      pEAISentMQBuffer.CALCFIELDS("XML Source");
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXmlDoc.load(lInStream);
+      IF NASHandler.IsDebug THEN
+        lXmlDoc.save(TEMPORARYPATH + 'EnvoiGEDACKACK.xml'); // pour test
+      lwinHTTPService.Send(lXmlDoc);
+
+      IF NOT lwinHTTPService.WaitForResponse(60) THEN ERROR('Request timed out.');
+
+      IF lwinHTTPService.Status = 200 THEN BEGIN
+        UpdateAcknowledgementInfo(lXmlDoc);
+      END ELSE BEGIN
+        CLEAR(lXmlDoc);
+        CREATE(lXmlDoc);
+        lXmlDoc.load(lwinHTTPService.ResponseStream);
+        CLEAR(pEAISentMQBuffer."Response XML Source");
+        pEAISentMQBuffer."Response XML Source".CREATEOUTSTREAM(lOutStream);
+        lXmlDoc.save(lOutStream);
+        lEAIMQBufferMgt.TransferSendMQBufferToSendMQ(pEAISentMQBuffer);
+        COMMIT;
+        ERROR(lwinHTTPService.StatusText);
+      END;
+    END;
+
+    PROCEDURE UpdateAcknowledgementInfo@1100281001(VAR pXmlDom@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument");
+    VAR
+      lDocumentAttachment@1000000000 : Record 50021;
+      lEDMDocAttachement@1100281006 : Record 50182;
+      lAttachmentMgt@1000000002 : Codeunit 50002;
+      lXMLNodeList@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXMLNodeList2@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDomElement2@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lLength@1100281003 : Integer;
+      i@1100281004 : Integer;
+      j@1000000005 : Integer;
+      lIDGed@1100281005 : Text[50];
+      lPath@1000000001 : Text[1024];
+    BEGIN
+      lXMLNodeList := pXmlDom.getElementsByTagName('ged:IdentificationDocumentGed');
+      lLength := lXMLNodeList.length();
+      IF lLength = 0 THEN
+        EXIT;
+
+      FOR i := 0 TO lXMLNodeList.length - 1 DO BEGIN
+        lIDGed := '';
+        CLEAR(lXmlDomElement);
+        lXmlDomElement := lXMLNodeList.item(i);
+        lXMLNodeList2 := lXmlDomElement.childNodes;
+        FOR j := 0 TO lXMLNodeList2.length - 1 DO BEGIN
+          lXmlDomElement2 := lXMLNodeList2.item(j);
+          CASE lXmlDomElement2.nodeName OF
+            'ged:identifiantDocument' : lIDGed := lXmlDomElement2.text;
+          END;
+        END;
+
+        lEDMDocAttachement.SETCURRENTKEY("Send Document",Acknowledge,"EDM Acknowledgement","EDM ID");
+        lEDMDocAttachement.SETRANGE("Send Document",TRUE);
+        lEDMDocAttachement.SETRANGE(Acknowledge,TRUE);
+        lEDMDocAttachement.SETRANGE("EDM Acknowledgement",FALSE);
+        lEDMDocAttachement.SETRANGE("EDM ID",lIDGed);
+        IF lEDMDocAttachement.FINDFIRST THEN BEGIN
+          lEDMDocAttachement."EDM Acknowledgement" := TRUE;
+          lEDMDocAttachement."EDM Acknowledgement Date" := CURRENTDATETIME;
+          lEDMDocAttachement.MODIFY;
+        END;
+
+        // suppression du fichier
+        IF lDocumentAttachment.GET(
+             lEDMDocAttachement."Referent Table No.",
+             lEDMDocAttachement."Key Integer 1",
+             lEDMDocAttachement."Key Integer 2",
+             lEDMDocAttachement."Key Code 1",
+             lEDMDocAttachement."Key Code 2",
+             lEDMDocAttachement."Entry No.")
+        THEN BEGIN
+          lPath := lAttachmentMgt.GetFilePath(lDocumentAttachment);
+          IF EXISTS(lPath) THEN BEGIN
+            ERASE(lPath);
+          END;
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 20/07/12 @a ISAT.RC @v IMH6.01.P006 @s Interface GED @c cr‚ation */
+    }
+    END.
+  }
+}

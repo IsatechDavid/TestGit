@@ -1,0 +1,150 @@
+OBJECT Codeunit 50052 Team Substitution Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=16/02/12;
+    Time=11:29:55;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 50048=rimd;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Infinite function found with substitution teams.;FRA=Boucle d‚tect‚e dans les corbeilles de substitution.';
+      HideDialog@1100281001 : Boolean;
+      Text002@1100281002 : TextConst 'ENU=Update tray lines #1########\@2@@@@@@@@@@@@@.;FRA=Mise … jour des activit‚s #1########\@2@@@@@@@@@@@@@.';
+
+    PROCEDURE FindSubstTeam@1100281000(VAR pTrayLine@1100281000 : Record 50048) : Boolean;
+    BEGIN
+      IF pTrayLine."Team Code" = '' THEN
+        EXIT(FALSE);
+
+      EXIT(FindRecursiveSubstTeam(pTrayLine, 0));
+    END;
+
+    LOCAL PROCEDURE FindRecursiveSubstTeam@1100281001(VAR pTrayLine@1100281000 : Record 50048;pLevel@1100281001 : Integer) : Boolean;
+    VAR
+      lTeamSubst@1100281003 : Record 50097;
+      lSourceTeam@1100281002 : Code[10];
+    BEGIN
+      IF pTrayLine."Team Code" = '' THEN
+        EXIT(FALSE);
+
+      lTeamSubst.SETRANGE("Source Team Code", pTrayLine."Team Code");
+      lTeamSubst.SETFILTER("Starting Date", '<=%1', CURRENTDATETIME);
+      lTeamSubst.SETFILTER("Task Code", '=%1|%2', pTrayLine."Task Code", '');
+      lTeamSubst.SETFILTER("Ending Date", '=%1|>=%2', 0DT, CURRENTDATETIME);
+      lTeamSubst.SETRANGE(Active, TRUE);
+      IF lTeamSubst.ISEMPTY THEN
+        EXIT(FALSE);
+      IF pTrayLine."Subst. Source Team Code" <> '' THEN
+        lSourceTeam := pTrayLine."Subst. Source Team Code"
+      ELSE
+        lSourceTeam := pTrayLine."Team Code";
+      lTeamSubst.FINDFIRST;
+      pLevel += 1;
+      IF pLevel > 10 THEN
+        ERROR(Text001);
+
+      pTrayLine."Team Code" := lTeamSubst."Substitution Team Code";
+      IF FindRecursiveSubstTeam(pTrayLine, pLevel) THEN;
+      pTrayLine."Team Substitution" := TRUE;
+      pTrayLine."Subst. Source Team Code" := lSourceTeam;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetTeamSubstitution@1100281002(VAR pTrayLine@1100281000 : Record 50048);
+    VAR
+      lDialogMgt@1100281003 : Codeunit 50092;
+      lLockingMgt@1100281004 : Codeunit 50071;
+      lOldTrayLine@1100281002 : Record 50048;
+      lNewTrayLine@1100281001 : Record 50048;
+    BEGIN
+      WITH pTrayLine DO BEGIN
+        IF ISEMPTY THEN
+          EXIT;
+        IF NOT GUIALLOWED THEN
+          HideDialog := TRUE;
+
+        IF NOT HideDialog THEN BEGIN
+          lDialogMgt.InitDialog(Text002);
+          lDialogMgt.InitProgress(2, COUNT, 2);
+        END;
+
+        FINDSET(TRUE);
+        REPEAT
+          IF NOT HideDialog THEN BEGIN
+            IF lOldTrayLine."Team Code" <> "Team Code" THEN
+              lDialogMgt.UpdateValue(1, "Team Code");
+            lDialogMgt.UpdateProgress(2);
+          END;
+
+          // Calcul de la substitution pour les non verrouill‚s
+          lOldTrayLine := pTrayLine;
+          lNewTrayLine := pTrayLine;
+          IF FindSubstTeam(lNewTrayLine) THEN BEGIN
+            lNewTrayLine."Entry No." := lNewTrayLine.GetNextEntryNo;
+            lNewTrayLine.INSERT(FALSE);
+            lOldTrayLine.DELETE(FALSE);
+          END;
+        UNTIL NEXT = 0;
+        IF NOT HideDialog THEN
+          lDialogMgt.CloseDialog;
+      END; // WITH
+    END;
+
+    PROCEDURE UndoTeamSubstitution@1100281003(VAR pTrayLine@1100281000 : Record 50048);
+    VAR
+      lDialogMgt@1100281001 : Codeunit 50092;
+      lOldTrayLine@1100281005 : Record 50048;
+      lNewTrayLine@1100281006 : Record 50048;
+    BEGIN
+      WITH pTrayLine DO BEGIN
+        IF ISEMPTY THEN
+          EXIT;
+        IF NOT GUIALLOWED THEN
+          HideDialog := TRUE;
+
+        IF NOT HideDialog THEN BEGIN
+          lDialogMgt.InitDialog(Text002);
+          lDialogMgt.InitProgress(2, COUNT, 2);
+        END;
+        SETRANGE("Team Substitution", TRUE);
+        FINDSET(TRUE);
+        REPEAT
+          IF NOT HideDialog THEN BEGIN
+            IF lOldTrayLine."Team Code" <> "Team Code" THEN
+              lDialogMgt.UpdateValue(1, "Team Code");
+            lDialogMgt.UpdateProgress(2);
+          END;
+
+          // Annulation de la substitution
+          lOldTrayLine := pTrayLine;
+          lNewTrayLine := pTrayLine;
+          lNewTrayLine."Team Code" := lNewTrayLine."Subst. Source Team Code";
+          lNewTrayLine."Team Substitution" := FALSE;
+          lNewTrayLine."Entry No." := lNewTrayLine.GetNextEntryNo;
+          lNewTrayLine.INSERT(FALSE);
+          lOldTrayLine.DELETE(FALSE);
+        UNTIL NEXT = 0;
+        IF NOT HideDialog THEN
+          lDialogMgt.CloseDialog;
+      END; // WITH
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 16/02/2012 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles @c Ajout permission 50048=rimd */
+      /** @r IMH01 @d 31/01/2011 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Cr‚ation objet */
+    }
+    END.
+  }
+}

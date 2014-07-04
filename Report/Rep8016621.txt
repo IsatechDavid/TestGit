@@ -1,0 +1,869 @@
+OBJECT Report 8016621 Vend. Receivables - Payables
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:18:45;
+    Modified=Yes;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Vendor Receivables - Payables;
+               FRA=Fournisseur : Ech‚ancier];
+    TopMargin=1000;
+    BottomMargin=500;
+    LeftMargin=1500;
+    OnPreReport=BEGIN
+                  CustFilter := Vendor.GETFILTERS;
+                  CustDateFilter := Vendor.GETFILTER("Date Filter");
+                  EndDate := Vendor.GETRANGEMAX("Date Filter");
+
+                  TmpDetails.RESET;
+                  TmpDetails.SETRANGE("USER ID",USERID);
+                  IF TmpDetails.FIND('+') THEN
+                    NextEntryNo := TmpDetails."Entry No."+1
+                  ELSE
+                    NextEntryNo := 1;
+                  TmpDetails.RESET;
+                END;
+
+    OnPostReport=BEGIN
+                   TmpDetails.RESET;
+                   TmpDetails.SETRANGE("USER ID",USERID);
+                   TmpDetails.DELETEALL;
+                 END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table23;
+        DataItemTableView=SORTING(No.);
+        PrintOnlyIfDetail=Yes;
+        OnPreDataItem=BEGIN
+                        CurrReport.CREATETOTALS("Vendor Ledger Entry"."Amount (LCY)",
+                                                "Vendor Ledger Entry"."Debit Amount (LCY)",
+                                                "Vendor Ledger Entry"."Credit Amount (LCY)");
+                        Window.OPEN(Text010);
+                        CustCount  := COUNT;
+                        CurPercent := 0;
+                        CurCust    := 1;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           CurCust := CurCust + 1;
+                           IF ROUND(CurCust*100/CustCount,1) > (CurPercent+5) THEN BEGIN
+                             Window.UPDATE(1,ROUND(CurCust*9999/CustCount,1));
+                             CurPercent := ROUND(CurCust*100/CustCount,1);
+                           END;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         Window.CLOSE;
+                         CLEAR(Window);
+                       END;
+
+        ReqFilterFields=No.,Search Name,Default Company Bank Account,Date Filter;
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table25;
+        DataItemTableView=SORTING(Vendor No.,Global Dimension 1 Code,Global Dimension 2 Code,Posting Date,Currency Code)
+                          WHERE(Open=CONST(Yes));
+        OnPreDataItem=BEGIN
+                        IF NOT TreatLedgerEntry THEN
+                          CurrReport.BREAK;
+                        IF PaymentMethodFilter <> '' THEN
+                          SETFILTER("Payment Method Code", PaymentMethodFilter);
+                      END;
+
+        OnAfterGetRecord=VAR
+                           TotalLettre@1000000000 : Decimal;
+                         BEGIN
+                           CALCFIELDS(Amount,"Remaining Amount","Original Amt. (LCY)","Remaining Amt. (LCY)");
+
+                           IF Amount = 0
+                             THEN CurrReport.SKIP;
+
+                           //lecture de l'ecriture de base
+                           FilterEntry:='0';
+                           GlobalVendLedgerEntry:="Vendor Ledger Entry";
+
+                           CumulVendLedgerEntry.RESET;
+                           CumulVendLedgerEntry.INIT;
+                           CumulVendLedgerEntry.SETCURRENTKEY("Vendor No.","Posting Date");
+                           CumulVendLedgerEntry.SETRANGE("Vendor No.","Vendor No.");
+                           CumulVendLedgerEntry.SETRANGE("Posting Date",0D,EndDate);
+
+                           SetFilterLedger("Entry No.");
+
+                           CumulVendLedgerEntry.SETFILTER("Entry No.",FilterEntry);
+                           TotalLettre:=0;
+                           IF CumulVendLedgerEntry.FIND('-') THEN
+                             REPEAT
+                               CumulVendLedgerEntry.CALCFIELDS(CumulVendLedgerEntry."Amount (LCY)");
+                               TotalLettre := TotalLettre + CumulVendLedgerEntry."Amount (LCY)";
+                             UNTIL CumulVendLedgerEntry.NEXT=0;
+
+                           //Gestion de l'affichage des ‚critures ouvertes ou lettr‚s
+                           IF TotalLettre = 0 THEN
+                             CurrReport.SKIP;
+
+                           AddVendLedgEntryToTemp("Vendor Ledger Entry");
+                         END;
+
+        ReqFilterFields=Document Type;
+        DataItemLink=Vendor No.=FIELD(No.),
+                     Global Dimension 2 Code=FIELD(Global Dimension 2 Filter),
+                     Global Dimension 1 Code=FIELD(Global Dimension 1 Filter),
+                     Due Date=FIELD(Date Filter);
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table10866;
+        DataItemTableView=SORTING(Account Type,Account No.,Copied To Line,Payment in Progress)
+                          WHERE(Account Type=CONST(Vendor),
+                                Payment in Progress=CONST(Yes));
+        OnPreDataItem=BEGIN
+                        IF NOT TreatPaymentLine THEN
+                          CurrReport.BREAK;
+                        SETRANGE("Copied To No.", '');
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF PaymentMethodFilter <> '' THEN BEGIN
+                             PaymentHeader.SETRANGE("No.", "No.");
+                             PaymentHeader.SETFILTER("Payment Method Code", PaymentMethodFilter);
+                             IF PaymentHeader.ISEMPTY THEN
+                               CurrReport.SKIP;
+                           END;
+                           AddPaymentLineToTemp("Payment Line");
+                         END;
+
+        DataItemLink=Account No.=FIELD(No.),
+                     Due Date=FIELD(Date Filter);
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemTable=Table8016604;
+        DataItemTableView=SORTING(Bank Account No.,Due Date,Payment Method Code,Source No.);
+        OnPreDataItem=BEGIN
+                        SETRANGE("USER ID",USERID);
+                        BankAccount.INIT;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF "Bank Account No." <> BankAccount."No." THEN
+                             IF NOT BankAccount.GET("Bank Account No.") THEN
+                               BankAccount.INIT;
+                         END;
+
+        TotalFields=Amount,Remaining Amount;
+        GroupTotalFields=Bank Account No.,Due Date,Payment Method Code,Source No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18900;
+            SectionHeight=2961;
+          }
+          CONTROLS
+          {
+            { 1100281098;TextBox;15450;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1100281099;TextBox;0    ;423  ;7500 ;423  ;SourceExpr=STRSUBSTNO(Text000,CustDateFilter) }
+            { 1100281100;TextBox;18150;423  ;450  ;423  ;CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 1100281101;Label  ;17400;423  ;750  ;423  ;ParentControl=1100281100 }
+            { 1100281102;TextBox;0    ;846  ;7500 ;423  ;SourceExpr=COMPANYNAME }
+            { 1100281103;TextBox;16350;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+            { 1100281104;Label  ;0    ;0    ;7500 ;423  ;HorzAlign=Left;
+                                                         FontSize=12;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Vendor Receivables-Payables;
+                                                                    FRA=Ech‚ancier fournisseur] }
+            { 1100281105;TextBox;150  ;1692 ;18150;423  ;SourceExpr=Vendor.TABLECAPTION + ': ' + CustFilter }
+            { 1100281106;Label  ;300  ;2115 ;1500 ;846  ;ParentControl=1100281070;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281107;Label  ;1950 ;2115 ;4500 ;846  ;ParentControl=1100281071;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281108;Label  ;6600 ;2115 ;1500 ;846  ;ParentControl=1100281072;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281109;Label  ;8250 ;2115 ;1200 ;846  ;ParentControl=1100281073;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281110;Label  ;9600 ;2115 ;1800 ;846  ;ParentControl=1100281074;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281111;Label  ;11550;2115 ;1800 ;846  ;ParentControl=1100281075;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281112;Label  ;13650;2115 ;1500 ;846  ;ParentControl=1100281076;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281113;Label  ;15300;2115 ;1500 ;846  ;ParentControl=1100281077;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281114;Label  ;16950;2115 ;1500 ;846  ;ParentControl=1100281078;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1100281115;Shape  ;150  ;2115 ;18300;30   ;ShapeStyle=HorzLine }
+            { 1100281116;Shape  ;0    ;2115 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281117;Shape  ;18300;2115 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281118;Shape  ;6450 ;2115 ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281119;Shape  ;8100 ;2115 ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281120;Shape  ;9450 ;2115 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281121;Shape  ;11400;2115 ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281122;Shape  ;13350;2115 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281123;Shape  ;15150;2115 ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281124;Shape  ;16800;2115 ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281125;Shape  ;150  ;2931 ;18300;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=18900;
+            SectionHeight=1269;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(CurrReport.TOTALSCAUSEDBY=FIELDNO("Bank Account No."));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281126;TextBox;300  ;423  ;18000;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=BankAccount."No." + ' : ' + BankAccount.Name }
+            { 1100281147;Shape  ;150  ;423  ;18300;30   ;ShapeStyle=HorzLine }
+            { 1100281148;Shape  ;150  ;846  ;18300;30   ;ShapeStyle=HorzLine }
+            { 1100281149;Shape  ;0    ;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281150;Shape  ;18300;423  ;300  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=18900;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(CurrReport.TOTALSCAUSEDBY=FIELDNO("Due Date"));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281088;TextBox;300  ;0    ;6150 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text020,"Due Date") }
+            { 1100281089;Shape  ;0    ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281090;Shape  ;6450 ;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281091;Shape  ;8100 ;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281092;Shape  ;9450 ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281093;Shape  ;11400;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281094;Shape  ;13350;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281095;Shape  ;15150;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281096;Shape  ;16800;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281097;Shape  ;18300;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281146;Shape  ;150  ;0    ;18300;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18900;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(NOT GroupBy);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281070;TextBox;300  ;0    ;1500 ;423  ;CaptionML=[ENU=Vendor No.;
+                                                                    FRA=Nø fournisseur];
+                                                         SourceExpr="Source No." }
+            { 1100281071;TextBox;1950 ;0    ;4500 ;423  ;CaptionML=[ENU=Vendor Name;
+                                                                    FRA=Nom fournisseur];
+                                                         SourceExpr="Source Name" }
+            { 1100281072;TextBox;6600 ;0    ;1500 ;423  ;CaptionML=[ENU=Document No.;
+                                                                    FRA=Nø document];
+                                                         SourceExpr="Document No." }
+            { 1100281073;TextBox;8250 ;0    ;1200 ;423  ;CaptionML=[ENU=Document Date;
+                                                                    FRA=Date document];
+                                                         SourceExpr="Document Date" }
+            { 1100281074;TextBox;9600 ;0    ;1800 ;423  ;CaptionML=[ENU=Original Amount;
+                                                                    FRA=Montant original];
+                                                         SourceExpr=Amount }
+            { 1100281075;TextBox;11550;0    ;1800 ;423  ;CaptionML=[ENU=Remaining Amount;
+                                                                    FRA=Restant D–];
+                                                         SourceExpr="Remaining Amount" }
+            { 1100281076;TextBox;13650;0    ;1500 ;423  ;CaptionML=[ENU=Currency Code;
+                                                                    FRA=Devise];
+                                                         SourceExpr="Currency Code" }
+            { 1100281077;TextBox;15300;0    ;1500 ;423  ;CaptionML=[ENU=Notification Code;
+                                                                    FRA=Code attente];
+                                                         SourceExpr="Notification Code" }
+            { 1100281078;TextBox;16950;0    ;1500 ;423  ;CaptionML=[ENU=Payment Method;
+                                                                    FRA=Mode de Paiement];
+                                                         SourceExpr="Payment Method Code" }
+            { 1100281079;Shape  ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281080;Shape  ;6450 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281081;Shape  ;8100 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281082;Shape  ;9450 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281083;Shape  ;11400;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281084;Shape  ;13350;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281085;Shape  ;15150;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281086;Shape  ;16800;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281087;Shape  ;18300;0    ;300  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=18900;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(
+                              (CurrReport.TOTALSCAUSEDBY=FIELDNO("Source No."))
+                              AND GroupBy
+                              AND IsOnlyOneEntry("Payables-Receivables Details"));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281001;TextBox;300  ;0    ;1500 ;423  ;CaptionML=[ENU=Vendor No.;
+                                                                    FRA=Nø fournisseur];
+                                                         SourceExpr="Source No." }
+            { 1100281002;TextBox;1950 ;0    ;4500 ;423  ;CaptionML=[ENU=Vendor Name;
+                                                                    FRA=Nom fournisseur];
+                                                         SourceExpr="Source Name" }
+            { 1100281003;TextBox;6600 ;0    ;1500 ;423  ;CaptionML=[ENU=Document No.;
+                                                                    FRA=Nø document];
+                                                         SourceExpr="Document No." }
+            { 1100281004;TextBox;8250 ;0    ;1200 ;423  ;CaptionML=[ENU=Document Date;
+                                                                    FRA=Date document];
+                                                         SourceExpr="Document Date" }
+            { 1100281005;TextBox;9600 ;0    ;1800 ;423  ;CaptionML=[ENU=Original Amount;
+                                                                    FRA=Montant original];
+                                                         SourceExpr=Amount }
+            { 1100281006;TextBox;11550;0    ;1800 ;423  ;CaptionML=[ENU=Remaining Amount;
+                                                                    FRA=Restant D–];
+                                                         SourceExpr="Remaining Amount" }
+            { 1100281007;TextBox;13650;0    ;1500 ;423  ;CaptionML=[ENU=Currency Code;
+                                                                    FRA=Devise];
+                                                         SourceExpr="Currency Code" }
+            { 1100281008;TextBox;15300;0    ;1500 ;423  ;CaptionML=[ENU=Notification Code;
+                                                                    FRA=Code attente];
+                                                         SourceExpr="Notification Code" }
+            { 1100281009;TextBox;16950;0    ;1500 ;423  ;CaptionML=[ENU=Payment Method;
+                                                                    FRA=Mode de Paiement];
+                                                         SourceExpr="Payment Method Code" }
+            { 1100281010;Shape  ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281011;Shape  ;6450 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281012;Shape  ;8100 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281013;Shape  ;9450 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281014;Shape  ;11400;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281015;Shape  ;13350;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281016;Shape  ;15150;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281017;Shape  ;16800;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281018;Shape  ;18300;0    ;300  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=18900;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(
+                              (CurrReport.TOTALSCAUSEDBY=FIELDNO("Source No."))
+                              AND GroupBy
+                              AND NOT IsOnlyOneEntry("Payables-Receivables Details"));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281127;TextBox;300  ;0    ;1500 ;423  ;CaptionML=[ENU=Vendor No.;
+                                                                    FRA=Nø fournisseur];
+                                                         SourceExpr="Source No." }
+            { 1100281128;TextBox;1950 ;0    ;4500 ;423  ;CaptionML=[ENU=Vendor Name;
+                                                                    FRA=Nom fournisseur];
+                                                         SourceExpr="Source Name" }
+            { 1100281131;TextBox;9600 ;0    ;1800 ;423  ;CaptionML=[ENU=Original Amount;
+                                                                    FRA=Montant original];
+                                                         SourceExpr=Amount }
+            { 1100281132;TextBox;11550;0    ;1800 ;423  ;CaptionML=[ENU=Remaining Amount;
+                                                                    FRA=Restant D–];
+                                                         SourceExpr="Remaining Amount" }
+            { 1100281136;Shape  ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281137;Shape  ;6450 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281138;Shape  ;8100 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281139;Shape  ;9450 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281140;Shape  ;11400;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281141;Shape  ;13350;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281142;Shape  ;15150;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281143;Shape  ;16800;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281144;Shape  ;18300;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281019;TextBox;6600 ;0    ;1500 ;423  ;CaptionML=[ENU=Vendor No.;
+                                                                    FRA=Nø fournisseur];
+                                                         SourceExpr=Text030 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=18900;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(CurrReport.TOTALSCAUSEDBY=FIELDNO("Payment Method Code"));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281057;TextBox;11550;0    ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr="Remaining Amount" }
+            { 1100281058;TextBox;9600 ;0    ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr=Amount }
+            { 1100281059;TextBox;300  ;0    ;6150 ;423  ;FontBold=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text021,"Payment Method Code") }
+            { 1100281060;Shape  ;0    ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281061;Shape  ;6450 ;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281062;Shape  ;9450 ;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281063;Shape  ;11400;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281064;Shape  ;13350;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281065;Shape  ;15150;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281066;Shape  ;16800;0    ;150  ;846  ;ShapeStyle=VertLine }
+            { 1100281067;Shape  ;18300;0    ;300  ;846  ;ShapeStyle=VertLine }
+            { 1100281068;Shape  ;9600 ;0    ;3900 ;30   ;ShapeStyle=HorzLine }
+            { 1100281069;Shape  ;8100 ;0    ;150  ;846  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=18900;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(CurrReport.TOTALSCAUSEDBY=FIELDNO("Due Date"));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281043;TextBox;300  ;0    ;6150 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text022,"Due Date") }
+            { 1100281044;TextBox;11550;0    ;1800 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Remaining Amount" }
+            { 1100281045;TextBox;9600 ;0    ;1800 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Amount }
+            { 1100281046;Shape  ;0    ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281047;Shape  ;6450 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281048;Shape  ;8100 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281049;Shape  ;9450 ;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281050;Shape  ;11400;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281051;Shape  ;13350;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281052;Shape  ;15150;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281053;Shape  ;16800;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281054;Shape  ;18300;0    ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281055;Shape  ;9600 ;0    ;3900 ;30   ;ShapeStyle=HorzLine }
+            { 1100281056;Shape  ;150  ;393  ;18300;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=18900;
+            SectionHeight=876;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(CurrReport.TOTALSCAUSEDBY=FIELDNO("Bank Account No."));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1100281000;TextBox;11550;423  ;1800 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Remaining Amount" }
+            { 1100281030;TextBox;9600 ;423  ;1800 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Amount }
+            { 1100281031;Shape  ;0    ;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281032;Shape  ;6450 ;423  ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281033;Shape  ;8100 ;423  ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281034;Shape  ;9450 ;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281035;Shape  ;11400;423  ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281036;Shape  ;13350;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281037;Shape  ;15150;423  ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281038;Shape  ;16800;423  ;150  ;423  ;ShapeStyle=VertLine }
+            { 1100281039;Shape  ;18300;423  ;300  ;423  ;ShapeStyle=VertLine }
+            { 1100281040;TextBox;300  ;423  ;6150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text023,BankAccount.Name) }
+            { 1100281041;Shape  ;150  ;846  ;18300;30   ;ShapeStyle=HorzLine }
+            { 1100281042;Shape  ;150  ;423  ;18300;30   ;ShapeStyle=HorzLine }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=5720;
+      Height=2860;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   TreatLedgerEntry := TRUE;
+                   TreatPaymentLine := TRUE;
+                   RequestOptionsForm.PaymentMethodCtrl.EDITABLE(TreatLedgerEntry);
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1000000000;CheckBox;3410;0    ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Treat Vendor Ledger Entry;
+                                                              FRA=Traiter ‚critures fournisseur];
+                                                   SourceExpr=TreatLedgerEntry;
+                                                   OnAfterValidate=BEGIN
+                                                                     RequestOptionsForm.PaymentMethodCtrl.EDITABLE(TreatLedgerEntry);
+                                                                   END;
+                                                                    }
+      { 1000000001;Label  ;0    ;0    ;3300 ;440  ;ParentControl=1000000000 }
+      { 1000000002;CheckBox;3410;550  ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Treat Payement Line;
+                                                              FRA=Traiter ‚critures bordereau];
+                                                   SourceExpr=TreatPaymentLine }
+      { 1000000003;Label  ;0    ;550  ;3300 ;440  ;ParentControl=1000000002 }
+      { 1000000004;TextBox;3410 ;2420 ;2310 ;440  ;Name=PaymentMethodCtrl;
+                                                   AssistEdit=Yes;
+                                                   CaptionML=[ENU=Payment Method Filter;
+                                                              FRA=Filtre m‚thode de paiement];
+                                                   SourceExpr=PaymentMethodFilter;
+                                                   OnAssistEdit=VAR
+                                                                  LocPaymentMethod@1000000000 : Record 289;
+                                                                BEGIN
+                                                                  IF FORM.RUNMODAL(0,LocPaymentMethod) = ACTION::LookupOK THEN BEGIN
+                                                                    IF PaymentMethodFilter<>'' THEN
+                                                                      PaymentMethodFilter := PaymentMethodFilter + '|';
+                                                                    PaymentMethodFilter := PaymentMethodFilter + LocPaymentMethod.Code;
+                                                                  END;
+                                                                END;
+                                                                 }
+      { 1000000005;Label  ;0    ;2420 ;3300 ;440  ;ParentControl=1000000004 }
+      { 1100281000;CheckBox;3410;1210 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Group by Vendor;
+                                                              FRA=Centralisation par fournisseur];
+                                                   SourceExpr=GroupBy }
+      { 1100281001;Label  ;0    ;1210 ;3300 ;440  ;ParentControl=1100281000 }
+      { 1100281002;CheckBox;3410;1760 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Display Source Doc. No.;
+                                                              FRA=Afficher Nø de document origine];
+                                                   SourceExpr=OriginDocNo }
+      { 1100281003;Label  ;0    ;1760 ;3300 ;440  ;ParentControl=1100281002 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      Text000@1000 : TextConst 'ENU=Period: %1;FRA=P‚riode : %1';
+      TmpDetails@1000000000 : Record 8016604;
+      CreateVendLedgEntry@1000000002 : Record 25;
+      GlobalVendLedgerEntry@1000000009 : Record 25;
+      CumulVendLedgerEntry@1000000010 : Record 25;
+      BankAccount@1100281005 : Record 270;
+      PaymentHeader@8016602 : Record 10865;
+      CustFilter@1004 : Text[250];
+      CustDateFilter@1005 : Text[30];
+      EndDate@1000000001 : Date;
+      TransfooterLedger@1000000004 : Boolean;
+      FilterEntry@1000000008 : Text[1000];
+      NextEntryNo@1000000005 : Integer;
+      Window@1000000011 : Dialog;
+      Text010@1000000012 : TextConst 'ENU=Vendor\@1@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@;FRA=Parcours des fournisseurs\@1@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@';
+      CustCount@1000000013 : Integer;
+      CurPercent@1000000015 : Integer;
+      CurCust@1000000014 : Integer;
+      Cpt@1000000021 : Integer;
+      TreatPaymentLine@1000000023 : Boolean;
+      TreatLedgerEntry@1000000024 : Boolean;
+      OriginDocNo@1100281002 : Boolean;
+      GroupBy@1100281001 : Boolean;
+      PaymentMethodFilter@1000000025 : Code[50];
+      Text020@1000000027 : TextConst 'ENU=DUE TO %1;FRA=ECHEANCE AU %1';
+      Text021@1000000026 : TextConst 'ENU=PAYMENT METHOD %1 TOTAL;FRA=TOTAL MODE DE PAIEMENT %1';
+      Text022@1000000028 : TextConst 'ENU=DUE %1 TOTAL;FRA=TOTAL ECHEANCE %1';
+      Text023@1100281000 : TextConst 'ENU=%1 BANK TOTAL;FRA=TOTAL BANQUE %1';
+      Text030@1100281003 : TextConst 'ENU=GROUP BY;FRA=CENTRALISATION';
+
+    PROCEDURE SetFilterLedger@1000000000(EntryNo@1000000001 : Integer);
+    VAR
+      Loc_apply2@1000000000 : Record 21;
+    BEGIN
+      //Cette fonction doit permettre de constituer le filtre qui va bien pour l'ensemble des ‚criture li‚ par un lettrage
+      IF NOT existe(EntryNo) THEN  BEGIN
+        descendant(EntryNo);
+        ascendant(EntryNo);
+      END;
+    END;
+
+    PROCEDURE descendant@1000000001(EntryNo@1000000000 : Integer);
+    VAR
+      LocVendLedgerEntry@1000000001 : Record 25;
+    BEGIN
+      IF NOT existe(EntryNo) THEN
+        FilterEntry := STRSUBSTNO('%1|%2',FilterEntry,EntryNo);
+
+      LocVendLedgerEntry.GET(EntryNo);
+
+      IF LocVendLedgerEntry."Closed by Entry No."<>0 THEN
+        IF NOT existe(LocVendLedgerEntry."Closed by Entry No.") THEN
+          SetFilterLedger(LocVendLedgerEntry."Closed by Entry No.")
+      ELSE
+        GlobalVendLedgerEntry:=LocVendLedgerEntry;
+    END;
+
+    PROCEDURE ascendant@1000000002(EntryNo@1000000001 : Integer);
+    VAR
+      LocVendLedgerEntry@1000000002 : Record 25;
+    BEGIN
+      IF NOT existe(EntryNo) THEN
+        FilterEntry:=STRSUBSTNO('%1|%2',FilterEntry,EntryNo);
+
+      LocVendLedgerEntry.SETRANGE("Closed by Entry No.",EntryNo);
+
+      IF LocVendLedgerEntry.FIND('-') THEN BEGIN
+       REPEAT
+        IF LocVendLedgerEntry."Closed by Entry No."=0 THEN
+          GlobalVendLedgerEntry := LocVendLedgerEntry;
+        IF NOT existe(LocVendLedgerEntry."Entry No.") THEN
+          SetFilterLedger(LocVendLedgerEntry."Entry No.");
+       UNTIL LocVendLedgerEntry.NEXT=0;
+      END;
+    END;
+
+    PROCEDURE existe@1000000003(EntryNo@1000000000 : Integer) : Boolean;
+    VAR
+      LocFilter@1000000001 : Text[1000];
+    BEGIN
+      LocFilter := FilterEntry + '|';
+      IF STRPOS(LocFilter,STRSUBSTNO('|%1|',FORMAT(EntryNo)))=0 THEN
+        EXIT(FALSE)
+      ELSE
+        EXIT(TRUE);
+    END;
+
+    PROCEDURE AddVendLedgEntryToTemp@1000000004(VAR ParVendLedgEntry@1000000000 : Record 25);
+    VAR
+      LocPurchInvoiceHeader@1000000001 : Record 122;
+      LocPurchCrMemoHeader@1000000002 : Record 124;
+      LocPaymentHeader@1000000003 : Record 10865;
+      LocPaymentMethod@1000000004 : Record 289;
+      LocVendLedgEntry@1100281000 : Record 25;
+    BEGIN
+      //Insertion de l'‚criture dans la table Temporaire
+      WITH TmpDetails DO
+      BEGIN
+        INIT;
+        "Entry No." := NextEntryNo;
+        "USER ID"   := USERID;
+         "Payment Method Code" := ParVendLedgEntry."Payment Method Code"; // ISA02.ISAT.MA
+
+        //r‚cup‚ration du document d'origine
+        CASE ParVendLedgEntry."Document Type" OF
+          ParVendLedgEntry."Document Type"::Invoice:
+          BEGIN
+            LocPurchInvoiceHeader.SETRANGE("No.",ParVendLedgEntry."Document No.");
+            LocPurchInvoiceHeader.SETFILTER("Payment Method Code",PaymentMethodFilter);
+            IF LocPurchInvoiceHeader.FIND('-') THEN BEGIN
+              "Payment Terms Code" := LocPurchInvoiceHeader."Payment Terms Code";
+              "Source Name"        := LocPurchInvoiceHeader."Buy-from Vendor Name";
+            END;
+          END;
+          ParVendLedgEntry."Document Type"::"Credit Memo":
+          BEGIN
+            LocPurchCrMemoHeader.SETRANGE("No.",ParVendLedgEntry."Document No.");
+            LocPurchCrMemoHeader.SETFILTER("Payment Method Code",PaymentMethodFilter);
+            IF LocPurchCrMemoHeader.FIND('-') THEN BEGIN
+            // <<ISA02.ISAT.MA
+              //IF LocPaymentMethod.GET(LocPurchCrMemoHeader."Payment Method Code") THEN
+              //  "Payment Method Code" := LocPaymentMethod.Description;
+            // <<ISA02.ISAT.MA
+              "Payment Terms Code" := LocPurchCrMemoHeader."Payment Terms Code";
+              "Source Name"        := LocPurchCrMemoHeader."Buy-from Vendor Name";
+            END;
+          END;
+          ParVendLedgEntry."Document Type"::Payment:
+            IF LocPaymentHeader.GET(ParVendLedgEntry."Document No.") THEN BEGIN
+              //"Payment Method Code" := LocPaymentHeader."Payment Class"; // ISA02.ISAT.MA
+            END;
+        END;
+
+      // <<ISAO2.ISAT.MA
+        //IF "Payment Method Code" = '' THEN
+        //  "Payment Method Code" := Vendor."Payment Method Code";
+      // >>ISAO2.ISAT.MA
+        IF LocPaymentMethod.GET("Payment Method Code") THEN
+          "Payment Method Code" := LocPaymentMethod.Description;
+
+        "Source No."       := ParVendLedgEntry."Vendor No.";
+        IF "Source Name" = '' THEN
+          "Source Name"      := Vendor.Name;
+        Description        := ParVendLedgEntry.Description;
+
+        IF OriginDocNo THEN BEGIN
+          IF ParVendLedgEntry."Closed by Entry No." <> 0 THEN BEGIN
+            ParVendLedgEntry."Entry No." := ParVendLedgEntry."Closed by Entry No.";
+            LocVendLedgEntry := ParVendLedgEntry;
+            LocVendLedgEntry.MARK(TRUE);
+          END;
+          LocVendLedgEntry.SETCURRENTKEY("Closed by Entry No.");
+          LocVendLedgEntry.SETRANGE("Closed by Entry No.",ParVendLedgEntry."Entry No.");
+          IF LocVendLedgEntry.FIND('-') THEN
+            REPEAT
+              LocVendLedgEntry.MARK(TRUE);
+            UNTIL NEXT = 0;
+          LocVendLedgEntry.MARKEDONLY(TRUE);
+          CASE LocVendLedgEntry.COUNT OF
+            0 : "Document No." := ParVendLedgEntry."Document No.";
+            1 : "Document No." := LocVendLedgEntry."Document No.";
+            ELSE "Document No." := Text030;
+          END;
+        END ELSE
+          "Document No." := ParVendLedgEntry."Document No.";
+
+        "Document Date"    := ParVendLedgEntry."Document Date";
+        "Due Date"         := ParVendLedgEntry."Due Date";
+        Amount             := -ParVendLedgEntry."Original Amt. (LCY)";
+        "Remaining Amount" := -ParVendLedgEntry."Remaining Amt. (LCY)";
+        "Currency Code"    := ParVendLedgEntry."Currency Code";
+        "Bank Account No." := Vendor."Default Company Bank Account";
+        "Notification Code" := ParVendLedgEntry."On Hold";
+        INSERT(TRUE);
+      END;
+
+      NextEntryNo := NextEntryNo + 1;
+    END;
+
+    PROCEDURE AddPaymentLineToTemp@1000000005(VAR ParPaymentLine@1000000000 : Record 10866);
+    VAR
+      LocPaymentHeader@1000000001 : Record 10865;
+      LocVendLedgEntry@1100281000 : Record 25;
+    BEGIN
+      //Insertion de l'‚criture dans la table Temporaire
+
+      //r‚cup‚ration de l'entˆte
+      IF NOT LocPaymentHeader.GET(ParPaymentLine."No.") THEN
+        LocPaymentHeader.INIT;
+
+      WITH TmpDetails DO
+      BEGIN
+        INIT;
+        "Entry No."        := NextEntryNo;
+        "USER ID"          := USERID;
+        "Source No."       := ParPaymentLine."Account No.";
+        "Source Name"      := Vendor.Name;
+        Description        := ParPaymentLine."External Document No.";
+        IF OriginDocNo THEN BEGIN
+          LocVendLedgEntry.RESET;
+          LocVendLedgEntry.SETCURRENTKEY("Applies-to ID");
+          LocVendLedgEntry.SETRANGE("Applies-to ID","Document No.");
+          IF LocVendLedgEntry.FIND('-') THEN
+            "Document No." := LocVendLedgEntry."Document No.";
+        END ELSE
+          "Document No."     := ParPaymentLine."No.";
+        "Document Date"    := LocPaymentHeader."Document Date";
+        "Due Date"         := ParPaymentLine."Due Date";
+        Amount             := -ParPaymentLine."Amount (LCY)";
+        "Remaining Amount" := -ParPaymentLine."Amount (LCY)";
+        "Currency Code"    := ParPaymentLine."Currency Code";
+        "Payment Method Code" := ParPaymentLine."Payment Class";
+        IF LocPaymentHeader."Account Type"=LocPaymentHeader."Account Type"::"Bank Account" THEN
+          "Bank Account No." := LocPaymentHeader."Account No."
+        ELSE
+          "Bank Account No." := '';
+        INSERT(TRUE);
+      END;
+
+      NextEntryNo := NextEntryNo + 1;
+    END;
+
+    PROCEDURE IsOnlyOneEntry@1100281000(ParDetails@1100281001 : Record 8016604) : Boolean;
+    VAR
+      LocDetails@1100281000 : Record 8016604;
+    BEGIN
+      LocDetails.RESET;
+      LocDetails.SETCURRENTKEY("Bank Account No.","Due Date","Payment Method Code","Source No.");
+      LocDetails.SETRANGE("Bank Account No.",ParDetails."Bank Account No.");
+      LocDetails.SETRANGE("Due Date",ParDetails."Due Date");
+      LocDetails.SETRANGE("Payment Method Code",ParDetails."Payment Method Code");
+      LocDetails.SETRANGE("Source No.",ParDetails."Source No.");
+      IF LocDetails.COUNT>1 THEN
+        EXIT(FALSE)
+      ELSE
+        EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/01/11 @a ISAT.MA @v IMH6.01.040 @s Isatech+ */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

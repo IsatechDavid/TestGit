@@ -1,0 +1,643 @@
+OBJECT Page 50022 Provider Call
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/05/14;
+    Time=15:37:28;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.P011;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Provider Call;
+               FRA=Appel prestataire];
+    InsertAllowed=Yes;
+    DeleteAllowed=No;
+    LinksAllowed=No;
+    SourceTable=Table51000;
+    PageType=NavigatePage;
+    SourceTableTemporary=Yes;
+    PromotedActionCategoriesML=[ENU=New,Process,Report,Card;
+                                FRA=Nouveau,Processus,Etat,Fiche];
+    OnOpenPage=VAR
+                 lAbilityCampGeoProvider@1100281000 : Record 50015;
+                 lAbilityGeoProvider@1100281002 : Record 50016;
+                 lPostCode@1100281001 : Record 225;
+                 lContactFound@1000000000 : Boolean;
+               BEGIN
+                 Provider.GET("Provider No.");
+
+                 Contact.RESET;
+                 Contact.SETCURRENTKEY("Company No.");
+                 Contact.SETRANGE("Company No.","Provider No.");
+                 Contact.SETRANGE("Preferred Contact DGS",TRUE);
+                 IF Contact.FINDFIRST THEN BEGIN
+                   ProviderContactAltAddr.SETRANGE("Contact No.",Contact."No.");
+                   lContactFound := TRUE;  //IMH10
+                 END ELSE
+                   ProviderContactAltAddr.SETRANGE("Contact No.",Provider."No.");
+
+                 ProviderContactAltAddr.SETRANGE("Geo. Reference Address",TRUE);
+
+                 IF NOT ProviderContactAltAddr.FINDFIRST THEN BEGIN
+                   ProviderContactAltAddr.INIT;
+                 END;
+
+                 ProviderAddressArray[1] := Provider."No." + ' - ' + Provider.Name;
+                 ProviderAddressArray[2] := ProviderContactAltAddr."Company Name";
+                 ProviderAddressArray[3] := ProviderContactAltAddr.Address + ' ' + ProviderContactAltAddr."Address 2";
+                 ProviderAddressArray[4] := ProviderContactAltAddr."Post Code" + ' - ' + ProviderContactAltAddr.City;
+                 //<<IMH10
+                 {
+                 ProviderAddressArray[5] := ProviderContactAltAddr."Phone No.";
+                 ProviderAddressArray[6] := ProviderContactAltAddr."Mobile Phone No.";
+                 ProviderAddressArray[7] := ProviderContactAltAddr."Constraint Phone No.";
+                 ProviderAddressArray[8] := ProviderContactAltAddr."Mobile Phone No. 2";
+                 }
+                 IF lContactFound THEN BEGIN
+                   ProviderAddressArray[5] := Contact."Phone No.";
+                   ProviderAddressArray[6] := Contact."Mobile Phone No.";
+                   ProviderAddressArray[7] := Contact."Constraint Phone No.";
+                   ProviderAddressArray[8] := Contact."Mobile Phone No. 2";
+                 END ELSE BEGIN
+                   ProviderAddressArray[5] := Provider."Phone No.";
+                   ProviderAddressArray[6] := Provider."Mobile Phone No.";
+                   ProviderAddressArray[7] := Provider."Constraint Phone No.";
+                   ProviderAddressArray[8] := Provider."Mobile Phone No. 2";
+                 END;
+                 //>>IMH10
+                 //<<IMH06
+                 ProviderAddressArray[9] := FORMAT(Contact."Send to Mission Without Call");
+                 //>>IMH06
+
+                 MEOAddressArray[1] := MEOContactAltAddr.Address + ' ' + MEOContactAltAddr."Address 2";
+                 MEOAddressArray[2] := MEOContactAltAddr."Post Code" + ' - ' + MEOContactAltAddr.City;
+
+                 IF "Campaign No." <> '' THEN BEGIN
+                   lAbilityCampGeoProvider.SETRANGE("Campaign No.", "Campaign No.");
+                   lAbilityCampGeoProvider.SETRANGE("Provider No.", "Provider No.");
+                   IF lPostCode.GET(MEOContactAltAddr."Post Code", MEOContactAltAddr.City) THEN
+                     lAbilityCampGeoProvider.SETRANGE("End Ref. Geo. Code", lPostCode."Geo. Reference Code");
+                   "Out Zone" := lAbilityCampGeoProvider.ISEMPTY;
+                 END ELSE BEGIN
+                   lAbilityGeoProvider.SETRANGE("Provider No.", "Provider No.");
+                   //<<IMH12.ZW
+                   {
+                   IF lPostCode.GET(MEOContactAltAddr."Post Code", MEOContactAltAddr.City) THEN
+                     lAbilityGeoProvider.SETRANGE("End Ref. Geo. Code", lPostCode."Geo. Reference Code");
+                   }
+                   lAbilityGeoProvider.SETRANGE("End Ref. Geo. Code", MEOContactAltAddr."Geo. Reference Code");
+                   //>>IMH12.ZW
+                   "Out Zone" := lAbilityGeoProvider.ISEMPTY;
+                 END;
+                 MODIFY(FALSE);
+
+                 //<<IMH15
+                 ProviderCardShow := UserSpecialPermission.DPRSearchPermitted;
+                 IF ProviderCardShow THEN BEGIN
+                   ShowCreateFollowUp := Provider."Follow Up" = '';
+                   ShowFollowUp := NOT ShowCreateFollowUp;
+                 END;
+                 //>>IMH15
+
+                 CurrPage.UPDATE(FALSE);
+
+                 IsOk := FALSE;
+               END;
+
+    OnAfterGetRecord=BEGIN
+                       CurrPage.ProviderSpecialitiesSubPage.FORM.SetSpecializationFilter(SpecializationFilter);
+                       //<<IMH07
+                       CurrPage.ProviderSpecialitiesSubPage.FORM.Load("Provider No.");
+                       CurrPage.ProviderSpecialitiesSubPage.FORM.Sort;
+                       //>>IMH07
+                     END;
+
+    OnQueryClosePage=BEGIN
+                       IF IsOk THEN
+                         EXIT;
+
+                       CASE CloseAction OF
+                         ACTION::Close,
+                         ACTION::OK,
+                         ACTION::LookupOK : BEGIN
+                           IF IsRefuse THEN
+                             EXIT;
+                           IF CONFIRM(Text002) THEN BEGIN
+                             CancelOnPush;
+                             EXIT;
+                           END ELSE BEGIN
+                             EXIT(FALSE);
+                           END;
+                         END;
+                         ACTION::Cancel,
+                         ACTION::LookupCancel : CancelOnPush;
+                       END;
+                       //>>IMH02
+                     END;
+
+    ActionList=ACTIONS
+    {
+      { 1900000004;0 ;ActionContainer;
+                      ActionContainerType=ActionItems }
+      { 1100281004;1 ;Action    ;
+                      Name=Refuse;
+                      CaptionML=[ENU=&Refuse >;
+                                 FRA=&Refuser];
+                      Promoted=Yes;
+                      PromotedIsBig=Yes;
+                      Image=Reject;
+                      PromotedCategory=Process;
+                      OnAction=BEGIN
+                                 Refuse_OnPush();
+                               END;
+                                }
+      { 1100281000;1 ;Action    ;
+                      Name=Accept;
+                      CaptionML=[ENU=Accept;
+                                 FRA=Accepter];
+                      Promoted=Yes;
+                      PromotedIsBig=Yes;
+                      Image=Approve;
+                      PromotedCategory=Process;
+                      OnAction=BEGIN
+                                 Accept_OnPush();
+                               END;
+                                }
+      { 1100281011;0 ;ActionContainer;
+                      ActionContainerType=RelatedInformation }
+      { 1100281005;1 ;Action    ;
+                      Name=ServHeaderCard;
+                      CaptionML=[ENU=Service Header;
+                                 FRA=Ligne produit];
+                      Promoted=Yes;
+                      Image=NewSparkle;
+                      PromotedCategory=Category4;
+                      OnAction=VAR
+                                 lServHeader@1100281000 : Record 5900;
+                               BEGIN
+                                 //IMH06
+                                 IF lServHeader.GET(lServHeader."Document Type"::Invoice, "Service Header No.") THEN
+                                   lServHeader.ShowCard(FALSE);
+                               END;
+                                }
+      { 1100281022;1 ;Action    ;
+                      Name=ProviderCard;
+                      CaptionML=[ENU=Provider Card;
+                                 FRA=Prestataire];
+                      Promoted=Yes;
+                      Visible=ProviderCardShow;
+                      Image=NewResource;
+                      PromotedCategory=Category4;
+                      OnAction=BEGIN
+                                 //IMH15
+                                 ShowProvider;
+                               END;
+                                }
+      { 1100281023;1 ;Action    ;
+                      Name=FollowUpCreationCtrl;
+                      CaptionML=[ENU=Follow Up CreationCtrl;
+                                 FRA=Cr‚ation suivi];
+                      Promoted=Yes;
+                      Visible=ShowCreateFollowUp;
+                      PromotedIsBig=Yes;
+                      Image=ImplementPriceChange;
+                      PromotedCategory=Category4;
+                      OnAction=VAR
+                                 lProvSearchFollowUpMgt@1100281001 : Codeunit 50287;
+                               BEGIN
+                                 //IMH15
+                                 lProvSearchFollowUpMgt.CreateFollowUpFromFirstSearch(Rec);
+                                 IF ProviderCardShow THEN BEGIN
+                                   Provider.GET("Provider No.");
+                                   ShowCreateFollowUp := Provider."Follow Up" = '';
+                                   ShowFollowUp := NOT ShowCreateFollowUp;
+                                 END;
+                               END;
+                                }
+    }
+  }
+  CONTROLS
+  {
+    { 1900000001;0;Container;
+                ContainerType=ContentArea }
+
+    { 1100281015;1;Group  ;
+                Name=ProviderGrp;
+                CaptionML=[ENU=Provider;
+                           FRA=Prestataire];
+                GroupType=Group }
+
+    { 1100281025;2;Group  ;
+                Visible=ShowFollowUp;
+                GroupType=Group }
+
+    { 1100281024;3;Field  ;
+                Name=FollowUpCtrl;
+                CaptionML=[ENU=Follow Up;
+                           FRA=Suivi];
+                SourceExpr=Provider."Follow Up";
+                Editable=FALSE;
+                MultiLine=Yes;
+                Style=Unfavorable;
+                StyleExpr=TRUE }
+
+    { 1100281018;2;Field  ;
+                Name=NoNameCtrl;
+                CaptionML=[ENU=No. - Name;
+                           FRA=Nø - Nom];
+                SourceExpr=ProviderAddressArray[1];
+                Editable=FALSE }
+
+    { 1100281013;2;Field  ;
+                Name=ContactNameCtrl;
+                CaptionML=[ENU=Contact Name;
+                           FRA=Non contact];
+                SourceExpr=ProviderAddressArray[2];
+                Editable=FALSE }
+
+    { 1100281017;2;Field  ;
+                Name=AddressCtrl;
+                CaptionML=FRA=Adresse;
+                SourceExpr=ProviderAddressArray[3];
+                Editable=FALSE }
+
+    { 1100281016;2;Field  ;
+                Name=PostCodeCityCtrl;
+                CaptionML=[ENU=Post Code - City;
+                           FRA=Code postal - Ville];
+                SourceExpr=ProviderAddressArray[4];
+                Editable=FALSE }
+
+    { 1100281012;2;Field  ;
+                Name=PhoneNoCtrl;
+                CaptionML=FRA=Nø t‚l‚phone;
+                SourceExpr=ProviderAddressArray[5];
+                Editable=FALSE;
+                Style=Favorable;
+                StyleExpr=TRUE;
+                OnAssistEdit=BEGIN
+                               //<<IMH05.PC
+                               IF ProviderAddressArray[5] <> '' THEN BEGIN
+                                 CTIManagement.MakeCall(ProviderAddressArray[5]);
+                               END;
+                               //>>IMH05.PC
+                             END;
+                              }
+
+    { 1100281010;2;Field  ;
+                Name=MobilePhoneNoCtrl;
+                CaptionML=FRA=Nø t‚l‚phone mobile;
+                SourceExpr=ProviderAddressArray[6];
+                Editable=FALSE;
+                Style=Favorable;
+                StyleExpr=TRUE;
+                OnAssistEdit=BEGIN
+                               //<<IMH05.PC
+                               IF ProviderAddressArray[6] <> '' THEN BEGIN
+                                 CTIManagement.MakeCall(ProviderAddressArray[6]);
+                               END;
+                               //>>IMH05.PC
+                             END;
+                              }
+
+    { 1000000001;2;Field  ;
+                Name=ConstaintePhoneNoCtrl;
+                CaptionML=[ENU=Constraint Phone No.;
+                           FRA=Nø t‚l‚phone. astreinte];
+                SourceExpr=ProviderAddressArray[7];
+                Editable=FALSE;
+                OnAssistEdit=BEGIN
+                               //<<IMH05.PC
+                               IF ProviderAddressArray[7] <> '' THEN BEGIN
+                                 CTIManagement.MakeCall(ProviderAddressArray[7]);
+                               END;
+                               //>>IMH05.PC
+                             END;
+                              }
+
+    { 1100281003;2;Field  ;
+                Name=MobilePhoneNo2Ctrl;
+                CaptionML=FRA=Nø t‚l‚phone mobile 2;
+                SourceExpr=ProviderAddressArray[8];
+                Editable=FALSE;
+                Style=Favorable;
+                StyleExpr=TRUE;
+                OnAssistEdit=BEGIN
+                               //<<IMH05.PC
+                               IF ProviderAddressArray[8] <> '' THEN BEGIN
+                                 CTIManagement.MakeCall(ProviderAddressArray[8]);
+                               END;
+                               //>>IMH05.PC
+                             END;
+                              }
+
+    { 1000000000;2;Field  ;
+                Name=SendtoMissionWithoutCallCtrl;
+                Lookup=Yes;
+                CaptionML=[ENU=Send to Mission Without Call;
+                           FRA=Missionnable sans appel];
+                SourceExpr=ProviderAddressArray[9];
+                Importance=Promoted;
+                Editable=FALSE;
+                Style=Favorable;
+                StyleExpr=TRUE }
+
+    { 1100281014;2;Field  ;
+                Name=Distance R‚elle;
+                CaptionML=[ENU=Distance;
+                           FRA=Distance R‚elle];
+                DecimalPlaces=0:0;
+                SourceExpr=Distance;
+                Editable=FALSE }
+
+    { 1100281019;2;Field  ;
+                DecimalPlaces=0:0;
+                SourceExpr="Travel Time (min)";
+                Importance=Additional;
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100281006;2;Field  ;
+                Name=OutZone;
+                CaptionML=[ENU=Out Zone;
+                           FRA=Hors zone];
+                SourceExpr="Out Zone";
+                Editable=FALSE }
+
+    { 1100281002;2;Field  ;
+                CaptionML=[ENU=Extranet;
+                           FRA=Extranet];
+                SourceExpr=Provider.Extranet;
+                Editable=false }
+
+    { 1100281007;2;Group  ;
+                Name=MEOGrp;
+                CaptionML=[ENU=Intervention Address;
+                           FRA=MEO Adresse];
+                GroupType=Group }
+
+    { 1100281020;3;Field  ;
+                Name=MEOAddress;
+                CaptionML=[ENU=Address;
+                           FRA=Adresse];
+                SourceExpr=MEOAddressArray[1];
+                Editable=FALSE }
+
+    { 1100281021;3;Field  ;
+                Name=MEOCPCity;
+                CaptionML=[ENU=Post Code - City;
+                           FRA=Code postal - Ville];
+                SourceExpr=MEOAddressArray[2];
+                Editable=FALSE }
+
+    { 1100281008;2;Part   ;
+                Name=ProviderSpecialitiesSubPage;
+                CaptionML=[ENU=Procider Specializations;
+                           FRA=Sp‚cialit‚s prestataire];
+                SubFormView=SORTING(Provider No.,Specialization Code);
+                SubFormLink=Provider No.=FIELD(Provider No.);
+                PagePartID=Page50185;
+                Editable=FALSE;
+                PartType=Page }
+
+    { 1000000002;1;Group  ;
+                Name=Compteur;
+                GroupType=Group }
+
+    { 1000000003;2;Field  ;
+                SourceExpr=STRSUBSTNO(Text004,Cpt,TotProvider);
+                Editable=FALSE;
+                StyleExpr=TRUE }
+
+    { 1100281001;1;Group  ;
+                Name=AgreementGrp;
+                CaptionML=[ENU=Agreement;
+                           FRA=Agr‚ment];
+                GroupType=Group }
+
+    { 1100281009;2;Part   ;
+                CaptionML=[ENU=Agreement Provider;
+                           FRA=Agr‚ment prestataire];
+                SubFormView=SORTING(Provider No.,Corporate No.);
+                SubFormLink=Provider No.=FIELD(Provider No.);
+                PagePartID=Page50184;
+                Editable=FALSE;
+                PartType=Page }
+
+  }
+  CODE
+  {
+    VAR
+      Provider@1100281008 : Record 50000;
+      Contact@1100281005 : Record 5050;
+      ContactProvider@1000000001 : Record 5050;
+      ProviderContactAltAddr@1100281014 : Record 5051;
+      MEOContactAltAddr@1100281016 : Record 5051;
+      CTIManagement@1000000000 : Codeunit 50138;
+      UserSpecialPermission@1100281010 : Codeunit 50093;
+      ProviderAddressArray@1100281021 : ARRAY [9] OF Text[80];
+      MEOAddressArray@1100281013 : ARRAY [2] OF Text[80];
+      Text001@1100281028 : TextConst 'ENU=Please fill a non-acceptance reason code.;FRA=Veuiller saisir une raison de refus';
+      Text002@1100281002 : TextConst 'ENU=Do you want to stop search ?;FRA=Souhaitez vous annuler la recherche ?';
+      Text003@1100281003 : TextConst 'ENU=Do you want to validate search ?;FRA=Souhaitez vous valider la recherche ?';
+      Text004@1000000002 : TextConst 'ENU=Provider %1/%2;FRA=PRESTATAIRE %1/%2';
+      ProviderFoundText@19052302 : TextConst 'ENU=This is the provider has been found;FRA=Voici le prestataire qui a ‚t‚ trouv‚';
+      SpecializationFilter@1100281000 : Text[1024];
+      NonAcceptReasonCode@1100281001 : Code[10];
+      IsOk@1100281007 : Boolean;
+      IsCancel@1100281006 : Boolean;
+      IsRefuse@1100281004 : Boolean;
+      Cpt@1000000003 : Integer;
+      TotProvider@1000000004 : Integer;
+      ProviderCardShow@1100281009 : Boolean INDATASET;
+      ShowCreateFollowUp@1100281011 : Boolean INDATASET;
+      ShowFollowUp@1100281012 : Boolean INDATASET;
+
+    PROCEDURE GetSpecialityDesc@1100281000(pSpecialityCode@1100281000 : Code[10]) : Text[50];
+    VAR
+      lSpeciality@1100281001 : Record 50005;
+    BEGIN
+      IF lSpeciality.GET(pSpecialityCode) THEN
+        EXIT(lSpeciality.Description);
+    END;
+
+    PROCEDURE GetInseeDesc@1100281003(pInseeCode@1100281001 : Code[10]) : Text[50];
+    VAR
+      lInseeCode@1100281000 : Record 50013;
+    BEGIN
+      IF lInseeCode.GET(pInseeCode) THEN
+        EXIT(lInseeCode."Town Name");
+    END;
+
+    PROCEDURE Finish_OnPush@1100281010();
+    VAR
+      lPSRBuffer@1100281000 : Record 51000;
+    BEGIN
+      CurrPage.EDITABLE(FALSE);
+      CurrPage.CLOSE;
+    END;
+
+    PROCEDURE Accept_OnPush@1100281015();
+    BEGIN
+      CurrPage.EDITABLE(FALSE);
+      IsOk := TRUE;
+      CurrPage.CLOSE;
+    END;
+
+    PROCEDURE Cancel_OnPush@1100281017();
+    BEGIN
+      IsCancel := TRUE;
+      CurrPage.EDITABLE(FALSE);
+      IsOk := TRUE;
+      CurrPage.CLOSE;
+    END;
+
+    PROCEDURE Refuse_OnPush@1100281014();
+    VAR
+      lProviderSecondSearchRefusPage@1000000000 : Page 50382;
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //<<IMH17.ST
+      {
+      lCode.SETRANGE("Table ID",DATABASE::"Provider Search Result Buffer");
+      lCode.SETRANGE("Field ID",10);
+      IF PAGE.RUNMODAL(0,lCode) = ACTION::LookupOK THEN BEGIN
+        NonAcceptReasonCode := lCode.Code;
+        //<<IMH16
+        "Non-Accept. Reason Code" := lCode.Code;
+        "Non-Accept. Comments" := lCode.Comment;
+        //>>IMH16
+      END ELSE
+      }
+      lProviderSecondSearchRefusPage.LoadPage;
+      lProviderSecondSearchRefusPage.LOOKUPMODE := TRUE;
+      lProviderSecondSearchRefusPage.EDITABLE := TRUE;
+      IF lProviderSecondSearchRefusPage.RUNMODAL = ACTION::LookupOK THEN BEGIN
+        lProviderSecondSearchRefusPage.GetReasonCode("Non-Accept. Reason Code","Non-Accept. Comments");
+        NonAcceptReasonCode := "Non-Accept. Reason Code";
+      END ELSE
+      //>>IMH17.ST
+        ERROR(Text001);
+
+      IsRefuse := TRUE;
+
+      CurrPage.EDITABLE(FALSE);
+      CurrPage.CLOSE;
+    END;
+
+    PROCEDURE GetIsOk@1100281008() : Boolean;
+    BEGIN
+      EXIT(IsOk);
+    END;
+
+    PROCEDURE GetIsCancel@1100281011() : Boolean;
+    BEGIN
+      EXIT(IsCancel);
+    END;
+
+    PROCEDURE GetProviderNo@1100281005() : Code[20];
+    BEGIN
+      IF IsCancel THEN
+        EXIT('')
+      ELSE
+        EXIT(Provider."No.");
+    END;
+
+    PROCEDURE SetRecords@1100281001(VAR pBuffer@1100281000 : Record 51000);
+    BEGIN
+      Rec := pBuffer;
+      INSERT;
+    END;
+
+    LOCAL PROCEDURE CancelOnPush@19054690();
+    BEGIN
+      Cancel_OnPush();
+    END;
+
+    PROCEDURE GetNonAcceptReasonCode@1100281004(VAR pReasonCode@1100281000 : Code[10];VAR pReasonComment@1100281001 : Text[100]);
+    BEGIN
+      //<<IMH14.PC
+      //EXIT(NonAcceptReasonCode);
+      //<<IMH16
+      //pReasonCode := "DPR Non-Accept. Reason Code";
+      pReasonCode := "Non-Accept. Reason Code";
+      //>>IMH16
+      pReasonComment := "Non-Accept. Comments";
+      //>>IMH14.PC
+    END;
+
+    PROCEDURE GetDistance@1100281012() : Decimal;
+    VAR
+      lProviderSearchMgt@1100281000 : Codeunit 50284;
+    BEGIN
+      IF (ProviderContactAltAddr."Geo. Reference Code" ='') OR
+         (MEOContactAltAddr."Geo. Reference Code" = '')
+      THEN BEGIN
+        EXIT(-1);
+      END;
+      EXIT(
+        lProviderSearchMgt.GetDistanceKm(        //IMH13
+          ProviderContactAltAddr."Geo. Reference Code",
+          MEOContactAltAddr."Geo. Reference Code"));
+    END;
+
+    PROCEDURE SetSpecializationFilter@1100281018(pSpecializationFilter@1100281000 : Text[1024]);
+    BEGIN
+      SpecializationFilter := pSpecializationFilter;
+    END;
+
+    PROCEDURE SetMEOAddr@1100281009(VAR pContAltAddr@1100281000 : Record 5051);
+    BEGIN
+      MEOContactAltAddr := pContAltAddr;
+    END;
+
+    PROCEDURE SetCpt@1000000000(pCpt@1000000000 : Integer;pTotProvider@1000000001 : Integer);
+    BEGIN
+      //IMH09
+      Cpt := pCpt;
+      TotProvider := pTotProvider;
+    END;
+
+    PROCEDURE ShowProvider@1100281002();
+    VAR
+      lProvider@1100281000 : Record 50000;
+    BEGIN
+      //IMH15
+      IF lProvider.GET("Provider No.") THEN
+        PAGE.RUN(PAGE::"Provider Card",lProvider);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH17 @d 20/05/14 @a ISAT.ST @v IMH6.01.P011 @s New Provider Search @h 5133
+          @c Reprise du fonction refus nouvelle recherche
+      /** @r IMH16 @d 29/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search
+          @c Change gestion de code refus */
+      /** @r IMH15 @d 16/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search
+          @c Ajouter affichage accŠs prestataire suivi. */
+      /** @r IMH14 @d 16/04/14 @a ISAT.PC @v IMH6.01.P011 @s New Provider Search
+          @c Change function GetNonAcceptReasonCode */
+      /** @r IMH13 @d 09/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search
+          @c Remplacer CU 50000 par 50284 */
+      /** @r IMH12 @d 28/05/13 @a ISAT.ZW @v IMH6.01.347 @s JUIN @h 4533 @c Correction affichage case hors zone */
+      /** @r IMH11 @d 18/07/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 3495
+          @c Afficher champ "Extranet" */
+      /** @r IMH10 @d 22/05/12 @a ISAT.ZW @v IMH6.01.020 @s Gestion des contacts @h 402
+          @c Nø t‚l‚phone par d‚faut */
+      /** @r IMH09 @d 04/05/12 @a ISAT.LLT @v IMH6.01.020 @s Gestion des contacts @h 2551
+          @c Ajout compteur */
+      /** @r IMH08 @d 02/05/12 @a ISAT.PC @v IMH6.01.020 @s Gestion des contacts @h 3319
+          @c Si tel astreinte non vide alors tel astreinte */
+      /** @r IMH07 @d 24/04/12 @a ISAT.LLT @v IMH6.01.020 @s Recherche prestataire
+          @c Tri par sp‚cialit‚ demand‚e @h 3229  */
+      /** @r IMH06 @d 04/04/12 @a ISAT.ZW @v IMH6.01.020 @s Recherche prestataire @h 3176 @c Ajout Champ missionable sans appelle */
+      /** @r IMH05 @d 18/01/12 @a ISAT.PC @v IMH6.01.129 @s CTI @c Ajout du dev pour la partie CTI */
+      /** @r IHM04 @d 09/12/11 @a ISAT.EBA @v IMH6.01.020 @s Recherche prestataire @c Ajout distance r‚elle et temps de trajet */
+      /** @r IHM03 @d 07/11/11 @a ISAT.EBA @v IMH6.01.020 @s Recherche prestataire @c utilisation du Prefered contact DGS si service No */
+      /** @r IHM02 @d 25/10/11 @a ISAT.NFO @v IMH6.01.020 @s Recherche prestataire @c utilisation du Prefered contact DGS si service No */
+      /** @r IHM01 @d 25/07/11 @a ISAT.PC @v IMH6.01.020 @s Recherche prestataire @c Refonte complete */
+    }
+    END.
+  }
+}

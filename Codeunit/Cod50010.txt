@@ -1,0 +1,246 @@
+OBJECT Codeunit 50010 ProviderContact-Update
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=14:40:23;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 5050=rim,
+                TableData 5051=rim,
+                TableData 5054=rim,
+                TableData 5079=r,
+                TableData 50000=rim;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      RMSetup@1000 : Record 5079;
+      ContactBusinessRelation@1001 : Record 5054;
+      Contact@1100281000 : Record 5050;
+      OldContact@1003 : Record 5050;
+      NoSeriesMgt@1004 : Codeunit 396;
+      ContactNo@1005 : Code[20];
+      NoSeries@1006 : Code[10];
+      NameBreakdownDisable@1100281001 : Boolean;
+
+    PROCEDURE OnInsert@3(VAR pProvider@1000 : Record 50000);
+    BEGIN
+      RMSetup.GET;
+      IF RMSetup."Bus. Rel. Code for Providers" = '' THEN BEGIN
+        EXIT;
+      END;
+
+      InsertNewContact(pProvider,TRUE);
+    END;
+
+    PROCEDURE OnModify@1(VAR pProvider@1000 : Record 50000);
+    VAR
+      lChangeLogMgt@1001 : Codeunit 423;
+      lEAISendSynchroAction@1100281000 : Codeunit 8016730;
+      lRecRef@1003 : RecordRef;
+      lxRecRef@1002 : RecordRef;
+    BEGIN
+      WITH ContactBusinessRelation DO BEGIN
+        SETCURRENTKEY("Link to Table","No.");
+        SETRANGE("Link to Table","Link to Table"::Provider);
+        SETRANGE("No.",pProvider."No.");
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+        FINDFIRST;
+        Contact.GET("Contact No.");
+        OldContact := Contact;
+      END;
+
+      ContactNo := Contact."No.";
+      NoSeries := Contact."No. Series";
+      Contact."Correspondence Type" := pProvider."Correspondence Type";
+      Contact."Fax No." := pProvider."Fax No.";
+      Contact."E-Mail" := pProvider."E-Mail";
+      Contact.MODIFY;
+      Contact.VALIDATE("E-Mail",pProvider."E-Mail");
+      Contact.TRANSFERFIELDS(pProvider);
+      IF (OldContact."Phone No." <> '') AND (Contact."Phone No." = '') THEN
+        Contact."Phone No." := OldContact."Phone No.";
+      IF (OldContact."Phone No. 2" <> '') AND (Contact."Phone No. 2" = '') THEN
+        Contact."Phone No. 2" := OldContact."Phone No. 2";
+      IF (OldContact."Mobile Phone No. 2" <> '') AND (Contact."Mobile Phone No. 2" = '')THEN
+        Contact."Mobile Phone No. 2" := OldContact."Mobile Phone No. 2";
+      IF (OldContact."Fax No." <> '') AND (Contact."Fax No." = '') THEN
+        Contact."Fax No." := OldContact."Fax No.";
+      IF (OldContact."Business Phone No." <> '') AND (Contact."Business Phone No." = '') THEN
+        Contact."Business Phone No." := OldContact."Business Phone No.";
+      IF (OldContact."Mobile Phone No." <> '') AND (Contact."Mobile Phone No." = '') THEN
+        Contact."Mobile Phone No." := OldContact."Mobile Phone No.";
+
+      //<<IMH04.isat.PC
+      //Contact."Correspondence Type" := Contact."Correspondence Type"::" ";
+      //>>IMH04.isat.PC
+      Contact."No." := ContactNo ;
+      Contact."No. Series" := NoSeries;
+      Contact.VALIDATE(Name);
+      Contact.OnModify(OldContact);
+      Contact.MODIFY(TRUE);
+
+      lxRecRef.GETTABLE(OldContact);
+      lRecRef.GETTABLE(Contact);
+      lChangeLogMgt.LogModification(lRecRef,lxRecRef);
+      //<<IMH03.ISAT.EBA
+      lEAISendSynchroAction.LogModification(lRecRef,lxRecRef);
+      //>>IMH03.ISAT.EBA
+    END;
+
+    PROCEDURE OnModifyLinkedContact@1000000000(VAR pProvider@1000 : Record 50000);
+    VAR
+      lContact@1000000000 : Record 5050;
+      lChangeLogMgt@1001 : Codeunit 423;
+      lEAISendSynchroAction@1100281000 : Codeunit 8016730;
+      lRecRef@1003 : RecordRef;
+      lxRecRef@1002 : RecordRef;
+    BEGIN
+      //IMH05
+      lContact.SETCURRENTKEY("Company Name","Company No.",Type,Name,"Service Contact");
+      lContact.SETRANGE("Company No.",pProvider."No.");
+      lContact.SETRANGE(Type,lContact.Type::Person);
+      IF lContact.ISEMPTY THEN
+        EXIT;
+      lContact.FINDSET;
+      REPEAT
+        IF (pProvider.Address <> '') AND (pProvider.Address <> lContact.Address) THEN
+          lContact.Address := pProvider.Address;
+        IF (pProvider."Address 2" <> '') AND (pProvider."Address 2" <> lContact."Address 2") THEN
+          lContact."Address 2" := pProvider."Address 2";
+        IF (pProvider."Post Code" <> '') AND (pProvider."Post Code" <> lContact."Post Code") THEN
+          lContact."Post Code" := pProvider."Post Code";
+        IF (pProvider.City <> '') AND (pProvider.City <> lContact.City) THEN
+          lContact.City := pProvider.City;
+        IF (pProvider."Constraint Phone No." <> '')
+          AND (pProvider."Constraint Phone No." <> lContact."Constraint Phone No.") THEN
+          lContact."Constraint Phone No." := pProvider."Constraint Phone No.";
+        IF (pProvider."Phone No." <> '') AND (pProvider."Phone No." <> lContact."Phone No.") THEN
+          lContact."Phone No." := pProvider."Phone No.";
+        IF (pProvider."Fax No." <> '') AND (pProvider."Fax No." <> lContact."Fax No.") THEN
+          lContact."Fax No." := pProvider."Fax No.";
+        IF (pProvider."E-Mail" <> '') AND (pProvider."E-Mail" <> lContact."E-Mail") THEN
+          lContact."E-Mail" := pProvider."E-Mail";
+        //<<IMH06
+        IF (pProvider."Business Phone No." <> '') AND (pProvider."Business Phone No." <> lContact."Business Phone No.") THEN
+          lContact."Business Phone No." := pProvider."Business Phone No.";
+        //>>IMH06
+        lContact.MODIFY(TRUE);
+
+      UNTIL lContact.NEXT = 0;
+    END;
+
+    PROCEDURE OnDelete@2(VAR pProvider@1000 : Record 50000);
+    BEGIN
+      WITH ContactBusinessRelation DO BEGIN
+        SETCURRENTKEY("Link to Table","No.");
+        SETRANGE("Link to Table","Link to Table"::Provider);
+        SETRANGE("No.", pProvider."No.");
+        DELETEALL(TRUE);
+      END;
+    END;
+
+    PROCEDURE InsertNewContact@5(VAR pProvider@1000 : Record 50000;pLocalCall@1001 : Boolean);
+    VAR
+      lContactAltAddress@1100281000 : Record 5051;
+    BEGIN
+      IF NOT pLocalCall THEN BEGIN
+        RMSetup.GET;
+        RMSetup.TESTFIELD("Bus. Rel. Code for Providers");
+      END;
+
+      WITH Contact DO BEGIN
+        INIT;
+        TRANSFERFIELDS(pProvider);
+        Contact.SetNameBreakdownDisable(NameBreakdownDisable); // IMH02.ISAT.MA
+        Contact.VALIDATE(Name);
+        Contact.VALIDATE("E-Mail");
+        "No." := pProvider."No.";
+        "No. Series" := '';
+        Type := Type::Company;
+        "Service Contact" := "Service Contact"::Provider;
+        TypeChange;
+        SetSkipDefault(FALSE);
+        INSERT(TRUE);
+      END;
+
+      WITH ContactBusinessRelation DO BEGIN
+        INIT;
+        "Contact No." := Contact."No.";
+        "Business Relation Code" := RMSetup."Bus. Rel. Code for Providers";
+        "Link to Table" := "Link to Table"::Provider;
+        "No." := pProvider."No.";
+        INSERT(TRUE);
+      END;
+
+      lContactAltAddress.UpdateAltAddress(Contact);
+    END;
+
+    PROCEDURE InsertNewContactPerson@4(VAR pProvider@1001 : Record 50000;pLocalCall@1003 : Boolean;pViewNewContact@1100281000 : Boolean);
+    VAR
+      lContact@1000 : Record 5050;
+    BEGIN
+      IF NOT pLocalCall THEN BEGIN
+        RMSetup.GET;
+        RMSetup.TESTFIELD("Bus. Rel. Code for Customers");
+      END;
+
+      ContactBusinessRelation.SETCURRENTKEY("Link to Table","No.");
+      ContactBusinessRelation.SETRANGE("Link to Table",ContactBusinessRelation."Link to Table"::Provider);
+      ContactBusinessRelation.SETRANGE("No.",pProvider."No.");
+      IF ContactBusinessRelation.FINDFIRST THEN BEGIN
+        IF lContact.GET(ContactBusinessRelation."Contact No.") THEN BEGIN
+          WITH Contact DO BEGIN
+            INIT;
+            "No." := '';
+            VALIDATE(Type,Type::Person);
+            "Company No." := lContact."No.";
+            "Service Contact" := "Service Contact"::Provider;
+            //<<IMH04
+            "Correspondence Type" := "Correspondence Type"::" ";
+            //>>IMH04
+            INSERT(TRUE);
+            InheritCompanyToPersonData(lContact,FALSE);
+            MODIFY(TRUE);
+          END
+        END;
+      END;
+
+      IF pViewNewContact THEN BEGIN
+        COMMIT;
+        FORM.RUNMODAL(FORM::"Contact Card",Contact);
+      END;
+    END;
+
+    PROCEDURE InsertNewOperationalAddress@1100281000();
+    BEGIN
+    END;
+
+    PROCEDURE SetNameBreakdownDisable@1100281011(pSetNameBreakdownDisable@1100281000 : Boolean);
+    BEGIN
+      // IMH02.ISAT.MA
+      NameBreakdownDisable := pSetNameBreakdownDisable;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH06 @d 14/08/12 @a ISAT.ZW @v IMH6.01.223 @s NEP000003 @h 2096 @c Synchro contact li‚ : Nø t‚l‚phone affaire */
+      /** @r IMH05 @d 15/05/12 @a ISAT.LLT @v IMH6.01.020 @s Prestataire @h 2096 @c Synchro contact li‚ */
+      /** @r IMH04 @d 27/06/11 @a ISAT.PC @v IMH6.01.198 @s RDD @c Gestion des correspondence */
+      /** @r IMH03 @d 16/05/11 @a ISAT.EBA @v IMH6.01.159 @s Comptabilit‚ - IMA Service */
+      /** @r IMH02 @d 11/01/11 @a ISAT.MA @v IMH6.01.198 @s RDD
+          @c D‚sactivation du test de longueur sur Contact.Surname */
+      /** @r IMH01 @d 06/10/10 @a ISAT.PC @v IMH6.01.020 @s Prestataire @c Creation */
+    }
+    END.
+  }
+}

@@ -1,0 +1,974 @@
+OBJECT Codeunit 50128 Send NAV Mail
+{
+  OBJECT-PROPERTIES
+  {
+    Date=09/12/13;
+    Time=14:13:24;
+    Modified=Yes;
+    Version List=IMH6.01.08,JUIN;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lCU@1000000000 : Codeunit 419;
+          BEGIN
+            StartSendMail('',TRUE);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      AppMgt@1000000004 : Codeunit 1;
+      CompanyInfo@1100281000 : Record 79;
+      SetupRead@1100281003 : Boolean;
+      CRMSetup@1100281004 : Record 5079;
+      TempAddressList@1100281001 : TEMPORARY Record 5050;
+      TempAttList@1100281002 : TEMPORARY Record 50021;
+      TempSegLine@1000000003 : TEMPORARY Record 5077;
+      InteractLogEntry@1000000000 : Record 5065;
+      Text001@1000000001 : TextConst 'ENU=Select file to join;FRA=S‚lectionner le fichier … joindre';
+      Text002@1000000002 : TextConst 'ENU=Failed to open file.;FRA=Erreur … l''ouverture du fichier.';
+      UserSetup@1100281005 : Record 91;
+
+    LOCAL PROCEDURE StartSendMail@1100281026(pPageDescr@1100281000 : Text[80];pLoadDefaults@1100281002 : Boolean);
+    VAR
+      lSendMailPage@1100281001 : Page 50307;
+      lMailMgt@1000000000 : Codeunit 397;
+      lSenderMail@1000000001 : Text[80];
+      lBodyText@1000000003 : Text[1024];
+    BEGIN
+      LoadCompanyMails;
+      lSenderMail := lMailMgt.GetSenderEMail('');
+      IF lSenderMail <> '' THEN BEGIN
+        InitSign(lSenderMail, lBodyText);
+        IF lBodyText <> '' THEN
+          lBodyText := GetEOL + GetEOL + lBodyText;
+      END;
+      TempAddressList.RESET;
+      TempAttList.RESET;
+      IF ISSERVICETIER THEN BEGIN
+        lSendMailPage.LoadData(pPageDescr,
+                               lSenderMail,
+                               '',
+                               lBodyText,
+                               TempSegLine, TempAddressList, TempAttList);
+        lSendMailPage.RUN;
+      END;
+    END;
+
+    PROCEDURE SendMailFromService@1100281002(pService@1100281000 : Record 50066;pDefaultMail@1100281001 : Text[80]);
+    VAR
+      lServHeader@1100281002 : Record 5900;
+      lIntervLine@1100281003 : Record 50075;
+    BEGIN
+      InitValues;
+      TempSegLine.VALIDATE("Service No.", pService."Service No.");
+      LoadServData(pService,TRUE,TRUE);
+      lServHeader.SETCURRENTKEY("Service No.");
+      lServHeader.SETRANGE("Service No.", pService."Service No.");
+      IF lServHeader.FINDSET(FALSE) THEN
+        REPEAT
+          LoadServHeaderData(lServHeader,TRUE,TRUE);
+          lIntervLine.SETRANGE("Service Header No.", lServHeader."No.");
+          IF lIntervLine.FINDSET(FALSE) THEN
+            REPEAT
+              LoadIntervData(lIntervLine,TRUE,TRUE);
+            UNTIL lIntervLine.NEXT=0;
+        UNTIL lServHeader.NEXT=0;
+      SetDefaultMail(pDefaultMail);
+      StartSendMail(STRSUBSTNO('%1 %2', pService.TABLECAPTION, pService."Service No."),TRUE);
+    END;
+
+    PROCEDURE SendMailFromServH@1100281000(pServHeader@1100281000 : Record 5900;pDefaultMail@1100281001 : Text[80]);
+    VAR
+      lIntervLine@1100281002 : Record 50075;
+      lService@1000000000 : Record 50066;
+    BEGIN
+      InitValues;
+      TempSegLine.VALIDATE("Service No.", pServHeader."Service No.");
+      TempSegLine.VALIDATE("Service Header No.", pServHeader."No.");
+      IF lService.GET(pServHeader."Service No.") THEN
+        LoadServData(lService,TRUE,TRUE);
+      LoadServHeaderData(pServHeader,TRUE,TRUE);
+      lIntervLine.SETRANGE("Service Header No.", pServHeader."No.");
+      IF lIntervLine.FINDSET(FALSE) THEN
+        REPEAT
+          LoadIntervData(lIntervLine,TRUE,TRUE);
+        UNTIL lIntervLine.NEXT=0;
+      LoadClaimOriginData(pServHeader);  //IMH06
+      SetDefaultMail(pDefaultMail);
+      StartSendMail(STRSUBSTNO('%1 %2', pServHeader.TABLECAPTION, pServHeader."No."),TRUE);
+    END;
+
+    PROCEDURE SendMailFromInterv@1100281001(pIntervLine@1100281000 : Record 50075;pDefaultMail@1100281001 : Text[80]);
+    VAR
+      lServHeader@1100281002 : Record 5900;
+      lService@1000000000 : Record 50066;
+    BEGIN
+      InitValues;
+      TempSegLine.VALIDATE("Service No.", pIntervLine."Service No.");
+      TempSegLine.VALIDATE("Service Header No.", pIntervLine."Service Header No.");
+      TempSegLine.VALIDATE("Intervention Line No.", pIntervLine."Line No.");
+      IF lService.GET(pIntervLine."Service No.") THEN
+        LoadServData(lService,TRUE,TRUE);
+      IF lServHeader.GET(lServHeader."Document Type"::Invoice, pIntervLine."Service Header No.") THEN
+        LoadServHeaderData(lServHeader,TRUE,TRUE);
+      LoadIntervData(pIntervLine,TRUE,TRUE);
+      SetDefaultMail(pDefaultMail);
+      StartSendMail(STRSUBSTNO('%1 %2-%3', pIntervLine.TABLECAPTION,
+                                      pIntervLine."Service Header No.",
+                                      pIntervLine."Intervention No."),TRUE);
+    END;
+
+    PROCEDURE SendMailFromContNo@1000000009(pContactNo@1100281000 : Code[20];pDefaultMail@1100281001 : Text[80]);
+    VAR
+      lContact@1100281002 : Record 5050;
+    BEGIN
+      IF pContactNo = '' THEN
+        EXIT;
+      InitValues;
+      TempSegLine.VALIDATE("Contact No.", pContactNo);
+      lContact.GET(pContactNo);
+      LoadContactData(lContact);
+      SetDefaultMail(pDefaultMail);
+      StartSendMail(STRSUBSTNO('%1 %2', lContact.TABLECAPTION, lContact.Name),TRUE);
+    END;
+
+    PROCEDURE SendMailFromCustNo@1000000012(pCustomerNo@1100281000 : Code[20];pDefaultMail@1100281001 : Text[80]);
+    VAR
+      lContBusRel@1100281002 : Record 5054;
+      lCust@1100281003 : Record 18;
+      lContactNo@1100281004 : Code[20];
+    BEGIN
+      IF pCustomerNo = '' THEN
+        EXIT;
+      InitValues;
+      IF lCust.GET(pCustomerNo) THEN
+        lContactNo := lCust."Primary Contact No.";
+      IF lContactNo = '' THEN BEGIN
+        lContBusRel.SETCURRENTKEY("Link to Table","No.");
+        lContBusRel.SETRANGE("Link to Table", lContBusRel."Link to Table"::Customer);
+        lContBusRel.SETRANGE("No.", pCustomerNo);
+        lContBusRel.FINDFIRST;
+        lContactNo := lContBusRel."Contact No.";
+      END;
+      SendMailFromContNo(lContactNo, pDefaultMail);
+    END;
+
+    PROCEDURE SendMailFromVendNo@1100281013(pVendorNo@1100281000 : Code[20];pDefaultMail@1100281001 : Text[80]);
+    VAR
+      lContBusRel@1100281002 : Record 5054;
+      lVend@1100281003 : Record 23;
+      lContactNo@1100281004 : Code[20];
+    BEGIN
+      IF pVendorNo = '' THEN
+        EXIT;
+      InitValues;
+      IF lVend.GET(pVendorNo) THEN
+        lContactNo := lVend."Primary Contact No.";
+      IF lContactNo = '' THEN BEGIN
+        lContBusRel.SETCURRENTKEY("Link to Table","No.");
+        lContBusRel.SETRANGE("Link to Table", lContBusRel."Link to Table"::Vendor);
+        lContBusRel.SETRANGE("No.", pVendorNo);
+        lContBusRel.FINDFIRST;
+        lContactNo := lContBusRel."Contact No.";
+      END;
+      SendMailFromContNo(lContactNo, pDefaultMail);
+    END;
+
+    PROCEDURE SendFaxFromService@1000000004(pService@1100281000 : Record 50066;pDefaultFax@1100281001 : Text[80]);
+    BEGIN
+      GetSetup;
+      IF CRMSetup."Fax via E-mail" THEN
+        SendMailFromService(pService,FaxToMail(pDefaultFax));
+    END;
+
+    PROCEDURE SendFaxFromServH@1000000003(pServHeader@1100281000 : Record 5900;pDefaultFax@1100281001 : Text[80]);
+    BEGIN
+      GetSetup;
+      IF CRMSetup."Fax via E-mail" THEN
+        SendMailFromServH(pServHeader,FaxToMail(pDefaultFax));
+    END;
+
+    PROCEDURE SendFaxFromInterv@1000000001(pIntervLine@1100281000 : Record 50075;pDefaultFax@1100281001 : Text[80]);
+    BEGIN
+      GetSetup;
+      IF CRMSetup."Fax via E-mail" THEN
+        SendMailFromInterv(pIntervLine, FaxToMail(pDefaultFax));
+    END;
+
+    PROCEDURE SendFaxFromContNo@1000000010(pContNo@1100281000 : Code[20];pDefaultFax@1100281001 : Text[80]);
+    BEGIN
+      GetSetup;
+      IF CRMSetup."Fax via E-mail" THEN
+        SendMailFromContNo(pContNo,FaxToMail(pDefaultFax));
+    END;
+
+    PROCEDURE SendFaxFromCustNo@1000000013(pCustNo@1100281000 : Code[20];pDefaultFax@1100281001 : Text[80]);
+    BEGIN
+      GetSetup;
+      IF CRMSetup."Fax via E-mail" THEN
+        SendMailFromCustNo(pCustNo,FaxToMail(pDefaultFax));
+    END;
+
+    PROCEDURE SendFaxFromVendNo@1100281014(pVendNo@1100281000 : Code[20];pDefaultFax@1100281001 : Text[80]);
+    BEGIN
+      GetSetup;
+      IF CRMSetup."Fax via E-mail" THEN
+        SendMailFromVendNo(pVendNo,FaxToMail(pDefaultFax));
+    END;
+
+    LOCAL PROCEDURE InitValues@1100281005();
+    VAR
+      lInteractSetup@1000000000 : Record 5122;
+    BEGIN
+      TempAddressList.RESET;
+      TempAddressList.DELETEALL;
+      TempAttList.RESET;
+      TempAttList.DELETEALL;
+      lInteractSetup.GET;
+      lInteractSetup.TESTFIELD("E-Mails");
+      CLEAR(TempSegLine);
+      WITH TempSegLine DO BEGIN
+        "Interaction Template Code" := lInteractSetup."E-Mails";
+        "Force Correspondence Type" := TRUE;
+        "Salesperson Code" := AppMgt.GetUserCode(1);
+        "Information Flow" := "Information Flow"::Outbound;
+        "Initiated By":= "Initiated By"::Us;
+        "Correspondence Type" := "Correspondence Type"::"E-Mail";
+      END;
+    END;
+
+    PROCEDURE AddContact@1100281018(pType@1100281001 : Code[1];pContact@1100281000 : Record 5050);
+    BEGIN
+      IF pContact."E-Mail" <> '' THEN
+        AddMail(pType, pContact);
+      IF pContact."Fax No." <> '' THEN
+        AddFax(pType, pContact);
+    END;
+
+    LOCAL PROCEDURE AddMail@1100281003(pType@1100281001 : Code[1];pContact@1100281000 : Record 5050);
+    VAR
+      lNo@1100281003 : Code[20];
+    BEGIN
+      IF pContact."E-Mail" = '' THEN
+        EXIT;
+      WITH TempAddressList DO BEGIN
+        RESET;
+        SETRANGE("E-Mail", pContact."E-Mail");
+        IF NOT ISEMPTY THEN
+          EXIT;
+        RESET;
+        SETFILTER("No.", STRSUBSTNO('%1*', pType));
+        IF FINDLAST THEN
+          lNo := INCSTR("No.")
+        ELSE
+          lNo := pType + '000000001';
+
+        TempAddressList := pContact;
+        "No." := lNo;
+        "Lookup Contact No." := pContact."No.";
+        "Preferred Contact DPR" := FALSE; // To
+        "Preferred Contact DGS" := FALSE; // CC
+        "Preferred Contact DFC" := FALSE; // Cci
+        INSERT(FALSE);
+      END;
+    END;
+
+    LOCAL PROCEDURE AddFax@1100281010(pType@1100281001 : Code[1];pContact@1100281000 : Record 5050);
+    VAR
+      lNo@1100281003 : Code[20];
+      lMail@1100281002 : Text[30];
+      lInt@1100281004 : Integer;
+    BEGIN
+      pContact."E-Mail" := FaxToMail(pContact."Fax No.");
+      IF pContact."E-Mail" = '' THEN
+        EXIT;
+      AddMail(pType, pContact);
+    END;
+
+    LOCAL PROCEDURE AddAttachment@1100281004(pAttachment@1100281000 : Record 50021);
+    BEGIN
+      TempAttList := pAttachment;
+      pAttachment.CALCFIELDS("Merge Source");
+      TempAttList."Merge Source" := pAttachment."Merge Source";
+      IF NOT TempAttList.FIND('=') THEN BEGIN
+        IF TempAttList."Interaction Template Code" = '' THEN BEGIN
+          IF TempAttList."Interaction Log Entry No." <> 0 THEN BEGIN
+            IF InteractLogEntry.GET(TempAttList."Interaction Log Entry No.") THEN BEGIN
+              TempAttList."Interaction Template Code" := InteractLogEntry."Interaction Template Code";
+            END;
+          END;
+        END;
+        TempAttList.Modifiable := FALSE;
+        TempAttList.INSERT(FALSE);
+      END;
+    END;
+
+    PROCEDURE AddEmployee@1100281028(pEmployeeNo@1100281000 : Code[20]);
+    VAR
+      lEmployee@1100281001 : Record 5200;
+      lContact@1100281002 : Record 5050;
+    BEGIN
+      //IMH07.ZW
+      IF pEmployeeNo = '' THEN BEGIN
+        IF NOT (FORM.RUNMODAL(0, lEmployee) = ACTION::LookupOK) THEN
+          EXIT;
+      END ELSE
+        lEmployee.GET(pEmployeeNo);
+
+      lEmployee.TESTFIELD("Contact No.");
+      IF lContact.GET(lEmployee."Contact No.") THEN BEGIN
+        lContact.TESTFIELD("E-Mail");
+        AddContact('R', lContact)
+      END;
+    END;
+
+    PROCEDURE LoadServData@1100281024(pService@1100281000 : Record 50066;pCont@1000000000 : Boolean;pAttach@1000000001 : Boolean);
+    VAR
+      lContact@1100281003 : Record 5050;
+      lDocAttach@1100281001 : Record 50021;
+    BEGIN
+      IF pCont THEN
+        WITH pService DO BEGIN
+          // Contact b‚n‚ficiaire
+          IF NOT lContact.GET("Contact No.") THEN
+            CLEAR(lContact);
+          IF "Contact Name" <> '' THEN
+            lContact.Name := "Contact Name";
+          lContact."Legal Form" := FORMAT(lContact."Service Contact"::Beneficiary);
+          AddContact('B', lContact);
+        END; // WITH pService
+      IF pAttach THEN
+        WITH lDocAttach DO BEGIN
+          // Doc joint service
+          SETCURRENTKEY("Service No.", "Service Document No.");
+          SETRANGE("Service No.", pService."Service No.");
+          SETRANGE("Service Document No.", '');
+          IF FINDSET(FALSE) THEN
+            REPEAT
+              AddAttachment(lDocAttach);
+            UNTIL NEXT = 0;
+        END; // WITH lDocAttach
+    END;
+
+    PROCEDURE LoadServHeaderData@1100281007(pServHeader@1100281000 : Record 5900;pCont@1000000002 : Boolean;pAttach@1000000001 : Boolean);
+    VAR
+      lContact@1100281001 : Record 5050;
+      lServAddr@1100281002 : Record 50068;
+      lDocAttach@1100281003 : Record 50021;
+      lContBusRel@1000000000 : Record 5054;
+    BEGIN
+      // Chargement des donn‚es de ligne produit
+      UserSetup.GET(USERID);
+      IF pCont THEN BEGIN
+        WITH pServHeader DO BEGIN
+          // B‚n‚ficiaire
+          IF NOT lContact.GET("Contact No.") THEN
+            CLEAR(lContact);
+          IF Name <> '' THEN
+            lContact.Name := Name;
+          IF "E-Mail" <> '' THEN
+            lContact."E-Mail" := "E-Mail";
+          IF "Fax No." <> '' THEN
+            lContact."Fax No." := "Fax No.";
+          lContact."Legal Form" := FORMAT(lContact."Service Contact"::Beneficiary);
+          AddContact('B', lContact);
+
+          // Mise en oeuvre
+          IF ("Ship-to E-Mail" <> lContact."E-Mail") AND ("Ship-to E-Mail" <> '') THEN BEGIN
+            lContact."E-Mail" := "Ship-to E-Mail";
+            IF "Ship-to Name" <> '' THEN
+              lContact.Name := "Ship-to Name";
+            AddMail('B', lContact);
+          END;
+          IF ("Ship-to Fax No." <> lContact."Fax No.") AND ("Ship-to Fax No." <> '') THEN BEGIN
+            lContact."Fax No." := "Ship-to Fax No.";
+            IF "Ship-to Name" <> '' THEN
+              lContact.Name := "Ship-to Name";
+            AddFax('B', lContact);
+          END;
+
+        {
+          // Contact d‚claration ?
+          IF "Declaration Contact No." <> '' THEN
+            IF lContact.GET("Declaration Contact No.") THEN BEGIN
+              lContact."Legal Form" := FIELDCAPTION("Declaration Contact NO.");
+              AddContact('D', lContact);
+            END;
+        }
+        //<<IMH03.ST
+          IF "Corporate Contact No." <> '' THEN BEGIN
+            IF lContact.GET("Corporate Contact No.") THEN BEGIN
+              lContact."Legal Form" := FIELDCAPTION("Declaration Contact No.");
+              AddContact('D', lContact);
+            END;
+          END;
+        //>>IMH03.ST
+          // Contact r‚gion Grand compte
+          lContBusRel.SETCURRENTKEY("Link to Table","No.");
+          lContBusRel.SETRANGE("Link to Table", lContBusRel."Link to Table"::Customer);
+          lContBusRel.SETRANGE("No.", "Corporate No.");
+          IF lContBusRel.FINDFIRST THEN BEGIN
+            lContact.SETCURRENTKEY("Company No.");
+            lContact.SETRANGE("Company No.", lContBusRel."Contact No.");
+            lContact.SETRANGE(Type, lContact.Type::Person);
+            lContact.SETRANGE("Corporate Region Code", "Corporate Region Code");
+            lContact.SETFILTER("E-Mail", '<>%1', '');
+            //<<IMH09
+            IF UserSetup."Show To DGS" AND (NOT UserSetup."Show To DPR") AND (NOT UserSetup."Show To DFC")
+                AND (NOT UserSetup."Show To DQP") THEN
+              lContact.SETRANGE("Mask To DGS", FALSE);
+            //>>IMH09
+            IF lContact.FINDSET(FALSE) THEN
+              REPEAT
+                lContact."Legal Form" := FORMAT(lContact."Service Contact"::"Corporate Customer");
+                AddContact('D', lContact);
+              UNTIL lContact.NEXT=0;
+          END;
+
+
+          // Expert
+          IF "Princ. Expert Contact No." <> '' THEN BEGIN
+            IF lContact.GET("Princ. Expert Contact No.") THEN BEGIN
+              lContact."Legal Form" := FORMAT(lContact."Service Contact"::Expert);
+              AddContact('E',lContact);
+            END;
+          END;
+          IF ("Expert Contact No." <> '') AND ("Expert Contact No." <> "Princ. Expert Contact No.") THEN BEGIN
+            IF lContact.GET("Expert Contact No.") THEN BEGIN
+              lContact."Legal Form" := FORMAT(lContact."Service Contact"::Expert);
+              AddContact('E',lContact);
+            END;
+          END;
+        END; // WITH pServHeader
+
+        WITH lServAddr DO BEGIN
+          // Adresses secondaires
+          SETRANGE("Service Header No.", pServHeader."No.");
+          SETFILTER("Address Type", '%1|%2|%3',
+                      "Address Type"::"Contact involved",
+                      "Address Type"::"Expert Contact",
+                      "Address Type"::"Annexe Contact");
+        //  SETFILTER("E-mail", '<>%1', '');
+          IF FINDSET(FALSE) THEN
+            REPEAT
+              IF NOT lContact.GET("Contact No.") THEN BEGIN
+                CLEAR(lContact);
+                lContact."No." := pServHeader."Contact No."; // identification du b‚n‚ficaire par d‚faut
+              END;
+              IF Name <> '' THEN
+                lContact.Name := Name;
+              IF "E-mail" <> '' THEN
+                lContact."E-Mail" := "E-mail";
+              IF "Fax No." <> '' THEN
+                lContact."Fax No." := "Fax No.";
+              lContact."Legal Form" := FORMAT("Address Type");
+              AddContact('F', lContact);
+            UNTIL NEXT=0;
+        END; // WITH lServAddr
+      END;
+      IF pAttach THEN
+        WITH lDocAttach DO BEGIN
+          // Doc joint ligne produit
+          SETCURRENTKEY("Service Document No.","Service Intervention Line No.");
+          SETRANGE("Service Document No.", pServHeader."No.");
+          SETRANGE("Service Intervention Line No.", 0);
+          IF FINDSET(FALSE) THEN
+            REPEAT
+              AddAttachment(lDocAttach);
+            UNTIL NEXT = 0;
+        END; // WITH lDocAttach
+    END;
+
+    PROCEDURE LoadIntervData@1100281008(pIntervLine@1100281000 : Record 50075;pCont@1000000001 : Boolean;pAttach@1000000000 : Boolean);
+    VAR
+      lContact@1100281001 : Record 5050;
+      lDocAttach@1100281002 : Record 50021;
+      lProvider@1100281004 : Record 50000;
+      lUserSetup@1100281003 : Record 91;
+    BEGIN
+      // Chargement des donn‚es d'interventions : contacts prestataire
+      IF pIntervLine."Provider No." = '' THEN
+        EXIT;
+      IF pCont THEN
+        WITH lContact DO BEGIN
+          IF GET(pIntervLine."Provider No.") THEN BEGIN
+            lContact."Legal Form" := FORMAT(lContact."Service Contact"::Provider);
+            AddContact('C', lContact);
+
+            SETCURRENTKEY("Company No.");
+            SETRANGE("Company No.", pIntervLine."Provider No.");
+            SETRANGE(Type, Type::Person);
+        //    SETRANGE("Preferred Contact DGS", TRUE);
+            IF FINDSET(FALSE) THEN
+              REPEAT
+                lContact."Legal Form" := FORMAT(lContact."Service Contact"::Provider);
+                AddContact('C', lContact);
+              UNTIL NEXT = 0;
+          END;
+        END; // WITH lContact
+
+      //<<IMH08
+      IF lProvider.GET(lContact."Company No.") THEN BEGIN
+        //Coordonnateur r‚gional
+      //<<IMH11.ST
+      //  IF lUserSetup.GET(lProvider."Regional Coordinator") THEN BEGIN
+        IF lUserSetup.GET(lProvider."Network Facilitator") THEN BEGIN
+      //>>IMH11.ST
+          lUserSetup.CALCFIELDS("Contact No.");
+          lUserSetup.TESTFIELD("Contact No.");
+          IF lContact.GET(lUserSetup."Contact No.") THEN BEGIN
+            lContact.TESTFIELD("E-Mail");
+      //<<IMH11.ST
+      //      lContact."Legal Form" := FORMAT(lProvider.FIELDCAPTION("Regional Coordinator"));
+            lContact."Legal Form" := FORMAT(lProvider.FIELDCAPTION("Network Facilitator"));
+      //>>IMH11.ST
+            AddContact('Q', lContact);
+          END;
+        END;
+      END;
+      //>>IMH08
+
+      IF pAttach THEN
+        WITH lDocAttach DO BEGIN
+          // Doc joint intervention
+          SETCURRENTKEY("Service Document No.","Service Intervention Line No.");
+          SETRANGE("Service Document No.", pIntervLine."Service Header No.");
+          SETRANGE("Service Intervention Line No.", pIntervLine."Line No.");
+          IF FINDSET(FALSE) THEN
+            REPEAT
+              AddAttachment(lDocAttach);
+            UNTIL NEXT = 0;
+        END; // WITH lDocAttach
+    END;
+
+    PROCEDURE LoadContactData@1100281019(pContact@1100281000 : Record 5050);
+    VAR
+      lContact@1100281001 : Record 5050;
+      lContact2@1100281002 : Record 5050;
+      lProvider@1100281003 : Record 50000;
+      lUserSetup@1100281004 : Record 91;
+    BEGIN
+      WITH pContact DO BEGIN
+        IF "No." = '' THEN
+          EXIT;
+        IF Type = Type::Company THEN
+          AddContact('A', pContact)
+        ELSE BEGIN
+          IF lContact.GET("Company No.") THEN
+            AddContact('A', lContact);
+          AddContact('B', pContact);
+        END;
+        IF "Company No." = '' THEN
+          EXIT;
+      END;
+      lContact.SETCURRENTKEY("Company No.");
+      lContact.SETRANGE("Company No.", pContact."Company No.");
+      lContact.SETFILTER("No.", '<>%1', pContact."No.");
+      IF lContact.FINDSET THEN
+        REPEAT
+          AddContact('B', lContact);
+        UNTIL lContact.NEXT = 0;
+
+      //<<IMH07.zw
+      IF lProvider.GET(lContact."Company No.") THEN BEGIN
+        //Coordonnateur r‚gional
+        IF lUserSetup.GET(lProvider."Regional Coordinator") THEN BEGIN
+          lUserSetup.CALCFIELDS("Contact No.");
+          lUserSetup.TESTFIELD("Contact No.");
+          IF lContact2.GET(lUserSetup."Contact No.") THEN BEGIN
+            lContact2.TESTFIELD("E-Mail");
+            lContact2."Legal Form" := FORMAT(lProvider.FIELDCAPTION("Regional Coordinator"));
+            AddContact('Q', lContact2);
+          END;
+        END;
+        //Animateur r‚seau
+        IF lUserSetup.GET(lProvider."Network Facilitator") THEN BEGIN
+          lUserSetup.CALCFIELDS("Contact No.");
+          lUserSetup.TESTFIELD("Contact No.");
+          IF lContact2.GET(lUserSetup."Contact No.") THEN BEGIN
+            lContact2.TESTFIELD("E-Mail");
+            lContact2."Legal Form" := FORMAT(lProvider.FIELDCAPTION("Network Facilitator"));
+            AddContact('Q', lContact2);
+          END;
+        END;
+        //Assistante r‚seau
+        IF lUserSetup.GET(lProvider."Network Assistant") THEN BEGIN
+          lUserSetup.CALCFIELDS("Contact No.");
+          lUserSetup.TESTFIELD("Contact No.");
+          IF lContact2.GET(lUserSetup."Contact No.") THEN BEGIN
+            lContact2.TESTFIELD("E-Mail");
+            lContact2."Legal Form" := FORMAT(lProvider.FIELDCAPTION("Network Assistant"));
+            AddContact('Q', lContact2);
+          END;
+        END;
+      END;
+      //IMH07.ZW
+    END;
+
+    PROCEDURE LoadClaimOriginData@1100281012(pServiceHeader@1100281000 : Record 5900);
+    VAR
+      lIntervLine@1100281002 : Record 50075;
+      lServiceHeader@1100281001 : Record 5900;
+      lService@1000000000 : Record 50066;
+      lOriginIntervLine@1000000001 : Record 50075;
+    BEGIN
+      //IMH06
+      IF NOT pServiceHeader.Claim THEN
+        EXIT;
+
+      lIntervLine.SETCURRENTKEY("Service No.");
+      lIntervLine.SETRANGE("Service No.", pServiceHeader."Service No.");
+      lIntervLine.SETRANGE("Service Header Claims No.", pServiceHeader."No.");
+      IF lIntervLine.ISEMPTY THEN BEGIN // r‚clamation sur ligne produit
+        lServiceHeader.SETCURRENTKEY("Service No.");
+        lServiceHeader.SETRANGE("Service No.", pServiceHeader."Service No.");
+        lServiceHeader.SETRANGE("Service Header Claims No.", pServiceHeader."No.");
+        //<<IMH10.ACO
+        //IF lServiceHeader.FINDFIRST THEN
+        //  LoadServHeaderData(lServiceHeader,TRUE,TRUE);
+        IF lServiceHeader.FINDFIRST THEN BEGIN
+          //chargement des donn‚es de la ligne produit
+          LoadServHeaderData(lServiceHeader,TRUE,TRUE);
+          //chargement des donn‚es des lignes d'intervention
+          lOriginIntervLine.SETCURRENTKEY("Service Header No.", "Line No.");
+          lOriginIntervLine.SETRANGE("Service Header No.", lServiceHeader."No.");
+          IF lOriginIntervLine.FINDSET THEN
+            REPEAT
+              LoadIntervData(lOriginIntervLine, TRUE, TRUE);
+            UNTIL lOriginIntervLine.NEXT = 0;
+          //chargement des donn‚es du service
+          IF lService.GET(lServiceHeader."Service No.") THEN
+            LoadServData(lService, TRUE, TRUE);
+        END
+        //>>IMH10.ACO
+      END ELSE BEGIN // r‚clamation sur intervention
+        //<<IMH10.ACO
+        //IF lIntervLine.FINDFIRST THEN
+        //  LoadIntervData(lIntervLine,TRUE,TRUE);
+        IF lIntervLine.FINDFIRST THEN BEGIN
+          //chargement des donn‚es de l'intervention
+          LoadIntervData(lIntervLine,TRUE,TRUE);
+          //chargement des donn‚es de la ligne produit
+          lServiceHeader.SETRANGE("No.",  lIntervLine."Service Header No.");
+          IF lServiceHeader.FINDFIRST THEN
+            LoadServHeaderData(lServiceHeader, TRUE, TRUE);
+          //chargement des donn‚es du service
+          IF lService.GET(lIntervLine."Service No.") THEN
+            LoadServData(lService, TRUE, TRUE);
+        END
+        //>>IMH10.ACO
+      END;
+    END;
+
+    LOCAL PROCEDURE SetDefaultMail@1100281006(pDefaultMail@1100281000 : Text[80]);
+    VAR
+      lContact@1100281001 : Record 5050;
+    BEGIN
+      IF pDefaultMail = '' THEN
+        EXIT;
+
+      WITH TempAddressList DO BEGIN
+        RESET;
+        SETRANGE("E-Mail", pDefaultMail);
+        IF NOT FINDFIRST THEN BEGIN
+          lContact."E-Mail" := pDefaultMail;
+          AddMail('A', lContact);
+        END;
+        IF FINDFIRST THEN BEGIN
+          "Preferred Contact DPR" := TRUE;
+          MODIFY;
+        END;
+        RESET;
+      END; // WITH TempAddressList
+    END;
+
+    LOCAL PROCEDURE LoadCompanyMails@1100281009();
+    VAR
+      lCRMSetup@1100281000 : Record 5079;
+      lContact@1100281001 : Record 5050;
+    BEGIN
+      lCRMSetup.GET;
+      IF lCRMSetup."Company Contact No." = '' THEN
+        EXIT;
+      WITH lContact DO BEGIN
+        SETCURRENTKEY("Company No.");
+        SETRANGE("Company No.", lCRMSetup."Company Contact No.");
+        SETRANGE(Type, Type::Person);
+        SETRANGE("Preferred Contact DGS", TRUE);
+      //  SETFILTER("E-Mail", '<>%1', '');
+        IF NOT FINDSET(FALSE) THEN
+          EXIT;
+        REPEAT
+          "Legal Form" := COMPANYNAME;
+          AddContact('Z', lContact);
+        UNTIL NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE AddFile@1000000000(VAR pDocAttach@1000000001 : Record 50021) : Boolean;
+    VAR
+      lFileMgt@1000000005 : Codeunit 419;
+      lTempBLOB@1000000000 : TEMPORARY Record 99008535;
+      lFileName@1000000002 : Text[1024];
+      lNextEntry@1000000004 : Integer;
+      lFolderMgt@1000000003 : Codeunit 50004;
+    BEGIN
+      // Fonction d'ajout manuel de fichier
+      lFileName := lFileMgt.BLOBImport(lTempBLOB, '', TRUE);
+      IF lFileName = '' THEN
+        EXIT(FALSE);
+
+      pDocAttach.SETRANGE("Referent Table No.",-1);
+      IF pDocAttach.FINDLAST THEN
+        lNextEntry := pDocAttach."Key Integer 1" + 1
+      ELSE
+        lNextEntry := 1;
+      pDocAttach.SETRANGE("Referent Table No.");
+      pDocAttach.INIT;
+      pDocAttach."File Path" := lFolderMgt.GetPathForFile(lFileName);
+      pDocAttach."Orginal File Name" :=  lFolderMgt.GetCurrentFileName(lFileName);
+      pDocAttach.Description := lFolderMgt.GetBaseName(lFileName);
+      pDocAttach."File Extension" := lFolderMgt.GetFileExtension(lFileName);
+      pDocAttach.Modifiable := TRUE; // joindre auto
+      pDocAttach."Referent Table No." := -1;
+      pDocAttach."Key Integer 1" := lNextEntry;
+      pDocAttach."Merge Source" := lTempBLOB.Blob;
+      pDocAttach.INSERT(FALSE);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE AddFileByFile@1000000011(VAR pDocAttach@1000000001 : Record 50021;pFileName@1000000006 : Text[1024]) : Boolean;
+    VAR
+      lNextEntry@1000000004 : Integer;
+      lFolderMgt@1000000003 : Codeunit 50004;
+    BEGIN
+      //IMH04
+      // Fonction d'ajout manuel de fichier
+      IF pFileName = '' THEN
+        EXIT(FALSE);
+      pDocAttach.SETRANGE("Referent Table No.",-1);
+      IF pDocAttach.FINDLAST THEN
+        lNextEntry := pDocAttach."Key Integer 1" + 1
+      ELSE
+        lNextEntry := 1;
+      pDocAttach.SETRANGE("Referent Table No.");
+      pDocAttach.INIT;
+      pDocAttach."File Path" := lFolderMgt.GetPathForFile(pFileName);
+      pDocAttach."Orginal File Name" :=  lFolderMgt.GetCurrentFileName(pFileName);
+      pDocAttach.Description := lFolderMgt.GetBaseName(pFileName);
+      pDocAttach."File Extension" := lFolderMgt.GetFileExtension(pFileName);
+      pDocAttach.Modifiable := TRUE; // joindre auto
+      pDocAttach."Referent Table No." := -1;
+      pDocAttach."Key Integer 1" := lNextEntry;
+      pDocAttach.INSERT(FALSE);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SendMail@1000000002(pSegLine@1000000010 : Record 5077;pSender@1000000000 : Text[1024];pSubject@1000000002 : Text[1024];pBodyText@1000000003 : BigText;VAR pToRecipList@1000000001 : Record 5050;VAR pCCRecipList@1000000005 : Record 5050;VAR pCCiRecipList@1000000006 : Record 5050;VAR pAttachList@1000000004 : Record 50021);
+    VAR
+      lMail@1000000011 : Codeunit 397;
+      lMailItem@1000000008 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{00061033-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.MailItem";
+      lTempSegLine@1000000007 : TEMPORARY Record 5077;
+      lContactNo@1000000009 : Code[20];
+      lSegMgt@1000000013 : Codeunit 5051;
+      lTempAttach@1000000012 : TEMPORARY Record 5062;
+      lTempCommentLine@1000000014 : TEMPORARY Record 5123;
+      lCRMSetup@1000000015 : Record 5079;
+      lContact@1000000016 : Record 5050;
+      lFileMgt@1000000017 : Codeunit 419;
+      lTempBLOB@1000000018 : TEMPORARY Record 99008535;
+      lFileName@1000000019 : Text[1024];
+    BEGIN
+      // Recherche du contact dans le pToRecipList
+      lContactNo := FindContact(pToRecipList);
+      IF lContactNo = '' THEN
+        lContactNo := FindContact(pCCRecipList);
+      IF lContactNo = '' THEN
+        lContactNo := FindContact(pCCiRecipList);
+      IF lContactNo = '' THEN BEGIN
+        lCRMSetup.GET;
+        lCRMSetup.TESTFIELD("Company Contact No.");
+        lContactNo := lCRMSetup."Company Contact No.";
+      END;
+      lContact.GET(lContactNo);
+      lFileName := lFileMgt.ClientTempFileName('','msg');
+      IF USERID = 'ISAT-ST' THEN BEGIN
+        IF NOT lMail.NewOutlookMessage2(pSender, pSubject, 0, pBodyText,
+                                    pToRecipList, pCCRecipList, pCCiRecipList, pAttachList, TRUE, lFileName) THEN
+          EXIT;
+        EXIT;
+      END
+      ELSE
+        IF NOT lMail.NewOutlookMessage2(pSender, pSubject, 0, pBodyText,
+                                    pToRecipList, pCCRecipList, pCCiRecipList, pAttachList, FALSE, lFileName) THEN
+          EXIT;
+
+      lFileMgt.BLOBImport(lTempBLOB, lFileName,FALSE);
+      lTempBLOB.CALCFIELDS(Blob);
+      IF lTempBLOB.Blob.HASVALUE THEN BEGIN
+        lTempAttach."No." := -1;
+        lTempAttach.Attachment := lTempBLOB.Blob;
+        lTempAttach."File Extension" := 'msg';
+        //<<IMH02
+        //lTempAttach."Use Description" := pSubject;
+        lTempAttach."Use Description" := COPYSTR(pSubject, 1, MAXSTRLEN(lTempAttach."Use Description"));
+        //>>IMH02
+        lTempAttach.INSERT;
+      END;
+      // Cr‚ation de l'interaction + PJ
+      lTempSegLine := pSegLine;
+      WITH lTempSegLine DO BEGIN
+        VALIDATE("Contact No.", lContact."No.");
+        INSERT;
+        VALIDATE("Interaction Template Code", pSegLine."Interaction Template Code");
+        Date := WORKDATE;
+        "Time of Interaction" := TIME;
+        //<<IMH02
+        //Description := pSubject;
+        Description := COPYSTR(pSubject, 1, MAXSTRLEN(Description));
+        //>>IMH02
+        "Force Correspondence Type" := TRUE;
+        "Correspondence Type" := "Correspondence Type"::"E-Mail";
+        "Salesperson Code" := AppMgt.GetUserCode(1);
+        "Information Flow" := "Information Flow"::Outbound;
+        "Initiated By":= "Initiated By"::Us;
+        "Attachment No." := -1;
+        MODIFY;
+      END;
+      lSegMgt.SetSkipDeliverTest(TRUE);
+      lSegMgt.LogInteraction(lTempSegLine,lTempAttach,lTempCommentLine,FALSE,FALSE);
+    END;
+
+    PROCEDURE FindContact@1000000007(VAR pContactList@1000000000 : Record 5050) : Code[20];
+    VAR
+      lContact@1000000001 : Record 5050;
+    BEGIN
+      WITH pContactList DO BEGIN
+        IF NOT FINDSET THEN
+          EXIT;
+        REPEAT
+          IF "Lookup Contact No." <> '' THEN
+            IF lContact.GET("Lookup Contact No.") THEN
+              EXIT(lContact."No.");
+        UNTIL NEXT = 0;
+      END;
+    END;
+
+    LOCAL PROCEDURE InitSign@1000000005(pEMailAddress@1000000000 : Text[80];VAR pSignText@1000000001 : Text[1024]);
+    VAR
+      lSalesperson@1000000002 : Record 13;
+      lSalesCode@1000000003 : Code[10];
+      lPos@1100281000 : Integer;
+    BEGIN
+      IF pEMailAddress = '' THEN BEGIN
+        // Voir si init sur la soci‚t‚ ?
+      END
+      ELSE BEGIN
+        lSalesperson.SETCURRENTKEY("Search E-Mail");
+        lSalesperson.SETRANGE("Search E-Mail", UPPERCASE(pEMailAddress));
+        IF lSalesperson.FINDFIRST THEN BEGIN
+          pSignText := lSalesperson."User Signature";
+        END;
+      END;
+
+      lSalesCode := AppMgt.GetUserCode(1);
+      IF lSalesCode = lSalesperson.Code THEN
+        EXIT;
+      IF NOT lSalesperson.GET(lSalesCode) THEN
+        CLEAR(lSalesperson);
+
+      IF STRPOS(pSignText, '%1') > 0 THEN
+        pSignText := STRSUBSTNO(pSignText, lSalesperson.Name);
+
+      // Remplacement des \n par des retours chariots
+      lPos := STRPOS(pSignText, '\n');
+      WHILE lPos > 0 DO BEGIN
+        pSignText[lPos] := 13;
+        pSignText[lPos + 1] := 10;
+        lPos := STRPOS(pSignText, '\n');
+      END;
+    END;
+
+    LOCAL PROCEDURE GetEOL@1000000008() rValue : Text[2];
+    BEGIN
+      rValue[1] := 13;
+      rValue[2] := 10;
+    END;
+
+    LOCAL PROCEDURE GetSetup@1100281011();
+    BEGIN
+      IF SetupRead THEN
+        EXIT;
+      CompanyInfo.GET;
+      CRMSetup.GET;
+      SetupRead := TRUE;
+    END;
+
+    PROCEDURE FaxToMail@1000000006(pFaxNo@1000000000 : Text[80]) : Text[80];
+    VAR
+      lInt@1000000001 : Integer;
+    BEGIN
+      IF pFaxNo = '' THEN
+        EXIT('');
+      GetSetup;
+      IF NOT CRMSetup."Fax via E-mail" THEN
+        EXIT('');
+      pFaxNo := DELCHR(pFaxNo, '=', '., ');
+      IF pFaxNo = '' THEN
+        EXIT('');
+      IF NOT EVALUATE(lInt, pFaxNo) THEN
+        EXIT('');
+      IF CRMSetup."Fax E-mail Address Extension" = '' THEN
+        CRMSetup.FIELDERROR("Fax E-mail Address Extension");
+      pFaxNo := pFaxNo + CRMSetup."Fax E-mail Address Extension";
+      EXIT(pFaxNo);
+    END;
+
+    PROCEDURE RetrieveTempData@1000000015(VAR pContact@1000000000 : Record 5050;VAR pAttach@1000000001 : Record 50021);
+    BEGIN
+      //IMH04.ST
+      TempAddressList.RESET;
+      IF TempAddressList.FINDSET THEN BEGIN
+        REPEAT
+          pContact := TempAddressList;
+          pContact.INSERT;
+        UNTIL TempAddressList.NEXT=0;
+        TempAddressList.DELETEALL;
+      END;
+      TempAttList.RESET;
+      IF TempAttList.FINDSET THEN BEGIN
+        REPEAT
+          pAttach := TempAttList;
+          pAttach.INSERT;
+        UNTIL TempAttList.NEXT=0;
+        TempAttList.DELETEALL;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH11 @d 15/10/13 @a ISAT.ST @v IMH6.01.353 @s Reorganisation region IMH @h 4801 @c Envoi de mail CPR */
+      /** @r IMH10 @d 21/06/13 @a ISAT.ACO @v IMH6.01.347 @s JUIN @h 3551
+          @c Chargement des documents joints et contacts des autres niveaux dans le cas d'une r‚clamation */
+      /** @r IMH09 @d 27/06/13 @a ISAT.ZW @v IMH6.01.345 @s MAI @h 4546
+          @c Fonction envoyer  de mail : masquer les contact grand compte masqu‚ pour DGS */
+      /** @r IMH08 @d 31/08/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 3445
+          @c fonction envoyer mail intervention ajouter mail CR prestataire par d‚faut  */
+      /** @r IMH07 @d 30/08/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 3674
+          @c fonction envoyer mail ajouter mail CR,AR prestataire par d‚faut  */
+      /** @r IMH06 @d 18/07/12 @a ISAT.PC @v IMH6.01.226 @s version 1.4 @h 3457 @c Ajout fonction LoadClaimOriginData */
+      /** @r IMH05 @d 20/06/12 @a ISAT.ZW @v IMH6.01.108 @s Interactions @h 2844 @c Ajout fonction AddFileByFile */
+      /** @r IMH04 @d 16/05/12 @a ISAT.ST @v IMH6.01.108 @s Interactions @h 2844
+          @c Ajout de paramŠtres pCont & pAttach sur LoadServData, LoadServHeaderData, LoadIntervData
+          @c + local … non pour ces fonctions (appel C5054)
+          @c Ajout fonction RetrieveTempData pour appel C5054 */
+      /** @r IMH03 @d 06/04/12 @a ISAT.ST @v IMH6.01.108 @s Interactions @h 3141 @c Ajout contact grand compte de la ligne produit */
+      /** @r IMH02 @d 03/04/12 @a ISAT.ZW @v IMH6.01.108 @d Interactions @h mantis3059  @c Correction longueur d‚signation Envoie mail */
+      /** @r IMH01 @d 16/02/12 @a ISAT.ST @v IMH6.01.108 @s Interactions @h 2137 @c Cr‚ation objet */
+    }
+    END.
+  }
+}

@@ -1,0 +1,184 @@
+OBJECT Page 50013 Attach. Creation Wizard
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/10/10;
+    Time=11:37:38;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Office Attachment Creation Wizard;
+               FRA=Assistant cr‚ation document joint];
+    InsertAllowed=No;
+    DeleteAllowed=No;
+    SourceTable=Table50021;
+    DataCaptionExpr=SetCaption;
+    PageType=NavigatePage;
+    SourceTableTemporary=Yes;
+    ActionList=ACTIONS
+    {
+      { 1900000004;0 ;ActionContainer;
+                      ActionContainerType=ActionItems }
+      { 1100481001;1 ;Action    ;
+                      Name=<Action1100481001>;
+                      ShortCutKey=F9;
+                      CaptionML=[ENU=Valid (F11);
+                                 FRA=Valider (F9)];
+                      InFooterBar=Yes;
+                      Image=Post;
+                      OnAction=BEGIN
+                                 Finish;
+                               END;
+                                }
+      { 11      ;1   ;Action    ;
+                      CaptionML=[ENU=Cancel;
+                                 FRA=Annuler];
+                      InFooterBar=Yes;
+                      Image=Cancel;
+                      OnAction=BEGIN
+                                 CurrPage.CLOSE;
+                               END;
+                                }
+    }
+  }
+  CONTROLS
+  {
+    { 1900000001;0;Container;
+                ContainerType=ContentArea }
+
+    { 13  ;1   ;Field     ;
+                CaptionML=[ENU=This wizard helps you to create attachments.Enter the informations of your document attachment :;
+                           FRA=Cet assistant vous permet de cr‚er des documents joints.Veuillez saisir les informations de votre document joint :] }
+
+    { 1100481004;1;Field  ;
+                CaptionML=[ENU=Template Code;
+                           FRA=Code modŠle];
+                SourceExpr="Attach. Template Code" }
+
+    { 1100481009;1;Field  ;
+                SourceExpr=Description }
+
+    { 1100481007;1;Field  ;
+                SourceExpr="Description 2" }
+
+    { 1100481013;1;Field  ;
+                CaptionML=[ENU=Default Folder;
+                           FRA=R‚pertoire par d‚faut];
+                SourceExpr=GetDefaultFolder;
+                Editable=FALSE }
+
+    { 1100481011;1;Field  ;
+                CaptionML=[ENU=File to attach;
+                           FRA=Fichier … joindre];
+                SourceExpr=FileToImport;
+                OnAssistEdit=VAR
+                               lCommonDialogMgt@1100481000 : Codeunit 412;
+                               lFromFile@1100281001 : Text[250];
+                             BEGIN
+                               IF ISSERVICETIER THEN
+                                 UPLOADINTOSTREAM(Text009,GetDefaultFolder,Text010,FileToImport,FileInStream)
+                               ELSE
+                                 FileToImport := AttachFolderMgt.GetFileName(FALSE,GetDefaultFolder, '');
+                             END;
+                              }
+
+  }
+  CODE
+  {
+    VAR
+      AttachmentTreeview@1100281000 : Record 50017;
+      AttachmentMgt@1100481001 : Codeunit 50002;
+      AttachFolderMgt@1000000000 : Codeunit 50004;
+      AttachTreeviewMgt@1100481015 : Codeunit 50001;
+      CurrentRecordRef@1000000001 : RecordRef;
+      FileToImport@1100481000 : Text[500];
+      IsOK@1100481002 : Boolean;
+      Text001@1100481003 : TextConst 'ENU=File''s paht to import is madatory;FRA=Le chemin d''accŠs au fichier … importer est obligatoire';
+      Text002@1100481004 : TextConst 'ENU=File to import not exists;FRA=Le fichier … importer n''existe pas';
+      Text003@1100481006 : TextConst 'ENU=Template is mandatory;FRA=Le code modŠle est obligatoire';
+      Text009@1100281002 : TextConst 'ENU=Import Attachment;FRA=Importer document';
+      Text010@1100281001 : TextConst 'ENU=All Files (*.*)|*.*;FRA=Tous les fichiers (*.*)|*.*';
+      FileInStream@1100281003 : InStream;
+
+    PROCEDURE SetCaption@1() : Text[150];
+    BEGIN
+      // Gestion du caption de la form
+
+      EXIT(COPYSTR(FORMAT(CurrentRecordRef.RECORDID),1,150));
+    END;
+
+    PROCEDURE SetValues@1000000000(pAttachment@1100481001 : Record 50021;pRecRef@1000000000 : RecordRef);
+    VAR
+      lAttachTemplate@1100281000 : Record 50020;
+    BEGIN
+      CurrentRecordRef := pRecRef;
+      Rec := pAttachment;
+
+      "Delete Mode" := 0;
+      Deleted := FALSE;
+      IF lAttachTemplate.GET(pAttachment."Attach. Template Code") THEN BEGIN
+        "Delete Mode" := lAttachTemplate."Delete Mode";
+        Modifiable := lAttachTemplate.Modifiable;
+      END;
+
+      // Reconstitue la cl‚ d'accŠs … l'enregistrement
+      AttachmentMgt.CollectRecordKey(Rec,CurrentRecordRef);
+
+      // Recup‚re l'arbo active
+      AttachTreeviewMgt.GetAttachTreeviewActive(
+        CurrentRecordRef,
+        "Attachment Treeview Code");
+      VALIDATE("Attachment Treeview Code");
+
+      AttachmentTreeview.GET("Attachment Treeview Code");
+
+      INSERT;
+    END;
+
+    PROCEDURE Finish@1100481001();
+    VAR
+      lAttachmentTemplate@1100481000 : Record 50020;
+    BEGIN
+      IF AttachmentTreeview."Template Mandatory" THEN BEGIN
+        IF NOT lAttachmentTemplate.GET("Attach. Template Code") THEN BEGIN
+          ERROR(Text003);
+        END;
+      END;
+      IsOK := TRUE;
+      CurrPage.CLOSE;
+    END;
+
+    LOCAL PROCEDURE GetDefaultFolder@1100481002() : Text[250];
+    VAR
+      lAttachTemplate@1100481000 : Record 50020;
+    BEGIN
+      IF NOT lAttachTemplate.GET("Attach. Template Code") THEN BEGIN
+        EXIT(lAttachTemplate."Default Folder");
+      END ELSE BEGIN
+        EXIT('');
+      END;
+    END;
+
+    PROCEDURE GetValues@1000000001(VAR pAttachment@1000000000 : Record 50021;VAR pFileToImport@1000000001 : Text[500];VAR pFileInStream@1100281000 : InStream);
+    BEGIN
+      // Permet de r‚cup‚rer l'enregistrement
+
+      CLEAR(pAttachment);
+      pAttachment := Rec;
+      pFileToImport := FileToImport;
+      pFileInStream := FileInStream;
+    END;
+
+    PROCEDURE GetIsOK@1100481000() : Boolean;
+    BEGIN
+      EXIT(IsOK);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 23/09/10 @a ISAT.ZW @v IMH6.01.003 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

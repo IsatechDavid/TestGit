@@ -1,0 +1,1567 @@
+OBJECT Table 50084 Service Intervention Minutes
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/11/13;
+    Time=10:03:08;
+    Modified=Yes;
+    Version List=IMH6.01,MATMUT01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 38=r,
+                TableData 122=r;
+    OnInsert=BEGIN
+               IF "Document No." = 0 THEN
+                 GetNextDocNo;
+
+               //<<IMH02
+               VALIDATE("Service Intervention Line No.");
+               VALIDATE("Current Minutes",TRUE);
+               TouchRecord(TRUE);
+               ServLog.LogMinute(Rec, 0); //IMH16.ST
+               IF (Type = Type::"End of work") AND (Status = Status::Validated) THEN
+                 CheckCount;
+
+               //TESTFIELD("Receipt Date"); //IMH13.ST
+               //VALIDATE(Reserves); //imh13.st
+               //<<IMH10.ISAT.EBA
+               IF Amount = 0 THEN
+                 InitAmount;
+               //>>IMH10.ISAT.EBA
+               InitDeductAmt; //IMH20.ST
+               CheckInterventionStatus(0);
+             END;
+
+    OnModify=BEGIN
+               TouchRecord(FALSE);
+
+               ServLog.LogMinute(Rec, 1); //IMH16.ST
+               IF xRec.Status = Status::Validated THEN
+                 CreateComment(xRec,FALSE); //IMH21.ST
+               CheckInterventionStatus(1);
+             END;
+
+    OnDelete=VAR
+               lServMinutes@1100281000 : Record 50084;
+               lAdvCommentLine@1000000001 : Record 50056;
+               lFound@1000000000 : Boolean;
+             BEGIN
+               ServLog.LogMinute(Rec, 2); //IMH16.ST
+               IF "Last Purch. Invoice No." <> '' THEN
+                 ERROR(STRSUBSTNO(Text022, "Last Purch. Invoice No."));
+
+               IF "Current Minutes" THEN BEGIN
+                 lServMinutes.SETRANGE("Service Header No.", "Service Header No.");
+                 lServMinutes.SETRANGE("Service Intervention Line No.", "Service Intervention Line No.");
+                 lServMinutes.SETFILTER(Status, '<>%1', Status::Rejected);
+                 IF lServMinutes.FIND('+') THEN
+                   REPEAT
+                     IF (lServMinutes."Document No." <> "Document No.") OR (lServMinutes."Line No." <> "Line No.") THEN BEGIN
+                       lServMinutes."Current Minutes" := TRUE;
+                       lServMinutes.MODIFY;
+                       lServMinutes.UpdServInterv;
+                       lFound := TRUE;
+                     END;
+                   UNTIL (lServMinutes.NEXT(-1)=0) OR lFound;
+               END;
+               //<<IMH21.ST
+               CALCFIELDS("Service No.");
+               lAdvCommentLine.SETCURRENTKEY("Source Table ID", "Source No.","Source No. 2","Source No. 3","Source No. 4",
+                                             "Source No. 5", "Creation Date");
+               lAdvCommentLine.SETRANGE("Source Table ID",DATABASE::"Service Intervention Minutes");
+               lAdvCommentLine.SETRANGE("Source No.", "Service No.");
+               lAdvCommentLine.SETRANGE("Source No. 2", "Service Header No.");
+               lAdvCommentLine.SETRANGE("Source No. 3", "Service Intervention Line No.");
+               lAdvCommentLine.SETRANGE("Source No. 5", "Document No.");
+               IF NOT lAdvCommentLine.ISEMPTY THEN
+                 lAdvCommentLine.DELETEALL;
+
+               CreateComment(Rec,TRUE);
+               //>>IMH21.ST
+               CheckInterventionStatus(2);
+             END;
+
+    OnRename=BEGIN
+               ServLog.LogMinute(Rec, 3); //IMH16.ST
+               TouchRecord(FALSE);
+             END;
+
+    CaptionML=[ENU=Service Intervention Minutes;
+               FRA=PV Interventions];
+    LookupFormID=Form50166;
+    DrillDownFormID=Form50166;
+  }
+  FIELDS
+  {
+    { 3   ;   ;Service Header No.  ;Code20        ;TableRelation="Service Header".No. WHERE (Document Type=CONST(Invoice));
+                                                   CaptionML=[ENU=Service Header No.;
+                                                              FRA=Nø ligne produit];
+                                                   Editable=No }
+    { 4   ;   ;Service Intervention Line No.;Integer;
+                                                   TableRelation="Service Intervention Line"."Line No." WHERE (Service Header No.=FIELD(Service Header No.));
+                                                   OnValidate=BEGIN
+                                                                "Intervention Line Code" := FORMAT("Service Intervention Line No.");
+                                                              END;
+
+                                                   CaptionML=[ENU=Service Intervention Line No.;
+                                                              FRA=Nø ligne intervention];
+                                                   Editable=No }
+    { 5   ;   ;Document No.        ;Integer       ;CaptionML=[ENU=Document No.;
+                                                              FRA=Nø PV] }
+    { 6   ;   ;Type                ;Option        ;OnValidate=VAR
+                                                                lServOrderType@1100281000 : Record 5903;
+                                                              BEGIN
+                                                                TestInvoice(FIELDCAPTION(Type)); //IMH20.ST
+                                                                CASE Type OF
+                                                                  Type::"End of work" : BEGIN
+                                                                    CheckCount;
+                                                                    //<<IMH10.ISAT.EBA
+                                                                    InitAmount;
+                                                                    //>>IMH10.ISAT.EBA
+                                                                  END;
+                                                                  Type::Intermediate : BEGIN
+                                                                    CALCFIELDS("Service Order Type");
+                                                                    IF NOT lServOrderType.GET("Service Order Type") THEN
+                                                                      CLEAR(lServOrderType);
+                                                                    IF lServOrderType."Intermediate Minutes Forbidden" THEN
+                                                                      ERROR(STRSUBSTNO(Text011, FORMAT(Type), lServOrderType.Description));
+                                                                    InitAmount;
+                                                                  END;
+                                                                //<<IMH21.ST
+                                                                  Type::Urgent :
+                                                                    IF "Receipt Date" <> 0D THEN
+                                                                      VALIDATE("Receipt Date"); // initialise le montant
+                                                                //>>IMH21.ST
+                                                                END;
+                                                                InitDeductAmt; //IMH20.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Type;
+                                                              FRA=Type];
+                                                   OptionCaptionML=[ENU=End of work,Intermediate,,Urgent;
+                                                                    FRA=Fin de travaux,Interm‚diaire,,Urgent];
+                                                   OptionString=End of work,Intermediate,Recovery,Urgent }
+    { 7   ;   ;Receipt Date        ;Date          ;OnValidate=BEGIN
+                                                                //<<IMH08.ST
+                                                                IF "Receipt Date" <> 0D THEN BEGIN
+                                                                  IF ServIntervention.GET("Service Header No.", "Service Intervention Line No.") THEN
+                                                                    IF "Receipt Date" < ServIntervention."Assigned Date" THEN
+                                                                      ERROR(STRSUBSTNO(Text002, FIELDCAPTION("Receipt Date")));
+                                                                  IF "Receipt Date" > TODAY THEN
+                                                                    ERROR(STRSUBSTNO(Text003, FIELDCAPTION("Receipt Date")));
+                                                                END;
+
+                                                                IF (Type =  Type::"End of work") THEN BEGIN
+                                                                  CheckCount;
+                                                                  //<<IMH10.ISAT.EBA
+                                                                  InitAmount;
+                                                                  //>>IMH10.ISAT.EBA
+                                                                END;
+
+                                                                PurchInvMgt.UdatePurchCostOnMinute(Rec,"VAT Prod. Posting Group");
+                                                                IF ("VAT Prod. Posting Group" <> '') THEN
+                                                                  VALIDATE("VAT Prod. Posting Group");
+                                                                VALIDATE(Amount);
+                                                                //>>IMH08.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Receipt Date;
+                                                              FRA=Date r‚ception] }
+    { 8   ;   ;Reference           ;Code20        ;CaptionML=[ENU=Reference;
+                                                              FRA=R‚f‚rence] }
+    { 9   ;   ;Line No.            ;Integer       ;CaptionML=[ENU=Line No.;
+                                                              FRA=Nø ligne] }
+    { 10  ;   ;Intervention No.    ;Integer       ;CaptionML=[ENU=Intervention No.;
+                                                              FRA=Nø intervention];
+                                                   MinValue=1;
+                                                   BlankZero=Yes;
+                                                   Editable=No }
+    { 11  ;   ;Intervention Line Code;Code10      ;CaptionML=[ENU=Intervention Line Code;
+                                                              FRA=Code ligne intervention];
+                                                   Editable=No }
+    { 12  ;   ;Current Minutes     ;Boolean       ;OnValidate=VAR
+                                                                lServIntervMinutes@1100281000 : Record 50084;
+                                                              BEGIN
+                                                                IF "Current Minutes" THEN BEGIN
+                                                                  IF Status = Status::Deleted THEN
+                                                                    FIELDERROR(Status);
+                                                                  IF Type <> Type::Intermediate THEN BEGIN
+                                                                    lServIntervMinutes := Rec;
+                                                                    lServIntervMinutes.SETRECFILTER;
+                                                                    lServIntervMinutes.SETFILTER("Document No.", '<>%1', "Document No.");
+                                                                    lServIntervMinutes.SETRANGE("Current Minutes", TRUE);
+                                                                    IF NOT lServIntervMinutes.ISEMPTY THEN
+                                                                      lServIntervMinutes.MODIFYALL("Current Minutes", FALSE);
+                                                                  END;
+                                                                END;
+                                                                UpdServInterv;
+                                                              END;
+
+                                                   CaptionML=[ENU=Current Minutes;
+                                                              FRA=PV en cours] }
+    { 13  ;   ;Service No.         ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header"."Service No." WHERE (Document Type=CONST(Invoice),
+                                                                                                            No.=FIELD(Service Header No.)));
+                                                   TableRelation=Service."Service No.";
+                                                   ValidateTableRelation=No;
+                                                   CaptionML=[ENU=Service No.;
+                                                              FRA=Nø service];
+                                                   Editable=No }
+    { 14  ;   ;Provider No.        ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Intervention Line"."Provider No." WHERE (Service Header No.=FIELD(Service Header No.),
+                                                                                                                        Line No.=FIELD(Service Intervention Line No.)));
+                                                   CaptionML=[ENU=Provider No.;
+                                                              FRA=Nø prestataire];
+                                                   Editable=No }
+    { 21  ;   ;Comment             ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Adv. Comment Line" WHERE (Source Table ID=CONST(50084),
+                                                                                                Source No.=FIELD(Service Header No.),
+                                                                                                Source No. 2=FIELD(Intervention Line Code),
+                                                                                                Source No. 3=FIELD(Document No.),
+                                                                                                Source No. 4=FIELD(Comment Code Filter)));
+                                                   CaptionML=[ENU=Comment;
+                                                              FRA=Commentaires];
+                                                   Editable=No }
+    { 22  ;   ;Status              ;Option        ;CaptionML=[ENU=Status;
+                                                              FRA=Statut];
+                                                   OptionCaptionML=[ENU=" ,Validated,,Rejected";
+                                                                    FRA=" ,Valid‚,,Refus‚"];
+                                                   OptionString=[ ,Validated,Pending,Rejected,Deleted];
+                                                   Editable=No }
+    { 23  ;   ;Comment Code Filter ;Code10        ;FieldClass=FlowFilter;
+                                                   CaptionML=[ENU=Comment Code Filter;
+                                                              FRA=Filtre code commentaire] }
+    { 24  ;   ;Status Date         ;Date          ;CaptionML=[ENU=Status Date;
+                                                              FRA=Date statut] }
+    { 30  ;   ;Reserves            ;Boolean       ;OnValidate=BEGIN
+                                                                //<<IMH06
+                                                                IF Reserves THEN BEGIN
+                                                                 IF Type = Type::Recovery THEN
+                                                                   ERROR(Text001);
+                                                                 VALIDATE(Status, Status::Rejected);
+                                                                END
+                                                                ELSE BEGIN
+                                                                  IF xRec.Reserves THEN
+                                                                    ERROR('');
+                                                                END;
+                                                                //>>IMH06
+                                                                //<<IMH17.ST d‚sactiv‚
+                                                                {
+                                                                IF (NOT Reserves) AND (Status = Status::Rejected) THEN BEGIN
+                                                                  TESTFIELD("Closing Reserve Date");
+                                                                  Status := Status::" ";
+                                                                END;
+                                                                }
+                                                                //>>IMH17.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Reserves;
+                                                              FRA=R‚serves] }
+    { 31  ;   ;Reserves Comment    ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Adv. Comment Line" WHERE (Source Table ID=CONST(50084),
+                                                                                                Source No. 2=FIELD(Service Header No.),
+                                                                                                Source No. 3=FIELD(Service Intervention Line No.),
+                                                                                                Source No. 4=FIELD(Reserves Code Filter),
+                                                                                                Source No. 5=FIELD(Document No.)));
+                                                   CaptionML=[ENU=Reserves Comment;
+                                                              FRA=Commentaires r‚serve];
+                                                   Editable=No }
+    { 32  ;   ;Reserves Code Filter;Code10        ;FieldClass=FlowFilter;
+                                                   CaptionML=[ENU=Reserves Code Filter;
+                                                              FRA=Filtre code r‚serves] }
+    { 33  ;   ;Closing Reserve Date;Date          ;OnValidate=BEGIN
+                                                                IF "Closing Reserve Date" <> 0D THEN BEGIN
+                                                                  //<<IMH18
+                                                                  IF "Closing Reserve Date" > WORKDATE THEN
+                                                                    ERROR(STRSUBSTNO(Text003, FIELDCAPTION("Closing Reserve Date")));
+                                                                  //>>IMH18
+
+                                                                  TESTFIELD(Reserves, TRUE);
+                                                                  //<<IMH18
+                                                                  //TESTFIELD("Work Restart Date");
+                                                                  IF  "Work Restart Date" <> 0D THEN
+                                                                  //>>IMH18
+                                                                  IF "Closing Reserve Date" < "Work Restart Date" THEN
+                                                                    ERROR(STRSUBSTNO(Text014, "Closing Reserve Date", "Work Restart Date"));
+                                                                  //>>IMH18
+                                                                  VALIDATE("Post Minute", TRUE);
+                                                                //<<IMH17.ST d‚sactiv‚
+                                                                //  VALIDATE(Reserves, FALSE);
+                                                                //>>IMH17.ST
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Closing Reserve Date;
+                                                              FRA=Date lev‚e r‚serves] }
+    { 39  ;   ;Work Restart Date   ;Date          ;OnValidate=BEGIN
+                                                                IF ("Work Restart Date" <> 0D) AND ("Closing Reserve Date" <> 0D) THEN BEGIN
+                                                                  IF "Closing Reserve Date" < "Work Restart Date" THEN
+                                                                    ERROR(STRSUBSTNO(Text014, "Closing Reserve Date", "Work Restart Date"));
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Work Restart Date;
+                                                              FRA=Date reprise travaux] }
+    { 40  ;   ;Document Attachment Entry No.;Integer;
+                                                   TableRelation="Document Attachment"."Entry No.";
+                                                   CaptionML=[ENU=Document Attachment Entry No.;
+                                                              FRA=Nø document attach‚] }
+    { 50  ;   ;Amount              ;Decimal       ;OnValidate=VAR
+                                                                lCurrExchRate@1100281000 : Record 330;
+                                                                lAmount@1100281002 : Decimal;
+                                                                lAmountInclVAT@1100281001 : Decimal;
+                                                                lVATProdPostingGroup@1100281003 : Code[10];
+                                                                lServIntervLine@1100281004 : Record 50075;
+                                                                lInsert@1000000000 : Boolean;
+                                                              BEGIN
+                                                                //<<IMH20.ST
+                                                                TestInvoice(FIELDCAPTION(Amount));
+                                                                GetCurrency("Currency Code");
+                                                                Amount := ROUND(Amount, Currency."Amount Rounding Precision");
+                                                                //>>IMH20.ST
+
+                                                                {IMH22.ST d‚sactiv‚
+                                                                //<<IMH17.ST
+                                                                IF Type IN [Type::Intermediate, Type::"End of work"] THEN BEGIN
+                                                                  IF CurrFieldNo = FIELDNO(Amount) THEN
+                                                                    ERROR(Text010, FIELDCAPTION(Amount));
+                                                                END;
+                                                                //>>IMH17.ST
+                                                                }//IMH22.ST d‚sactiv‚
+                                                                {IMH21.ST ObsolŠte
+                                                                IF (Type = Type::Intermediate) THEN BEGIN
+                                                                  CalcQuoteAmount(lAmount,lAmountInclVAT,lVATProdPostingGroup);
+                                                                  lAmount := ROUND(lAmount, Currency."Amount Rounding Precision"); //IMH20.ST
+                                                                  IF Amount <> 0 THEN
+                                                                    IF (lAmount = Amount) THEN
+                                                                      ERROR(Text009);
+                                                                END;
+                                                                }
+                                                                IF (Type = Type::Urgent) THEN BEGIN
+                                                                  // Saisie manuelle, mais calcul de la TVA
+                                                                  CalcQuoteAmount(lAmount,lAmountInclVAT,lVATProdPostingGroup);
+                                                                  IF (lVATProdPostingGroup <> '') AND ("VAT Prod. Posting Group" = '') THEN
+                                                                    VALIDATE("VAT Prod. Posting Group", lVATProdPostingGroup);
+                                                                END;
+                                                                CalcAmount(FALSE);
+                                                                InitDeductAmt; //IMH20.ST
+                                                                //<<IMH23
+                                                                IF Type = Type::Urgent THEN
+                                                                IF lServIntervLine.GET("Service Header No.","Service Intervention Line No.") THEN BEGIN
+                                                                  //<<IMH30
+                                                                  IF NOT INSERT THEN
+                                                                    MODIFY
+                                                                  ELSE
+                                                                    lInsert := TRUE;
+                                                                  //>>IMH30
+                                                                  lServIntervLine.CalcTotOrderAmount;
+                                                                  lServIntervLine.MODIFY;
+                                                                  IF lInsert THEN
+                                                                    IF DELETE THEN;
+                                                                END;
+                                                                //>>IMH23
+                                                              END;
+
+                                                   CaptionML=[ENU=Amount;
+                                                              FRA=Montant HT];
+                                                   MinValue=0;
+                                                   AutoFormatType=1;
+                                                   AutoFormatExpr="Currency Code" }
+    { 51  ;   ;Amount Incl. VAT    ;Decimal       ;OnValidate=VAR
+                                                                lCurrExchRate@1100281000 : Record 330;
+                                                                lAmount@1100281001 : Decimal;
+                                                                lAmountInclVAT@1100281002 : Decimal;
+                                                                lVATProdPostingGroup@1100281003 : Code[10];
+                                                              BEGIN
+                                                                //<<IMH20.ST
+                                                                TestInvoice(FIELDCAPTION("Amount Incl. VAT"));
+                                                                GetCurrency("Currency Code");
+                                                                "Amount Incl. VAT" := ROUND("Amount Incl. VAT", Currency."Amount Rounding Precision");
+                                                                //>>IMH20.ST
+                                                                {IMH22.ST d‚sactiv‚
+                                                                //<<IMH17.ST
+                                                                IF Type IN [Type::Urgent,Type::"End of work"] THEN BEGIN
+                                                                  IF NOT CheckModifyAmount THEN //IMH19
+                                                                  IF CurrFieldNo = FIELDNO("Amount Incl. VAT") THEN
+                                                                    ERROR(Text010, FIELDCAPTION("Amount Incl. VAT"));
+                                                                END;
+                                                                //>>IMH17.ST
+                                                                }//IMH22.ST d‚sactiv‚
+                                                                IF (Type = Type::Intermediate) THEN BEGIN
+                                                                  CalcQuoteAmount(lAmount,lAmountInclVAT,lVATProdPostingGroup);
+                                                                  lAmountInclVAT := ROUND(lAmountInclVAT, Currency."Amount Rounding Precision"); //IMH20.ST
+                                                                  IF "Amount Incl. VAT" <> 0 THEN
+                                                                    IF (lAmountInclVAT = "Amount Incl. VAT") THEN
+                                                                      ERROR(Text009);
+                                                                END;
+                                                                CalcAmount(TRUE);
+                                                                InitDeductAmt; //IMH20.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Amount Incl. VAT;
+                                                              FRA=Montant TTC];
+                                                   MinValue=0;
+                                                   AutoFormatType=1;
+                                                   AutoFormatExpr="Currency Code" }
+    { 52  ;   ;Amount (LCY)        ;Decimal       ;CaptionML=[ENU=Amount (LCY);
+                                                              FRA=Montant (DS)];
+                                                   Editable=No;
+                                                   AutoFormatType=1 }
+    { 53  ;   ;Amount Incl. VAT (LCY);Decimal     ;OnValidate=VAR
+                                                                lCurrExchRate@1100281000 : Record 330;
+                                                              BEGIN
+                                                              END;
+
+                                                   CaptionML=[ENU=Amount Incl. VAT (DS);
+                                                              FRA=Montant TTC (DS)];
+                                                   AutoFormatType=1 }
+    { 60  ;   ;Currency Code       ;Code10        ;TableRelation=Currency;
+                                                   OnValidate=BEGIN
+                                                                IF "Currency Code" <> xRec."Currency Code" THEN
+                                                                  UpdateCurrencyFactor;
+                                                              END;
+
+                                                   CaptionML=[ENU=Currency Code;
+                                                              FRA=Code devise] }
+    { 61  ;   ;Currency Factor     ;Decimal       ;OnValidate=BEGIN
+                                                                IF ("Currency Code" = '') AND ("Currency Factor" <> 0) THEN
+                                                                  FIELDERROR("Currency Code");
+                                                                VALIDATE(Amount);
+                                                                VALIDATE("Amount Incl. VAT");
+                                                              END;
+
+                                                   CaptionML=[ENU=Currency Factor;
+                                                              FRA=Facteur devise];
+                                                   DecimalPlaces=0:15;
+                                                   MinValue=0;
+                                                   Editable=No }
+    { 90  ;   ;Service Order Type  ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header"."Service Order Type" WHERE (Document Type=CONST(Invoice),
+                                                                                                                   No.=FIELD(Service Header No.)));
+                                                   TableRelation="Service Order Type".Code;
+                                                   ValidateTableRelation=No;
+                                                   CaptionML=[ENU=Service Order Type;
+                                                              FRA=Type produit];
+                                                   Editable=No }
+    { 100 ;   ;Service Creation Date;DateTime     ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Service."Creation Date" WHERE (Service No.=FIELD(Service No.)));
+                                                   CaptionML=[ENU=Service Creation Date;
+                                                              FRA=Date cr‚ation service];
+                                                   Editable=No }
+    { 101 ;   ;Post Minute         ;Boolean       ;OnValidate=VAR
+                                                                lPurchaseInvoicingMgt@1100281002 : Codeunit 50080;
+                                                                lInvoicingMatrixSetup@1100281001 : Record 50137;
+                                                                lServiceOrderType@1100281005 : Record 5903;
+                                                                lIntervLine@1100281000 : Record 50075;
+                                                                lServiceIntrerventionQuote@1100281003 : Record 50076;
+                                                                lServiceInterventionLine@1100281004 : Record 50075;
+                                                                lProvider@1000000000 : Record 50000;
+                                                                lServiceHeader@1100281006 : Record 5900;
+                                                                lServIntervLine@1000000001 : Record 50075;
+                                                                lInsert@1000000002 : Boolean;
+                                                              BEGIN
+                                                                IF xRec."Post Minute" AND (NOT "Post Minute") THEN BEGIN
+                                                                  "Post Minute" := TRUE;
+                                                                  EXIT;
+                                                                END;
+                                                                TestInvoice(FIELDCAPTION("Post Minute")); //IMH20.ST
+                                                                IF NOT "Post Minute" THEN
+                                                                  EXIT;
+
+                                                                TESTFIELD("Receipt Date");
+
+                                                                //<<IMH17.ST
+                                                                IF Reserves AND ("Closing Reserve Date" = 0D) THEN
+                                                                  ERROR(Text012);
+                                                                //>>IMH17.ST
+
+                                                                CASE Type OF
+                                                                  Type::Intermediate, Type::Urgent : BEGIN
+                                                                    TESTFIELD("Amount Incl. VAT");
+                                                                  END;
+                                                                END;
+
+                                                                IF (Status = Status::Deleted) AND "Current Minutes" THEN
+                                                                  VALIDATE("Current Minutes", FALSE);
+                                                                //<<IMH22.ST
+                                                                CALCFIELDS("Provider No.");
+                                                                lProvider.GET("Provider No.");
+                                                                IF lProvider.GetVendorNo("Provider No.") = '' THEN
+                                                                  lProvider.CreateVendor;
+                                                                //>>IMH22.ST
+                                                                IF Status = Status::Validated THEN
+                                                                  EXIT;
+
+                                                                //IF Status = Status::Rejected THEN
+                                                                //  EXIT;
+
+                                                                IF (Type = Type::"End of work") AND (Status = Status::" ") THEN BEGIN
+                                                                  CheckCount;
+                                                                  CALCFIELDS("Service Order Type");
+                                                                  lIntervLine.GET("Service Header No.", "Service Intervention Line No.");
+                                                                  lServiceOrderType.GET("Service Order Type");
+                                                                  //<<IMH26
+                                                                  //IF lServiceOrderType."Apply Emergency Price" AND lIntervLine.Urgent THEN BEGIN
+                                                                  //<<IMH27.PC
+                                                                  //IF lIntervLine.Urgent THEN BEGIN
+                                                                  IF lIntervLine.Urgent AND
+                                                                     (lIntervLine."Non-Urgent Pursuit" = lIntervLine."Non-Urgent Pursuit"::" ") OR
+                                                                     (lIntervLine."Non-Urgent Pursuit" = lIntervLine."Non-Urgent Pursuit"::No)
+                                                                  THEN BEGIN
+                                                                  //>>IMH27.PC
+                                                                  //>>IMH26
+                                                                    lIntervLine.TESTFIELD("Arrival Date");
+                                                                    //<<IMH26
+                                                                    //lIntervLine.TESTFIELD("Work End Date");
+                                                                    //<<IMH27.PC
+                                                                    //IF lIntervLine."Work End Date" = 0D THEN
+                                                                    //>>IMH27.PC
+                                                                      MESSAGE(Text024);
+                                                                      ERROR('');
+                                                                    //>>IMH26
+                                                                  //<<IMH27.PC
+                                                                  END ELSE BEGIN
+                                                                    IF lIntervLine."Work End Date" = 0D THEN BEGIN
+                                                                      MESSAGE(Text023);
+                                                                      ERROR('');
+                                                                    END;
+                                                                  //>>IMH27.PC
+                                                                  END;
+
+                                                                  //<<IMH31.PC
+                                                                  IF lIntervLine."Is OK to DRT" <> lIntervLine."Is OK to DRT"::Yes THEN BEGIN
+                                                                    MESSAGE(Text025);
+                                                                    ERROR('');
+                                                                  END;
+                                                                  //>>IMH31.PC
+                                                                END;
+
+                                                                ////<<IMH12.zw
+                                                                //IF (Status = Status::" ") AND Reserves THEN
+                                                                //  VALIDATE(Reserves, FALSE);
+                                                                ////>>IMH12.zw
+
+                                                                //<<IMH07
+                                                                IF (Type = Type::Urgent) THEN BEGIN
+                                                                //<<IMH17.ST
+                                                                  CALCFIELDS("Service Order Type");
+                                                                  lServiceOrderType.GET("Service Order Type");
+                                                                  IF lServiceOrderType."Apply Emergency Price" THEN
+                                                                //>>IMH17.ST
+                                                                    CreatePurchOrder;
+                                                                END;
+                                                                CreateReceipt;
+                                                                //>>IMH07
+
+                                                                //<<IMH28.ISAT.RC
+                                                                // Fonction comment‚e (Attente validation PC)
+                                                                //<<IMH15.ISAT.EBA
+                                                                //SendToIMA;
+                                                                //>>IMH15.ISAT.EBA
+                                                                //>>IMH28.ISAT.RC
+
+                                                                //<<IMH28.ISAT.RC
+                                                                IF "Post Minute" = TRUE THEN
+                                                                  IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.") THEN
+                                                                    SendProviderOrderToIMA(lServiceHeader);
+                                                                //>>IMH28.ISAT.RC
+                                                                "Status Date" := TODAY;//IMH02
+                                                                Status := Status::Validated;
+
+                                                                //<<IMH30
+                                                                IF Type = Type::Urgent THEN
+                                                                IF lServIntervLine.GET("Service Header No.","Service Intervention Line No.") THEN BEGIN
+                                                                  IF NOT INSERT THEN
+                                                                    MODIFY
+                                                                  ELSE
+                                                                    lInsert := TRUE;
+                                                                  lServIntervLine.CalcTotOrderAmount;
+                                                                  lServIntervLine.MODIFY;
+                                                                  IF lInsert THEN
+                                                                    IF DELETE THEN;
+                                                                END;
+                                                                //>>IMH30
+                                                              END;
+
+                                                   CaptionML=[ENU=Post Minute;
+                                                              FRA=Valider PV] }
+    { 102 ;   ;Without Quote       ;Boolean       ;CaptionML=[ENU=Without Quote;
+                                                              FRA=Sans devis] }
+    { 50030;  ;Tarif Zone Code     ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(7012),
+                                                                                  Field ID=CONST(50001));
+                                                   OnValidate=BEGIN
+                                                                PurchInvMgt.UdatePurchCostOnMinute(Rec,"VAT Prod. Posting Group");
+                                                                VALIDATE("VAT Prod. Posting Group"); //IMH17.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Territory Code;
+                                                              FRA=Code Zone tarifaire];
+                                                   Description=IMH04 }
+    { 50031;  ;Package Price       ;Code10        ;TableRelation="Vendor Invoice Disc.".Code WHERE (Type=CONST(Package Price));
+                                                   CaptionML=FRA=Type de forfait;
+                                                   Description=IMH04 }
+    { 50032;  ;Recomm. Unit Cost Excl. VAT;Decimal;CaptionML=[ENU=Recommended Unit Cost;
+                                                              FRA=Prix recommand‚ HT];
+                                                   Description=IMH04 }
+    { 50033;  ;Item No.            ;Code20        ;CaptionML=[ENU=Item No.;
+                                                              FRA=Nø article] }
+    { 50100;  ;VAT Prod. Posting Group;Code10     ;TableRelation="VAT Product Posting Group";
+                                                   OnValidate=VAR
+                                                                lVATPostingSetup@1100281000 : Record 325;
+                                                              BEGIN
+                                                                TestInvoice(FIELDCAPTION("VAT Prod. Posting Group")); //IMH20.ST
+                                                                //<<IMH16.VA
+                                                                GetSetup;
+                                                                "VAT Bus. Posting Group" := ServiceSetup."VAT Bus. Posting Group Default";
+
+                                                                "VAT %" := 0;
+                                                                IF lVATPostingSetup.GET("VAT Bus. Posting Group","VAT Prod. Posting Group") THEN
+                                                                  "VAT %" := lVATPostingSetup."VAT %";
+                                                                CalcAmount(FALSE);
+                                                                //>>IMH16.VA
+                                                              END;
+
+                                                   CaptionML=[ENU=Order VAT Prod. Posting Group;
+                                                              FRA=Taux TVA] }
+    { 50101;  ;VAT Bus. Posting Group;Code10      ;TableRelation="VAT Business Posting Group";
+                                                   CaptionML=[ENU=VAT Bus. Posting Group;
+                                                              FRA=Groupe compta. march‚ TVA] }
+    { 50102;  ;VAT %               ;Decimal       ;CaptionML=[ENU=VAT %;
+                                                              FRA=% TVA] }
+    { 50200;  ;Deductible Amount (LCY);Decimal    ;OnValidate=BEGIN
+                                                                IF "Deductible Amount (LCY)" <> xRec."Deductible Amount (LCY)" THEN BEGIN
+                                                                  TestInvoice(FIELDCAPTION("Deductible Amount (LCY)"));
+                                                                  IF "Deductible Amount (LCY)" <> 0 THEN
+                                                                    CheckIntervDeductAmt;
+                                                                  UpdateNetAmt;
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Deductible Amount;
+                                                              FRA=Montant franchise];
+                                                   MinValue=0;
+                                                   AutoFormatType=1 }
+    { 50201;  ;Unsecured Depr. Amount (LCY);Decimal;
+                                                   OnValidate=VAR
+                                                                lServMinutes@1100281000 : Record 50084;
+                                                              BEGIN
+                                                                IF Type = Type::Urgent THEN
+                                                                  TESTFIELD("Unsecured Depr. Amount (LCY)",0);
+
+                                                                IF ("Unsecured Depr. Amount (LCY)" <> xRec."Unsecured Depr. Amount (LCY)") THEN BEGIN
+                                                                  TestInvoice(FIELDCAPTION("Unsecured Depr. Amount (LCY)"));
+                                                                  IF "Unsecured Depr. Amount (LCY)" <> 0 THEN
+                                                                    CheckIntervDeductAmt;
+                                                                  UpdateNetAmt;
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Unsecured Depreciation Amount;
+                                                              FRA=V‚tust‚ non garantie mtt];
+                                                   MinValue=0;
+                                                   BlankZero=Yes;
+                                                   AutoFormatType=1 }
+    { 50202;  ;Net Amount (LCY)    ;Decimal       ;OnValidate=BEGIN
+                                                                IF "Net Amount (LCY)" <> xRec."Net Amount (LCY)" THEN
+                                                                  TestInvoice(FIELDCAPTION("Net Amount (LCY)"));
+                                                              END;
+
+                                                   CaptionML=[ENU=Net Amount Excl. VAT;
+                                                              FRA=Montant net HT];
+                                                   MinValue=0;
+                                                   Editable=No;
+                                                   AutoFormatType=1 }
+    { 50203;  ;Net Amount Incl. VAT (LCY);Decimal ;OnValidate=BEGIN
+                                                                IF "Net Amount Incl. VAT (LCY)" <> xRec."Net Amount Incl. VAT (LCY)" THEN
+                                                                  TestInvoice(FIELDCAPTION("Net Amount Incl. VAT (LCY)"));
+                                                              END;
+
+                                                   CaptionML=[ENU=Net Amount Incl. VAT;
+                                                              FRA=Montant net TTC];
+                                                   MinValue=0;
+                                                   Editable=No;
+                                                   AutoFormatType=1 }
+    { 50210;  ;Last Purch. Invoice Type;Option    ;CaptionML=[ENU=Last Invoice Type;
+                                                              FRA=Type derniŠre facture];
+                                                   OptionCaptionML=[ENU=" ,Invoice,PostedInvoice,NoInvoice";
+                                                                    FRA=" ,Facture,Facture enregistr‚e,Non facturable"];
+                                                   OptionString=[ ,Invoice,PostedInvoice,NoInvoice];
+                                                   Editable=No }
+    { 50211;  ;Last Purch. Invoice No.;Code20     ;TableRelation=IF (Last Purch. Invoice Type=CONST(Invoice)) "Purchase Header".No. WHERE (Document Type=CONST(Invoice))
+                                                                 ELSE IF (Last Purch. Invoice Type=CONST(PostedInvoice)) "Purch. Inv. Header".No.;
+                                                   OnLookup=VAR
+                                                              lPurchInvMgt@1000000000 : Codeunit 50080;
+                                                            BEGIN
+                                                              lPurchInvMgt.ShowInvoiceDoc("Last Purch. Invoice Type", "Last Purch. Invoice No.");
+                                                            END;
+
+                                                   CaptionML=[ENU=Last Invoice No.;
+                                                              FRA=Dernier nø facture];
+                                                   Editable=No }
+    { 50212;  ;Unbillable          ;Boolean       ;OnValidate=BEGIN
+                                                                IF Unbillable THEN BEGIN
+                                                                  IF "Last Purch. Invoice No." <> '' THEN
+                                                                    ERROR(STRSUBSTNO(Text022, "Last Purch. Invoice No."));
+                                                                  VALIDATE("Last Purch. Invoice Type", "Last Purch. Invoice Type"::NoInvoice);
+                                                                END
+                                                                ELSE
+                                                                  VALIDATE("Last Purch. Invoice Type", "Last Purch. Invoice Type"::" ");
+                                                                InitDeductAmt;
+                                                              END;
+
+                                                   CaptionML=[ENU=Unbillable;
+                                                              FRA=Non facturable] }
+    { 50500;  ;Creation Date       ;DateTime      ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date de cr‚ation];
+                                                   Editable=No }
+    { 50501;  ;Creation User ID    ;Text30        ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Creation User ID;
+                                                              FRA=Utilisateur cr‚ation];
+                                                   Editable=No }
+    { 50502;  ;Last Modification Date;DateTime    ;CaptionML=[ENU=Last Modification Date;
+                                                              FRA=Date derniŠre modification];
+                                                   Editable=No }
+    { 50503;  ;Last Modification User ID;Text30   ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Last Modification User ID;
+                                                              FRA=Utilisateur derniŠre modification];
+                                                   Editable=No }
+  }
+  KEYS
+  {
+    {    ;Service Header No.,Service Intervention Line No.,Document No.,Line No.;
+                                                   SumIndexFields=Net Amount (LCY),Net Amount Incl. VAT (LCY),Deductible Amount (LCY),Unsecured Depr. Amount (LCY);
+                                                   MaintainSIFTIndex=No;
+                                                   Clustered=Yes }
+    {    ;Service Header No.,Service Intervention Line No.,Type;
+                                                   SumIndexFields=Amount,Amount Incl. VAT }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      ServiceSetup@1100281000 : Record 5911;
+      SetupRead@1100281001 : Boolean;
+      Currency@1100281002 : Record 4;
+      Text001@1100281003 : TextConst 'ENU=You can not put reservations on PV of type "Recovery";FRA=La mise de r‚serves sur les PV de type "Reprise" est interdite';
+      ServIntervention@1100281004 : Record 50075;
+      Text002@1100281005 : TextConst 'ENU=%1 must be after assignment date.;FRA=%1 doit ˆtre aprŠs la date d''assignation.';
+      Text003@1100281006 : TextConst 'ENU=%1 can''t be after today.;FRA=%1 ne peut pas ˆtre aprŠs aujourd''hui.';
+      ServLog@1100281907 : Codeunit 50149;
+      PurchInvMgt@1100281008 : Codeunit 50080;
+      Text008@1100281009 : TextConst 'FRA=La commande n''a pas ‚t‚ cr‚e';
+      Text009@1100281010 : TextConst 'FRA=Le type de PV doit ˆtre fin de travaux';
+      Text010@1100281007 : TextConst 'ENU=You can''t fill %1.;FRA=Vous ne pouvez pas renseigner %1.';
+      Text011@1100281011 : TextConst 'ENU=Minutes type %2 unauthorised for product type %2.;FRA=Type de PV %1 non autoris‚ pour le type produit %2.';
+      Text012@1100281012 : TextConst 'ENU=You can''t post this minutes without closing reserves.;FRA=Vous ne pouvez pas valider le PV sans avoir lev‚ les r‚serves.';
+      Text014@1100281014 : TextConst 'ENU=%1 can''t be before %2;FRA=La date de levŠe des r‚serves ne peut pas ˆtre ant‚rieure … la date de reprise des travaux.';
+      Text015@1100281013 : TextConst 'ENU=Minutes deductible amount can''t be more than intervention deductible amount.;FRA=La franchise des PV d‚passe la franchise de l''intervention.';
+      Text016@1100281015 : TextConst 'ENU=Minutes depreciation amount can''t be more than intervention depreciation amount.;FRA=La v‚tust‚ des PV d‚passe la v‚tust‚ de l''intervention';
+      Text017@1100281016 : TextConst 'ENU=You can'' modify %1 because an invoice has been reconciled.;FRA=Vous ne pouvez pas modifier %1 car une facture a ‚t‚ rapproch‚e.';
+      Text018@1000000000 : TextConst 'ENU=You can'' modify %1 because an invoice has been posted.;FRA=Vous ne pouvez pas modifier %1 car une facture a ‚t‚ valid‚e.';
+      Text019@1000000001 : TextConst 'ENU=Delete Minute %1 %2 (%3 TTC);FRA=Suppression PV %1 %2 (%3 TTC)';
+      Text020@1000000002 : TextConst 'ENU=Modify validated minutes :;FRA=Modification PV valid‚ :';
+      Text021@1000000003 : TextConst 'FRA=%1 %2 (%3).';
+      Text022@1000000004 : TextConst 'ENU=Minutes is already applied with invoice %1.;FRA=Le PV est rapproch‚ avec la facture %1.';
+      Text023@1100281018 : TextConst 'FRA=Suivi des travaux: Merci de renseigner la date r‚elle de fin de travaux';
+      Text024@1100281017 : TextConst 'FRA="Inter U (MC uniquement ou r‚parations d‚finitives) : Merci de passer un PV de type Urgent. "';
+      Text025@1000000005 : TextConst 'ENU=Immpossible to validate Minutes because there are mission informations about DRT;FRA=Impossible de valider le PV car il manque des informations n‚cessaires … la DRT';
+
+    PROCEDURE GetNextDocNo@1100281012();
+    VAR
+      lServIntervMinutes@1100281000 : Record 50084;
+    BEGIN
+      lServIntervMinutes := Rec;
+      lServIntervMinutes.SETRECFILTER;
+      lServIntervMinutes.SETRANGE("Document No.");
+      lServIntervMinutes.SETRANGE("Line No.");
+      lServIntervMinutes.LOCKTABLE;
+      IF lServIntervMinutes.FINDLAST THEN
+        "Document No." := lServIntervMinutes."Document No." + 1
+      ELSE
+        "Document No." := 1;
+      "Line No." := 10000;
+    END;
+
+    LOCAL PROCEDURE GetSetup@1100281000();
+    BEGIN
+      IF SetupRead THEN
+        EXIT;
+      ServiceSetup.GET;
+    END;
+
+    PROCEDURE InitFlowFilters@1100281001();
+    BEGIN
+      GetSetup;
+      SETRANGE("Comment Code Filter", ServiceSetup."Minute Comment Code");
+      SETRANGE("Reserves Code Filter", ServiceSetup."Reserve Comment Code");
+    END;
+
+    PROCEDURE TouchRecord@1100281006(pInsert@1100281000 : Boolean);
+    BEGIN
+      IF pInsert THEN BEGIN
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+      END;
+      "Last Modification Date" := CURRENTDATETIME;
+      "Last Modification User ID" := USERID;
+    END;
+
+    PROCEDURE UpdServInterv@1100281002();
+    VAR
+      lServIntervLine@1100281000 : Record 50075;
+    BEGIN
+      IF NOT lServIntervLine.GET("Service Header No.", "Service Intervention Line No.") THEN
+        EXIT;
+
+      IF "Current Minutes" THEN BEGIN
+        IF lServIntervLine."Minutes Document" <> "Document No." THEN BEGIN
+          lServIntervLine."Minutes Document" := "Document No.";
+          lServIntervLine.MODIFY;
+        END;
+      END ELSE BEGIN
+        IF lServIntervLine."Minutes Document" = "Document No." THEN BEGIN
+          lServIntervLine."Minutes Document" := 0;
+          lServIntervLine.MODIFY;
+        END;
+      END;
+    END;
+
+    PROCEDURE CheckCount@1100281003();
+    VAR
+      lServIntervMinutes@1100281000 : Record 50084;
+    BEGIN
+    END;
+
+    LOCAL PROCEDURE UpdateCurrencyFactor@12();
+    VAR
+      lCurrExchRate@1100281000 : Record 330;
+    BEGIN
+      IF "Currency Code" <> '' THEN BEGIN
+        "Currency Factor" := lCurrExchRate.ExchangeRate(WORKDATE,"Currency Code")
+      END ELSE
+        "Currency Factor" := 0;
+      VALIDATE("Currency Factor");
+    END;
+
+    LOCAL PROCEDURE GetCurrency@3(pCurrencyCode@1100281000 : Code[10]);
+    BEGIN
+      //ISAT02.ST
+      IF pCurrencyCode = '' THEN BEGIN
+        CLEAR(Currency);
+        Currency.InitRoundingPrecision
+      END ELSE
+        IF pCurrencyCode <> Currency.Code THEN BEGIN
+          Currency.GET(pCurrencyCode);
+          Currency.TESTFIELD("Amount Rounding Precision");
+        END;
+    END;
+
+    PROCEDURE OpenComments@1100281009(pCode@1100281001 : Code[10]);
+    VAR
+      lAdvCommentLine@1100281000 : Record 50056;
+    BEGIN
+      lAdvCommentLine.SETCURRENTKEY("Source Table ID", "Source No.","Source No. 2","Source No. 3","Source No. 4",
+                                    "Source No. 5", "Creation Date");
+      //lAdvCommentLine.SETCURRENTKEY("Source No. 2", "Source No. 3", "Creation Date");
+      lAdvCommentLine.SETRANGE("Source Table ID",DATABASE::"Service Intervention Minutes");
+      lAdvCommentLine.ASCENDING(FALSE);
+      //lAdvCommentLine.SETRANGE("Source No.","Service Header No.");
+      //lAdvCommentLine.SETRANGE("Source No. 2","Intervention Line Code");
+      //lAdvCommentLine.SETRANGE("Source No. 3","Document No.");
+      CALCFIELDS("Service No.");
+      lAdvCommentLine.SETRANGE("Source No.", "Service No.");
+      lAdvCommentLine.SETRANGE("Source No. 2", "Service Header No.");
+      lAdvCommentLine.SETRANGE("Source No. 3", "Service Intervention Line No.");
+      lAdvCommentLine.SETRANGE("Source No. 5", "Document No.");
+      lAdvCommentLine.SETRANGE("Source No. 4", pCode);
+      FORM.RUNMODAL(FORM::"Adv. Comment Lines",lAdvCommentLine);
+    END;
+
+    PROCEDURE CreateReceipt@1100281005() : Boolean;
+    VAR
+      lPurchaseInvoicingMgt@1100281000 : Codeunit 50080;
+      lServiceInterventionLine@1100281001 : Record 50075;
+      lServOrderType@1100281002 : Record 5903;
+    BEGIN
+      //IMH07
+      EXIT; //IMH20.ST
+      lServiceInterventionLine.GET("Service Header No.","Service Intervention Line No.");
+      MODIFY; // IMH17.ST lPurchaseInvoicingMgt r‚cupŠre le rec
+      EXIT(lPurchaseInvoicingMgt.ReceiptPurchaseOrder(lServiceInterventionLine."Service No.","Service Header No.",
+                                                      "Service Intervention Line No.", "Document No.", "Line No."));
+    END;
+
+    PROCEDURE InitAmount@1100281004();
+    VAR
+      lServIntervQuote@1100281000 : Record 50076;
+      lServOrderType@1100281001 : Record 5903;
+      lAmtExclVAT@1000000000 : Decimal;
+      lAmtInclVAT@1000000001 : Decimal;
+      lVATProdGroup@1000000002 : Code[10];
+      lCurrExchRate@1000000003 : Record 330;
+    BEGIN
+      //<<IMH10.ISAT.EBA
+      lAmtExclVAT := "Amount (LCY)";
+      lAmtInclVAT := "Amount Incl. VAT (LCY)";
+      CASE Type OF
+        Type::Intermediate, Type::Recovery : BEGIN
+          lAmtExclVAT := 0;
+          lAmtInclVAT := 0;
+        END;
+        Type::Urgent : BEGIN
+        //<<IMH17.ST
+        // Init … 0 si "Calculer le prix urgent" sur le type produit
+          CALCFIELDS("Service Order Type");
+          IF NOT lServOrderType.GET("Service Order Type") THEN
+            CLEAR(lServOrderType);
+          IF lServOrderType."Apply Emergency Price" THEN BEGIN
+            lAmtExclVAT := 0;
+            lAmtInclVAT := 0;
+          END;
+        //>>IMH17.ST
+        END;
+        ELSE BEGIN
+      //<<IMH21.ST
+      //    IF NOT "Without Quote" THEN
+      //      CalcQuoteAmount(Amount,"Amount Incl. VAT","VAT Prod. Posting Group");
+          GetRemainAmt(TRUE,lAmtExclVAT, lAmtInclVAT,lVATProdGroup);
+        END;
+      END;
+      IF (lVATProdGroup <> '') AND ("VAT Prod. Posting Group" <> lVATProdGroup) THEN
+        VALIDATE("VAT Prod. Posting Group", lVATProdGroup);
+
+      IF "Currency Code" <> '' THEN BEGIN
+        lAmtExclVAT := lCurrExchRate.ExchangeAmtLCYToFCY(
+                             WORKDATE, "Currency Code",
+                             lAmtExclVAT,"Currency Factor");
+        lAmtInclVAT := lCurrExchRate.ExchangeAmtLCYToFCY(
+                             WORKDATE, "Currency Code",
+                             lAmtInclVAT, "Currency Factor");
+      END;
+      IF Amount <> lAmtExclVAT THEN
+        VALIDATE(Amount, lAmtExclVAT);
+      IF "Amount Incl. VAT" <> lAmtInclVAT THEN
+        VALIDATE("Amount Incl. VAT", lAmtInclVAT);
+      //>>IMH10.ISAT.EBA
+    END;
+
+    PROCEDURE CalcQuoteAmount@1100281011(VAR pAmount@1100281001 : Decimal;VAR pAmountInclVAT@1100281002 : Decimal;VAR pVATProdPostingGroup@1100281003 : Code[10]);
+    VAR
+      lServIntervQuote@1100281000 : Record 50076;
+      lCurrencyCode@1100281004 : Code[10];
+      lRemainAmt@1100281005 : ARRAY [2] OF Decimal;
+    BEGIN
+      lServIntervQuote.SETRANGE("Service Header No.","Service Header No.");
+      lServIntervQuote.SETRANGE("Intervention Line No.","Service Intervention Line No.");
+      lServIntervQuote.SETRANGE(Acceptance,lServIntervQuote.Acceptance::Yes);
+      IF lServIntervQuote.COUNT > 1 THEN
+        lServIntervQuote.SETRANGE(Active,TRUE);
+
+      pAmount := 0;
+      pAmountInclVAT := 0;  //IMH14.zw
+
+      IF lServIntervQuote.FINDSET THEN BEGIN
+        REPEAT
+          lRemainAmt[1] := lServIntervQuote."Amount Excl. VAT" - lServIntervQuote."Transfered Amount";
+          lRemainAmt[2] := lServIntervQuote."Amount Incl. VAT" - lServIntervQuote."Transfered Amount Incl. VAT";
+          IF (lRemainAmt[1] <> 0) OR (lRemainAmt[2] <> 0) THEN BEGIN
+            pAmount := pAmount + lRemainAmt[1];
+            pAmountInclVAT := pAmountInclVAT + lRemainAmt[2];
+            pVATProdPostingGroup := lServIntervQuote."Order VAT Prod. Posting Group";
+            lCurrencyCode := lServIntervQuote."Currency Code";
+          END;
+        UNTIL lServIntervQuote.NEXT = 0;
+        IF "Currency Code" <> lCurrencyCode THEN
+          VALIDATE("Currency Code", lCurrencyCode);
+      END;
+    END;
+
+    PROCEDURE SendToIMA@1100281907();
+    VAR
+      lEAISentIMAAction@1100281001 : Codeunit 50130;
+    BEGIN
+      //<<IMH15.ISAT.EBA
+      IF (Status = Status::Validated) OR (Type <> Type::"End of work") OR (NOT "Current Minutes") THEN
+        EXIT;
+
+      //lEAISentIMAAction.CreateSalesReturnMsg(Rec,FALSE,TRUE);
+      //Beneficiary - Sales Return
+      lEAISentIMAAction.SendFromSrvIntervMin(Rec,TRUE,TRUE,FALSE);
+      //Provider - Sales Order
+      lEAISentIMAAction.SendFromSrvIntervMin(Rec,TRUE,FALSE,TRUE);
+      //>>IMH15.ISAT.EBA
+    END;
+
+    PROCEDURE CheckInterventionStatus@1100281008(pFromTrigger@1100281000 : 'Insert,Modify,Delete,Rename');
+    VAR
+      lRec@1000000000 : Record 50084;
+    BEGIN
+      // pilotage du statut de l'intervention
+      IF NOT ServIntervention.GET("Service Header No.", "Service Intervention Line No.") THEN
+        EXIT;
+      IF pFromTrigger = pFromTrigger::Insert THEN
+        EXIT;
+      CASE pFromTrigger OF
+        pFromTrigger::Modify : MODIFY(FALSE);
+        pFromTrigger::Insert : BEGIN
+          lRec.COPY(Rec);
+          lRec.INSERT(FALSE);
+        END;
+        pFromTrigger::Delete : BEGIN
+          lRec.COPY(Rec);
+          lRec.DELETE(FALSE);
+        END;
+      END;
+
+      //<<IMH23.ST
+      IF ServIntervention.UpdateExtranetDelay THEN BEGIN
+        ServIntervention.MODIFY(TRUE); // d‚clenche l'autostep
+      END
+      ELSE
+      //>>IMH23.ST
+        IF ServIntervention.AutoStep THEN
+          ServIntervention.MODIFY(TRUE);
+
+      CASE pFromTrigger OF
+        pFromTrigger::Insert : BEGIN
+          lRec.DELETE(FALSE);
+          Rec.COPY(lRec);
+        END;
+        pFromTrigger::Delete : BEGIN
+          lRec.INSERT(FALSE);
+          Rec.COPY(lRec);
+        END;
+      END;
+    END;
+
+    PROCEDURE CalcAmount@1100281013(pFromInclVAT@1100281001 : Boolean);
+    VAR
+      lVAT@1100281000 : Decimal;
+      lText001@1100281002 : TextConst 'ENU=The %1 field must be a decimal;FRA=Le champ %1 doit ˆtre de type d‚cimal';
+      lCurrExchRate@1100281003 : Record 330;
+    BEGIN
+      //<<IMH16.VA
+      IF pFromInclVAT THEN BEGIN
+      //  IF "Amount Incl. VAT" <> 0 THEN BEGIN   IMH17.ST d‚sactiv‚
+          Amount := "Amount Incl. VAT" / (1+("VAT %"/100));
+      //  END;
+      END
+      ELSE BEGIN
+      //  IF Amount <> 0 THEN BEGIN   IMH17.ST d‚sactiv‚
+          "Amount Incl. VAT" := Amount + (Amount * "VAT %")/100;
+      //  END;
+      END;
+
+
+      GetCurrency("Currency Code");
+      IF "Currency Code" = '' THEN
+        "Amount (LCY)" := Amount
+      ELSE
+        "Amount (LCY)" := ROUND(
+          lCurrExchRate.ExchangeAmtFCYToLCY(
+            WORKDATE,"Currency Code",
+            Amount,"Currency Factor"));
+      Amount := ROUND(Amount,Currency."Amount Rounding Precision");
+
+      IF "Currency Code" = '' THEN
+        "Amount Incl. VAT (LCY)" := "Amount Incl. VAT"
+      ELSE
+        "Amount Incl. VAT (LCY)" := ROUND(
+          lCurrExchRate.ExchangeAmtFCYToLCY(
+            WORKDATE,"Currency Code",
+            "Amount Incl. VAT","Currency Factor"));
+      "Amount Incl. VAT" := ROUND("Amount Incl. VAT",Currency."Amount Rounding Precision");
+      //>>IMH16.VA
+
+      UpdateNetAmt; //IMH20.ST
+    END;
+
+    PROCEDURE CreatePurchOrder@1100281010();
+    VAR
+      lServiceHeader@1100281004 : Record 5900;
+      lService@1100281003 : Record 50066;
+      lPurchaseInvoicingMgt@1100281002 : Codeunit 50080;
+      lInvoicingMatrixSetup@1100281001 : Record 50137;
+      lServiceInterventionLine@1100281000 : Record 50075;
+    BEGIN
+      EXIT; // D‚sactivation ST 27/03/2012
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.") THEN
+        lServiceHeader.INIT;
+      IF NOT lService.GET(lServiceHeader."Service No.") THEN
+        lService.INIT;
+      IF NOT lServiceInterventionLine.GET("Service Header No.","Service Intervention Line No.") THEN
+        lServiceInterventionLine.INIT;
+      //<<IMH29.ISAT.RC
+      //IF lPurchaseInvoicingMgt.CheckCreationAvailable(
+      //   lInvoicingMatrixSetup,
+      //   lService."Corporate No.",
+      //   lServiceHeader."Service Order Type",
+      //   lService."Corporate Region Code",
+      //   lService."Service No.",
+      //   lServiceInterventionLine."Provider No.")
+      IF lPurchaseInvoicingMgt.CheckCreationAvailable(
+         lInvoicingMatrixSetup,
+         lService."Corporate No.",
+         lServiceHeader."Service Order Type",
+         lService."Corporate Region Code",
+         lService."Service No.",
+         lServiceInterventionLine."Provider No.",lServiceHeader)
+
+      //>>IMH29.ISAT.RC
+         THEN
+      BEGIN
+        IF NOT lPurchaseInvoicingMgt.CreateOrderFromIntervention(lServiceInterventionLine,Amount,"VAT Prod. Posting Group") THEN
+          ERROR(Text008);
+      END;
+    END;
+
+    PROCEDURE LookupReserves@1100281007();
+    BEGIN
+      GetSetup;
+      TESTFIELD(Reserves);
+      ServiceSetup.TESTFIELD("Reserve Comment Code");
+      OpenComments(ServiceSetup."Reserve Comment Code");//IMH03
+      CALCFIELDS("Reserves Comment");
+    END;
+
+    PROCEDURE CheckModifyAmount@1100281014() : Boolean;
+    VAR
+      lServiceOrderType@1100281000 : Record 5903;
+    BEGIN
+      //IMH19
+      IF NOT lServiceOrderType.GET("Service Order Type") THEN
+        EXIT(TRUE);
+      IF (lServiceOrderType."Apply Emergency Price") AND
+       (lServiceOrderType."Emergency Price Control") THEN BEGIN
+        IF (Type = Type::Urgent) AND
+        (ServIntervention."Non-Urgent Pursuit" = ServIntervention."Non-Urgent Pursuit"::No)
+        AND ((ServIntervention."Definitive Repair") OR (ServIntervention."Protective Action")) THEN
+          EXIT(TRUE);
+      END;
+    END;
+
+    PROCEDURE UpdateNetAmt@1100281017() : Boolean;
+    VAR
+      lAmount@1100281000 : Decimal;
+    BEGIN
+      //IMH20.ST
+      lAmount := "Amount (LCY)" - "Deductible Amount (LCY)" - "Unsecured Depr. Amount (LCY)";
+      IF lAmount < 0 THEN
+        lAmount := 0;
+      GetCurrency('');
+      lAmount := ROUND(lAmount, Currency."Amount Rounding Precision");
+      IF "Net Amount (LCY)" <> lAmount THEN
+        VALIDATE("Net Amount (LCY)", lAmount);
+      lAmount := "Amount Incl. VAT (LCY)" - "Deductible Amount (LCY)" - "Unsecured Depr. Amount (LCY)";
+      IF lAmount < 0 THEN
+        lAmount := 0;
+      lAmount := ROUND(lAmount, Currency."Amount Rounding Precision");
+      IF "Net Amount Incl. VAT (LCY)" <> lAmount THEN
+        VALIDATE("Net Amount Incl. VAT (LCY)", lAmount);
+    END;
+
+    LOCAL PROCEDURE CheckIntervDeductAmt@1100281016();
+    VAR
+      lServMin@1000000002 : Record 50084;
+      lDeprAmt@1000000001 : Decimal;
+      lDeductAmt@1000000000 : Decimal;
+    BEGIN
+      //IMH20.ST
+      GetDeductRemainAmt(FALSE, lDeductAmt, lDeprAmt);
+      IF lDeductAmt < 0 THEN
+        ERROR(Text015);
+      IF lDeprAmt < 0 THEN
+        ERROR(Text016);
+    END;
+
+    PROCEDURE GetDeductRemainAmt@1000000003(pExcludeCurrLine@1000000000 : Boolean;VAR pDeductAmt@1000000001 : Decimal;VAR pDeprAmt@1000000002 : Decimal);
+    VAR
+      lServMin@1000000005 : Record 50084;
+    BEGIN
+      pDeductAmt := 0;
+      pDeprAmt := 0;
+      IF NOT ServIntervention.GET("Service Header No.", "Service Intervention Line No.") THEN
+        EXIT;
+      pDeductAmt := ServIntervention."Deductible Amount";
+      pDeprAmt := ServIntervention."Unsecured Depreciation Amount";
+
+      lServMin.SETRANGE("Service Header No.", "Service Header No.");
+      lServMin.SETRANGE("Service Intervention Line No.", "Service Intervention Line No.");
+      IF lServMin.FINDSET THEN BEGIN
+        REPEAT
+          IF (lServMin."Document No." <> "Document No.") OR
+             (lServMin."Line No." <> "Line No.") THEN BEGIN
+            pDeductAmt -= lServMin."Deductible Amount (LCY)";
+            pDeprAmt -= lServMin."Unsecured Depr. Amount (LCY)";
+          END;
+        UNTIL lServMin.NEXT = 0;
+      END;
+      IF NOT pExcludeCurrLine THEN BEGIN
+        pDeductAmt -= "Deductible Amount (LCY)";
+        pDeprAmt -= "Unsecured Depr. Amount (LCY)";
+      END;
+    END;
+
+    PROCEDURE InitDeductAmt@1000000002();
+    VAR
+      lDeductAmt@1000000000 : Decimal;
+      lDeprAmt@1000000001 : Decimal;
+    BEGIN
+      //IMH20.ST
+      CASE TRUE OF
+        "Amount Incl. VAT" = 0, Unbillable, Type IN [Type::Recovery, Type::Intermediate] : BEGIN
+          lDeductAmt := 0;
+          lDeprAmt := 0;
+        END;
+        Type = Type::Urgent : BEGIN
+          lDeductAmt := 0;
+          lDeprAmt := 0;
+          IF ServIntervention.GET("Service Header No.", "Service Intervention Line No.") THEN
+            IF ServIntervention."Definitive Repair" THEN
+              GetDeductRemainAmt(TRUE, lDeductAmt, lDeprAmt);
+          lDeprAmt := 0; // Pas de v‚tust‚ sur un PV urgent
+        END;
+        ELSE BEGIN
+          GetDeductRemainAmt(TRUE, lDeductAmt, lDeprAmt);
+        END;
+      END;
+
+      IF lDeductAmt > "Amount Incl. VAT (LCY)" THEN
+        lDeductAmt := "Amount Incl. VAT (LCY)";
+      IF lDeprAmt > "Amount Incl. VAT (LCY)" - lDeductAmt THEN
+        lDeprAmt := "Amount Incl. VAT (LCY)" - lDeductAmt;
+      IF "Deductible Amount (LCY)" <> lDeductAmt THEN
+        VALIDATE("Deductible Amount (LCY)", lDeductAmt);
+      IF "Unsecured Depr. Amount (LCY)" <> lDeprAmt THEN
+        VALIDATE("Unsecured Depr. Amount (LCY)", lDeprAmt);
+    END;
+
+    PROCEDURE TestInvoice@1000000000(pFieldCaption@1000000000 : Text[250]);
+    BEGIN
+      //IMH20.ST
+      CASE "Last Purch. Invoice Type" OF
+        "Last Purch. Invoice Type"::" " : EXIT;
+        "Last Purch. Invoice Type"::Invoice : ERROR(Text017, pFieldCaption);
+        "Last Purch. Invoice Type"::PostedInvoice : ERROR(Text018, pFieldCaption);
+      END;
+    END;
+
+    PROCEDURE GetDocValues@1100281015(VAR pDocDate@1100281000 : Date;VAR pDocNo@1100281001 : Code[20]);
+    VAR
+      lPurchHeader@1100281002 : Record 38;
+      lPurchInvHeader@1100281003 : Record 122;
+    BEGIN
+      //IMH20.ST
+      pDocDate := 0D;
+      pDocNo := '';
+      CASE "Last Purch. Invoice Type" OF
+        "Last Purch. Invoice Type"::" " : EXIT;
+        "Last Purch. Invoice Type"::Invoice :
+          IF lPurchHeader.GET(lPurchHeader."Document Type"::Invoice, "Last Purch. Invoice No.") THEN BEGIN
+            pDocDate := lPurchHeader."Posting Date";
+            pDocNo := lPurchHeader."Vendor Invoice No.";
+          END;
+        "Last Purch. Invoice Type"::PostedInvoice :
+          IF lPurchInvHeader.GET("Last Purch. Invoice No.") THEN BEGIN
+            pDocDate := lPurchInvHeader."Posting Date";
+            pDocNo := lPurchInvHeader."Vendor Invoice No.";
+          END;
+      END;
+    END;
+
+    PROCEDURE GetIntervAmt@1100281020(VAR pAmtExclVATLCY@1100281000 : Decimal;VAR pAmtInclVATLCY@1100281001 : Decimal;VAR pDefaultVATProdGroup@1000000000 : Code[10]);
+    VAR
+      lServIntervQuote@1100281002 : Record 50076;
+      lServMgtSetup@1100281003 : Record 5911;
+      lServCode@1100281005 : Record 50040;
+      lQuoteType@1100281007 : Record 50062;
+      lCalcDescAmt@1100281006 : Boolean;
+      lCalcQuoteAmt@1100281004 : Boolean;
+      lIntervDesc@1000000001 : Record 50070;
+      lSpecFilter@1000000002 : Text[1024];
+    BEGIN
+      //IMH21.ST
+      pAmtExclVATLCY := 0;
+      pAmtInclVATLCY := 0;
+      lCalcDescAmt := FALSE;
+      lCalcQuoteAmt := FALSE;
+      lServIntervQuote.SETRANGE("Service Header No.","Service Header No.");
+      lServIntervQuote.SETRANGE("Intervention Line No.","Service Intervention Line No.");
+      lServIntervQuote.SETRANGE(Acceptance,lServIntervQuote.Acceptance::Yes);
+      IF lServIntervQuote.COUNT > 1 THEN
+        lServIntervQuote.SETRANGE(Active,TRUE);
+
+      IF lServIntervQuote.ISEMPTY THEN
+        lCalcDescAmt := TRUE
+      ELSE BEGIN
+        // Calcul du montant chiffrage si devis compl‚mentaire
+        lServIntervQuote.FINDSET;
+        REPEAT
+          pAmtExclVATLCY += lServIntervQuote."Amount Excl. VAT (LCY)";
+          pAmtInclVATLCY += lServIntervQuote."Amount Incl. VAT (LCY)";
+          IF lQuoteType.GET(lServIntervQuote."Service Order Type", lServIntervQuote."Service Quote Type",
+                            lQuoteType.Type::QuoteType) THEN
+            IF lQuoteType."Service Quote Type" = lQuoteType."Service Quote Type"::Additional THEN
+              lCalcDescAmt := TRUE;
+          pDefaultVATProdGroup := lServIntervQuote."Order VAT Prod. Posting Group";
+        UNTIL lServIntervQuote.NEXT = 0;
+      END;
+
+
+      IF lCalcDescAmt THEN BEGIN
+        CALCFIELDS("Service No.");
+        lServCode.SETRANGE("Service Type", lServCode."Service Type"::Intervention);
+        lServCode.SETRANGE("Service No.", "Service No.");
+        lServCode.SETRANGE("Service Header No.", "Service Header No.");
+        lServCode.SETRANGE("Intervention Line No.", "Service Intervention Line No.");
+        lServCode.SETRANGE("Code Type", lServCode."Code Type"::Speciality);
+        IF lServCode.FINDSET THEN
+          REPEAT
+            lServCode.CALCFIELDS("Estimate Amt Excl. VAT (LCY)", "Estimate Amt Incl. VAT (LCY)");
+            pAmtExclVATLCY += lServCode."Estimate Amt Excl. VAT (LCY)";
+            pAmtInclVATLCY += lServCode."Estimate Amt Incl. VAT (LCY)";
+      //<<IMH22.ST
+            IF pDefaultVATProdGroup = '' THEN BEGIN
+              IF lSpecFilter = '' THEN
+                lSpecFilter := lServCode.Code
+              ELSE
+                lSpecFilter := lSpecFilter + '|' + lServCode.Code;
+            END;
+      //>>IMH22.ST
+          UNTIL lServCode.NEXT = 0;
+      //>>IMH22.ST
+        IF pDefaultVATProdGroup = '' THEN BEGIN
+          lIntervDesc.SETRANGE("Service Header No.", "Service Header No.");
+          lIntervDesc.SETFILTER("Speciality Code", lSpecFilter);
+          lIntervDesc.SETFILTER("VAT Prod. Posting Group", '<>%1', '');
+          IF lIntervDesc.FINDSET THEN BEGIN
+            pDefaultVATProdGroup := lIntervDesc."VAT Prod. Posting Group";
+            REPEAT
+              IF pDefaultVATProdGroup <> lIntervDesc."VAT Prod. Posting Group" THEN
+                pDefaultVATProdGroup := '';
+            UNTIL (lIntervDesc.NEXT=0) OR (pDefaultVATProdGroup = '');
+          END;
+        END;
+      //>>IMH22.ST
+      END;
+    END;
+
+    PROCEDURE GetRemainAmt@1100281018(pExcludeCurrLine@1100281002 : Boolean;VAR pAmtExclVAT@1100281004 : Decimal;VAR pAmtInclVAT@1100281003 : Decimal;VAR pDefaultVATProdGroup@1000000001 : Code[10]);
+    VAR
+      lServMin@1000000000 : Record 50084;
+    BEGIN
+      //IMH21.ST
+      GetIntervAmt(pAmtExclVAT,pAmtInclVAT,pDefaultVATProdGroup);
+      lServMin.SETRANGE("Service Header No.", "Service Header No.");
+      lServMin.SETRANGE("Service Intervention Line No.", "Service Intervention Line No.");
+      lServMin.SETFILTER(Type, '<>%1', Type::Urgent);
+      IF lServMin.FINDSET THEN BEGIN
+        REPEAT
+          IF (lServMin."Document No." <> "Document No.") OR
+             (lServMin."Line No." <> "Line No.") THEN BEGIN
+            pAmtExclVAT -= lServMin."Amount (LCY)";
+            pAmtInclVAT -= lServMin."Amount Incl. VAT (LCY)";
+          END;
+        UNTIL lServMin.NEXT = 0;
+      END;
+      IF NOT pExcludeCurrLine THEN BEGIN
+        IF Type <> Type::Urgent THEN BEGIN
+          pAmtExclVAT -= "Amount (LCY)";
+          pAmtInclVAT -= "Amount Incl. VAT (LCY)";
+        END;
+      END;
+    END;
+
+    PROCEDURE InitNewLine@1000000001();
+    VAR
+      lServMin@1000000000 : Record 50084;
+      lServOrderType@1100281000 : Record 5903;
+    BEGIN
+      //IMH21.ST
+      IF ("Service Header No." = '') OR ("Service Intervention Line No." = 0) THEN
+        EXIT;
+      INIT;
+      lServMin.SETRANGE("Service Header No.", "Service Header No.");
+      lServMin.SETRANGE("Service Intervention Line No.", "Service Intervention Line No.");
+      IF lServMin.FINDLAST THEN BEGIN
+        "Document No." := lServMin."Document No." + 1;
+        "Line No." := 10000;
+      END
+      ELSE BEGIN
+        "Document No." := 1;
+        "Line No." := 10000;
+        CALCFIELDS("Service Order Type");
+        IF "Service Order Type" <> '' THEN
+          IF lServOrderType.GET("Service Order Type") THEN
+            IF Type <> lServOrderType."First Minutes Type" THEN
+              VALIDATE(Type, lServOrderType."First Minutes Type");
+
+      //  IF ServIntervention.GET("Service Header No.", "Service Intervention Line No.") THEN BEGIN
+      //    IF ServIntervention.Urgent THEN BEGIN
+      //      IF ServIntervention."Non-Urgent Pursuit" = ServIntervention."Non-Urgent Pursuit"::No THEN
+      //        IF Type <> Type::Urgent THEN
+      //          VALIDATE(Type, Type::Urgent);
+      //    END;
+      //  END;
+      END;
+    END;
+
+    PROCEDURE CreateComment@1000000004(pxRec@1000000000 : Record 50084;pDelete@1000000001 : Boolean);
+    VAR
+      lAdvCommentLine@1000000002 : Record 50056;
+      lCommentMgt@1000000003 : Codeunit 50085;
+      lBigT@1000000004 : BigText;
+      lCRLF@1000000005 : Text[2];
+    BEGIN
+      //IMH21.ST
+      lAdvCommentLine.INIT;
+      lAdvCommentLine."Source Table ID" := DATABASE::"Service Intervention Line";
+      CALCFIELDS("Service No.");
+      lAdvCommentLine."Source No." := "Service No.";
+      lAdvCommentLine."Source No. 2" := "Service Header No.";
+      lAdvCommentLine."Source No. 3" := "Service Intervention Line No.";
+      IF pDelete THEN BEGIN
+        lCommentMgt.SaveText(lAdvCommentLine, TODAY,
+                             STRSUBSTNO(Text019,FORMAT(Type),"Document No.","Amount Incl. VAT"));
+      END
+      ELSE BEGIN
+        lCRLF[1] := 13;
+        lCRLF[2] := 10;
+
+        IF "Receipt Date" <> xRec."Receipt Date" THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION("Receipt Date"), "Receipt Date", xRec."Receipt Date") + lCRLF);
+        IF Status <> xRec.Status THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION(Status), Status, xRec.Status) + lCRLF);
+        IF "Work Restart Date" <> xRec."Work Restart Date" THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION("Work Restart Date"),
+                                   "Work Restart Date", xRec."Work Restart Date") + lCRLF);
+        IF "Closing Reserve Date" <> xRec."Closing Reserve Date" THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION("Closing Reserve Date"),
+                                   "Closing Reserve Date", xRec."Closing Reserve Date") + lCRLF);
+        IF Amount <> xRec.Amount THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION(Amount), Amount, xRec.Amount) + lCRLF);
+        IF "Amount Incl. VAT" <> xRec."Amount Incl. VAT" THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION("Amount Incl. VAT"), "Amount Incl. VAT", xRec."Amount Incl. VAT") + lCRLF);
+        IF "VAT %" <> xRec."VAT %" THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION("VAT %"), "VAT %", xRec."VAT %") + lCRLF);
+        IF "Deductible Amount (LCY)" <> xRec."Deductible Amount (LCY)" THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION("Deductible Amount (LCY)"),
+                                   "Deductible Amount (LCY)", xRec."Deductible Amount (LCY)") + lCRLF);
+        IF "Unsecured Depr. Amount (LCY)" <> xRec."Unsecured Depr. Amount (LCY)" THEN
+          lBigT.ADDTEXT(STRSUBSTNO(Text021, FIELDCAPTION("Unsecured Depr. Amount (LCY)"),
+                                   "Unsecured Depr. Amount (LCY)", xRec."Unsecured Depr. Amount (LCY)") + lCRLF);
+        IF lBigT.LENGTH <> 0 THEN BEGIN
+          lBigT.ADDTEXT(Text020 + lCRLF,1);
+          lCommentMgt.SaveBigText(lAdvCommentLine, TODAY, lBigT);
+        END;
+      END;
+    END;
+
+    PROCEDURE UpdateIntervStatus@1000000005(pFromInsert@1100281000 : Boolean);
+    VAR
+      lServiceInterventionLine@1100281001 : Record 50075;
+    BEGIN
+      // IMH25.PC
+
+      IF NOT pFromInsert THEN BEGIN
+        MODIFY(FALSE);
+      END;
+      IF lServiceInterventionLine.GET("Service Header No.","Service Intervention Line No.") THEN BEGIN
+        IF lServiceInterventionLine.AutoStep THEN BEGIN
+          lServiceInterventionLine.MODIFY(TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE SendProviderOrderToIMA@1100281047(pServiceHeader@1100281001 : Record 5900);
+    VAR
+      lServIntervMin@1100281002 : Record 50084;
+      lEAISentIMAAction@1100281000 : Codeunit 50130;
+    BEGIN
+      //<<IMH70.RC.ISAT
+      IF NOT pServiceHeader."Home Service"  THEN
+        EXIT;
+
+      IF (Type = Type::"End of work") AND ( "Post Minute"= TRUE)    THEN
+        lEAISentIMAAction.SendFromSrvIntervMin(Rec,TRUE,FALSE,TRUE);
+      //lEAISentIMAAction.SendFromSrvHeader(pServiceHeader,TRUE,FALSE,TRUE)
+      //>>IMH70.RC.ISAT
+    END;
+
+    BEGIN
+    {
+      /** @r IMH31 @d 31/10/2013 @a ISAT.PC @v IMH6.01.348 @s MATMUT @c add error about DRT */
+      /** @r IMH30 @d 13/05/2013 @a ISAT.ZW @v IMH6.01.345 @s MAI @h 4470
+          @c Calcul montant commande devis ttc intervention … la validation PV */
+      /** @r IMH29 @d 28/08/2012 @a ISAT.RC @v IMH6.01.212 @s Gestion date de reference matrice @h 3795
+          @c Changement de la signature de la fonction CheckCreationAvailable Rajout du paramŠtre Service Header*/
+      /** @r IMH28 @d 21/08/12 @a ISAT.RC @v IMH6.01.212 @h 3289 @s V1.4.1
+          @c ajout Fonction SendProviderOrderToIMA */
+      /** @r IMH27 @d 19/07/12 @a ISAT.PC @v IMH6.01.011 @s Gestion du service @h 3722
+          @c Modificaton des conditions pour la gestion du type de PV */
+      /** @r IMH26 @d 17/07/12 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @h 3721
+          @c Modificaton message */
+      /** @r IMH25 @d 15/06/12 @a ISAT.PC @v IMH6.01.011 @s Gestion du service @h 3563
+          @c ProblŠme pas de passage par le trigger OnInsert / OnModify de la page sur la premiŠre ligne
+          @c Ajout function UpdateIntervStatus */
+      /** @r IMH24 @d 10/04/12 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @h 1353
+          @c Ajout cl‚ Service Header No.,Service Intervention Line No.,Type */
+      /** @r IMH23 @d 30/03/12 @a ISAT.ST @v IMH6.01.165 @s Extranet - Mantis @h 3209 @c Mise … jour calcul d‚lai intervention */
+      /** @r IMH22 @d 28/03/12 @a iSAT.ST @v IMH6.01.146 @s Refonte facturation
+          @c Cr‚ation fourniseur, r‚cup TVA sur chiffrage, autorisation saisie TTC HT */
+      /** @r IMH21 @d 14/03/12 @a ISAT.ST @v IMH6.01.146 @s Refonte facturation
+          @c Gestion des montants et initialisations de PV */
+      /** @r IMH20 @d 28/02/12 @a ISAT.ST @v IMH6.01.146 @s Refonte facturation
+          @c Ajout des champs 50200 Deductible Amount, 50201 Unsecured Depreciation Amount, 50202 Net Amount, 50203 Net Amount Incl. VAT
+          @c 50210 Last Purch. Invoice Type, 50211 Last Purch. Invoice No., 50212 Unbillable */
+      /** @r IMH19 @d 09/09/11 @s ISAT.LLT @v IMH6.01.011 @s Gestion du PV
+          @ Gestion champs montants modifiables */
+      /** @r IMH18 @d 06/09/11 @s ISAT.LLT @v IMH6.01.011 @s Gestion du PV
+          @c Ajout controle sur date lev‚e r‚serve */
+      /** @r IMH17 @d 08/08/11 @s ISAT.ST @v IMH6.01.011 @s Gestion du PV
+          @c Corrections retour Mantis
+          @c Ajout controle du type de PV interm‚diaire */
+      /** @r IMH16 @d 20/06/11 @a ISAT.VA @v IMH6.01.011 @s Correction de la rŠgle de calcul de la TVA */
+      /** @r IMH16 @d 17/06/11 @a ISAT.ST @v IMH6.01.161 @s Log Service @c Appel sur les triggers de table */
+      /** @r IMH15 @d 16/05/11 @a ISAT.EBA @v IMH6.01.159 @s Comptabilit‚ - IMA Service
+          @c Ajout fonction SendToIMA */
+      /** @r IMH14 @d 13/05/11 @a ISAT.ZW @v IMH6.01.011 @s Calculer total Devis TTC auto */
+      /** @r IMH13 @d 10/05/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service */
+      /** @r IMH12 @d 06/05/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service
+          @c Statut PV valid‚ --> passer la coche Reserves … NON */
+      /** @r IMH11 @d 18/04/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service
+          @c Suppression Statut "Supprimer" */
+      /** @r IMH10 @d 18/04/10 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service
+          @c Ajout de fonction : InitAmount
+          @c Modification libell‚ "PV courant" en "PV en cours" */
+      /** @r IMH09 @d 18/04/10 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service
+          @c Modification libell‚ "Montant" en "Montant HT" */
+      /** @r IMH08 @d 14/04/11 @a ISAT.ST @v IMH6.01.011 @s Gestion service @c Contr“le date de r‚ception */
+      /** @r IMH07 @d 14/03/11 @a ISAT.LLT @v IMH6.01.146 @s Gestion facturation @c Appel fonction reception */
+      /** @r IMH06 @d 04/03/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Ajout du type PV urgent dans Type */
+      /** @r IMH06 @d 28/02/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Ajout du type PV de reprise dans Type */
+      /** @r IMH05 @d 14/02/11 @a ISAT.LLT @v IMH6.01.108 @s Interactions
+          @c Ajout champ 100 Service Creation Date */
+      /** @r IMH04 @d 14/02/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @ reference No. Passe de 10 … 20 */
+      /** @r IMH03 @d 20/01/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Ajout champ 33 Closing reserve Date
+          @c Ajout champ 39 WOrk Restart Date */
+      /** @r IMH02 @d 10/01/11 @a ISAT.LLT @v IMH6.01.198 @s Reprise de donn‚es
+          @c Ajout champ 24 Status Date
+          @c Ajout champ 9 Line No.
+          @c Ajour champ de 50 … 53 */
+      /** @r IMH01 @d 21/12/10 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Cr‚ation objet */
+    }
+    END.
+  }
+}

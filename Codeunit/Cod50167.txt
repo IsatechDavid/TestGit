@@ -1,0 +1,302 @@
+OBJECT Codeunit 50167 DARVA Sent DRT Gen. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/02/14;
+    Time=15:20:11;
+    Modified=Yes;
+    Version List=IMH6.01,AOUT,V1.7;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            lEAISentMQBuffer := Rec;
+            Code(lEAISentMQBuffer);
+            lEAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+            Rec := lEAISentMQBuffer;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      VendLedgEntry@1100281005 : Record 25;
+      Provider@1100281002 : Record 50000;
+      EAISetup@1100281004 : Record 8016700;
+      EAIXMLDocMgt@1100281003 : Codeunit 8016713;
+      NASHandler@1100281008 : Codeunit 8016720;
+      DARVAXMLMgt@1100281009 : Codeunit 50154;
+      Text000@1100281000 : TextConst 'ENU=sch:SoumettreDemandeReglementReparateurAGPMDemande;FRA=sch:SoumettreDemandeReglementReparateurAGPMDemande';
+      Text001@1100281001 : TextConst 'ENU=sch:SoumettreDemandeReglementReparateurMACIFDemande;FRA=sch:SoumettreDemandeReglementReparateurMACIFDemande';
+      AgreementCode@1100281006 : Code[20];
+      Text002@1000000000 : TextConst 'ENU=Invoice no. must be lower than 17 caracters.;FRA=Le nø de facture ne doit pas exc‚der 17 caractŠres.';
+
+    PROCEDURE Code@1100281001(VAR pEAISentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lEAIAct@1100281015 : Record 8016706;
+      lEAIPartner@1100281014 : Record 8016707;
+      lService@1100281011 : Record 50066;
+      lServiceHeader@1100281003 : Record 5900;
+      lServiceInterventionLine@1100281016 : Record 50075;
+      lProviderAgreement@1100281019 : Record 50012;
+      lCorporateRegion@1100281018 : Record 50058;
+      lVendorLedgerEntry@1100281017 : Record 25;
+      lEAIDocEntryMgt@1100281002 : Codeunit 8016707;
+      lRecRef@1100281013 : RecordRef;
+      lRecID@1100281012 : RecordID;
+      lXMLDocument@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewChild0@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild1@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild2@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild3@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lInStream@1100281005 : InStream;
+      lNameSpace@1100281006 : Text[250];
+      lFunctionName@1100281009 : Text[80];
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      lEAIPartner.GET(pEAISentMQBuffer."EAI Partner Code");
+
+      lRecID := pEAISentMQBuffer.RecordId;
+      lRecRef := lRecID.GETRECORD;
+      lRecRef.LOCKTABLE;
+      lRecRef.FIND('=');
+      lRecRef.SETTABLE(lVendorLedgerEntry);
+
+      EAISetup.GET;
+      lService.GET(lVendorLedgerEntry."Service No.");
+      CASE lService."Corporate No." OF
+        EAISetup."AGPM Customer No." : lFunctionName := Text000;
+        EAISetup."MACIF Customer No." : lFunctionName := Text001;
+        ELSE EXIT;
+      END;
+
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,lVendorLedgerEntry."Service Header No.");
+      lServiceInterventionLine.GET(lVendorLedgerEntry."Service Header No.",lVendorLedgerEntry."Intervention Line No.");
+
+      //Root Node
+      lXMLDocument.async := FALSE;
+      DARVAXMLMgt.SetType(1);
+      lXMLDocument.setProperty('SelectionNamespaces',DARVAXMLMgt.GetSelectionNameSpace);
+      DARVAXMLMgt.CreateWSHeader(lXMLDocument,lXMLNewChild2,lEAIPartner.Username,lEAIPartner.Password);
+
+      lNameSpace := DARVAXMLMgt.GetNameSpace(1);
+      EAIXMLDocMgt.AddElement(lXMLNewChild2,lFunctionName,'',lNameSpace,lXMLNewChild3);
+
+      lNameSpace := DARVAXMLMgt.GetNameSpace(2);
+      //context
+      DARVAXMLMgt.Sent_InsertContext(lEAIPartner,lXMLNewChild3);
+      //dossier
+      DARVAXMLMgt.Sent_InsertService(lEAIPartner,lService,lXMLNewChild3);
+      //partenaires
+      DARVAXMLMgt.Sent_InsertPartnersDRT(lEAIPartner,lServiceHeader,lXMLNewChild3);
+
+      Provider.GET(lServiceInterventionLine."Provider No.");
+      // Agr‚ment
+      //<<IMH03.ISAT.EBA
+      {**
+      lCorporateRegion.SETRANGE("Corporate No.",lServiceInterventionLine."Corporate No.");
+      lCorporateRegion.SETRANGE("Region Code",lServiceInterventionLine."Corporate Region Code");
+      IF lCorporateRegion.FINDFIRST THEN BEGIN
+        lProviderAgreement.SETRANGE("Provider No.",lServiceInterventionLine."Provider No.");
+        lProviderAgreement.SETRANGE("Corporate No.",lCorporateRegion."Sell-to Customer No.");
+        lProviderAgreement.SETFILTER("Service Order Type",'%1|%2','',lServiceInterventionLine."Service Order Type");
+        lProviderAgreement.SETRANGE("Exclusion Type",lProviderAgreement."Exclusion Type"::Agree);
+        IF lProviderAgreement.FINDFIRST THEN BEGIN
+          AgreementCode := lProviderAgreement."Agreement No.";
+        END;
+        IF AgreementCode = '' THEN BEGIN
+          AgreementCode := lCorporateRegion."SDR64 Provider No.";
+        END;
+      END;
+      IF AgreementCode = '' THEN BEGIN
+        lProviderAgreement.SETRANGE("Provider No.",lServiceInterventionLine."Provider No.");
+        lProviderAgreement.SETRANGE("Corporate No.",lServiceInterventionLine."Corporate No.");
+        lProviderAgreement.SETFILTER("Service Order Type",'%1|%2','',lServiceInterventionLine."Service Order Type");
+        lProviderAgreement.SETRANGE("Exclusion Type",lProviderAgreement."Exclusion Type"::Agree);
+        IF lProviderAgreement.FINDFIRST THEN BEGIN
+          AgreementCode := lProviderAgreement."Agreement No.";
+        END;
+
+        IF AgreementCode = '' THEN BEGIN
+          AgreementCode := Provider."No.";
+        END;
+      END;
+      **}
+
+      AgreementCode := Provider.GetAgreement(
+        lServiceInterventionLine."Corporate No.",
+        lServiceInterventionLine."Corporate Region Code",
+        lServiceInterventionLine."Service Order Type");
+      //>>IMH03.ISAT.EBA
+
+      CASE lService."Corporate No." OF
+        EAISetup."AGPM Customer No." : MakeAGPMBody(lXMLNewChild3,lVendorLedgerEntry,lServiceInterventionLine."Work End Date");
+        EAISetup."MACIF Customer No." : MakeMACIFBody(lXMLNewChild3,lVendorLedgerEntry);
+      END;
+
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXMLDocument.save(lInStream);
+
+      // pour les tests
+      IF NASHandler.IsDebug THEN
+        lXMLDocument.save(TEMPORARYPATH + 'EnvoiDRT.xml');
+
+      //TODO : Enregistrement dans la table "‚criture document EDI"
+      //lEAIDocEntryMgt.AddEntryFromSentBuffer(DATABASE::Provider,0,lProvider."No.",'',0, pEAISentMQBuffer);
+    END;
+
+    PROCEDURE MakeAGPMBody@1100281000(VAR pXMLNewChild@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pVendorLedgerEntry@1100281012 : Record 25;pWorkEndDate@1100281011 : Date);
+    VAR
+      lXMLNewChild1@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild2@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild3@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lAdvCommentLine@1100281010 : Record 50056;
+      lNameSpace@1100281004 : Text[250];
+      lAmountExclVAT@1100281008 : Decimal;
+      lAmountVAT@1100281006 : Decimal;
+      lPercentVAT@1100281007 : Decimal;
+      lPercentVATText@1000000000 : Text[30];
+    BEGIN
+      lNameSpace := DARVAXMLMgt.GetNameSpace(2);
+      WITH EAIXMLDocMgt DO BEGIN
+        // Recherche des montants sur la ligne d'intervention
+        GetAmounts(pVendorLedgerEntry,lAmountExclVAT,lAmountVAT,lPercentVAT);
+
+        AddElement(pXMLNewChild,'ns:demandeReglementReparateurAGPM','',lNameSpace,lXMLNewChild1);
+        AddElement(lXMLNewChild1,'ns:travaux','',lNameSpace,lXMLNewChild2);
+        //<<IMH05.PC
+        //AddElement(lXMLNewChild2,'ns:tauxTVA',FORMAT(lPercentVAT,0,9),lNameSpace,lXMLNewChild3);
+        lPercentVATText := FORMAT(lPercentVAT);
+        //<<<IMH07
+        //IF STRLEN(lPercentVATText) = 1 THEN BEGIN
+        IF STRLEN(lPercentVATText) IN [1, 2] THEN BEGIN
+        //>>IMH07
+          lPercentVATText := lPercentVATText + '.0';
+        END;
+        AddElement(lXMLNewChild2,'ns:tauxTVA',FORMAT(lPercentVATText,0,9),lNameSpace,lXMLNewChild3);
+        //>>IMH05.PC
+        AddElement(
+          lXMLNewChild2,'ns:montantHT',
+          FORMAT(lAmountExclVAT + pVendorLedgerEntry."Deductible Amount" + pVendorLedgerEntry."Depreciation Amount",0,9),
+          lNameSpace,lXMLNewChild3);
+        AddElement(lXMLNewChild2,'ns:montantTVA',FORMAT(lAmountVAT,0,9),lNameSpace,lXMLNewChild3);
+        AddElement(
+          lXMLNewChild2,'ns:montantTTC',
+          FORMAT(lAmountExclVAT + lAmountVAT + pVendorLedgerEntry."Deductible Amount" + pVendorLedgerEntry."Depreciation Amount",0,9),
+          lNameSpace,lXMLNewChild3);
+        // optionnel
+        AddElement(
+          lXMLNewChild1,
+          'ns:montantChargeAssure',
+          FORMAT(pVendorLedgerEntry."Depreciation Amount" + pVendorLedgerEntry."Deductible Amount",0,9),
+          lNameSpace,lXMLNewChild2);
+        AddElement(lXMLNewChild1,'ns:montantChargeAssureur',FORMAT(lAmountExclVAT + lAmountVAT,0,9),lNameSpace,lXMLNewChild2);
+        // optionnel
+        AddElement(lXMLNewChild1,'ns:dateFinTravaux',DARVAXMLMgt.Date2Text(pWorkEndDate),lNameSpace,lXMLNewChild2);
+        AddElement(lXMLNewChild1,'ns:receptionTravaux','O',lNameSpace,lXMLNewChild2);
+      END;
+    END;
+
+    PROCEDURE MakeMACIFBody@1100281002(VAR pXMLNewChild@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pVendorLedgerEntry@1100281010 : Record 25);
+    VAR
+      lXMLNewChild1@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild2@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lNameSpace@1100281001 : Text[250];
+      lAmountExclVAT@1100281007 : Decimal;
+      lAmountVAT@1100281006 : Decimal;
+      lPercentVAT@1100281005 : Decimal;
+    BEGIN
+      lNameSpace := DARVAXMLMgt.GetNameSpace(2);
+      WITH EAIXMLDocMgt DO BEGIN
+        // Recherche des montants sur la ligne d'intervention
+        GetAmounts(pVendorLedgerEntry,lAmountExclVAT,lAmountVAT,lPercentVAT);
+
+        AddElement(pXMLNewChild,'ns:demandeReglementReparateurMACIF','',lNameSpace,lXMLNewChild1);
+        AddElement(lXMLNewChild1,'ns:codeEntrepriseAgreee',AgreementCode,lNameSpace,lXMLNewChild2);
+        IF pVendorLedgerEntry."Deductible Amount" = 0 THEN BEGIN
+          AddElement(lXMLNewChild1,'ns:franchiseDeduite','N',lNameSpace,lXMLNewChild2);
+        END ELSE BEGIN
+          AddElement(lXMLNewChild1,'ns:franchiseDeduite','O',lNameSpace,lXMLNewChild2);
+        END;
+
+        //<<IMH04.PC
+        //AddElement(lXMLNewChild1,'ns:numeroFacture',pVendorLedgerEntry."Document No.",lNameSpace,lXMLNewChild2);
+        //<<IMH06.PC
+        IF STRLEN(pVendorLedgerEntry."External Document No.") > 17 THEN BEGIN
+          ERROR(Text002);
+        END;
+        //>>IMH06.PC
+        AddElement(lXMLNewChild1,'ns:numeroFacture',pVendorLedgerEntry."External Document No.",lNameSpace,lXMLNewChild2);
+        //>>IMH04.PC
+        AddElement(
+          lXMLNewChild1,'ns:estimationReelle',
+          FORMAT(lAmountExclVAT + lAmountVAT + pVendorLedgerEntry."Depreciation Amount" + pVendorLedgerEntry."Deductible Amount",0,9),
+          lNameSpace,lXMLNewChild2);
+        AddElement(lXMLNewChild1,'ns:franchise',FORMAT(pVendorLedgerEntry."Deductible Amount",0,9),lNameSpace,lXMLNewChild2);
+        AddElement(
+          lXMLNewChild1,
+          'ns:vetusteNonGarantie',
+          FORMAT(pVendorLedgerEntry."Depreciation Amount",0,9),
+          lNameSpace,
+          lXMLNewChild2);
+
+        AddElement(lXMLNewChild1,'ns:estimationGarantie',FORMAT(lAmountExclVAT + lAmountVAT,0,9),lNameSpace,lXMLNewChild2);
+      END;
+    END;
+
+    PROCEDURE GetAmounts@1100281003(pVendorLedgerEntry@1100281006 : Record 25;VAR pAmountExclVAT@1100281007 : Decimal;VAR pAmountVAT@1100281003 : Decimal;VAR pPercentVAT@1100281004 : Decimal) : Decimal;
+    VAR
+      lGLEntry@1100281000 : Record 17;
+      lVATPostingSetup@1100281001 : Record 325;
+    BEGIN
+      // r‚cupŠre les montants issue des ‚critures comptable li‚ au num‚ro de transmission ainsi que des services
+      pAmountVAT := 0;
+      pPercentVAT := 0;
+      pAmountExclVAT := 0;
+
+      WITH lGLEntry DO BEGIN
+        //SETCURRENTKEY("Transmission No.");
+        //SETRANGE("Transmission No.",pVendorLedgerEntry."Transmission No.");
+        SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+        SETRANGE("Service No.",pVendorLedgerEntry."Service No.");
+        SETRANGE("Service Header No.",pVendorLedgerEntry."Service Header No.");
+        SETRANGE("Intervention Line No.",pVendorLedgerEntry."Intervention Line No.");
+        SETRANGE("Gen. Posting Type","Gen. Posting Type"::Purchase);
+        SETRANGE("Document Type",pVendorLedgerEntry."Document Type");
+        SETRANGE("Document No.",pVendorLedgerEntry."Document No.");
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+
+        FINDSET;
+        // doit ˆtre r‚cup‚r‚ sur le PV
+        lVATPostingSetup.GET("VAT Bus. Posting Group","VAT Prod. Posting Group");
+        pPercentVAT := lVATPostingSetup."VAT %";
+        REPEAT
+          pAmountExclVAT += Amount;
+          pAmountVAT += "VAT Amount";
+        UNTIL NEXT = 0;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH07 @d 19/02/14 @a ISAT.ZW @v IMH6.01.4995 @h 4995 @s Format taux TVA @c Gestion tx TVA */
+      /** @r IMH06 @d 20/08/13 @a ISAT.PC @v IMH6.01.351 @s Juillet @h 4605 @c Gestion du nb de caractŠre sur nø facture */
+      /** @r IMH05 @d 23/04/13 @a ISAT.PC @v IMH6.01.228 @s NEP00011 @c Gestion tx TVA @h 4469 */
+      /** @r IMH04 @d 22/12/11 @a ISAT.PC @v IMH6.01.134 @s DARVA Management @c External Document No. … la place du nø document */
+      /** @r IMH03 @d 21/12/11 @a ISAT.EBA @v IMH6.01.018 @s Gestion des agr‚ments */
+      /** @r IMH02 @d 15/09/11 @a ISAT.ZW @v IMH6.01.134 @s DARVA Management
+          @c DRT : Soumettre Suivi Dossier Reparateur Commentaire Demande */
+      /** @r IMH02 @d 25/08/11 @a ISAT.PC @v IMH6.01.134 @s DARVA Management @s Correctif */
+      /** @r IMH01 @d 13/07/11 @a ISAT.MA @v IMH6.01.134 @s DARVA Management @s Cr‚ation */
+    }
+    END.
+  }
+}

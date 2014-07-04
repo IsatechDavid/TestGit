@@ -1,0 +1,701 @@
+OBJECT Table 50044 Process Action
+{
+  OBJECT-PROPERTIES
+  {
+    Date=15/10/13;
+    Time=18:19:46;
+    Modified=Yes;
+    Version List=IMH6.01.08;
+  }
+  PROPERTIES
+  {
+    OnInsert=VAR
+               lProcessType@1100281000 : Record 50041;
+               lProcessAction@1100281001 : Record 50044;
+             BEGIN
+               ProcessEditable(TRUE);
+               IF "Action Order" = 0 THEN BEGIN
+                 lProcessAction.SETCURRENTKEY("Process Code","Source Action","Source Line No.","Action Order");
+                 lProcessAction.SETRANGE("Process Code", "Process Code");
+                 lProcessAction.SETRANGE("Source Action", "Source Action");
+                 lProcessAction.SETRANGE("Source Line No.", "Source Line No.");
+                 IF lProcessAction.FINDLAST THEN
+                   "Action Order" := lProcessAction."Action Order" + 1
+                 ELSE
+                   "Action Order" := 1;
+               END;
+               TouchRecord(TRUE);
+               CheckAction;
+             END;
+
+    OnModify=BEGIN
+               ProcessEditable(TRUE);
+               TouchRecord(FALSE);
+               CheckAction;
+             END;
+
+    OnDelete=VAR
+               lCurrentAction@1100281000 : Record 50046;
+               lProcessActionsRequirement@1100281001 : Record 50045;
+             BEGIN
+               ProcessEditable(TRUE);
+               lCurrentAction.SETCURRENTKEY("Process Code","Source Action","Source Line No.","Next Status","Action Line No.");
+               lCurrentAction.SETRANGE("Process Code", "Process Code");
+               lCurrentAction.SETRANGE("Source Action", "Source Action");
+               lCurrentAction.SETRANGE("Source Line No.", "Source Line No.");
+               lCurrentAction.SETRANGE("Action Line No.", "Line No.");
+               IF NOT lCurrentAction.ISEMPTY THEN BEGIN
+                 IF NOT "Suspend Action" THEN
+                  ERROR(Text004);
+                 IF DT2DATE("Suspend Action Date") = WORKDATE THEN
+                   ERROR(STRSUBSTNO(Text005, WORKDATE + 1));
+               //  ERROR(Text001, "Process Code" + '-' + FORMAT("Source Action") + '-' +
+               //    FORMAT("Source Line No.") + '-' + FORMAT("Line No."));
+                 lCurrentAction.DELETEALL;
+               END;
+
+               lProcessActionsRequirement.SETRANGE("Process Code", "Process Code");
+               lProcessActionsRequirement.SETRANGE("Source Requirement", lProcessActionsRequirement."Source Requirement"::Action);
+               lProcessActionsRequirement.SETRANGE("Source Line No.", "Source Line No.");
+               lProcessActionsRequirement.SETRANGE("Source Action Line No.", "Line No.");
+               IF NOT lProcessActionsRequirement.ISEMPTY THEN
+                 lProcessActionsRequirement.DELETEALL(TRUE);
+             END;
+
+    OnRename=BEGIN
+               ProcessEditable(TRUE);
+               TouchRecord(FALSE);
+             END;
+
+    CaptionML=[ENU=Process Action;
+               FRA=Action processus];
+    LookupFormID=Form50135;
+    DrillDownFormID=Form50135;
+  }
+  FIELDS
+  {
+    { 1   ;   ;Process Code        ;Code10        ;TableRelation=Process.Code;
+                                                   OnValidate=VAR
+                                                                lProcessType@1100281000 : Record 50041;
+                                                              BEGIN
+                                                                lProcessType.GET("Process Code");
+                                                                IF "Source Table" <> lProcessType."Source Table No." THEN
+                                                                  VALIDATE("Source Table", lProcessType."Source Table No.");
+                                                              END;
+
+                                                   CaptionML=[ENU=Process Code;
+                                                              FRA=Code processus];
+                                                   NotBlank=Yes }
+    { 2   ;   ;Source Action       ;Option        ;CaptionML=[ENU=Source Action;
+                                                              FRA=Action source];
+                                                   OptionCaptionML=[ENU=Status,Step,AutoStep Error;
+                                                                    FRA=Statut,Etape,Erreur ‚tape auto];
+                                                   OptionString=Status,Step,AutoStepError }
+    { 3   ;   ;Source Line No.     ;Integer       ;TableRelation=IF (Source Action=CONST(Status)) "Process Status"."Status No." WHERE (Process Code=FIELD(Process Code))
+                                                                 ELSE IF (Source Action=CONST(Step)) "Process Step"."Line No." WHERE (Process Code=FIELD(Process Code));
+                                                   CaptionML=[ENU=Source Line No.;
+                                                              FRA=Nø ligne origine];
+                                                   NotBlank=Yes }
+    { 5   ;   ;Line No.            ;Integer       ;CaptionML=[ENU=Line No.;
+                                                              FRA=Nø ligne];
+                                                   NotBlank=Yes }
+    { 7   ;   ;Description         ;Text30        ;CaptionML=[ENU=Description;
+                                                              FRA=D‚signation] }
+    { 8   ;   ;Optional            ;Boolean       ;OnValidate=BEGIN
+                                                                IF Optional THEN BEGIN
+                                                                  IF NOT ("Action Type" IN ["Action Type"::"Create Interaction", "Action Type"::"Run Function"]) THEN
+                                                                    FIELDERROR("Action Type");
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Optional;
+                                                              FRA=Optionnelle] }
+    { 9   ;   ;Action Order        ;Integer       ;CaptionML=[ENU=Action Order;
+                                                              FRA=Ordre ex‚cution] }
+    { 10  ;   ;Action Type         ;Option        ;OnValidate=BEGIN
+                                                                IF NOT ("Action Type" IN ["Action Type"::"Create Interaction", "Action Type"::"Run Function"]) THEN
+                                                                  Optional := FALSE;
+
+                                                                IF "Action Type" <> "Action Type"::"Create Tray Line" THEN BEGIN
+                                                                  "Team Code" := '';
+                                                                  "Service Default Team" := FALSE;
+                                                                  "Task Code" := '';
+                                                                END;
+                                                                IF "Action Type" <> "Action Type"::"Create Interaction" THEN BEGIN
+                                                                  "Interaction Template Code" := '';
+                                                                  "Open Wizard For User" := 0;
+                                                                END;
+
+                                                                IF "Action Type" <> "Action Type"::"Run Object" THEN BEGIN
+                                                                  VALIDATE("Object Type", "Object Type"::" ");
+                                                                  "Use Request Form" := FALSE;
+                                                                  "Use System Printer" := FALSE;
+                                                                END;
+                                                                IF "Action Type" <> "Action Type"::"Set Value" THEN BEGIN
+                                                                  "Field To Set" := 0;
+                                                                  "Value To Set" := '';
+                                                                  "Value Int To Set" := 0;
+                                                                  "Fill Date" :=  FALSE;//IMH04
+                                                                END;
+                                                                IF "Action Type" <> "Action Type"::"Run Function" THEN BEGIN
+                                                                  "Action Function No." := 0;
+                                                                  "Action Function Parameters" := '';
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Action Type;
+                                                              FRA=Type action];
+                                                   OptionCaptionML=[ENU=Create Tray Line,Create Interaction,Run Object,Set Value,Run Function;
+                                                                    FRA=Cr‚er activit‚ corbeille,Cr‚er interaction,Ex‚cuter objet,Mise … jour valeur,Ex‚cuter fonction];
+                                                   OptionString=Create Tray Line,Create Interaction,Run Object,Set Value,Run Function }
+    { 11  ;   ;Object Type         ;Option        ;OnValidate=BEGIN
+                                                                IF "Object Type" <> "Object Type"::" " THEN BEGIN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Run Object");
+                                                                  IF "Object Type" <> xRec."Object Type" THEN
+                                                                    VALIDATE("Object No.", 0);
+                                                                END
+                                                                ELSE
+                                                                  VALIDATE("Object No.", 0);
+                                                              END;
+
+                                                   CaptionML=[ENU=Object Type;
+                                                              FRA=Type objet];
+                                                   OptionCaptionML=[ENU=" ,,,Report,,Codeunit";
+                                                                    FRA=" ,,,Report,,Codeunit"];
+                                                   OptionString=[ ,Table,Form,Report,Dataport,Codeunit] }
+    { 12  ;   ;Object No.          ;Integer       ;TableRelation=IF (Object Type=FILTER(>' ')) AllObj."Object ID" WHERE (Object Type=FIELD(Object Type));
+                                                   OnValidate=BEGIN
+                                                                IF "Object No." <> 0 THEN BEGIN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Run Object");
+                                                                END;
+                                                                IF CurrFieldNo = FIELDNO("Object No.") THEN
+                                                                  CALCFIELDS("Object Caption");
+                                                              END;
+
+                                                   CaptionML=[ENU=Object ID;
+                                                              FRA=Nø objet];
+                                                   NotBlank=Yes;
+                                                   BlankZero=Yes }
+    { 13  ;   ;Use Request Form    ;Boolean       ;OnValidate=BEGIN
+                                                                IF "Use Request Form" THEN
+                                                                  TESTFIELD("Object Type", "Object Type"::Report);
+                                                              END;
+
+                                                   CaptionML=[ENU=Use Request Form;
+                                                              FRA=Affiche formulaire] }
+    { 14  ;   ;Use System Printer  ;Boolean       ;OnValidate=BEGIN
+                                                                IF "Use System Printer" THEN
+                                                                  TESTFIELD("Object Type", "Object Type"::Report);
+                                                              END;
+
+                                                   CaptionML=[ENU=Use System Printer;
+                                                              FRA=Utiliser imprimante systŠme] }
+    { 15  ;   ;Object Caption      ;Text250       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(AllObjWithCaption."Object Caption" WHERE (Object Type=FIELD(Object Type),
+                                                                                                                Object ID=FIELD(Object No.)));
+                                                   CaptionML=[ENU=Object Caption;
+                                                              FRA=Libell‚ objet];
+                                                   Editable=No }
+    { 20  ;   ;Team Code           ;Code10        ;TableRelation=Team.Code;
+                                                   OnValidate=BEGIN
+                                                                IF "Team Code" <> '' THEN BEGIN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Create Tray Line");
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Team Code;
+                                                              FRA=Code corbeille] }
+    { 21  ;   ;Task Code           ;Code10        ;TableRelation=IF (Source Table=CONST(50000)) "Tray Task"."Task Code" WHERE (Source Table No.=CONST(5050))
+                                                                 ELSE IF (Source Table=FILTER(<>50000)) "Tray Task"."Task Code" WHERE (Source Table No.=FIELD(Source Table));
+                                                   OnValidate=BEGIN
+                                                                IF "Task Code" <> '' THEN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Create Tray Line");
+                                                              END;
+
+                                                   CaptionML=[ENU=Task Code;
+                                                              FRA=Code tƒche] }
+    { 22  ;   ;Service Default Team;Boolean       ;OnValidate=VAR
+                                                                lProcessType@1100281000 : Record 50041;
+                                                              BEGIN
+                                                                IF "Service Default Team" THEN BEGIN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Create Tray Line");
+                                                                  lProcessType.GET("Process Code");
+                                                                  IF NOT (lProcessType."Source Table No." IN [DATABASE::"Service Header", DATABASE::"Service Intervention Line",
+                                                                                                              DATABASE::"Service Intervention Quote"]) //IMH06.ST
+                                                                  THEN
+                                                                    FIELDERROR("Service Default Team");
+                                                                //<<IMH09.ST
+                                                                  IF "DPR Tray Line" > 0 THEN
+                                                                    "DPR Tray Line" := 0;
+                                                                //>>IMH09.ST
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Service Default Team;
+                                                              FRA=Corbeille service] }
+    { 23  ;   ;Open Tray Line Wizard;Boolean      ;CaptionML=[ENU=Open Tray Line Wizard;
+                                                              FRA=Ouvrir fenˆtre activit‚ corbeille] }
+    { 31  ;   ;Source Table        ;Integer       ;TableRelation=AllObj."Object ID" WHERE (Object Type=CONST(TableData));
+                                                   CaptionML=[ENU=Source Table;
+                                                              FRA=Table source];
+                                                   Editable=No }
+    { 32  ;   ;Field To Set        ;Integer       ;TableRelation=Field.No. WHERE (TableNo=FIELD(Source Table),
+                                                                                  Enabled=CONST(Yes),
+                                                                                  Class=CONST(Normal));
+                                                   OnValidate=BEGIN
+                                                                IF "Field To Set" <> 0 THEN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Set Value");
+                                                                IF CurrFieldNo = FIELDNO("Field To Set") THEN
+                                                                  CALCFIELDS("Field Caption");
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              lField@1100281002 : Record 2000000041;
+                                                              lFieldList@1100281001 : Form 6521;
+                                                            BEGIN
+                                                              TESTFIELD("Action Type", "Action Type"::"Set Value");
+                                                              lField.FILTERGROUP(2);
+                                                              lField.SETRANGE(TableNo, "Source Table");
+                                                              lField.SETRANGE(Class, lField.Class::Normal);
+                                                              lField.SETRANGE(Enabled, TRUE);
+                                                              lField.FILTERGROUP(0);
+                                                              lFieldList.SETTABLEVIEW(lField);
+                                                              IF "Field To Set" <> 0 THEN
+                                                                IF lField.GET("Source Table","Field To Set") THEN
+                                                                  lFieldList.SETRECORD(lField);
+                                                              lFieldList.LOOKUPMODE(TRUE);
+                                                              IF lFieldList.RUNMODAL = ACTION::LookupOK THEN BEGIN
+                                                                lFieldList.GETRECORD(lField);
+                                                                VALIDATE("Field To Set", lField."No.");
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Field To Set;
+                                                              FRA=Champ … mettre … jour];
+                                                   BlankZero=Yes }
+    { 33  ;   ;Value To Set        ;Text30        ;OnValidate=VAR
+                                                                lFieldRef@1100281000 : FieldRef;
+                                                              BEGIN
+                                                                IF "Value To Set" <> '' THEN BEGIN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Set Value");
+                                                                  GetField("Source Table",lFieldRef,"Field To Set");
+                                                                  EvaluateField(lFieldRef,"Value To Set");
+
+                                                                  IF UPPERCASE(FORMAT(lFieldRef.TYPE)) IN ['BOOLEAN', 'OPTION'] THEN
+                                                                    "Value Int To Set" := lFieldRef.VALUE
+                                                                  ELSE
+                                                                    "Value To Set" := FORMAT(lFieldRef.VALUE);
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Value To Set;
+                                                              FRA=Valeur … mettre … jour] }
+    { 34  ;   ;Value Int To Set    ;Integer       ;CaptionML=[ENU=Value Int To Set;
+                                                              FRA=Valeur int … mettre … jour] }
+    { 35  ;   ;Field Caption       ;Text250       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Field."Field Caption" WHERE (TableNo=FIELD(Source Table),
+                                                                                                   No.=FIELD(Field To Set)));
+                                                   CaptionML=[ENU=Field Caption;
+                                                              FRA=Nom du champ];
+                                                   Editable=No }
+    { 40  ;   ;Interaction Template Code;Code10   ;TableRelation=IF (Source Table=FILTER(5050|50000)) "Interaction Template".Code WHERE (Show To Contact=CONST(Yes))
+                                                                 ELSE IF (Source Table=CONST(50066)) "Interaction Template".Code WHERE (Show To Service=CONST(Yes))
+                                                                 ELSE IF (Source Table=CONST(5900)) "Interaction Template".Code WHERE (Show To Service Header=CONST(Yes))
+                                                                 ELSE IF (Source Table=CONST(50075)) "Interaction Template".Code WHERE (Show To Intervention=CONST(Yes))
+                                                                 ELSE IF (Source Table=CONST(50076)) "Interaction Template".Code WHERE (Show To Intervention=CONST(Yes));
+                                                   OnValidate=BEGIN
+                                                                IF "Interaction Template Code" <> '' THEN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Create Interaction");
+                                                              END;
+
+                                                   CaptionML=[ENU=Interaction Template Code;
+                                                              FRA=Code modŠle interaction] }
+    { 41  ;   ;Open Wizard For User;Option        ;OnValidate=BEGIN
+                                                                IF "Open Wizard For User" > 0 THEN
+                                                                  IF NOT ("Action Type" IN ["Action Type"::"Create Interaction", "Action Type"::"Run Function"]) THEN
+                                                                    FIELDERROR("Action Type");
+                                                              END;
+
+                                                   CaptionML=[ENU=Open Wizard For User;
+                                                              FRA=Ouvrir assistant];
+                                                   OptionCaptionML=[ENU=Assist Action Only,Full Wizard,No Wizard;
+                                                                    FRA=Action assist‚e seulement,Assistant complet,Pas d'assistant];
+                                                   OptionString=Assist Action Only,Full Wizard,No Wizard }
+    { 51  ;   ;Action Function No. ;Integer       ;TableRelation="Process Function"."Function No." WHERE (Source Table No.=FIELD(Source Table),
+                                                                                                          Function Type=CONST(ActionFunction));
+                                                   OnValidate=BEGIN
+                                                                IF "Action Function No." <> 0 THEN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Run Function");
+
+                                                                IF CurrFieldNo = FIELDNO("Action Function No.") THEN
+                                                                  CALCFIELDS("Action Function Description");
+                                                              END;
+
+                                                   CaptionML=[ENU=Action Function No.;
+                                                              FRA=Nø fonction action];
+                                                   BlankZero=Yes }
+    { 52  ;   ;Action Function Description;Text50 ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Process Function"."Function Description" WHERE (Source Table No.=FIELD(Source Table),
+                                                                                                                       Function No.=FIELD(Action Function No.),
+                                                                                                                       Function Type=CONST(ActionFunction)));
+                                                   CaptionML=[ENU=Action Function Description;
+                                                              FRA=Fonction action];
+                                                   Editable=No }
+    { 53  ;   ;Action Function Parameters;Text250 ;OnValidate=BEGIN
+                                                                CheckParametres; //IMH10.zw
+                                                              END;
+
+                                                   CaptionML=[ENU=Action Function Parameters;
+                                                              FRA=ParamŠtres fonction action] }
+    { 90  ;   ;Requirements        ;Integer       ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Process Requirement" WHERE (Process Code=FIELD(Process Code),
+                                                                                                  Source Requirement=CONST(Action),
+                                                                                                  Source Line No.=FIELD(Source Line No.),
+                                                                                                  Source Action Line No.=FIELD(Line No.)));
+                                                   CaptionML=[ENU=Requirements;
+                                                              FRA=Conditions];
+                                                   BlankZero=Yes;
+                                                   Editable=No }
+    { 91  ;   ;Suspend Action      ;Boolean       ;OnValidate=BEGIN
+                                                                IF "Suspend Action" THEN
+                                                                  "Suspend Action Date" := CURRENTDATETIME
+                                                                ELSE
+                                                                  "Suspend Action Date" := 0DT;
+                                                              END;
+
+                                                   CaptionML=[ENU=Suspend Action;
+                                                              FRA=Inactif] }
+    { 92  ;   ;Suspend Action Date ;DateTime      ;CaptionML=[ENU=Suspend Action Date;
+                                                              FRA=Date inactivit‚];
+                                                   Editable=No }
+    { 200 ;   ;DPR Tray Line       ;Option        ;OnValidate=VAR
+                                                                lProcessType@1100281001 : Record 50041;
+                                                              BEGIN
+                                                                //IMH04
+                                                                IF "DPR Tray Line" <> "DPR Tray Line"::" " THEN BEGIN
+                                                                  TESTFIELD("Action Type", "Action Type"::"Create Tray Line");
+                                                                  lProcessType.GET("Process Code");
+                                                                //<<IMH09.ST
+                                                                //  IF NOT (lProcessType."Source Table No." = DATABASE::Provider) THEN
+                                                                  "Service Default Team" := FALSE;
+                                                                  IF NOT (lProcessType."Source Table No." IN [DATABASE::Provider, DATABASE::"Service Intervention Line",
+                                                                                                              DATABASE::"Service Intervention Quote"]) THEN
+                                                                //>>IMH09.ST
+                                                                    FIELDERROR("DPR Tray Line");
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=DPR Tray Line;
+                                                              FRA=Corbeille DPR];
+                                                   OptionCaptionML=[ENU=" ,RC,NA,NF,RC Territory,NA Territory,NF Territory";
+                                                                    FRA=" ,Responsable zone,AR,Charg‚ de pilotage,Zone responsable,Zone AR,Zone charg‚ de pilotage"];
+                                                   OptionString=[ ,RC,NA,NF,RC Territory,NA Territory,NF Territory] }
+    { 210 ;   ;Fill Date           ;Boolean       ;OnValidate=VAR
+                                                                lFieldRef@1100281000 : FieldRef;
+                                                              BEGIN
+                                                                //IMH04
+                                                                IF "Fill Date" THEN BEGIN
+                                                                  TESTFIELD("Action Type","Action Type"::"Set Value");
+                                                                  GetField("Source Table",lFieldRef,"Field To Set");
+                                                                  IF NOT (UPPERCASE(FORMAT(lFieldRef.TYPE)) IN ['DATE', 'DATETIME']) THEN
+                                                                    ERROR(STRSUBSTNO(Text002,FIELDCAPTION("Field To Set")));
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Fill Date;
+                                                              FRA=Remplir … date] }
+    { 220 ;   ;Select Code         ;Boolean       ;OnValidate=VAR
+                                                                lCodeRec@1100281000 : Record 50079;
+                                                              BEGIN
+                                                                //<<IMH08.isat.PC
+                                                                TESTFIELD("Action Type","Action Type"::"Set Value");
+                                                                IF "Select Code" THEN BEGIN
+                                                                  lCodeRec.SETRANGE("Table ID","Source Table");
+                                                                  lCodeRec.SETRANGE("Field ID","Field To Set");
+                                                                  IF lCodeRec.ISEMPTY THEN BEGIN
+                                                                    "Select Code" := FALSE;
+                                                                  END;
+                                                                END;
+                                                                //>>IMH08.isat.PC
+                                                              END;
+
+                                                   CaptionML=[ENU=Select Code;
+                                                              FRA=S‚lectionner code] }
+    { 50500;  ;Creation Date       ;DateTime      ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date de cr‚ation];
+                                                   Editable=No }
+    { 50501;  ;Creation User ID    ;Text30        ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Creation User ID;
+                                                              FRA=Utilisateur cr‚ation];
+                                                   Editable=No }
+    { 50502;  ;Last Modification Date;DateTime    ;CaptionML=[ENU=Last Modification Date;
+                                                              FRA=Date derniŠre modification];
+                                                   Editable=No }
+    { 50503;  ;Last Modification User ID;Text30   ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Last Modification User ID;
+                                                              FRA=Utilisateur derniŠre modification];
+                                                   Editable=No }
+  }
+  KEYS
+  {
+    {    ;Process Code,Source Action,Source Line No.,Line No.;
+                                                   Clustered=Yes }
+    {    ;Process Code,Source Action,Source Line No.,Action Order }
+    {    ;Action Type,Source Table,Action Function No. }
+    {    ;Action Type,Interaction Template Code    }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=You can''t delete the action %1, because there is a process for this action.;FRA=Vous ne pouvez pas supprimer l''action %1, car il y a un processus en cours pour cette action.';
+      ProcStatus@1100281001 : Record 50042;
+      ProcStep@1100281002 : Record 50043;
+      SkipStatusCheck@1100281003 : Boolean;
+      Text002@1100281004 : TextConst 'ENU=The field %1 must be a date or datetime field.;FRA=Le champ %1 doit ˆtre un champ date ou dateheure.';
+      Text003@1100281005 : TextConst 'ENU=You can''t create interaction with NAS.;FRA=Vous ne pouvez pas cr‚er d''interaction par les NAS.';
+      Text004@1100281006 : TextConst 'ENU=You must deactivate your action before.;FRA=Votre action doit ˆtre inactive avant suppression.';
+      Text005@1100281007 : TextConst 'ENU=You can''t delete this action before %1.;FRA=Vous ne pouver pas supprimer cette action avant le %1.';
+
+    PROCEDURE TouchRecord@1100281006(pInsert@1100281000 : Boolean);
+    BEGIN
+      IF pInsert THEN BEGIN
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+      END;
+      "Last Modification Date" := CURRENTDATETIME;
+      "Last Modification User ID" := USERID;
+    END;
+
+    PROCEDURE SetSkipStatusCheck@1100281007(pSkipStatusCheck@1100281000 : Boolean);
+    BEGIN
+      SkipStatusCheck := pSkipStatusCheck;
+    END;
+
+    LOCAL PROCEDURE GetField@1100281003(pTableNo@1100281000 : Integer;VAR pFieldRef@1001 : FieldRef;pFieldNo@1003 : Integer);
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      lRecRef.OPEN(pTableNo);
+      pFieldRef := lRecRef.FIELD(pFieldNo);
+    END;
+
+    PROCEDURE EvaluateField@1100481002(VAR pFieldRef@1100481000 : FieldRef;VAR pFilterValue@1100481001 : Text[1024]);
+    VAR
+      lBool@1100481002 : Boolean;
+      lInt@1100481003 : Integer;
+      lDec@1100481004 : Decimal;
+      lText@1100481005 : Text[1024];
+      lCode@1100481006 : Code[1024];
+      lDate@1100481007 : Date;
+      lTime@1100481008 : Time;
+      lDateTime@1100481009 : DateTime;
+    BEGIN
+      CASE UPPERCASE(FORMAT(pFieldRef.TYPE)) OF
+        'BOOLEAN' : BEGIN
+          EVALUATE(lBool, pFilterValue);
+          pFieldRef.VALUE := lBool;
+          pFilterValue := FORMAT(lBool);
+        END;
+        'INTEGER', 'DURATION' : BEGIN
+          EVALUATE(lInt, pFilterValue);
+          pFieldRef.VALUE := lInt;
+        END;
+        'DECIMAL' : BEGIN
+          EVALUATE(lDec, pFilterValue);
+          pFieldRef.VALUE := lDec;
+        END;
+        'CODE' : BEGIN
+          EVALUATE(lCode, pFilterValue);
+          pFieldRef.VALUE := lCode;
+        END;
+        'DATE' : BEGIN
+          EVALUATE(lDate, pFilterValue);
+          pFieldRef.VALUE := lDate;
+        END;
+        'TIME' : BEGIN
+          EVALUATE(lTime, pFilterValue);
+          pFieldRef.VALUE := lTime;
+        END;
+        'DATETIME' : BEGIN
+          EVALUATE(lDateTime, pFilterValue);
+          pFieldRef.VALUE := lDateTime;
+        END;
+        'OPTION' : BEGIN
+          pFieldRef.SETFILTER(pFilterValue);
+          pFilterValue := pFieldRef.GETFILTER;
+          pFieldRef.VALUE := pFieldRef.GETRANGEMIN;
+        END;
+      END; //CASE
+    END;
+
+    PROCEDURE GetCaption@1100281005() : Text[1024];
+    BEGIN
+      EXIT(STRSUBSTNO('%1 %2', FORMAT("Source Action"), GetSourceName));
+    END;
+
+    PROCEDURE ProcessEditable@1100281000(pError@1100281000 : Boolean) rValue : Boolean;
+    VAR
+      lProcess@1100281001 : Record 50041;
+    BEGIN
+      IF SkipStatusCheck THEN
+        EXIT(TRUE);
+      EXIT(lProcess.IsModifyStatus("Process Code", pError));
+    END;
+
+    PROCEDURE GetSourceName@1100281008() : Text[80];
+    BEGIN
+      CASE "Source Action" OF
+        "Source Action"::Status : BEGIN
+          EXIT(GetPrevStatusName);
+          IF NOT ProcStatus.GET("Process Code", "Source Line No.") THEN
+            CLEAR(ProcStatus);
+          EXIT(ProcStatus.Description);
+        END;
+        "Source Action"::Step : BEGIN
+          IF NOT ProcStep.GET("Process Code", "Source Line No.") THEN
+            CLEAR(ProcStep);
+          EXIT(ProcStep.Description);
+        END;
+      END; // CASE
+    END;
+
+    PROCEDURE GetPrevStatusName@1100281001() : Text[80];
+    BEGIN
+      CASE "Source Action" OF
+        "Source Action"::Status : BEGIN
+          IF NOT ProcStatus.GET("Process Code", "Source Line No.") THEN
+            CLEAR(ProcStatus);
+          EXIT(ProcStatus.Description);
+        END;
+        "Source Action"::Step : BEGIN
+          IF NOT ProcStep.GET("Process Code", "Source Line No.") THEN
+            CLEAR(ProcStep);
+          EXIT(ProcStep.Description);
+        END;
+      END; // CASE
+    END;
+
+    PROCEDURE GetInteractParam@1100281004() : Integer;
+    BEGIN
+      // param des interactions : masquer assistant = No,AssistActionOnly,All
+      IF (NOT GUIALLOWED) OR ("Open Wizard For User" = "Open Wizard For User"::"No Wizard") THEN
+        EXIT(2);
+      CASE "Open Wizard For User" OF
+        "Open Wizard For User"::"Assist Action Only" :
+          EXIT(1);
+        "Open Wizard For User"::"Full Wizard" :
+          EXIT(0);
+      END;
+    END;
+
+    PROCEDURE GetUserInterf@1100281010() : Boolean;
+    BEGIN
+      //<<IMH11.PC
+      IF NOT GUIALLOWED THEN BEGIN
+      //  IF "Action Type" = "Action Type"::"Create Interaction" THEN
+      //    ERROR(Text003);
+        EXIT(FALSE);
+      END;
+      //>>IMH11.PC
+      CASE "Action Type" OF
+        "Action Type"::"Create Tray Line" : EXIT("Open Tray Line Wizard");
+        "Action Type"::"Create Interaction" : EXIT("Open Wizard For User" <> "Open Wizard For User"::"No Wizard");
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetRequirementFilter@1100281002(VAR pRequirement@1100281000 : Record 50045);
+    BEGIN
+      pRequirement.RESET;
+      pRequirement.SETRANGE("Process Code", "Process Code");
+      pRequirement.SETRANGE("Source Requirement", pRequirement."Source Requirement"::Action);
+      pRequirement.SETRANGE("Source Line No.", "Source Line No.");
+      pRequirement.SETRANGE("Source Action Line No.", "Line No.");
+    END;
+
+    LOCAL PROCEDURE CheckAction@1100281009();
+    BEGIN
+      //IMH07.ST
+      CASE "Action Type" OF
+        "Action Type"::"Create Tray Line" :
+          IF NOT "Open Tray Line Wizard" THEN
+            IF ("Team Code" = '') AND (NOT "Service Default Team") AND ("DPR Tray Line" = "DPR Tray Line"::" ") THEN
+              FIELDERROR("Team Code");
+        "Action Type"::"Create Interaction" :
+          IF ("Interaction Template Code" = '') AND ("Open Wizard For User" <> "Open Wizard For User"::"Full Wizard") THEN
+            FIELDERROR("Interaction Template Code");
+        "Action Type"::"Run Object" :
+          IF "Object No." = 0 THEN
+            FIELDERROR("Object No.");
+        "Action Type"::"Set Value" :
+          IF "Field To Set" = 0 THEN
+            FIELDERROR("Field To Set");
+        "Action Type"::"Run Function" :
+          IF "Action Function No." = 0 THEN
+            FIELDERROR("Action Function No.");
+      END; // CASE
+    END;
+
+    PROCEDURE AssistParameters@1100281011();
+    VAR
+      lFunction@1100281000 : Record 50085;
+    BEGIN
+      //IMH09.ST
+      TESTFIELD("Action Function No.");
+      lFunction.VALIDATE("Source Table No.", "Source Table");
+      lFunction."Function Type" := lFunction."Function Type"::ActionFunction;
+      lFunction."Function No." := "Action Function No.";
+      lFunction.AssistFunction;
+    END;
+
+    PROCEDURE CheckParametres@1100281013();
+    VAR
+      lFunction@1100281000 : Record 50085;
+    BEGIN
+      //IMH10.ZW
+      TESTFIELD("Action Function No.");
+      lFunction.VALIDATE("Source Table No.", "Source Table");
+      lFunction."Function Type" := lFunction."Function Type"::ActionFunction;
+      lFunction."Function No." := "Action Function No.";
+      lFunction.CheckParameters("Action Function Parameters");
+    END;
+
+    BEGIN
+    {
+      /** @r IMH14 @d 15/10/13 @a ISAT.ST @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR / R‚gion */
+      /** @r IMH13 @d 03/11/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des statuts
+          @c Ajout index Action Type,Action Function No.
+          @c Ajout index Action Type,Interaction Template Code
+          @c Pour navigation */
+      /** @r IMH12 @d 17/10/11 @a ISAT.EBA @v IMH6.01.120 @s Gestion des corbeilles
+          @c Modification "OptionString" du champ 200 "DPR Tray Line" */
+      /** @r IMH11 @d 13/09/11 @a ISAT.PC @v IMH6.01.102 @s Gestion des status @c D‚sactivation */
+      /** @r IMH10 @d 05/04/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des status
+          @c Ajout CheckParameters */
+      /** @r IMH09 @d 06/04/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des status
+          @c Autoriser corbeille DPR en devis / intervention
+          @c Ajout AssistParameters */
+      /** @r IMH08 @d 19/03/11 @a ISAT.PC @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout du champ 220, Select Code
+      /** @r IMH07 @d 08/03/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Ajout CheckAction  */
+      /** @r IMH06 @d 21/02/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Statut devis service  */
+      /** @r IMH05 @d 28/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Test relation sur la mise … jour de valeur */
+      /** @r IMH04 @d 27/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout du champ 200 DPR Team Code
+          @c Ajout du champ 210 Fill Date */
+      /** @r IMH03 @d 31/12/10 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Finalisation, changement PK */
+      /** @r IMH02 @d 15/12/10 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Ajout Next process code */
+      /** @r IMH01 @d 08/11/10 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Creation Objet
+          @C Plage de champ d‚pendant du type */
+    }
+    END.
+  }
+}

@@ -1,0 +1,891 @@
+OBJECT Report 8016643 FA-Professionnal Tax
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:21:26;
+    Modified=Yes;
+    Version List=ISA6.00,IMISAT6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Fixed Asset-Professionnal Tax;
+               FRA=Immos - Taxe professionnelle];
+    OnPreReport=BEGIN
+                  DeprBook.GET(DeprBookCode);
+                  FAGenReport.AppendFAPostingFilter("Fixed Asset",StartingDate,EndingDate);
+                  FAFilter := "Fixed Asset".GETFILTERS;
+                  MainTextTitle := Text1120046;
+                  IF BudgetReport THEN
+                    MainTextTitle := STRSUBSTNO('%1 %2',MainTextTitle,Text1120047);
+                  DeprBookText := STRSUBSTNO('%1%2 %3',DeprBook.TABLECAPTION,':',DeprBookCode);
+                  IF PrintDetails THEN BEGIN
+                    FANo := "Fixed Asset".FIELDCAPTION("No.");
+                    FADescription := "Fixed Asset".FIELDCAPTION(Description);
+                  END;
+
+                  IF ProfTax = ProfTax::percentage THEN
+                    ProfTaxText := Text001
+                  ELSE
+                    ProfTaxText := Text002;
+                  TotalTPBase := 0;
+                END;
+
+    OnPostReport=BEGIN
+                   IF CreateXl THEN BEGIN  // NOR01.isat.cc
+                      FASetup.GET;
+                      IF ((FASetup."R50041.Filemane" <> '') AND (FASetup."R50041.Sheet" <> '')) THEN
+                         R370.OpenBook(FASetup."R50041.Filemane",FASetup."R50041.Sheet")
+                      ELSE
+                         R370.CreateBook;
+
+                      R370.CreateSheet('TP','Taxe professionelle',COMPANYNAME,USERID);
+                      R370.GiveUserControl;
+                   END;
+                 END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table5600;
+        OnPreDataItem=BEGIN
+                        CASE GroupTotals OF
+                          GroupTotals::"FA Class":
+                            SETCURRENTKEY("FA Class Code");
+                          GroupTotals::"FA Subclass":
+                            SETCURRENTKEY("FA Subclass Code");
+                          GroupTotals::"Main Asset":
+                            SETCURRENTKEY("Component of Main Asset");
+                          GroupTotals::"Global Dimension 1":
+                            SETCURRENTKEY("Global Dimension 1 Code");
+                          GroupTotals::"FA Location":
+                            SETCURRENTKEY("FA Location Code");
+                          GroupTotals::"Global Dimension 2":
+                            SETCURRENTKEY("Global Dimension 2 Code");
+                        END;
+                        FAPostingType.CreateTypes;
+                        FADateType.CreateTypes;
+
+                        DateType1 := FADeprBook.FIELDCAPTION("Acquisition Date");
+
+                        PostingType1 := FADeprBook.FIELDCAPTION("Acquisition Cost");
+                        PostingType2 := FADeprBook.FIELDCAPTION("Acquisition Cost");
+                        Period1 := Period1::"at Ending Date";
+                        Period2 := Period1::"at Ending Date";
+
+                        CheckDateType(DateType1,DateTypeNo1);
+                        CheckDateType(DateType2,DateTypeNo2);
+
+                        CheckPostingType(PostingType1,PostingTypeNo1);
+                        CheckPostingType(PostingType2,PostingTypeNo2);
+                        CheckPostingType(PostingType3,PostingTypeNo3);
+                        MakeGroupTotalText;
+                        FAGenReport.ValidateDates(StartingDate,EndingDate);
+                        MakeDateHeadLine;
+                        MakeAmountHeadLine(3,PostingType1,PostingTypeNo1,Period1);
+                        MakeAmountHeadLine(4,PostingType2,PostingTypeNo2,Period2);
+                        MakeAmountHeadLine(5,PostingType3,PostingTypeNo3,Period3);
+
+                        TotalProfTAxAmount := 0;
+
+                        IF (CreateXl) THEN
+                        BEGIN
+                           XlLine(R370);
+                           R370.INIT;
+                           R370.VALIDATE("Row No.",VLine);
+                           R370.VALIDATE("Column No.",1);
+                           R370."Cell Value as Text" := 'Groupe';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",2);
+                           R370.Bold := TRUE;
+                           R370."Cell Value as Text" := 'Nø immobilisation';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",3);
+                           R370."Cell Value as Text" := 'D‚signation';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",4);
+                           R370."Cell Value as Text" := 'Date d''acquisition ';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",5);
+                           R370."Cell Value as Text" := 'Montant';
+                           R370.INSERT;
+                           R370.VALIDATE("Column No.",6);
+                           R370."Cell Value as Text" := 'Taxe';
+                           R370.INSERT;
+                           VLine += 1;
+                        END;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF NOT FADeprBook.GET("No.",DeprBookCode) THEN
+                             CurrReport.SKIP;
+                           IF SkipRecord THEN
+                             CurrReport.SKIP;
+
+                           Date[1] :=
+                             FAGenReport.GetLastDate(
+                               "No.",DateTypeNo1,EndingDate,DeprBookCode,FALSE);
+                           Date[2] :=
+                             FAGenReport.GetLastDate(
+                               "No.",DateTypeNo2,EndingDate,DeprBookCode,FALSE);
+
+                           BeforeAmount := 0;
+                           EndingAmount := 0;
+                           IF BudgetReport THEN
+                              BudgDepr.Calculate(
+                                "No.",GetStartDate(StartingDate),EndingDate,DeprBookCode,BeforeAmount,EndingAmount);
+
+                           IF SetAmountToZero(PostingTypeNo1,Period1) THEN
+                             Amounts[1] := 0
+                           ELSE
+                             Amounts[1] :=
+                               FAGenReport.CalcFAPostedAmount(
+                                 "No.",PostingTypeNo1,Period1,StartingDate,EndingDate,
+                                 DeprBookCode,BeforeAmount,EndingAmount,FALSE,FALSE);
+
+                           IF (Amounts[1] = 0) THEN
+                              CurrReport.SKIP;
+
+                           IF SetAmountToZero(PostingTypeNo2,Period2) THEN
+                             Amounts[2] := 0
+                           ELSE
+                             Amounts[2] :=
+                               FAGenReport.CalcFAPostedAmount(
+                                 "No.",PostingTypeNo2,Period2,StartingDate,EndingDate,
+                                 DeprBookCode,BeforeAmount,EndingAmount,FALSE,FALSE);
+
+                           IF SetAmountToZero(PostingTypeNo3,Period3) THEN
+                             Amounts[3] := 0
+                           ELSE
+                             Amounts[3] :=
+                               FAGenReport.CalcFAPostedAmount(
+                                 "No.",PostingTypeNo3,Period3,StartingDate,EndingDate,
+                                 DeprBookCode,BeforeAmount,EndingAmount,FALSE,FALSE);
+
+                           Amounts[2] := ROUND(Amounts[2] * PercentageTax["Professional Tax" + 1]/100);
+
+                           //isat ec 05/12/05 affichage Base Taxe professionnelle
+                           CLEAR(ProfTaxAmount);
+                           IF ProfTax = ProfTax::percentage THEN
+                             ProfTaxAmount := PercentageTax["Professional Tax" + 1]*Amounts[1]/100
+                           ELSE
+                             IF NOT SetAmountToZero(PostingTypeNo1,Period1) THEN
+                               ProfTaxAmount := "Fixed Asset"."Professional Tax Amount";
+                         END;
+
+        ReqFilterFields=No.,FA Class Code,FA Subclass Code,Professional Tax;
+        GroupTotalFields=FA Subclass Code,FA Class Code,Global Dimension 1 Code,Global Dimension 2 Code,Component of Main Asset,FA Location Code;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19050;
+            SectionHeight=1692;
+          }
+          CONTROLS
+          {
+            { 33  ;TextBox      ;0    ;0    ;7500 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=MainTextTitle }
+            { 32  ;TextBox      ;0    ;846  ;7500 ;423  ;FontSize=8;
+                                                         SourceExpr=COMPANYNAME }
+            { 34  ;TextBox      ;11550;0    ;7500 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 35  ;TextBox      ;11550;846  ;7500 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+            { 36  ;TextBox      ;18600;423  ;450  ;423  ;SourceExpr=CurrReport.PAGENO }
+            { 37  ;Label        ;17850;423  ;750  ;423  ;ParentControl=36;
+                                                         CaptionML=[ENU=Page;
+                                                                    FRA=Page] }
+            { 3   ;TextBox      ;0    ;423  ;7500 ;423  ;FontSize=8;
+                                                         SourceExpr=DeprBookText }
+            { 1100281000;TextBox;0    ;1269 ;7500 ;423  ;FontSize=8;
+                                                         SourceExpr=ProfTaxText }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19050;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT((CurrReport.PAGENO = 1) AND (FAFilter <> ''));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 28  ;TextBox      ;0    ;0    ;18150;423  ;SourceExpr="Fixed Asset".TABLECAPTION+ ': ' + FAFilter }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19050;
+            SectionHeight=2115;
+          }
+          CONTROLS
+          {
+            { 21  ;TextBox      ;6300 ;423  ;1800 ;1269 ;HorzAlign=Left;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=TextTitle[1] }
+            { 16  ;TextBox      ;0    ;0    ;5250 ;423  ;FontSize=8;
+                                                         SourceExpr=GroupCodeName }
+            { 2   ;TextBox      ;0    ;846  ;1500 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=FANo }
+            { 6   ;TextBox      ;1650 ;846  ;4500 ;846  ;VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=FADescription }
+            { 10  ;TextBox      ;8250 ;423  ;2100 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text1120054 }
+            { 1100281001;Shape  ;0    ;1692 ;19050;423  ;ShapeStyle=HorzLine }
+            { 1100281005;TextBox;10500;423  ;1950 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text1120059 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19050;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT((GroupTotals = 0) OR NOT PrintDetails);
+                         END;
+
+          }
+          CONTROLS
+          {
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=19050;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           FOR i := 1 TO 3 DO
+                             GroupAmounts[i] := 0;
+                           MakeGroupHeadLine;
+                           CurrReport.SHOWOUTPUT(PrintDetails AND (GroupTotals <> 0));
+                         END;
+
+            OnPostSection=BEGIN
+                            IF CurrReport.SHOWOUTPUT THEN BEGIN
+                              GroupTPBase := 0;
+                              GroupProfTAxAmount := 0;
+                            END;
+                            IF (CreateXl AND XlSection) THEN
+                            BEGIN
+                               R370.INIT;
+                               R370.VALIDATE("Row No.",VLine);
+                               R370.VALIDATE("Column No.",1);
+                               R370.Bold := TRUE;
+                               R370."Cell Value as Text" := GroupTitle;
+                               R370.INSERT;
+                               VLine += 1;
+                            END;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 26  ;TextBox      ;0    ;423  ;5500 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=GroupTitle }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19050;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(PrintDetails);
+                         END;
+
+            OnPostSection=BEGIN
+                            FOR i := 1 TO 3 DO BEGIN
+                              GroupAmounts[i] := GroupAmounts[i] + Amounts[i];
+                              TotalAmounts[i] := TotalAmounts[i] + Amounts[i];
+                            END;
+                            ApplyTax :=0;
+                            IF ("Fixed Asset"."Professional Tax">0) THEN
+                               ApplyTax := 1;
+
+                            TotalTPBase += Amounts[1]*ApplyTax;
+                            GroupTPBase += Amounts[1]*ApplyTax;
+                            GroupProfTAxAmount += ProfTaxAmount;
+
+                            IF (CreateXl) THEN
+                            BEGIN
+                               R370.INIT;
+                               R370.VALIDATE("Row No.",VLine);
+                               R370.VALIDATE("Column No.",1);
+                               R370.Bold := FALSE;
+                               MakeGroupHeadLine;
+                               R370."Cell Value as Text" := GroupTitle;
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",2);
+                               R370."Cell Value as Text" := "No.";
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",3);
+                               R370."Cell Value as Text" := Description;
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",4);
+                               R370."Cell Value as Text" := FORMAT(Date[1]);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",5);
+                               R370."Cell Value as Text" := FORMAT(Amounts[1]);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",6);
+                               R370."Cell Value as Text" := FORMAT(Amounts[1] * ApplyTax);
+                               R370.INSERT;
+                               VLine += 1;
+                            END;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 1   ;TextBox      ;0    ;0    ;1500 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr="No." }
+            { 5   ;TextBox      ;1650 ;0    ;4500 ;423  ;FontSize=8;
+                                                         SourceExpr=Description }
+            { 7   ;TextBox      ;8250 ;0    ;2400 ;423  ;FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Amounts[1];
+                                                         AutoFormatType=1 }
+            { 24  ;TextBox      ;6300 ;0    ;1800 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Date[1] }
+            { 1100281006;TextBox;10800;0    ;2250 ;423  ;FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Amounts[1]*ApplyTax;
+                                                         AutoFormatType=1 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=19050;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(GroupTotals <> 0)
+                         END;
+
+            OnPostSection=BEGIN
+                            IF CurrReport.SHOWOUTPUT THEN
+                              TotalProfTAxAmount += ProfTaxAmount;
+                            IF (CreateXl AND XlSection) THEN
+                            BEGIN
+                               R370.INIT;
+                               R370.VALIDATE("Row No.",VLine);
+                               R370.VALIDATE("Column No.",2);
+                               R370.Bold := TRUE;
+                               R370."Cell Value as Text" := Text1120057 + ': ' + GroupTitle;
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",5);
+                               R370."Cell Value as Text" := FORMAT(GroupAmounts[1]);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",6);
+                               R370."Cell Value as Text" := FORMAT(GroupTPBase);
+                               R370.INSERT;
+                               VLine += 2;
+                            END;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 4   ;TextBox      ;8250 ;0    ;2400 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GroupAmounts[1];
+                                                         AutoFormatType=1 }
+            { 27  ;TextBox      ;0    ;0    ;6150 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text1120057 + ': ' + GroupTitle }
+            { 1100281007;TextBox;10800;0    ;2250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GroupTPBase;
+                                                         AutoFormatType=1 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=19050;
+            SectionHeight=846;
+            OnPostSection=BEGIN
+                            IF (CreateXl) THEN
+                            BEGIN
+                               R370.INIT;
+                               R370.VALIDATE("Row No.",VLine);
+                               R370.VALIDATE("Column No.",2);
+                               R370.Bold := TRUE;
+                               R370."Cell Value as Text" := 'TOTAL';
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",5);
+                               R370."Cell Value as Text" := FORMAT(TotalAmounts[1]);
+                               R370.INSERT;
+                               R370.VALIDATE("Column No.",6);
+                               R370."Cell Value as Text" := FORMAT(TotalTPBase);
+                               R370.INSERT;
+                               VLine += 1;
+                            END;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 29  ;TextBox      ;8250 ;423  ;2400 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TotalAmounts[1];
+                                                         AutoFormatType=1 }
+            { 38  ;Label        ;0    ;423  ;1500 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Total;
+                                                                    FRA=Total] }
+            { 1100281002;Shape  ;0    ;0    ;19050;423  ;ShapeStyle=HorzLine }
+            { 1100281008;TextBox;10800;423  ;2250 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TotalTPBase;
+                                                         AutoFormatType=1 }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Permissions=TableData 5603=r;
+      Width=6490;
+      Height=8250;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   IF DeprBookCode = '' THEN BEGIN
+                     FASetup.GET;
+                     DeprBookCode := FASetup."Default Depr. Book";
+                   END;
+                   FAPostingType.CreateTypes;
+                   FADateType.CreateTypes;
+                   PercentageTax[2] := 8;
+                   PercentageTax[3] := 9;
+                   PercentageTax[4] := 16;
+
+                   RequestOptionsForm.percentTP.VISIBLE := (ProfTax = ProfTax::percentage);
+                   RequestOptionsForm.PercentageTax2.VISIBLE := (ProfTax = ProfTax::percentage);
+                   RequestOptionsForm.PercentageTax3.VISIBLE := (ProfTax = ProfTax::percentage);
+                   RequestOptionsForm.PercentageTax4.VISIBLE := (ProfTax = ProfTax::percentage);
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1   ;Label        ;0    ;660  ;3300 ;440  ;ParentControl=2 }
+      { 2   ;TextBox      ;3410 ;660  ;2750 ;440  ;CaptionML=[ENU=Subtotals;
+                                                              FRA=Sous-totaux];
+                                                   OptionCaptionML=[ENU=" ,FA Class,FA Subclass,FA Location,Main Asset,Global Dimension 1,Global Dimension 2";
+                                                                    FRA=" ,Classe immo.,Sous-classe immo.,Emplacement immo.,Immo. principale,Axe principal 1,Axe principal 2"];
+                                                   NextControl=21;
+                                                   SourceExpr=GroupTotals }
+      { 12  ;Label        ;0    ;2750 ;3300 ;440  ;ParentControl=14 }
+      { 13  ;Label        ;0    ;3300 ;3300 ;440  ;ParentControl=15 }
+      { 14  ;TextBox      ;3410 ;2750 ;1650 ;440  ;CaptionML=[ENU=Starting Date;
+                                                              FRA=Date d‚but];
+                                                   SourceExpr=StartingDate }
+      { 15  ;TextBox      ;3410 ;3300 ;1650 ;440  ;CaptionML=[ENU=End Date;
+                                                              FRA=Date fin];
+                                                   SourceExpr=EndingDate }
+      { 17  ;Label        ;0    ;0    ;3300 ;440  ;ParentControl=19 }
+      { 18  ;Label        ;0    ;1320 ;3300 ;440  ;ParentControl=21 }
+      { 21  ;CheckBox     ;3410 ;1320 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Print per Fixed Asset;
+                                                              FRA=Imprimer par immobilisation];
+                                                   SourceExpr=PrintDetails }
+      { 19  ;TextBox      ;3410 ;0    ;2750 ;440  ;CaptionML=[ENU=Depreciation Books;
+                                                              FRA=Lois d'amortissement];
+                                                   SourceExpr=DeprBookCode;
+                                                   TableRelation="Depreciation Book" }
+      { 3   ;TextBox      ;3410 ;5610 ;1650 ;440  ;Name=PercentageTax2;
+                                                   CaptionML=[ENU=Fixed Asset >3  years 1;
+                                                              FRA=Immo >30 ans 1];
+                                                   BlankZero=Yes;
+                                                   SourceExpr=PercentageTax[2];
+                                                   MinValue=0;
+                                                   MaxValue=100 }
+      { 4   ;Label        ;0    ;5610 ;3300 ;440  ;ParentControl=3 }
+      { 7   ;Label        ;0    ;5060 ;3300 ;440  ;Name=percentTP;
+                                                   HorzAlign=Right;
+                                                   LeaderDots=No;
+                                                   CaptionML=[ENU=Professionnal Tax %;
+                                                              FRA=% Taxe  professionnelle] }
+      { 5   ;TextBox      ;3410 ;6160 ;1650 ;440  ;Name=PercentageTax3;
+                                                   CaptionML=[ENU=Fixed Asset >30 years 2;
+                                                              FRA=Immo >30 ans 2];
+                                                   BlankZero=Yes;
+                                                   SourceExpr=PercentageTax[3];
+                                                   MinValue=0;
+                                                   MaxValue=100 }
+      { 6   ;Label        ;0    ;6160 ;3300 ;440  ;ParentControl=5 }
+      { 8   ;TextBox      ;3410 ;6710 ;1650 ;440  ;Name=PercentageTax4;
+                                                   CaptionML=[ENU=Fixed Asset <30 years;
+                                                              FRA=Immo <30 ans];
+                                                   BlankZero=Yes;
+                                                   SourceExpr=PercentageTax[4];
+                                                   MinValue=0;
+                                                   MaxValue=100 }
+      { 9   ;Label        ;0    ;6710 ;3300 ;440  ;ParentControl=8 }
+      { 1100281000;TextBox;3410 ;4400 ;2750 ;440  ;CaptionML=[ENU=Professionnal Tax Method;
+                                                              FRA=Calcul taxe professionnelle];
+                                                   OptionString=pourcentage TP,montant TP;
+                                                   SourceExpr=ProfTax;
+                                                   OnAfterValidate=BEGIN
+                                                                     RequestOptionsForm.percentTP.VISIBLE := (ProfTax = ProfTax::percentage);
+                                                                     RequestOptionsForm.PercentageTax2.VISIBLE := (ProfTax = ProfTax::percentage);
+                                                                     RequestOptionsForm.PercentageTax3.VISIBLE := (ProfTax = ProfTax::percentage);
+                                                                     RequestOptionsForm.PercentageTax4.VISIBLE := (ProfTax = ProfTax::percentage);
+                                                                   END;
+                                                                    }
+      { 1100281001;Label  ;0    ;4400 ;3300 ;440  ;ParentControl=1100281000 }
+      { 1000000000;Label  ;0    ;2200 ;3300 ;440  ;CaptionML=FRA=Immo. aquis entre : }
+      { 1000000001;CheckBox;3410;7260 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=FRA=Export vers Excel;
+                                                   SourceExpr=CreateXl }
+      { 1000000002;Label  ;0    ;7260 ;3300 ;440  ;ParentControl=1000000001 }
+      { 1000000003;CheckBox;3410;7810 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=FRA=Export les ruptures vers Excel;
+                                                   SourceExpr=XlSection }
+      { 1000000004;Label  ;0    ;7810 ;3300 ;440  ;ParentControl=1000000003 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      FASetup@1120000 : Record 5603;
+      DeprBook@1120001 : Record 5611;
+      FADeprBook@1120002 : Record 5612;
+      FAPostingType@1120003 : Record 5644;
+      FADateType@1120004 : Record 5645;
+      FAGenReport@1120005 : Codeunit 5626;
+      BudgDepr@1120006 : Codeunit 5615;
+      FAFilter@1120007 : Text[250];
+      MainTextTitle@1120008 : Text[100];
+      DeprBookText@1120009 : Text[50];
+      GroupCodeName@1120010 : Text[50];
+      GroupTitle@1120011 : Text[50];
+      FANo@1120012 : Text[50];
+      FADescription@1120013 : Text[50];
+      GroupTotals@1120014 : ' ,FA Class,FA Subclass,FA Location,Main Asset,Global Dimension 1,Global Dimension 2';
+      GroupAmounts@1120015 : ARRAY [3] OF Decimal;
+      TotalProfTAxAmount@1100281005 : Decimal;
+      TotalAmounts@1120016 : ARRAY [3] OF Decimal;
+      TextTitle@1120017 : ARRAY [5] OF Text[50];
+      Amounts@1120018 : ARRAY [3] OF Decimal;
+      Date@1120019 : ARRAY [2] OF Date;
+      i@1120020 : Integer;
+      Period1@1120021 : 'before Starting Date,Net Change,at Ending Date';
+      Period2@1120022 : 'before Starting Date,Net Change,at Ending Date';
+      Period3@1120023 : 'before Starting Date,Net Change,at Ending Date';
+      PostingType1@1120024 : Text[30];
+      PostingType2@1120025 : Text[30];
+      PostingType3@1120026 : Text[30];
+      PostingTypeNo1@1120027 : Integer;
+      PostingTypeNo2@1120028 : Integer;
+      PostingTypeNo3@1120029 : Integer;
+      DateType1@1120030 : Text[30];
+      DateType2@1120031 : Text[30];
+      DateTypeNo1@1120032 : Integer;
+      DateTypeNo2@1120033 : Integer;
+      StartingDate@1120034 : Date;
+      EndingDate@1120035 : Date;
+      DeprBookCode@1120036 : Code[10];
+      PrintDetails@1120037 : Boolean;
+      BudgetReport@1120038 : Boolean;
+      BeforeAmount@1120039 : Decimal;
+      EndingAmount@1120040 : Decimal;
+      AcquisitionDate@1120041 : Date;
+      DisposalDate@1120042 : Date;
+      SalesReport@1120043 : Boolean;
+      TypeExist@1120044 : Boolean;
+      PercentageTax@1120045 : ARRAY [4] OF Decimal;
+      Text001@1100281002 : TextConst 'FRA=M‚thode de calcul Taxe professionnelle : Pourcentage';
+      Text002@1100281004 : TextConst 'FRA=M‚thode de calcul Taxe professionnelle : Montant';
+      Text1120046@1120046 : TextConst 'ENU=Fixed Assets - Professional Tax;FRA=Immos - Taxe professionnelle';
+      Text1120047@1120047 : TextConst 'ENU=(Budget Report);FRA=(Etat budget)';
+      Text1120048@1120048 : TextConst 'ENU=Subtotals : %1;FRA=Sous-totaux : %1';
+      Text1120049@1120049 : TextConst 'ENU=%1 and %2 must be defined only with the option %3.;FRA=%1 et %2 ne doivent ˆtre d‚finis qu''avec l''option %3.';
+      Text1120050@1120050 : TextConst 'ENU=The starting date must be defined only when the option %1 is used.;FRA=La date d‚but ne doit ˆtre d‚finie que lorsque l''option %1 est utilis‚e.';
+      Text1120051@1120051 : TextConst 'ENU=Saled;FRA=Vendu';
+      Text1120052@1120052 : TextConst 'ENU=The date type %1 isn''t a valid option.;FRA=Le type date %1 n''est pas une option valide.';
+      Text1120053@1120053 : TextConst 'ENU=The posting type %1 isn''t a valid option.;FRA=Le type comptabilisation %1 n''est pas une option valide.';
+      Text1120054@1120054 : TextConst 'ENU=Acquisition Cost;FRA=Co–t acquisition';
+      Text1120055@1120055 : TextConst 'ENU=% Professional Tax;FRA=Taxe professionnelle';
+      Text1120056@1120056 : TextConst 'ENU=Renting Value;FRA=Valeur locative';
+      Text1120057@1120057 : TextConst 'ENU=Subtotal;FRA=Sous-total';
+      Text1120058@1120058 : TextConst 'ENU=no global dimension;FRA=pas de section analytique';
+      ProfTax@1100281000 : 'percentage,base';
+      ProfTaxAmount@1100281001 : Decimal;
+      ProfTaxText@1100281003 : Text[80];
+      Text1120059@1100281006 : TextConst 'ENU=PT Base Amount;FRA=Montant Base TP';
+      TotalTPBase@1100281007 : Decimal;
+      GroupTPBase@1100281008 : Decimal;
+      ApplyTax@1100281009 : Integer;
+      GroupProfTAxAmount@1100281010 : Decimal;
+      R370@1000000006 : TEMPORARY Record 370;
+      R370B@1000000005 : TEMPORARY Record 370;
+      VLine@1000000004 : Integer;
+      VColumn@1000000003 : Integer;
+      CreateXl@1000000002 : Boolean;
+      XlSection@1000000000 : Boolean;
+      CreateHeader@1000000001 : Boolean;
+
+    LOCAL PROCEDURE SkipRecord@5() : Boolean;
+    BEGIN
+      AcquisitionDate := FADeprBook."Acquisition Date";
+      DisposalDate := FADeprBook."Disposal Date";
+
+      IF "Fixed Asset".Inactive THEN
+        EXIT(TRUE);
+
+      IF (AcquisitionDate > EndingDate) OR (AcquisitionDate < StartingDate) THEN
+        EXIT(TRUE);
+
+      IF (DisposalDate < EndingDate) AND (DisposalDate <> 0D) THEN
+        EXIT(TRUE);
+
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE SetSalesMark@11() : Text[30];
+    BEGIN
+      IF DisposalDate > 0D THEN
+        IF (EndingDate = 0D) OR (DisposalDate <= EndingDate) THEN
+          EXIT(Text1120051);
+      EXIT('');
+    END;
+
+    LOCAL PROCEDURE MakeGroupTotalText@6();
+    BEGIN
+      CASE GroupTotals OF
+        GroupTotals::"FA Class":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("FA Class Code");
+        GroupTotals::"FA Subclass":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("FA Subclass Code");
+        GroupTotals::"Main Asset":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("Main Asset/Component");
+        GroupTotals::"Global Dimension 1":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("Global Dimension 1 Code");
+        GroupTotals::"FA Location":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("FA Location Code");
+        GroupTotals::"Global Dimension 2":
+          GroupCodeName := "Fixed Asset".FIELDCAPTION("Global Dimension 2 Code");
+      END;
+      IF GroupCodeName <> '' THEN
+        GroupCodeName := STRSUBSTNO(Text1120048,GroupCodeName);
+    END;
+
+    LOCAL PROCEDURE MakeDateHeadLine@4();
+    BEGIN
+      IF NOT PrintDetails THEN
+        EXIT;
+      TextTitle[1] := DateType1;
+      TextTitle[2] := DateType2;
+    END;
+
+    LOCAL PROCEDURE MakeAmountHeadLine@3(i@1120000 : Integer;PostingType@1120001 : Text[50];PostingTypeNo@1120002 : Integer;Period@1120003 : 'before Starting Date,Net Change,at Ending Date');
+    BEGIN
+      IF PostingTypeNo = 0 THEN
+        EXIT;
+      CASE PostingTypeNo OF
+        FADeprBook.FIELDNO("Proceeds on Disposal"),
+        FADeprBook.FIELDNO("Gain/Loss"):
+          IF Period <> Period::"at Ending Date" THEN BEGIN
+            Period := Period::"at Ending Date";
+            ERROR(
+              Text1120049,
+              FADeprBook.FIELDCAPTION("Proceeds on Disposal"),
+              FADeprBook.FIELDCAPTION("Gain/Loss"),
+              Period);
+          END;
+      END;
+      IF Period = Period::"before Starting Date" THEN
+        IF StartingDate < 01010001D THEN
+          ERROR(
+            Text1120050,Period);
+
+      TextTitle[i] := STRSUBSTNO('%1 %2',PostingType,Period);
+    END;
+
+    LOCAL PROCEDURE MakeGroupHeadLine@1();
+    BEGIN
+      WITH "Fixed Asset" DO BEGIN
+        CASE GroupTotals OF
+          GroupTotals::"FA Class":
+            GroupTitle := "FA Class Code";
+          GroupTotals::"FA Subclass":
+            GroupTitle := "FA Subclass Code";
+          GroupTotals::"Main Asset":
+            BEGIN
+              GroupTitle := STRSUBSTNO('%1 %2',GroupTotals,"Component of Main Asset");
+              IF "Component of Main Asset" = '' THEN
+                GroupTitle := GroupTitle + '*****';
+            END;
+          GroupTotals::"Global Dimension 1":
+            GroupTitle := "Global Dimension 1 Code";
+          GroupTotals::"FA Location":
+            GroupTitle := "FA Location Code";
+          GroupTotals::"Global Dimension 2":
+            GroupTitle := "Global Dimension 2 Code";
+        END;
+      END;
+      IF GroupTitle = '' THEN
+        GroupTitle := Text1120058;
+    END;
+
+    LOCAL PROCEDURE SetAmountToZero@7(PostingTypeNo@1120000 : Integer;Period@1120001 : 'before Starting Date,Net Change,at Ending Date') : Boolean;
+    BEGIN
+      CASE PostingTypeNo OF
+        FADeprBook.FIELDNO("Proceeds on Disposal"),
+        FADeprBook.FIELDNO("Gain/Loss"):
+          EXIT(FALSE);
+      END;
+      IF NOT SalesReport AND (Period = Period::"at Ending Date") AND (SetSalesMark <> '') THEN
+        EXIT(TRUE);
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE GetStartDate@8(StartingDate@1120000 : Date) : Date;
+    BEGIN
+      IF StartingDate <= 01010000D THEN
+        EXIT(0D)
+      ELSE
+        EXIT(StartingDate - 1);
+    END;
+
+    LOCAL PROCEDURE CheckDateType@10(VAR DateType@1120000 : Text[30];VAR DateTypeNo@1120001 : Integer);
+    BEGIN
+      DateTypeNo := 0;
+      IF DateType = '' THEN
+        EXIT;
+      WITH FADateType DO BEGIN
+        SETRANGE("FA Entry",TRUE);
+        IF FIND('-') THEN
+          REPEAT
+            TypeExist := DateType = "FA Date Type Name";
+            IF TypeExist THEN
+              DateTypeNo := "FA Date Type No.";
+          UNTIL (NEXT = 0) OR TypeExist;
+      END;
+
+      IF NOT TypeExist THEN
+        ERROR(Text1120052,DateType);
+    END;
+
+    LOCAL PROCEDURE CheckPostingType@20(VAR PostingType@1120000 : Text[30];VAR PostingTypeNo@1120001 : Integer);
+    BEGIN
+      PostingTypeNo := 0;
+      IF PostingType = '' THEN
+        EXIT;
+      WITH FAPostingType DO BEGIN
+        SETRANGE("FA Entry",TRUE);
+        IF FIND('-') THEN
+          REPEAT
+            TypeExist := PostingType = "FA Posting Type Name";
+            IF TypeExist THEN
+              PostingTypeNo := "FA Posting Type No.";
+          UNTIL (NEXT = 0) OR TypeExist;
+      END;
+      IF NOT TypeExist THEN
+        ERROR(Text1120053,PostingType);
+    END;
+
+    PROCEDURE "---ISAT---"@1000000000();
+    BEGIN
+    END;
+
+    PROCEDURE XlLine@1100281001(VAR me@1000000000 : Record 370);
+    VAR
+      XlHead1@1000000001 : TextConst 'FRA=Liste d''inventaire immobilisation';
+    BEGIN
+      FASetup.GET;
+      IF CreateHeader AND FASetup."R50041.Init" THEN
+      BEGIN
+         me.INIT;
+         me.VALIDATE("Row No.",1);
+         me.VALIDATE("Column No.",1);
+         me."Cell Value as Text" := XlHead1;
+         me.INSERT;
+         me.VALIDATE("Column No.",8);
+         me."Cell Value as Text" := FORMAT(TODAY,0,'<Day> <Month text> <Year4>');
+         me.Bold := TRUE;
+         me.INSERT;
+         me.VALIDATE("Row No.",2);
+         me.VALIDATE("Column No.",1);
+         me.Bold := TRUE;
+         me."Cell Value as Text" := COMPANYNAME;
+         me.Bold := TRUE;
+         me.INSERT;
+         me.Bold := FALSE;
+         me.VALIDATE("Column No.",8);
+         me."Cell Value as Text" := FORMAT(USERID);
+         me.Bold := TRUE;
+         me.INSERT;
+         me.VALIDATE("Row No.",3);
+         me.VALIDATE("Column No.",1);
+         me."Cell Value as Text" := FORMAT(USERID);
+         me.Bold := TRUE;
+         me.INSERT;
+      END;
+
+      VLine := 5;
+      CreateHeader := FALSE;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/07/11 @a ISAT.ST @v IMH6.01.151 @s Immobilisation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

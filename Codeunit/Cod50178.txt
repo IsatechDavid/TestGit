@@ -1,0 +1,93 @@
+OBJECT Codeunit 50178 DARVA Sent SDR61-2 Valid. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/02/13;
+    Time=18:17:27;
+    Modified=Yes;
+    Version List=A supprimer;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            ERROR(''); //IMH01.ST
+            lEAISentMQBuffer := Rec;
+            Code(lEAISentMQBuffer);
+            lEAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+            Rec := lEAISentMQBuffer;
+            IF NOT INSERT(TRUE) THEN
+              MODIFY;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      InterfaceSetup@1100281000 : Record 50139;
+      NASHandler@1100281001 : Codeunit 8016720;
+
+    PROCEDURE Code@1100281000(VAR pEAISentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lEAIExchangeType@1100281015 : Record 8016717;
+      lwinHTTPService@1100281014 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDom2@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDoc@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNodeList@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXMLDomElement@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXMLDomNode@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lInStream@1100281007 : InStream;
+      lFile@1100281006 : File;
+      lOutStream@1100281005 : OutStream;
+      lOutStream2@1100281004 : OutStream;
+      lInStream2@1100281003 : InStream;
+      lBigText@1100281002 : BigText;
+      lLength@1100281001 : Integer;
+    BEGIN
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      InterfaceSetup.GET;
+      lwinHTTPService.Open('POST',InterfaceSetup."Fusion Comment Create WS Url",0);
+      lwinHTTPService.SetRequestHeader('Content-type','application/soap+xml');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      CREATE(lXmlDoc);
+      pEAISentMQBuffer.CALCFIELDS("XML Source");
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXmlDoc.load(lInStream);
+      IF NASHandler.IsDebug THEN
+        lXmlDoc.save(TEMPORARYPATH + 'EnvoiSDR99.xml'); // pour test
+      lwinHTTPService.Send(lXmlDoc);
+      CLEAR(lInStream);
+      CLEAR(lXmlDoc);
+
+      IF NOT lwinHTTPService.WaitForResponse(60) THEN ERROR('Request timed out.');
+      CLEAR(pEAISentMQBuffer."XML Source");
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      lFile.CREATE(TEMPORARYPATH + '\' + lwinHTTPService.StatusText() + '_EnvoiSDR99.txt');
+      lFile.OPEN(TEMPORARYPATH + '\' + lwinHTTPService.StatusText() + '_EnvoiSDR99.txt');
+      lFile.CREATEOUTSTREAM(lOutStream);
+      lInStream2 := lwinHTTPService.ResponseStream();
+      COPYSTREAM(lOutStream,lInStream2);
+      CLEAR(lXmlDom);
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream());
+      lXmlDom.save(lInStream);
+      lFile.CLOSE;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/06/11 @a ISAT.ST @v IMH6.01.131 @s Codeunit obsoläte */
+    }
+    END.
+  }
+}

@@ -1,0 +1,244 @@
+OBJECT Codeunit 50048 Proc. Quote Act. Funct.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=13/11/12;
+    Time=15:19:30;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      AssistMode@1100281003 : Boolean;
+      CurrRec@1100281004 : Record 50076;
+      Funct001_Name@1100281002 : TextConst 'ENU=Cancel auto tray activities;FRA=Annulation activit‚s corbeille auto';
+      Funct001_Assist@1100281010 : TextConst 'ENU="Team code filter (unmandatory),Tray task filter (unmandatory),Auto filtre (unmandatory : 0=Auto/1=Manuel/2=Toutes)";FRA="Filtre code corbeille (non obligatoire),Filtre tƒche corbeille (non obligatoire),Filtre activit‚ auto (non obligatoire, 0=Auto/1=Manuel/2=Toutes)"';
+      Funct002_Name@1100281006 : TextConst 'ENU=Cancel auto tray activities;FRA=Etape suivante';
+      Funct002_Assist@1100281005 : TextConst 'ENU=Selection mandatory.;FRA=S‚lection obligatoire par l''utilisateur.';
+      ProcCommFct@1100281007 : Codeunit 50049;
+      Funct101_Name@1100281000 : TextConst 'ENU=Deactivate other quotes.;FRA=D‚sactivation des autres devis.';
+      Funct101_Assist@1100281008 : TextConst 'ENU=Quote type filter (unmandatory);FRA=Filtre type devis (non obligatoire)';
+      HideDialogBox@1100281009 : Boolean;
+      FromProcessCode@1100281012 : Code[10];
+      FromProcessNo@1100281011 : Integer;
+      ProcessSetted@1100281001 : Boolean;
+
+    LOCAL PROCEDURE GetTableNo@1100281000() : Integer;
+    BEGIN
+      EXIT(DATABASE::"Service Intervention Quote");
+    END;
+
+    PROCEDURE LoadFunctionList@1100281001();
+    VAR
+      lProcFunction@1100281000 : Record 50085;
+    BEGIN
+      // Source Table, Type, nø de la fonction, Description, ParamŠtre o/n
+      WITH lProcFunction DO BEGIN
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 1, Funct001_Name, TRUE);
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 2, Funct002_Name, FALSE);
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 101, Funct101_Name, TRUE); //IMH04.ST
+      END;
+      ProcCommFct.LoadActFunctionList(GetTableNo); //IMH02.ST
+    END;
+
+    PROCEDURE AssistFunction@1100281009(pFunctionNo@1100281000 : Integer);
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      AssistMode := TRUE;
+      RunFunction(pFunctionNo, '', lRecRef);
+      AssistMode := FALSE;
+    END;
+
+    PROCEDURE RunFunction@1100281003(pFunctionNo@1100281000 : Integer;pParameters@1100281001 : Text[1024];VAR pCurrRecRef@1100281002 : RecordRef) rValue : Boolean;
+    BEGIN
+      IF NOT AssistMode THEN
+        pCurrRecRef.SETTABLE(CurrRec);
+      CASE pFunctionNo OF
+        //<<IMH07
+        //1 : rValue := CancelTrayLines(TRUE, pParameters);
+        1 : rValue := CancelTrayLines(pParameters);
+        //>>IMH07
+        2 : rValue := SelectNextStep;
+        101 : rValue := DeactivateOtherQuotes(pParameters); //IMH04.ST
+        ELSE BEGIN
+          //<<IMH05.ISAT.EBA
+          ProcCommFct.SetHideDialogBox(HideDialogBox);
+          //>>IMH05.ISAT.EBA
+          rValue := ProcCommFct.RunFunction(GetTableNo, pFunctionNo, pParameters); //IMH02.ST
+        END;
+      END;
+      IF NOT AssistMode THEN
+        pCurrRecRef.GETTABLE(CurrRec);
+    END;
+
+    PROCEDURE CheckParameters@1100281010(pFunctionNo@1100281000 : Integer;pParameter@1100281002 : Text[1024];VAR pErrorText@1100281001 : Text[250]) : Boolean;
+    BEGIN
+      //IMH04.zw
+      EXIT(pErrorText = '');   //IMH06
+    END;
+
+    LOCAL PROCEDURE "------------------------------"@1100281004();
+    BEGIN
+    END;
+
+    PROCEDURE SelectNextStep@1100281002() : Boolean;
+    VAR
+      lQuoteProcess@1100281000 : Codeunit 50046;
+    BEGIN
+      IF AssistMode THEN
+        EXIT;
+
+      //<<IMH08
+      IF ProcessSetted THEN BEGIN
+        CurrRec."Process Code" := FromProcessCode;
+        CurrRec."Process Status No." := FromProcessNo;
+      END;
+      //>>IMH08
+      EXIT(lQuoteProcess.SelectNextStep(CurrRec));
+    END;
+
+    PROCEDURE CancelTrayLines@1100281008(pParameters@1100281000 : Text[1024]) : Boolean;
+    VAR
+      lTrayTask@1100281007 : Record 50080;
+      lTrayLine@1100281001 : Record 50048;
+      lTeamFilter@1100281003 : Text[1024];
+      lTaskFilter@1100281004 : Text[1024];
+      lParamNb@1100281005 : Integer;
+      lActType@1100281006 : Integer;
+      lToTreat@1100281002 : Boolean;
+    BEGIN
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct001_Assist);
+        EXIT;
+      END;
+
+      //<<IMH07
+      lActType := 0;
+      IF pParameters <> '' THEN BEGIN
+        lParamNb := ProcCommFct.CountParameters(pParameters, ',');
+        IF lParamNb > 3 THEN
+          ProcCommFct.ErrorNbExpectedParam(Funct001_Name, lParamNb);
+        lTeamFilter := SELECTSTR(1, pParameters);
+        IF lParamNb > 1 THEN
+          lTaskFilter := SELECTSTR(2, pParameters);
+        IF lParamNb > 2 THEN BEGIN
+          IF SELECTSTR(3, pParameters) <> '' THEN
+            EVALUATE(lActType,SELECTSTR(3, pParameters));
+        END;
+      END;
+      //>>IMH07
+
+      WITH lTrayLine DO BEGIN
+        SETCURRENTKEY("Service No.", "Service Header No.", "Intervention Line No.", "Intervention Quote Line No.");
+        CurrRec.CALCFIELDS("Service No.");  //IMH07
+        SETRANGE("Service No.", CurrRec."Service No.");
+        SETRANGE("Service Header No.", CurrRec."Service Header No.");
+        SETRANGE("Intervention Line No.", CurrRec."Intervention Line No.");
+        SETRANGE("Intervention Quote Line No.", CurrRec."Line No.");
+        SETRANGE("Linked To Table", "Linked To Table"::InterventionQuote);
+        SETRANGE(Closed, FALSE);
+        IF lTeamFilter <> '' THEN
+          SETFILTER("Team Code", lTeamFilter);
+        IF lTaskFilter <> '' THEN
+          SETFILTER("Task Code", lTaskFilter);
+      //<<IMH07
+        CASE lActType OF
+          0 : SETRANGE(Manual, FALSE);
+          1 : SETRANGE(Manual, TRUE);
+        END;
+      //>>IMH07
+        //IF pOnlyAuto THEN
+        //  SETRANGE(Manual, FALSE);
+        IF ISEMPTY THEN
+          EXIT(TRUE);
+        FINDSET(TRUE);
+        REPEAT
+          //<<IMH07
+          lToTreat := TRUE;
+          IF lTrayTask.GET(lTrayTask."Source Table"::Intervention, lTrayLine."Task Code") THEN
+            IF lTrayTask."Assist Action" <> lTrayTask."Assist Action"::OpenCard THEN
+              lToTreat := FALSE;
+          CALCFIELDS("Lock Exists");
+          //IF NOT "Lock Exists"THEN BEGIN
+          IF (NOT "Lock Exists") OR lToTreat THEN BEGIN
+          //>>IMH07
+            VALIDATE(Status, Status::Canceled);
+            MODIFY(TRUE);
+          END;
+        UNTIL NEXT = 0;
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE DeactivateOtherQuotes@1100281005(pParameters@1100281000 : Text[1024]) : Boolean;
+    VAR
+      lServQuote@1100281001 : Record 50076;
+      lServQuote2@1100281002 : Record 50076;
+    BEGIN
+      //IMH04.ST
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct101_Assist);
+        EXIT;
+      END;
+
+      WITH lServQuote DO BEGIN
+        SETRANGE("Service Header No.", CurrRec."Service Header No.");
+        SETRANGE("Intervention Line No.", CurrRec."Intervention Line No.");
+        SETRANGE(Active, TRUE);
+        SETFILTER("Line No.", '<>%1', CurrRec."Line No.");
+        IF pParameters <> '' THEN
+          SETFILTER("Service Quote Type", pParameters);
+        IF FINDSET THEN
+          REPEAT
+            lServQuote2 := lServQuote;
+      //      lServQuote2.VALIDATE("Approval Status", "Approval Status"::No);
+            lServQuote2.Active := FALSE;
+            lServQuote2.MODIFY(TRUE);
+          UNTIL NEXT = 0;
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetHideDialogBox@57(NewHideDialogBox@1000 : Boolean);
+    BEGIN
+      //<<IMH05.ISAT.EBA
+      HideDialogBox := NewHideDialogBox;
+      //>>IMH05.ISAT.EBA
+    END;
+
+    PROCEDURE SetFromProcess@1100281015(pFromProcessCode@1100281000 : Code[10];pFromProcessNo@1100281001 : Integer);
+    BEGIN
+      //IMH08
+      ProcessSetted := TRUE;
+      FromProcessCode := pFromProcessCode;
+      FromProcessNo := pFromProcessNo;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH08 @d 13/11/12 @a ISAT.ZW @v IMH6.01.215 @s NEP000006 @h 3702 @c Gestion processus*/
+      /** @r IMH07 @d 09/10/12 @a ISAT.ZW @v IMH6.01.226 @s V1.4 @c Modification CancelTrayLine */
+      /** @r IMH06 @d 05/10/12 @a ISAT.ZW @v IMH6.01.214 @s NEP00005 @c Modification CheckParameters */
+      /** @r IMH05 @d 15/11/11 @a ISAT.EBA @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout de fonction "SetHideDialogBox" */
+      /** @r IMH04 @d 30/08/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction DeactivateOtherQuotes */
+      /** @r IMH03 @d 05/05/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction CheckParameters */
+      /** @r IMH02 @d 02/04/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Appel fonctions communes */
+      /** @r IMH01 @d 20/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts
+          @c Cr‚ation objet
+          @c Pr‚voir la gestion de la s‚curit‚ TableData */
+    }
+    END.
+  }
+}

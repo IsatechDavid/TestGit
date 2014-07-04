@@ -1,0 +1,180 @@
+OBJECT Codeunit 50278 Ws dbrenet
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/11/13;
+    Time=17:23:04;
+    Modified=Yes;
+    Version List=;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+            TestListDocumentToDownload('\\imha.local\IMHA\Documents$\DSI\_Utilisateurs\dbrenet\fob\Mantis 3851\david','347403T','',TRUE);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ExtFct@1000000000 : Codeunit 50204;
+      ToolsMgt@1000000005 : Codeunit 8016602;
+
+    PROCEDURE ProvIntervList@1000000001(pProviderNo@1000000002 : Code[20];pServOrderTypeFilter@1000000003 : Text[250];pIncludeClosed@1000000000 : Boolean;VAR pIntervList@1000000001 : BigText) : Boolean;
+    VAR
+      lGUID@1000000004 : GUID;
+      lIntervention@1000000005 : Record 50075;
+      lXmlDoc@1000000006 : Integer;
+    BEGIN
+
+      ExtFct.Initial(2,'ProvIntervList',
+                     STRSUBSTNO('%1,%2,%3',pProviderNo,pServOrderTypeFilter,pIncludeClosed),lGUID);
+
+      // debut dbrenet :  Envoi de la liste des interventions pour prestataire
+
+      // structure XML
+      // INTERVENTION_LIST
+      //  INTERVENTION
+      //   SERVICE_NO
+      //   SERVICE_HEADER_NO
+      //   INTERVENTION_NO
+      //   CONTACT_NO
+      //   ASSIGNED_DATE
+      //   SERVICE_ORDER_DATE
+
+      lIntervention.SETCURRENTKEY("Provider No.");
+      lIntervention.SETRANGE("Provider No.",pProviderNo);
+
+      IF pServOrderTypeFilter <> '' THEN
+        lIntervention.SETFILTER("Service Order Type", pServOrderTypeFilter);
+
+      IF NOT pIncludeClosed THEN
+        lIntervention.SETRANGE(Closed, FALSE);
+
+      EncodIntervList(lIntervention, pIntervList);
+
+      ExtFct.Finish(lGUID);
+      EXIT(TRUE);
+
+      // fin dbrenet
+    END;
+
+    LOCAL PROCEDURE EncodIntervList@1000000005(VAR pIntervList@1000000000 : Record 50075;VAR PBigTextResult@1000000001 : BigText);
+    VAR
+      lXMLDoc@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNode1@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode2@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLMgt@1000000005 : Codeunit 8016710;
+      lProcStatus@1000000006 : Record 50042;
+      lToolsManagement@1000000007 : Codeunit 8016602;
+      lFIle@1000000008 : File;
+      lFileName@1000000009 : Text[1024];
+      lInstream@1000000010 : InStream;
+    BEGIN
+
+
+      IF NOT lXMLMgt.CreateXml(lXMLDoc,'<INTERVENTION_LIST />',lXMLNode1) THEN
+          ERROR ('Erreur de cr‚ation XML');
+
+      WITH pIntervList DO BEGIN
+        IF FINDSET THEN
+          REPEAT
+           lXMLMgt.IsAddElement(lXMLNode1,'INTERVENTION','','',lXMLNode2);
+             lXMLMgt.IsAddElement4(lXMLNode2,'SERVICE_NO',"Service No.",'');
+             lXMLMgt.IsAddElement4(lXMLNode2,'SERVICE_HEADER_NO',"Service Header No.",'');
+             lXMLMgt.IsAddElement4(lXMLNode2,'INTERVENTION_NO',lToolsManagement.IntegerToText("Intervention No."),'');
+             lXMLMgt.IsAddElement4(lXMLNode2,'CONTACT_NO',"Contact No.",'');
+             lXMLMgt.IsAddElement4(lXMLNode2,'ASSIGNED_DATE',lToolsManagement.DateToText("Assigned Date"),'');
+             lXMLMgt.IsAddElement4(lXMLNode2,'SERVICE_ORDER_TYPE',"Service Order Type",'');
+
+             IF NOT lProcStatus.GET(pIntervList."Process Code","Process Status No." )THEN
+               CLEAR(lProcStatus);
+             lXMLMgt.IsAddElement4(lXMLNode2,'EXTRANET_CODE',lProcStatus."Extranet Code",'');
+          UNTIL NEXT = 0;
+      END;
+
+
+
+      lFileName := ExtFct.GetTempFilename('xml');
+      lXMLDoc.save(lFileName);
+      IF lFIle.OPEN(lFileName) THEN BEGIN
+        lFIle.CREATEINSTREAM(lInstream);
+        PBigTextResult.READ(lInstream);
+        lFIle.CLOSE;
+        ERASE(lFileName);
+      END ELSE BEGIN
+        ERROR('Ouverture Fichier');
+      END;
+
+
+
+      // INTERVENTION_LIST
+      //  INTERVENTION
+      //   SERVICE_NO
+      //   SERVICE_HEADER_NO
+      //   INTERVENTION_NO
+      //   CONTACT_NO
+      //   ASSIGNED_DATE
+      //   SERVICE_ORDER_DATE
+    END;
+
+    PROCEDURE TestListDocumentToDownload@1100281000(pFileNameToExport@1000000011 : Text[1024];pProviderNo@1000000003 : Code[20];pServOrderTypeFilter@1000000002 : Text[250];pIncludeClosed@1000000001 : Boolean);
+    VAR
+      lSentMQBuffer@1000000014 : Record 8016720;
+      lwinHTTPService@1000000013 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000007 : InStream;
+      lOutStream@1000000015 : OutStream;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<ProvIntervList xmlns="urn:microsoft-dynamics-schemas/codeunit/WSDBR">');
+      lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      lOutStream.WRITETEXT('<pServOrderTypeFilter>' + pServOrderTypeFilter + '</pServOrderTypeFilter>');
+      IF pIncludeClosed THEN
+        lOutStream.WRITETEXT('<pIncludeClosed>true</pIncludeClosed>' )
+        ELSE
+        lOutStream.WRITETEXT('<pIncludeClosed>false</pIncludeClosed>' )     ;
+
+      lOutStream.WRITETEXT('<pIntervList/>');
+      lOutStream.WRITETEXT('</ProvIntervList>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST','http://simhns07:7061/NST2009R2_Dev_IMH/WS/IMH%20-%20Dev/Codeunit/WSDBR',0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      ////IF EnableSendMessage THEN BEGIN
+        //lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'ListDocumentToDownload_Send.xml');
+      //END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'ListDocumentToDownload_Response.xml');
+    END;
+
+    BEGIN
+    END.
+  }
+}

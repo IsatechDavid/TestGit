@@ -1,0 +1,703 @@
+OBJECT Table 5051 Contact Alt. Address
+{
+  OBJECT-PROPERTIES
+  {
+    Date=09/12/11;
+    Time=17:04:15;
+    Modified=Yes;
+    Version List=NAVW16.00,IMH6.01;
+  }
+  PROPERTIES
+  {
+    DataCaptionFields=Contact No.,Code,Company Name;
+    OnInsert=VAR
+               lPhoneNoList@1100281000 : Record 50055;
+             BEGIN
+               UpdateSearchFields;
+               TouchContact("Contact No.");
+               //<<IMH02
+               UpdatePhoneNoList;
+               //>>IMH02
+             END;
+
+    OnModify=BEGIN
+               UpdateSearchFields;
+               "Last Date Modified" := TODAY;
+               //<<IMH02
+               //SynchroContact;
+               UpdatePhoneNoList;
+               //>>IMH02
+               //<<IMH17
+               UpdateGeo();
+               //>>IMH17
+               TouchContact("Contact No.");
+             END;
+
+    OnDelete=VAR
+               ContAltAddrDateRange@1000 : Record 5052;
+               lPhoneNoList@1100281000 : Record 50055;
+             BEGIN
+               TouchContact("Contact No.");
+               TESTFIELD("Contact Address", FALSE); //IMH11.ST
+               //<<IMH02
+               IF lPhoneNoList.GET("Phone No.","Contact No.",FIELDNO("Phone No."),Code) THEN
+                 lPhoneNoList.DELETE;
+               IF lPhoneNoList.GET("Mobile Phone No.","Contact No.",FIELDNO("Mobile Phone No."),Code) THEN
+                 lPhoneNoList.DELETE;
+               //>>IMH02
+
+               ContAltAddrDateRange.SETRANGE("Contact No.","Contact No.");
+               ContAltAddrDateRange.SETRANGE("Contact Alt. Address Code",Code);
+               ContAltAddrDateRange.DELETEALL;
+             END;
+
+    OnRename=BEGIN
+               TESTFIELD("Contact Address", FALSE); //IMH11.ST
+               IF xRec."Contact No." = "Contact No." THEN
+                 TouchContact("Contact No.")
+               ELSE BEGIN
+                 TouchContact("Contact No.");
+                 TouchContact(xRec."Contact No.");
+               END;
+             END;
+
+    CaptionML=[ENU=Contact Alt. Address;
+               FRA=Adresse secondaire contact];
+    LookupFormID=Form5057;
+  }
+  FIELDS
+  {
+    { 1   ;   ;Contact No.         ;Code20        ;TableRelation=Contact;
+                                                   OnValidate=VAR
+                                                                lContact@1100281000 : Record 5050;
+                                                              BEGIN
+                                                                //<<IMH02
+                                                                IF NOT lContact.GET("Contact No.") THEN
+                                                                  EXIT;
+                                                                "Company Name" := lContact.Name;
+                                                                "Search Name" := lContact."Search Name";
+                                                                "Search Surname" := ToolsMgt.ReplaceAccent(lContact.Surname);
+                                                                "Search First Name" := ToolsMgt.ReplaceAccent(lContact."First Name");
+                                                                "Search E-Mail" := lContact."Search E-Mail";
+                                                                "Corporate No." := lContact."Corporate No.";
+                                                                "Corporate Region Code" := lContact."Corporate Region Code";
+                                                                //>>IMH02
+                                                                "Member No." := lContact."Member No."; //IMH06.ST
+                                                                "Service Contact" := lContact."Service Contact";
+                                                              END;
+
+                                                   CaptionML=[ENU=Contact No.;
+                                                              FRA=Nø contact] }
+    { 2   ;   ;Code                ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5201),
+                                                                                  Field ID=CONST(2));
+                                                   CaptionML=[ENU=Code;
+                                                              FRA=Code];
+                                                   NotBlank=Yes }
+    { 3   ;   ;Company Name        ;Text50        ;CaptionML=[ENU=Name;
+                                                              FRA=Nom] }
+    { 4   ;   ;Company Name 2      ;Text50        ;CaptionML=[ENU=Name 2;
+                                                              FRA=Nom 2] }
+    { 5   ;   ;Address             ;Text50        ;OnValidate=BEGIN
+                                                                //<<IMH02
+                                                                "Search Address" := ToolsMgt.ReplaceAccent(Address);
+                                                                //>>IMH02
+                                                              END;
+
+                                                   CaptionML=[ENU=Address;
+                                                              FRA=Adresse] }
+    { 6   ;   ;Address 2           ;Text50        ;CaptionML=[ENU=Address 2;
+                                                              FRA=Adresse (2Šme ligne)] }
+    { 7   ;   ;City                ;Text30        ;TableRelation=IF (Post Code=FILTER(<>'')) "Post Code".City WHERE (Code=FIELD(Post Code))
+                                                                 ELSE IF (Post Code=FILTER('')) "Post Code".City;
+                                                   OnValidate=BEGIN
+                                                                PostCode.ValidateCity(City,"Post Code", "Country/Region Code");  //IMH14 Ajout Code pays
+                                                                //<<IMH02
+                                                                "Search City" := ToolsMgt.GetSearchString(City);
+                                                                //>>IMH02
+                                                              END;
+
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=City;
+                                                              FRA=Ville] }
+    { 8   ;   ;Post Code           ;Code20        ;TableRelation="Post Code";
+                                                   OnValidate=VAR
+                                                                lAreaCode@1100281000 : Code[10];
+                                                              BEGIN
+                                                                PostCode.ValidatePostCode(City,"Post Code", "Country/Region Code"); //IMH14 Ajout Code pays
+                                                                //<<IMH03.isat.PC
+                                                                "Geo. Reference Code" := PostCode.GetReferenceGeoCode("Post Code",City);
+                                                                //>>IMH03.isat.PC
+                                                              END;
+
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Post Code;
+                                                              FRA=Code postal] }
+    { 9   ;   ;County              ;Text30        ;CaptionML=[ENU=County;
+                                                              FRA=R‚gion] }
+    { 10  ;   ;Country/Region Code ;Code10        ;TableRelation=Country/Region;
+                                                   CaptionML=[ENU=Country/Region Code;
+                                                              FRA=Code pays/r‚gion] }
+    { 12  ;   ;Phone No.           ;Text30        ;OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                                //<<IMH01
+                                                                PhoneStandardization.ValidatePhoneNo(DATABASE::"Contact Alt. Address",12,"Country/Region Code","Phone No.");
+                                                                //>>IMH01
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Phone No.;
+                                                              FRA=Nø t‚l‚phone] }
+    { 13  ;   ;Mobile Phone No. 2  ;Text30        ;OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                                //<<IMH01
+                                                                PhoneStandardization.ValidatePhoneNo(DATABASE::"Contact Alt. Address",13,"Country/Region Code","Mobile Phone No. 2");
+                                                                //>>IMH01
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Mobile Phone No. 2;
+                                                              FRA=Nø t‚l‚phone mobile 2] }
+    { 14  ;   ;Extension No.       ;Text30        ;ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Extension No.;
+                                                              FRA=Nø t‚l‚phone direct] }
+    { 15  ;   ;Mobile Phone No.    ;Text30        ;OnValidate=VAR
+                                                                lPhoneStandardization@1100281000 : Codeunit 50099;
+                                                              BEGIN
+                                                                //<<IMH01
+                                                                lPhoneStandardization.ValidatePhoneNo(DATABASE::"Contact Alt. Address",15,"Country/Region Code","Mobile Phone No.");
+                                                                //>>IMH01
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Mobile Phone No.;
+                                                              FRA=Nø t‚l‚phone mobile] }
+    { 16  ;   ;Pager               ;Text30        ;CaptionML=[ENU=Pager;
+                                                              FRA=Pager] }
+    { 17  ;   ;E-mail              ;Text80        ;OnValidate=VAR
+                                                                lEmailStandardization@1100281000 : Codeunit 50096;
+                                                              BEGIN
+                                                                lEmailStandardization.ValidateEmail("E-mail"); //IMH15
+                                                                "Search E-Mail" := ToolsMgt.ReplaceAccent("E-mail");
+                                                              END;
+
+                                                   ExtendedDatatype=E-Mail;
+                                                   CaptionML=[ENU=E-Mail;
+                                                              FRA=E-mail] }
+    { 18  ;   ;Home Page           ;Text80        ;ExtendedDatatype=URL;
+                                                   CaptionML=[ENU=Home Page;
+                                                              FRA=Page d'accueil] }
+    { 19  ;   ;Fax No.             ;Text30        ;OnValidate=BEGIN
+                                                                //<<IMH01
+                                                                PhoneStandardization.ValidatePhoneNo(DATABASE::"Contact Alt. Address",15,"Country/Region Code","Fax No.");
+                                                                //>>IMH01
+                                                              END;
+
+                                                   CaptionML=[ENU=Fax No.;
+                                                              FRA=Nø t‚l‚copie] }
+    { 20  ;   ;Telex Answer Back   ;Text20        ;CaptionML=[ENU=Telex Answer Back;
+                                                              FRA=T‚lex retour] }
+    { 21  ;   ;Last Date Modified  ;Date          ;CaptionML=[ENU=Last Date Modified;
+                                                              FRA=Date dern. modification] }
+    { 22  ;   ;Search E-Mail       ;Code80        ;CaptionML=[ENU=Search E-Mail;
+                                                              FRA=E-mail de recherche] }
+    { 50000;  ;Address Type        ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5050),
+                                                                                  Field ID=CONST(50000));
+                                                   CaptionML=[ENU=Address Type;
+                                                              FRA=Type d'adresse] }
+    { 50001;  ;Contact Address     ;Boolean       ;CaptionML=[ENU=Contact Address;
+                                                              FRA=Adresse contact];
+                                                   Editable=No }
+    { 50002;  ;Search City         ;Code30        ;CaptionML=[ENU=Search City;
+                                                              FRA=Ville de recherche] }
+    { 50003;  ;Search Address      ;Code50        ;CaptionML=[ENU=Search Address;
+                                                              FRA=Adresse de recherche] }
+    { 50004;  ;Search Name         ;Code50        ;CaptionML=[ENU=Search Name;
+                                                              FRA=Nom complet de recherche] }
+    { 50005;  ;Search Surname      ;Code50        ;CaptionML=[ENU=Search Surname;
+                                                              FRA=Nom de recherche] }
+    { 50006;  ;Search First Name   ;Code30        ;CaptionML=[ENU=Search First Name;
+                                                              FRA=Pr‚nom de recherche] }
+    { 50010;  ;Service Contact     ;Option        ;CaptionML=[ENU=Service Contact;
+                                                              FRA=Type contact];
+                                                   OptionCaptionML=[ENU=Corporate Customer,Supplier,Adjuster,Beneficiary;
+                                                                    FRA=Grand compte,Prestataire,Expert,B‚n‚ficiaire];
+                                                   OptionString=Corporate Customer,Supplier,Adjuster,Beneficiary }
+    { 50011;  ;Corporate No.       ;Code20        ;TableRelation=IF (Service Contact=CONST(Beneficiary)) Customer.No. WHERE (Service Contact=CONST(Corporate Customer),
+                                                                                                                             Service Corporate=CONST(Yes));
+                                                   CaptionML=[ENU=Corporate No.;
+                                                              FRA=Nø grand compte] }
+    { 50012;  ;Corporate Region Code;Code10       ;TableRelation=IF (Service Contact=CONST(Beneficiary)) "Corporate Region"."Region Code" WHERE (Corporate No.=FIELD(Corporate No.));
+                                                   CaptionML=[ENU=Corporate Region Code;
+                                                              FRA=Code r‚gion grand compte] }
+    { 50013;  ;Member No.          ;Code20        ;CaptionML=[ENU=Member No.;
+                                                              FRA=Nø identifiant];
+                                                   Editable=No }
+    { 50050;  ;Geo. Reference Code ;Code10        ;TableRelation="Geographical Reference";
+                                                   CaptionML=[ENU=Geo. Reference Code;
+                                                              FRA=Code r‚f‚rence g‚o.];
+                                                   Editable=No }
+    { 50051;  ;Geo. Reference Address;Boolean     ;OnValidate=VAR
+                                                                lContactAltAddress@1100281000 : Record 5051;
+                                                              BEGIN
+                                                                lContactAltAddress.SETRANGE("Contact No.","Contact No.");
+                                                                lContactAltAddress.SETFILTER(Code,'<>%1',Code);
+                                                                lContactAltAddress.MODIFYALL(lContactAltAddress."Geo. Reference Address",FALSE,FALSE);
+                                                              END;
+
+                                                   CaptionML=[ENU=Geo. Reference Address;
+                                                              FRA=Adresse r‚f‚rence g‚o.] }
+    { 50052;  ;Operational Distance;Decimal       ;CaptionML=[ENU=Operational Distance;
+                                                              FRA=Distance op‚rationnelle];
+                                                   DecimalPlaces=0:2 }
+    { 50053;  ;Constraint Phone No.;Text30        ;OnValidate=BEGIN
+                                                                PhoneStandardization.ValidatePhoneNo(DATABASE::"Contact Alt. Address",CurrFieldNo,"Country/Region Code","Constraint Phone No.");
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Constraint Phone No.;
+                                                              FRA=Nø t‚l‚phone astreinte] }
+    { 50060;  ;Way Type            ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(50077),
+                                                                                  Field ID=CONST(21));
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Way Type;
+                                                              FRA=Type de voie] }
+    { 50061;  ;Way No.             ;Integer       ;CaptionML=[ENU=Way No.;
+                                                              FRA=Nø de voie] }
+    { 50062;  ;Way No. Extension   ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50062));
+                                                   CaptionML=[ENU=Way No. Extension;
+                                                              FRA=Extension nø de voie] }
+    { 50063;  ;Way Name            ;Text50        ;TableRelation="Address Reference"."Way Name" WHERE (Post Code=FIELD(Post Code),
+                                                                                                       Geo. Reference Code=FIELD(Geo. Reference Code));
+                                                   OnLookup=VAR
+                                                              lAddressReference@1100281000 : Record 50077;
+                                                            BEGIN
+                                                              //lAddressReference.SETRANGE("Address Key", "Post Code");
+                                                              lAddressReference.SETRANGE("Geo. Reference Code", "Geo. Reference Code");
+
+                                                              IF FORM.RUNMODAL(0, lAddressReference) = ACTION::LookupOK THEN BEGIN
+                                                                "Way Name" := lAddressReference."Way Name";
+                                                                //"Way Type" := lAddressReference."Way Type";//IMH10
+                                                              END;
+                                                            END;
+
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Way Name;
+                                                              FRA=Libell‚ de voie] }
+    { 50070;  ;Occupier Nature     ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50070));
+                                                   CaptionML=[ENU=Occupier Nature;
+                                                              FRA=Nature de l'occupant] }
+    { 50071;  ;Residence Type      ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50071));
+                                                   CaptionML=[ENU=Residence Type;
+                                                              FRA=Type de r‚sidence] }
+    { 50072;  ;Housing Type        ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50072));
+                                                   CaptionML=[ENU=Housing Type;
+                                                              FRA=Type d'habitation] }
+    { 50073;  ;Property Type       ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50073));
+                                                   CaptionML=[ENU=Property Type;
+                                                              FRA=Type de propri‚t‚] }
+    { 50100;  ;Contact Contract Filter;Code20     ;FieldClass=FlowFilter;
+                                                   CaptionML=[ENU=Contact Contract Filter;
+                                                              FRA=Filtre formule b‚n‚ficiaire] }
+    { 50101;  ;Contact Contract Exist;Boolean     ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Contact Contract Address" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                       Address Code=FIELD(Code),
+                                                                                                       Contract Form Code=FIELD(Contact Contract Filter)));
+                                                   CaptionML=[ENU=Contact Contract Exists;
+                                                              FRA=Formule contact existe];
+                                                   Editable=No }
+    { 50200;  ;Latitude            ;Integer       ;CaptionML=[ENU=Latitude;
+                                                              FRA=Latitude];
+                                                   Editable=No }
+    { 50201;  ;Longitude           ;Integer       ;CaptionML=[ENU=Longitude;
+                                                              FRA=Longitude];
+                                                   Editable=No }
+    { 50202;  ;Address Geocoded    ;Boolean       ;CaptionML=[ENU=Address Geocoded;
+                                                              FRA=Geocodage … l'adresse];
+                                                   Editable=No }
+    { 50203;  ;Geocoded            ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Contact Alt. Address" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                   Code=FIELD(Code),
+                                                                                                   Geo. Reference Code=FILTER(<>'')));
+                                                   CaptionML=[ENU=Geocoded;
+                                                              FRA=Geocod‚];
+                                                   Editable=No }
+    { 50500;  ;Occupier Nature Description;Text50 ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Code.Description WHERE (Table ID=CONST(5051),
+                                                                                              Field ID=CONST(50070),
+                                                                                              Code=FIELD(Occupier Nature)));
+                                                   CaptionML=[ENU=Occupier Nature Description;
+                                                              FRA=D‚signation nature de l'occupant];
+                                                   Editable=No }
+    { 8016608;;Address 3           ;Text50        ;CaptionML=[ENU=Address 3;
+                                                              FRA=Adresse (3Šme ligne)] }
+  }
+  KEYS
+  {
+    {    ;Contact No.,Code                        ;Clustered=Yes }
+    {    ;Search Name,Service Contact              }
+    {    ;Post Code,Country/Region Code,Service Contact }
+    {    ;Search City,Corporate No.,Service Contact,Search Address,Search Name }
+    {    ;Search E-Mail                            }
+    { No ;Phone No.                                }
+    {    ;Member No.,Corporate No.                 }
+    {    ;Search Surname,Corporate No.,Search First Name }
+    {    ;Post Code,Search Name,Service Contact    }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      PostCode@1001 : Record 225;
+      Cont@1000 : Record 5050;
+      PhoneStandardization@1100281000 : Codeunit 50099;
+      ToolsMgt@1100281001 : Codeunit 8016602;
+
+    PROCEDURE TouchContact@1(ContactNo@1000 : Code[20]);
+    BEGIN
+      Cont.LOCKTABLE;
+      Cont.GET(ContactNo);
+      Cont."Last Date Modified" := TODAY;
+      Cont.MODIFY;
+    END;
+
+    PROCEDURE SynchroContact@1100281000();
+    VAR
+      lContact@1100281001 : Record 5050;
+      lModify@1100281002 : Boolean;
+    BEGIN
+      //<<IMH02
+      // Si adresse principale du contact alors synchro vers contact
+      IF NOT "Contact Address" THEN
+        EXIT;
+      IF NOT lContact.GET("Contact No.") THEN
+        EXIT;
+
+      IF Rec.Address <> xRec.Address THEN BEGIN
+        lContact.Address := Address;
+        lModify := TRUE;
+      END;
+      IF Rec."Address 2" <> xRec."Address 2" THEN BEGIN
+        lContact."Address 2" := "Address 2";
+        lModify := TRUE;
+      END;
+      IF Rec."Address 3" <> xRec."Address 3" THEN BEGIN
+        lContact."Address 3" := "Address 3";
+        lModify := TRUE;
+      END;
+      IF Rec."Post Code" <> xRec."Post Code" THEN BEGIN
+        lContact."Post Code" := "Post Code";
+        lModify := TRUE;
+      END;
+      IF Rec.City <> xRec.City THEN BEGIN
+        lContact.City := City;
+        lModify := TRUE;
+      END;
+      IF Rec.County <> xRec.County THEN BEGIN
+        lContact.County := County;
+        lModify := TRUE;
+      END;
+      IF Rec."Country/Region Code" <> xRec."Country/Region Code" THEN BEGIN
+        lContact."Country/Region Code" := "Country/Region Code";
+        lModify := TRUE;
+      END;
+      IF Rec."Phone No." <> xRec."Phone No." THEN BEGIN
+        lContact."Phone No." := "Phone No.";
+        lModify := TRUE;
+      END;
+      //<<IMH11.ST
+      IF Rec."Fax No." <> xRec."Fax No." THEN BEGIN
+        lContact."Fax No." := "Fax No.";
+        lModify := TRUE;
+      END;
+      //>>IMT11.ST
+      IF Rec."Mobile Phone No." <> xRec."Mobile Phone No." THEN BEGIN
+        lContact."Mobile Phone No." := "Mobile Phone No.";
+        lModify := TRUE;
+      END;
+      IF Rec."Mobile Phone No. 2" <> xRec."Mobile Phone No. 2" THEN BEGIN
+        lContact."Mobile Phone No. 2" := "Mobile Phone No. 2";
+        lModify := TRUE;
+      END;
+      //<<IMH03.isat.PC
+      IF Rec."Constraint Phone No." <> xRec."Constraint Phone No." THEN BEGIN
+        lContact."Constraint Phone No." := "Constraint Phone No.";
+        lModify := TRUE;
+      END;
+      //>>IMH03.isat.PC
+      IF Rec."Home Page" <> xRec."Home Page" THEN BEGIN
+        lContact."Home Page" := "Home Page";
+        lModify := TRUE;
+      END;
+      IF Rec."E-mail" <> xRec."E-mail" THEN BEGIN
+        lContact."E-Mail" := "E-mail";
+        lModify := TRUE;
+      END;
+      IF lModify THEN
+        lContact.MODIFY;//(TRUE);
+      //>>IMH02
+    END;
+
+    PROCEDURE UpdateAltAddress@1100281001(pContact@1100281000 : Record 5050);
+    VAR
+      lMarketingSetup@1100281002 : Record 5079;
+      lContactAltAddress@1100281001 : Record 5051;
+      lModify@1100281003 : Boolean;
+    BEGIN
+      //<<IMH02
+
+      lContactAltAddress.SETRANGE("Contact No.",pContact."No.");
+      lContactAltAddress.SETRANGE("Contact Address",TRUE);
+      IF NOT lContactAltAddress.FINDFIRST THEN BEGIN
+        lMarketingSetup.GET;
+        lContactAltAddress.INIT;
+        lContactAltAddress.VALIDATE("Contact No.",pContact."No.");
+        lContactAltAddress."Company Name" := pContact.Name;
+        lContactAltAddress."Service Contact" := pContact."Service Contact";
+        lContactAltAddress.Code := lMarketingSetup."Main Address Code";
+        lContactAltAddress."Contact Address" := TRUE;
+        //<<IMH03.isat.PC
+        lContactAltAddress."Geo. Reference Address" := TRUE;
+        //>>IMH03.isat.PC
+        lContactAltAddress.INSERT;
+      END;
+
+      IF (lContactAltAddress."Service Contact" <> pContact."Service Contact") OR
+         (lContactAltAddress."Company Name" <> pContact.Name) OR
+         (lContactAltAddress."Search Name" <> UPPERCASE(ToolsMgt.ReplaceAccent(pContact.Name))) OR
+         (lContactAltAddress."Search First Name" <> UPPERCASE(ToolsMgt.ReplaceAccent(pContact."First Name"))) OR
+         (lContactAltAddress."Search Surname" <> UPPERCASE(ToolsMgt.ReplaceAccent(pContact.Surname))) OR
+         (lContactAltAddress.Address <> pContact.Address) OR
+         (lContactAltAddress."Search Address" <> UPPERCASE(ToolsMgt.ReplaceAccent(pContact.Address))) OR
+         (lContactAltAddress."Address 2" <> pContact."Address 2") OR
+         (lContactAltAddress."Address 3" <> pContact."Address 3") OR
+         (lContactAltAddress."Post Code" <> pContact."Post Code") OR
+         (lContactAltAddress."Search City" <> UPPERCASE(ToolsMgt.GetSearchString(pContact.City))) OR
+         (lContactAltAddress.County <> pContact.County) OR
+         (lContactAltAddress."Country/Region Code" <> pContact."Country/Region Code") OR
+         (lContactAltAddress."Phone No." <> pContact."Phone No.") OR
+         (lContactAltAddress."Mobile Phone No." <> pContact."Mobile Phone No.") OR
+         (lContactAltAddress."Mobile Phone No. 2" <> pContact."Mobile Phone No. 2") OR
+         //<<IMH03.isat.PC
+         (lContactAltAddress."Constraint Phone No." <> pContact."Constraint Phone No.") OR
+         (lContactAltAddress."Geo. Reference Code" <> pContact."Geo. Reference Code") OR
+         //>>IMH03.isat.PC
+         (lContactAltAddress."Home Page" <> pContact."Home Page") OR
+         (lContactAltAddress."E-mail" <> pContact."E-Mail") OR
+         (lContactAltAddress."Search E-Mail" <> ToolsMgt.ReplaceAccent(pContact."E-Mail")) OR
+         (lContactAltAddress."Corporate No." <> pContact."Corporate No.") OR
+         (lContactAltAddress."Corporate Region Code" <> pContact."Corporate Region Code")
+      THEN BEGIN
+        lContactAltAddress."Service Contact" := pContact."Service Contact";
+        lContactAltAddress."Company Name" := pContact.Name;
+        lContactAltAddress."Search Name" := UPPERCASE(ToolsMgt.ReplaceAccent(pContact.Name));
+        lContactAltAddress."Search First Name" := UPPERCASE(ToolsMgt.ReplaceAccent(pContact."First Name"));
+        lContactAltAddress."Search Surname" := UPPERCASE(ToolsMgt.ReplaceAccent(pContact.Surname));
+        lContactAltAddress.Address := pContact.Address;
+        lContactAltAddress."Search Address" := UPPERCASE(ToolsMgt.ReplaceAccent(pContact.Address));
+        lContactAltAddress."Address 2" := pContact."Address 2";
+        lContactAltAddress."Address 3" := pContact."Address 3";
+        lContactAltAddress."Post Code" := pContact."Post Code";
+        lContactAltAddress.City := pContact.City;
+        lContactAltAddress."Search City" := UPPERCASE(ToolsMgt.GetSearchString(pContact.City));
+        lContactAltAddress.County := pContact.County;
+        lContactAltAddress."Country/Region Code" := pContact."Country/Region Code";
+        lContactAltAddress."Phone No." := pContact."Phone No.";
+        lContactAltAddress."Fax No." := pContact."Fax No."; //IMH11.ST
+        lContactAltAddress."Mobile Phone No." := pContact."Mobile Phone No.";
+        lContactAltAddress."Mobile Phone No. 2" := pContact."Mobile Phone No. 2";
+        //<<IMH03.isat.PC
+        lContactAltAddress."Constraint Phone No." := pContact."Constraint Phone No.";
+        lContactAltAddress."Geo. Reference Code" := pContact."Geo. Reference Code";
+        //>>IMH03.isat.PC
+        lContactAltAddress."Home Page" := pContact."Home Page";
+        lContactAltAddress."E-mail" := pContact."E-Mail";
+        lContactAltAddress."Search E-Mail" := ToolsMgt.ReplaceAccent(pContact."E-Mail");
+        lContactAltAddress."Corporate No." := pContact."Corporate No.";
+        lContactAltAddress."Corporate Region Code" := pContact."Corporate Region Code";
+        lContactAltAddress.MODIFY;
+      END;
+      //>>IMH02
+    END;
+
+    PROCEDURE UpdatePhoneNoList@1100281002();
+    VAR
+      lPhoneNoList@1100281000 : Record 50055;
+      lCode@1100281002 : Code[10];
+    BEGIN
+      //<<IMH02
+      IF "Contact Address" THEN
+        lCode := ''
+      ELSE
+        lCode := Code;
+      IF "Phone No." <> '' THEN
+        lPhoneNoList.InsertAltAddressPhoneNo("Phone No.","Contact No.",FIELDNO("Phone No."),Code);
+      IF "Mobile Phone No." <> '' THEN
+        lPhoneNoList.InsertAltAddressPhoneNo("Mobile Phone No.","Contact No.",FIELDNO("Mobile Phone No."),Code);
+      //>>IMH02
+    END;
+
+    PROCEDURE UpdateGeo@1100281003();
+    VAR
+      lModify@1100281000 : Boolean;
+    BEGIN
+      IF Rec.Address <> xRec.Address THEN
+        lModify := TRUE;
+      IF Rec."Address 2" <> xRec."Address 2" THEN
+        lModify := TRUE;
+      IF Rec."Address 3" <> xRec."Address 3" THEN
+        lModify := TRUE;
+      IF Rec."Post Code" <> xRec."Post Code" THEN
+        lModify := TRUE;
+      IF Rec.City <> xRec.City THEN
+        lModify := TRUE;
+      IF lModify THEN BEGIN
+        Latitude := 0;
+        Longitude := 0;
+        "Address Geocoded" := FALSE;
+      END;
+    END;
+
+    PROCEDURE GetOccupierNature@1100281004() : Text[50];
+    VAR
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //IMH18.ST
+      IF lCode.GET(5051,50070,"Occupier Nature") THEN
+        EXIT(lCode.Description);
+    END;
+
+    PROCEDURE GetResidenceType@1100281005() : Text[50];
+    VAR
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //IMH18.ST
+      IF lCode.GET(5051,50071,"Residence Type") THEN
+        EXIT(lCode.Description);
+    END;
+
+    PROCEDURE GetHousingType@1100281006() : Text[50];
+    VAR
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //IMH18.ST
+      IF lCode.GET(5051,50072,"Housing Type") THEN
+        EXIT(lCode.Description);
+    END;
+
+    PROCEDURE GetPropertyType@1100281007() : Text[50];
+    VAR
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //IMH18.ST
+      IF lCode.GET(5051,50073,"Property Type") THEN
+        EXIT(lCode.Description);
+    END;
+
+    PROCEDURE UpdateSearchFields@1100281008();
+    BEGIN
+      "Search Address" := ToolsMgt.ReplaceAccent(Address);
+      "Search City" := ToolsMgt.GetSearchString(City);
+      "Search E-Mail" := ToolsMgt.ReplaceAccent("E-mail");
+      IF Cont.GET("Contact No.") THEN BEGIN
+        "Search Name" := ToolsMgt.ReplaceAccent(Cont.Name);
+        "Search First Name" := UPPERCASE(ToolsMgt.ReplaceAccent(Cont."First Name"));
+        "Search Surname" := UPPERCASE(ToolsMgt.ReplaceAccent(Cont.Surname));
+      END;
+    END;
+
+    PROCEDURE GetNextCode@1100281009();
+    VAR
+      lContAltAddr@1100281000 : Record 5051;
+    BEGIN
+      lContAltAddr.SETRANGE("Contact No.", "Contact No.");
+      lContAltAddr.SETRANGE(Code, 'S001', 'S999');
+      IF lContAltAddr.FINDLAST THEN
+        Code := INCSTR(lContAltAddr.Code)
+      ELSE
+        Code := 'S001';
+    END;
+
+    BEGIN
+    {
+      /** @r IMH20 @d 09/12/11 @a ISAT.PC @v IMH6.01.002 @s Gestion des contacts
+          @c ajout champ 50203, Geocoded */
+      /** @r IMH19 @d 27/07/11 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts @c Ajout Addresse 3 */
+      /** @r IMH18 @d 26/07/11 @a ISTA.ST @v IMH6.01.002 @s Gestion des contacts
+          @c Ajout des fonctions GetOccupierNature, GetResidenceType, GetHousingType, GetPropertyType */
+      /** @r IMH17 @d 28/03/11 @a ISAT.NFO @v IMH6.01.002 @s Geo
+          @c Raz des informations g‚ographiques si l'adresse change */
+      /** @r IMH16 @d 17/11/10 @a ISAT.LLT @v IMH6.01.002 @s Gestion des contacts
+          @c Ajout champ 50500 Occupier Nature Description
+      /** @r IMH15 @d 11/02/2011 @a IMH.ZW @v IMH6.01.001 @s Normalisation des donn‚es @c normalisation Email */
+      /** @r IHM14 @d 10/02/11 @a ISAT.ZW @v IMH6.01.001 @s Normalisation des donn‚es
+          @c Associer les Pays au code postaux - descendre le code pays automatiquement*/
+      /** @r IMH13 @d 19/01/11 @a ISAT.NFO @v IMH6.01.002 @s Gestion des contacts
+          @c Les champs latitude,longitude,geocoded non editable */
+      /** @r IMH12 @d 05/01/11 @a ISAT.NFO @v IMH6.01.002 @s Gestion des contacts
+          @c ajout du champs Address Geocoded */
+      /** @r IMH11 @d 10/12/10 @a ISAT.ST @v IMH6.01.002 @s Gestion des contacts
+          @c Blocage suppression adresse principale
+          @c Ajout Fax No. dans la synchro */
+      /** @r IMH10 @d 01/12/10 @a ISAT.NFO @v IMH6.01.002 @s Gestion des contacts
+          @c Mise … blanc du type de voie */
+      /** @r IMH09 @d 17/18/10 @a ISAT.NFO @v IMH6.01.002 @s Gestion des contacts
+          @c Ajout du champ 50200 Longitude
+          @c Ajout du champ 50201 latitude */
+      /** @r IMH08 @d 17/11/10 @a ISAT.LLT @v IMH6.01.002 @s Gestion des contacts
+          @c Ajout du champ 50070 Occupier Nature
+          @c Ajout du champ 50071 Residence Type
+          @c Ajout du champ 50072 Housing Type
+          @c Ajout du champ 50073 Property Type */
+      /** @r IMH07 @d 05/11/10 @a ISAT.LLT @v IMH6.01.004 @s Gestion des contacts
+          @c Renommage soci‚t‚ */
+      /** @r IMH06 @d 26/10/10 @a ISAT.ST @v IMH6.01.004 @s Gestion des contacts
+          @c Ajout champ 50013 Member No.
+          @c Ajout index Member No.,Partner No. */
+      /** @r IMH05 @d 21/10/10 @a ISAT.ZW @v IMH6.01.001 @s Normalisation des donn‚es
+          @c Ajout champ 50061 Way No.,50062 Way No. Extension, 50063 Way Name */
+      /** @r IMH04 @d 12/10/10 @a ISAT.ST @v IMH6.01.004 @s Gestion des contacts
+          @c D‚sactivation cl‚ Phone No.
+          @c Changement cl‚ "Country/Region Code,Post Code" en "Post Code,Country/Region Code" */
+      /** @r IMH03 @d 28/09/10 @a isat.PC @v IMH6.01.022 @s Comp‚tence g‚ographique
+          @c Ajout champ 50050, Reference Geo. Code
+          @c Ajout champ 50051, Reference Geo. Address
+          @c Ajout champ 50052, Operational Distance
+          @c Ajout champ 50053, Constraint Phone No. */
+      /** @r IMH02 @d 24/09/10 @a ISAT.LLT @v IMH6.01.004 @s Gestion des contacts
+          @c Ajout de la cl‚ Search Name,Search First Name
+          @c Ajout de la cl‚ Country/Region Code,Post Code
+          @c Ajout de la cl‚ Search City,Search Address
+          @c Ajout de la cl‚ Search E-Mail
+          @c Ajout cl‚ Phone No. */
+      /** @r IMH02 @d 24/09/10 @a ISAT.LLT @v IMH6.01.002 @s Gestion des contacts
+          @c Ajout du champ 50000 Address Type
+          @c Ajout du champ 50001 Contact Adress
+          @c Ajout du champ 50002 Search City
+          @c Ajout du champ 50003 Search Address
+          @c Ajout du champ 50004 Search Name
+          @c Ajout du champ 50005 Search Surname
+          @c Ajout du champ 50006 Search FirstName
+          @c Ajout du champ 50010 Service Contact
+          @c Ajout du champ 50011 Partner No.
+          @c Ajout du champ 50012 Partner Region Code
+          @c Synchro. vers Contact si adresse principale */
+      /** @r IMH01 @d 23/09/10 @a ISAT.LLT @v IMH6.01.001 @s Normalisation des donn‚es
+          @c Appel de la fonction de normalisation sur les champs de type t‚l‚phonie
+          @c Ajout du champ 50060 Way Type */
+    }
+    END.
+  }
+}

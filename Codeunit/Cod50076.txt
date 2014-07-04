@@ -1,0 +1,999 @@
+OBJECT Codeunit 50076 Network Visit Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=12/04/12;
+    Time=16:08:39;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lProviderVisitPlanning@1100281000 : Record 50167;
+          BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281002 : TextConst 'ENU=You must enter a file name.;FRA=Vous devez saisir un nom de fichier.';
+      Text002@1100281001 : TextConst 'ENU=You must enter an Excel worksheet name.;FRA=Vous devez saisir un nom de feuille Excel.';
+      Text003@1100281003 : TextConst 'ENU=You must enter a error file name.;FRA=Vous devez saisir un nom de fichier d''erreur.';
+      Text004@1100281007 : TextConst 'ENU=Import finished.;FRA=Importation termin‚e.';
+      ErrorText001@1100281004 : TextConst 'ENU=Row %1 : Provider exist.;FRA=Ligne %1 : Prestataire existant.';
+      ErrorText002@1100281005 : TextConst 'ENU=Row %1 : Post code %2 city %3 do not exists in Post Code table.;FRA=Ligne %1 : Code postal %2 ville %3 n''existe pas dans la table Code postal.';
+      ErrorText003@1100281006 : TextConst 'ENU=Row %1 column %2 : Phone No. format %3 is not correct.;FRA=Ligne %1 colonne %2 : Le format du nø de t‚l‚phone %3 n''est pas correct.';
+      ErrorText004@1100281008 : TextConst 'ENU=Row %1 column %2 : Specialization %3 nonexistent.;FRA=Ligne %1 colonne %2 : Sp‚cialit‚ %3 inexistante.';
+      ErrorText005@1100281000 : TextConst 'ENU=Errors Number : %1.;FRA=Nbre d''erreurs : %1.';
+      ErrorText006@1100281010 : TextConst 'ENU=Row %1 column %2 : Several specializations found for %3.;FRA=Ligne %1 colonne %2 : Plusieurs sp‚cialit‚s trouv‚es pour %3.';
+      ToolsMgt@1100281009 : Codeunit 8016602;
+      Text006@1000000000 : TextConst 'ENU=The visit is already affected to the planning %1. Do you want to modify the visit date/time?;FRA=La visite a d‚j… ‚t‚ affectr‚ au planning nø %1, souhaitez-vous modifier la date/l''heure de visite?';
+      Text007@1000000001 : TextConst 'ENU=Do you want to create the provider and put the process status to Black List?;FRA=Souhaitez-vous cr‚er le prestataire et mettre le statut processus du prestataire … Black List?';
+      Text008@1000000002 : TextConst 'ENU=Do you want to create the provider and put the process status to not interesting?;FRA=Souhaitez-vous cr‚er le prestataire et mettre le statut processus du prestataire … non int‚ress‚?';
+      Text009@1000000004 : TextConst 'ENU=Do you want to put the process status to Black List?;FRA=Souhaitez-vous mettre le statut processus du prestataire … Black Liste?';
+      Text010@1000000003 : TextConst 'ENU=Do you want to put the process status to not interesting?;FRA=Souhaitez-vous mettre le statut processus du prestataire … non int‚ress‚?';
+      Text011@1000000006 : TextConst 'ENU=Import Attachment;FRA=Importer document';
+      Text012@1000000005 : TextConst 'ENU=All Files (*.*)|*.*;FRA=Tous les fichiers (*.*)|*.*';
+      FolderMgt@1000000007 : Codeunit 50004;
+      Text013@1100281011 : TextConst 'ENU=Management visit crreated from %1 provider(s);FRA=Visite(s) d''animation et de gestion cr‚e(s) pour %1 prestataire(s)';
+      Text014@1000000008 : TextConst 'ENU=Do you want to cancel the visit?;FRA=Souhaitez-vous annuler la visite?';
+      Text015@1000000009 : TextConst 'ENU=Do you want to passe the visit to done?;FRA=Souhaitez-vous passer la visite en statut effectu‚?';
+      Text016@1000000010 : TextConst 'ENU=Do you want to replan the visit?;FRA=Souhaitez-vous re-planifier la visite?';
+      Text017@1100281012 : TextConst 'ENU=Do you want to confirm the visit?;FRA=Souhaitez-vous confirmer la visite?';
+
+    PROCEDURE CreateProvider@1100281025(VAR pNetworkFacilitatorVisit@1100281000 : Record 50105;VAR pProvider@1100281001 : Record 50000;pShowCard@1100281004 : Boolean);
+    VAR
+      lSpecialization@1100281005 : Record 50005;
+      lPostCode@1100281002 : Record 225;
+      lArea@1100281003 : Record 284;
+      lProviderContactUpdate@1100281006 : Codeunit 50010;
+    BEGIN
+      // Cr‚ation d'un prestataire … partir d'une ligne de visite
+
+      IF pNetworkFacilitatorVisit."Provider No." <> '' THEN BEGIN
+        EXIT;
+      END;
+      pNetworkFacilitatorVisit.TESTFIELD("Provider Post Code");
+      pNetworkFacilitatorVisit.TESTFIELD("Provider City");
+      lPostCode.GET(pNetworkFacilitatorVisit."Provider Post Code",pNetworkFacilitatorVisit."Provider City");
+
+      pProvider.INIT;
+      pProvider."No." := '';
+      pProvider.INSERT(TRUE);
+
+      pProvider.VALIDATE(Name, pNetworkFacilitatorVisit."Provider Name");
+      pProvider.VALIDATE("Name 2", pNetworkFacilitatorVisit."Provider Name 2");
+      pProvider.VALIDATE(Address, pNetworkFacilitatorVisit."Provider Address");
+      pProvider.VALIDATE("Address 2", pNetworkFacilitatorVisit."Provider Address 2");
+      pProvider."Post Code" := lPostCode.Code;
+      pProvider.City := lPostCode.City;
+      pProvider."IMH Territory Code" := lPostCode."IMH Territory Code";
+      pProvider."Area Code" := lPostCode."Area Code";
+      pProvider."Admin. Territory Code" := lPostCode."Admin. Territory Code";
+      lArea.GET(lPostCode."Area Code");
+      pProvider."Geo. Reference Code" := lPostCode.GetReferenceGeoCode(pProvider."Post Code",pProvider.City);
+      pProvider.VALIDATE("Network Facilitator",lArea."Network Facilitator");
+      pProvider.VALIDATE("Regional Coordinator",lArea."Regional Coordinator");
+      pProvider.VALIDATE("Network Assistant",lArea."Network Assistant");
+      pProvider.VALIDATE("Phone No.", pNetworkFacilitatorVisit."Provider Phone No.");
+      pProvider.VALIDATE("Country/Region Code", pNetworkFacilitatorVisit."Provider Country/Region Code");
+      pProvider.VALIDATE("Mobile Phone No.", pNetworkFacilitatorVisit."Provider Mobile Phone No.");
+      pProvider.VALIDATE("Recruitment Date", pNetworkFacilitatorVisit."Visit Date");
+      pProvider."Main Specialization Code" := pNetworkFacilitatorVisit."Main Specialization Code";
+      lSpecialization.GetBuildingTrade(pProvider."Main Specialization Code",pProvider."Main Building Trade No.");
+      pProvider.VALIDATE("Planified Visit Date", pNetworkFacilitatorVisit."Visit Date");
+      pProvider.VALIDATE("Next Visit interlocutor", pNetworkFacilitatorVisit."Visit Interlocutor");
+      pProvider.VALIDATE("Registration No.",pNetworkFacilitatorVisit."Provider Registration No.");
+
+      pProvider.MODIFY(TRUE);
+
+      // Gestion du lien contact
+      lProviderContactUpdate.OnModify(pProvider);
+
+      pNetworkFacilitatorVisit."Provider No." := pProvider."No.";
+      // Indique que le prestataire a ‚t‚ cr‚‚ depuis la visite
+      pNetworkFacilitatorVisit."Provider Not Refenced" := TRUE;
+      pNetworkFacilitatorVisit.MODIFY(TRUE);
+
+      IF pShowCard THEN BEGIN
+        COMMIT;
+        FORM.RUN(FORM::"Provider Card", pProvider);
+      END;
+    END;
+
+    PROCEDURE LoadNetworkFaciVisitByProvider@1100281001(pProviderVisitPlanning@1000000001 : Record 50167);
+    VAR
+      lProvider@1100281000 : Record 50000;
+      lProviderSpecialization@1000000000 : Record 50006;
+      lPostCode@1100281001 : Record 225;
+      lGeographicalRefBuffer@1100281012 : TEMPORARY Record 50013;
+      lContactAltAddress@1100281016 : Record 5051;
+      lAddVisitFacilitator@1100281003 : Report 50146;
+      lProviderSearchMgt@1100281002 : Codeunit 50000;
+      lBeginVisitDate@1000000006 : Date;
+      lEndVisitDate@1000000007 : Date;
+      lIsOk@1100281009 : Boolean;
+      lCheckZone@1100281013 : Boolean;
+      lCheckSpecialization@1100281014 : Boolean;
+      lCreateVisit@1100281015 : Boolean;
+      lCityKey@1100281008 : Text[30] INDATASET;
+      lPostCodeKey@1100281007 : Code[20];
+      lCountryKey@1100281006 : Code[10];
+      lZoneSearch@1100281005 : Integer INDATASET;
+      lLineToTreate@1100281011 : Integer;
+      lCountLine@1100281010 : Integer;
+      lSearchTimeFormula@1100281004 : Integer;
+    BEGIN
+      // ajouter les visites animation et gestion
+
+      // On v‚rifie que les dates de d‚but et fin planning sont renseign‚es
+      pProviderVisitPlanning.TESTFIELD("Begin Date");
+      pProviderVisitPlanning.TESTFIELD("End Date");
+
+      // On va r‚cup‚rer les variables de cr‚ation
+      lAddVisitFacilitator.SetValues(
+        pProviderVisitPlanning."Start City",
+        pProviderVisitPlanning."Start City Post Code",
+        pProviderVisitPlanning."Start City Country/Region Code",
+        pProviderVisitPlanning."Zone Visit");
+      lAddVisitFacilitator.RUNMODAL;
+      lAddVisitFacilitator.GetValues(
+        lProvider,
+        lProviderSpecialization,
+        lIsOk,
+        lCityKey,
+        lPostCodeKey,
+        lCountryKey,
+        lZoneSearch,
+        lSearchTimeFormula);
+      IF NOT lIsOk THEN BEGIN
+        EXIT;
+      END;
+
+      // Gestion de la zone
+      lCheckZone := FALSE;
+      IF (lCityKey <> '') AND (lPostCodeKey <> '') AND (lCountryKey <> '') THEN BEGIN
+        lPostCode.GET(lPostCodeKey,lCityKey);
+        GetSearchProviderZone(lGeographicalRefBuffer,lPostCode."Geo. Reference Code",lZoneSearch);
+        lCheckZone := TRUE;
+      END;
+
+      // Gestion des sp‚cialit‚s
+      lCheckSpecialization := lProviderSpecialization.GETFILTERS <> '';
+
+      // Filtres par d‚faut
+      lProvider.SETFILTER(
+        Status,'%1|%2|%3',
+        lProvider.Status::Approval,
+        lProvider.Status::Operational,
+        lProvider.Status::"Trial Period");
+      lProvider.SETFILTER("Visit Category Code",'<>%1','');
+
+      // Pose des filtres pour les dates
+      lBeginVisitDate := pProviderVisitPlanning."Begin Date";
+      lEndVisitDate := pProviderVisitPlanning."End Date" + lSearchTimeFormula;
+      {
+      IF lSearchTimeFormula <> 0 THEN BEGIN
+        //lEndVisitDate := CALCDATE(lSearchTimeFormula,pProviderVisitPlanning."End Date");
+        lEndVisitDate := pProviderVisitPlanning."End Date" + lSearchTimeFormula;
+      END ELSE BEGIN
+        lEndVisitDate := pProviderVisitPlanning."End Date";
+      END;
+      }
+
+      lProvider.SETRANGE("Planified Facilit. Visit Date", lBeginVisitDate, lEndVisitDate);
+
+      IF pProviderVisitPlanning."Ligne To Treate Nb" <> 0 THEN BEGIN
+        lLineToTreate := pProviderVisitPlanning."Ligne To Treate Nb";
+      END ELSE BEGIN
+        lLineToTreate := lProvider.COUNT;
+      END;
+
+      lCountLine := 0;
+      IF lProvider.FINDSET THEN BEGIN
+        REPEAT
+          lCreateVisit := TRUE;
+          // on v‚rifie que le prestataire possŠde une des sp‚cialit‚
+          IF lCheckSpecialization THEN BEGIN
+            lProviderSpecialization.SETRANGE("Provider No.",lProvider."No.");
+            lCreateVisit := NOT lProviderSpecialization.ISEMPTY;
+          END;
+          // on v‚rifie que le prestataire est dans la zone
+          IF lCheckZone THEN BEGIN
+            lContactAltAddress.SETRANGE("Contact No.",lProvider."No.");
+            lContactAltAddress.SETRANGE("Geo. Reference Address",TRUE);
+            IF lContactAltAddress.FINDFIRST THEN BEGIN
+              IF lContactAltAddress."Geo. Reference Code" <> '' THEN BEGIN
+                lGeographicalRefBuffer.RESET;
+                lGeographicalRefBuffer.SETRANGE(Code,lContactAltAddress."Geo. Reference Code");
+                lCreateVisit := lCreateVisit AND NOT (lGeographicalRefBuffer.ISEMPTY);
+              END ELSE
+                lCreateVisit := FALSE;
+            END;
+          END;
+
+          IF lCreateVisit THEN BEGIN
+            CreateVisitByProvider(lProvider, pProviderVisitPlanning, 0);
+            lCountLine += 1
+          END;
+        UNTIL (lProvider.NEXT = 0) OR (lCountLine = lLineToTreate);
+      END;
+      IF GUIALLOWED THEN BEGIN
+        MESSAGE(Text013,lCountLine);
+      END;
+    END;
+
+    PROCEDURE LoadProviderBasVisitByProvider@1000000010(pProviderVisitPlanning@1000000001 : Record 50167);
+    VAR
+      lProvider@1100281019 : Record 50000;
+      lProviderSpecialization@1100281018 : Record 50006;
+      lPostCode@1100281017 : Record 225;
+      lGeographicalRefBuffer@1100281016 : TEMPORARY Record 50013;
+      lContactAltAddress@1100281015 : Record 5051;
+      lAddVisitProviderBase@1100281014 : Report 50147;
+      lProviderSearchMgt@1100281013 : Codeunit 50000;
+      lBeginVisitDate@1100281012 : Date;
+      lEndVisitDate@1100281011 : Date;
+      lIsOk@1100281010 : Boolean;
+      lCheckZone@1100281009 : Boolean;
+      lCheckSpecialization@1100281008 : Boolean;
+      lCreateVisit@1100281007 : Boolean;
+      lCityKey@1100281006 : Text[30] INDATASET;
+      lPostCodeKey@1100281005 : Code[20];
+      lCountryKey@1100281004 : Code[10];
+      lZoneSearch@1100281003 : Integer INDATASET;
+      lLineToTreate@1100281002 : Integer;
+      lCountLine@1100281001 : Integer;
+    BEGIN
+      // ajouter des visites … partir de la base de prestataire
+
+      // On va r‚cup‚rer les variables de cr‚ation
+      lAddVisitProviderBase.SetValues(
+        pProviderVisitPlanning."Start City",
+        pProviderVisitPlanning."Start City Post Code",
+        pProviderVisitPlanning."Start City Country/Region Code",
+        pProviderVisitPlanning."Zone Visit");
+      lAddVisitProviderBase.RUNMODAL;
+      lAddVisitProviderBase.GetValues(
+        lProvider,
+        lProviderSpecialization,
+        lIsOk,
+        lCityKey,
+        lPostCodeKey,
+        lCountryKey,
+        lZoneSearch);
+      IF NOT lIsOk THEN BEGIN
+        EXIT;
+      END;
+
+      // Gestion de la zone
+      lCheckZone := FALSE;
+      IF (lCityKey <> '') AND (lPostCodeKey <> '') AND (lCountryKey <> '') THEN BEGIN
+        lPostCode.GET(lPostCodeKey,lCityKey);
+        GetSearchProviderZone(lGeographicalRefBuffer,lPostCode."Geo. Reference Code",lZoneSearch);
+        lCheckZone := TRUE;
+      END;
+
+      // Gestion des sp‚cialit‚s
+      lCheckSpecialization := lProviderSpecialization.GETFILTERS <> '';
+
+      IF pProviderVisitPlanning."Ligne To Treate Nb" <> 0 THEN BEGIN
+        lLineToTreate := pProviderVisitPlanning."Ligne To Treate Nb";
+      END ELSE BEGIN
+        lLineToTreate := lProvider.COUNT;
+      END;
+
+      lCountLine := 0;
+      IF lProvider.FINDSET THEN BEGIN
+        REPEAT
+          lCreateVisit := TRUE;
+          // on v‚rifie que le prestataire possŠde une des sp‚cialit‚
+          IF lCheckSpecialization THEN BEGIN
+            lProviderSpecialization.SETRANGE("Provider No.",lProvider."No.");
+            lCreateVisit := NOT lProviderSpecialization.ISEMPTY;
+          END;
+          // on v‚rifie que le prestataire est dans la zone
+          IF lCheckZone THEN BEGIN
+            lContactAltAddress.SETRANGE("Contact No.",lProvider."No.");
+            lContactAltAddress.SETRANGE("Geo. Reference Address",TRUE);
+            IF lContactAltAddress.FINDFIRST THEN BEGIN
+              IF lContactAltAddress."Geo. Reference Code" <> '' THEN BEGIN
+                lGeographicalRefBuffer.RESET;
+                lGeographicalRefBuffer.SETRANGE(Code,lContactAltAddress."Geo. Reference Code");
+                lCreateVisit := lCreateVisit AND NOT (lGeographicalRefBuffer.ISEMPTY);
+              END ELSE
+                lCreateVisit := FALSE;
+            END;
+          END;
+
+          IF lCreateVisit THEN BEGIN
+            CreateVisitByProvider(lProvider, pProviderVisitPlanning, 4);
+            lCountLine += 1
+          END;
+        UNTIL (lProvider.NEXT = 0) OR (lCountLine = lLineToTreate);
+      END;
+      IF GUIALLOWED THEN BEGIN
+        MESSAGE(Text013,lCountLine);
+      END;
+    END;
+
+    PROCEDURE LoadRecuitmentVisit@1000000017(pProviderVisitPlanning@1000000001 : Record 50167);
+    VAR
+      lNetworkVisit@1000000000 : Record 50105;
+      lNetworkVisit2@1000000003 : Record 50105;
+      lProvider@1000000002 : Record 50000;
+      lPostCode@1100281001 : Record 225;
+      lGeographicalRefBuffer@1100281012 : TEMPORARY Record 50013;
+      lContactAltAddress@1100281016 : Record 5051;
+      lAddVisitRecrutement@1100281003 : Report 50144;
+      lProviderSearchMgt@1100281002 : Codeunit 50000;
+      lIsOk@1100281009 : Boolean;
+      lCheckZone@1100281013 : Boolean;
+      lCreateVisit@1100281015 : Boolean;
+      lCityKey@1100281008 : Text[30] INDATASET;
+      lPostCodeKey@1100281007 : Code[20];
+      lCountryKey@1100281006 : Code[10];
+      lZoneSearch@1100281005 : Integer INDATASET;
+      lLineToTreate@1100281011 : Integer;
+      lCountLine@1100281010 : Integer;
+    BEGIN
+      //IMH03
+      // ajouter les visites campagn de recrutement
+
+      // On va r‚cup‚rer les variables de cr‚ation
+      lAddVisitRecrutement.SetValues(
+        pProviderVisitPlanning."Start City",
+        pProviderVisitPlanning."Start City Post Code",
+        pProviderVisitPlanning."Start City Country/Region Code",
+        pProviderVisitPlanning."Zone Visit");
+      lAddVisitRecrutement.RUNMODAL;
+      lAddVisitRecrutement.GetValues(
+        lNetworkVisit,
+        lIsOk,
+        lCityKey,
+        lPostCodeKey,
+        lCountryKey,
+        lZoneSearch);
+      IF NOT lIsOk THEN BEGIN
+        EXIT;
+      END;
+
+      // Gestion de la zone
+      lCheckZone := FALSE;
+      IF (lCityKey <> '') AND (lPostCodeKey <> '') AND (lCountryKey <> '') THEN BEGIN
+        lPostCode.GET(lPostCodeKey,lCityKey);
+        GetSearchProviderZone(lGeographicalRefBuffer,lPostCode."Geo. Reference Code",lZoneSearch);
+        lCheckZone := TRUE;
+      END;
+
+      // Filtres par d‚faut
+      lNetworkVisit.SETCURRENTKEY(Type);
+      lNetworkVisit.SETRANGE("Planning No.", '');
+      lNetworkVisit.SETRANGE(Closed, FALSE);
+      lNetworkVisit.SETRANGE(Type, lNetworkVisit.Type::"Camp. Recruitment");
+
+      IF pProviderVisitPlanning."Ligne To Treate Nb" <> 0 THEN BEGIN
+        lLineToTreate := pProviderVisitPlanning."Ligne To Treate Nb";
+      END ELSE BEGIN
+        lLineToTreate := lNetworkVisit.COUNT;
+      END;
+
+      lCountLine := 0;
+      //MESSAGE(FORMAT(lNetworkVisit.COUNT));
+      IF lNetworkVisit.FINDSET THEN BEGIN
+        REPEAT
+          lCreateVisit := TRUE;
+
+          IF (NOT lNetworkVisit."Not Interesting") AND (NOT lNetworkVisit."Provider Not Refenced")
+              AND (lNetworkVisit."Provider No." <>'') THEN BEGIN
+            lCreateVisit := FALSE;
+          END;
+
+          // on v‚rifie que le prestataire est dans la zone
+          IF lCheckZone THEN BEGIN
+            IF lCreateVisit THEN BEGIN
+              IF lProvider.GET(lNetworkVisit."Provider No.") THEN BEGIN
+                lContactAltAddress.SETRANGE("Contact No.",lProvider."No.");
+                lContactAltAddress.SETRANGE("Geo. Reference Address",TRUE);
+                IF lContactAltAddress.FINDFIRST THEN BEGIN
+                  IF lContactAltAddress."Geo. Reference Code" <> '' THEN BEGIN
+                    lGeographicalRefBuffer.RESET;
+                    lGeographicalRefBuffer.SETRANGE(Code,lContactAltAddress."Geo. Reference Code");
+                    lCreateVisit := lCreateVisit AND NOT (lGeographicalRefBuffer.ISEMPTY);
+                  END ELSE
+                    lCreateVisit := FALSE;
+                END ELSE
+                  lCreateVisit := FALSE;
+              END ELSE BEGIN
+                IF lNetworkVisit."Prov. Geo. Reference Code" <> '' THEN BEGIN
+                  lGeographicalRefBuffer.RESET;
+                  lGeographicalRefBuffer.SETRANGE(Code,lNetworkVisit."Prov. Geo. Reference Code");
+                  lCreateVisit := lCreateVisit AND NOT (lGeographicalRefBuffer.ISEMPTY);
+                END ELSE
+                  lCreateVisit := FALSE;
+              END;
+            END;
+          END;
+
+          IF lCreateVisit THEN BEGIN
+            lNetworkVisit2 := lNetworkVisit;
+            lNetworkVisit2."Planning No." := pProviderVisitPlanning."No.";
+            lNetworkVisit2.MODIFY(TRUE);
+            lCountLine += 1
+          END;
+        UNTIL (lNetworkVisit.NEXT = 0) OR (lCountLine = lLineToTreate);
+      END;
+    END;
+
+    PROCEDURE LoadPrepositionVisit@1000000018(pProviderVisitPlanning@1000000001 : Record 50167);
+    VAR
+      lNetworkVisit@1000000000 : Record 50105;
+      lNetworkVisit2@1000000003 : Record 50105;
+      lProvider@1000000002 : Record 50000;
+      lPostCode@1100281001 : Record 225;
+      lGeographicalRefBuffer@1100281012 : TEMPORARY Record 50013;
+      lContactAltAddress@1100281016 : Record 5051;
+      lAddVisitPreposition@1100281003 : Report 50145;
+      lProviderSearchMgt@1100281002 : Codeunit 50000;
+      lIsOk@1100281009 : Boolean;
+      lCheckZone@1100281013 : Boolean;
+      lCreateVisit@1100281015 : Boolean;
+      lCityKey@1100281008 : Text[30] INDATASET;
+      lPostCodeKey@1100281007 : Code[20];
+      lCountryKey@1100281006 : Code[10];
+      lZoneSearch@1100281005 : Integer INDATASET;
+      lLineToTreate@1100281011 : Integer;
+      lCountLine@1100281010 : Integer;
+    BEGIN
+      //IMH03
+      // ajouter les visites Pr‚-positionn‚es
+
+      // On va r‚cup‚rer les variables de cr‚ation
+      lAddVisitPreposition.SetValues(
+        pProviderVisitPlanning."Start City",
+        pProviderVisitPlanning."Start City Post Code",
+        pProviderVisitPlanning."Start City Country/Region Code",
+        pProviderVisitPlanning."Zone Visit");
+      lAddVisitPreposition.RUNMODAL;
+      lAddVisitPreposition.GetValues(
+        lNetworkVisit,
+        lIsOk,
+        lCityKey,
+        lPostCodeKey,
+        lCountryKey,
+        lZoneSearch);
+      IF NOT lIsOk THEN BEGIN
+        EXIT;
+      END;
+
+      // Gestion de la zone
+      lCheckZone := FALSE;
+      IF (lCityKey <> '') AND (lPostCodeKey <> '') AND (lCountryKey <> '') THEN BEGIN
+        lPostCode.GET(lPostCodeKey,lCityKey);
+        GetSearchProviderZone(lGeographicalRefBuffer,lPostCode."Geo. Reference Code",lZoneSearch);
+        lCheckZone := TRUE;
+      END;
+
+      // Filtres par d‚faut
+      lNetworkVisit.SETCURRENTKEY(Type);
+      lNetworkVisit.SETRANGE("Planning No.", '');
+      lNetworkVisit.SETRANGE(Closed, FALSE);
+      lNetworkVisit.SETFILTER(Type, '%1|%2|%3|%4', lNetworkVisit.Type::Claim,
+                                                   lNetworkVisit.Type::"Quality Control",
+                                                   lNetworkVisit.Type::Formation,
+                                                   lNetworkVisit.Type::"TH Control");
+      IF (pProviderVisitPlanning."Begin Date" <> 0D) AND (pProviderVisitPlanning."End Date" <> 0D) THEN
+        lNetworkVisit.SETFILTER("Visit Date",'%1|%2..%3', 0D, pProviderVisitPlanning."Begin Date", pProviderVisitPlanning."End Date");
+      IF (pProviderVisitPlanning."Begin Date" <> 0D) AND (pProviderVisitPlanning."End Date" = 0D) THEN
+        lNetworkVisit.SETFILTER("Visit Date",'%1|>=%2', 0D, pProviderVisitPlanning."Begin Date");
+      IF (pProviderVisitPlanning."Begin Date" = 0D) AND (pProviderVisitPlanning."End Date" <> 0D) THEN
+        lNetworkVisit.SETFILTER("Visit Date",'%1|<=%3', 0D, pProviderVisitPlanning."End Date");
+
+
+      IF pProviderVisitPlanning."Ligne To Treate Nb" <> 0 THEN BEGIN
+        lLineToTreate := pProviderVisitPlanning."Ligne To Treate Nb";
+      END ELSE BEGIN
+        lLineToTreate := lNetworkVisit.COUNT;
+      END;
+
+      lCountLine := 0;
+      IF lNetworkVisit.FINDSET THEN BEGIN
+        REPEAT
+          lCreateVisit := TRUE;
+
+          // on v‚rifie que le prestataire est dans la zone
+          IF lCheckZone THEN BEGIN
+            IF lCreateVisit THEN BEGIN
+              IF lProvider.GET(lNetworkVisit."Provider No.") THEN BEGIN
+                lContactAltAddress.SETRANGE("Contact No.",lProvider."No.");
+                lContactAltAddress.SETRANGE("Geo. Reference Address",TRUE);
+                IF lContactAltAddress.FINDFIRST THEN BEGIN
+                  IF lContactAltAddress."Geo. Reference Code" <> '' THEN BEGIN
+                    lGeographicalRefBuffer.RESET;
+                    lGeographicalRefBuffer.SETRANGE(Code,lContactAltAddress."Geo. Reference Code");
+                    lCreateVisit := lCreateVisit AND NOT (lGeographicalRefBuffer.ISEMPTY);
+                  END ELSE
+                    lCreateVisit := FALSE;
+                END ELSE
+                  lCreateVisit := FALSE;
+              END ELSE BEGIN
+                IF lNetworkVisit."Prov. Geo. Reference Code" <> '' THEN BEGIN
+                  lGeographicalRefBuffer.RESET;
+                  lGeographicalRefBuffer.SETRANGE(Code,lNetworkVisit."Prov. Geo. Reference Code");
+                  lCreateVisit := lCreateVisit AND NOT (lGeographicalRefBuffer.ISEMPTY);
+                END ELSE
+                  lCreateVisit := FALSE;
+              END;
+            END;
+          END;
+
+          IF lCreateVisit THEN BEGIN
+            lNetworkVisit2 := lNetworkVisit;
+            lNetworkVisit2."Planning No." := pProviderVisitPlanning."No.";
+            lNetworkVisit2.MODIFY(TRUE);
+            lCountLine += 1
+          END;
+        UNTIL (lNetworkVisit.NEXT = 0) OR (lCountLine = lLineToTreate);
+      END;
+    END;
+
+    PROCEDURE CreateProviderVisitHistory@1100281002(pNetworkFacilitatorVisit@1000000000 : Record 50105);
+    VAR
+      lNetworkVisitHistory@1100281002 : Record 50110;
+    BEGIN
+      IF NOT pNetworkFacilitatorVisit.Closed THEN
+        EXIT;
+
+      lNetworkVisitHistory.INIT;
+      lNetworkVisitHistory.TRANSFERFIELDS(pNetworkFacilitatorVisit);
+      lNetworkVisitHistory.INSERT(TRUE);
+
+      pNetworkFacilitatorVisit.DELETE(FALSE);
+    END;
+
+    PROCEDURE CreateInteractionFromVisit@1000000001(VAR pNetworkFacilitatorVisit@1000 : Record 50105);
+    VAR
+      lProvider@1000000000 : Record 50000;
+      lInteractionLogEntry@1000000001 : Record 5065;
+      lSegmentLineTmp@1000000002 : TEMPORARY Record 5077;
+    BEGIN
+      lProvider.GET(pNetworkFacilitatorVisit."Provider No.");
+      lSegmentLineTmp."Document Type" := lSegmentLineTmp."Document Type"::VisitProv;
+      lSegmentLineTmp."Document No." := pNetworkFacilitatorVisit."No.";
+      lSegmentLineTmp.CreateInteractionFromProvider(lProvider);
+      IF lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.") THEN BEGIN
+        lInteractionLogEntry."Document Type" := lInteractionLogEntry."Document Type"::VisitProv;
+        lInteractionLogEntry."Document No." := pNetworkFacilitatorVisit."No.";
+        lInteractionLogEntry.MODIFY(FALSE);
+      END;
+    END;
+
+    PROCEDURE CreateUpdtVisitByClaimService@1000000002(pServHeader@1000000000 : Record 5900);
+    VAR
+      lNetworkFacilitatorVisit@1000000001 : Record 50105;
+      lIntervLine@1000000002 : Record 50075;
+      lServiceHeader@1000000003 : Record 5900;
+    BEGIN
+      IF NOT pServHeader.Claim THEN
+        EXIT;
+      IF pServHeader."Claim Visit Date" = 0D THEN
+        EXIT;
+
+      lNetworkFacilitatorVisit.SETCURRENTKEY("Claim Service Header No.");
+      lNetworkFacilitatorVisit.SETRANGE("Claim Service Header No.", pServHeader."No.");
+      IF lNetworkFacilitatorVisit.FINDFIRST THEN BEGIN
+        IF lNetworkFacilitatorVisit."Planning No." <> '' THEN
+          IF NOT CONFIRM(Text006) THEN
+            ERROR('');
+        lNetworkFacilitatorVisit.VALIDATE("Theorical Planified Visit Date", pServHeader."Claim Visit Date");
+        lNetworkFacilitatorVisit.VALIDATE("Visit Date", pServHeader."Claim Visit Date");
+        lNetworkFacilitatorVisit.VALIDATE("Visit Time", pServHeader."Claim Visit Time");
+        lNetworkFacilitatorVisit.MODIFY(TRUE);
+        EXIT;
+      END;
+
+      lIntervLine.SETCURRENTKEY("Service No.");
+      lIntervLine.SETRANGE("Service No.", pServHeader."Service No.");
+      lIntervLine.SETRANGE("Service Header Claims No.", pServHeader."No.");
+      lIntervLine.FINDFIRST;
+
+      lNetworkFacilitatorVisit.RESET;
+      lNetworkFacilitatorVisit.INIT;
+      lNetworkFacilitatorVisit."No." := '';
+      lNetworkFacilitatorVisit.VALIDATE(Type, lNetworkFacilitatorVisit.Type::Claim);
+      lNetworkFacilitatorVisit.VALIDATE("Provider No.", lIntervLine."Provider No.");
+      lNetworkFacilitatorVisit.VALIDATE("Theorical Planified Visit Date", pServHeader."Claim Visit Date");
+      lNetworkFacilitatorVisit.VALIDATE("Visit Date", pServHeader."Claim Visit Date");
+      lNetworkFacilitatorVisit.VALIDATE("Visit Time", pServHeader."Claim Visit Time");
+      //lNetworkFacilitatorVisit.VALIDATE("Visit Confirmed", TRUE);
+      lNetworkFacilitatorVisit.VALIDATE("Claim Service Header No.", pServHeader."No.");
+      lNetworkFacilitatorVisit.VALIDATE("Create Auto", TRUE);
+      lNetworkFacilitatorVisit.INSERT(TRUE);
+    END;
+
+    PROCEDURE GetSalespersonName@1000000003(pSalespersonCode@1000000000 : Code[10]) : Text[80];
+    VAR
+      lSalespersonPurchaser@1000000001 : Record 13;
+    BEGIN
+      IF lSalespersonPurchaser.GET(pSalespersonCode) THEN
+        EXIT(lSalespersonPurchaser.Name);
+    END;
+
+    PROCEDURE ProviderToBlackList@1000000004(VAR pNetworkFacilitatorVisit@1000000001 : Record 50105);
+    VAR
+      lProviderSetup@1000000000 : Record 50011;
+      lProvider@1000000002 : Record 50000;
+      lProcessManagement@1000000003 : Codeunit 50040;
+      lCode@1000000004 : Code[10];
+      lText@1000000005 : Text[30];
+    BEGIN
+      IF pNetworkFacilitatorVisit."Provider No." = '' THEN BEGIN
+        IF NOT CONFIRM(Text007) THEN
+          ERROR('');
+        CreateProvider(pNetworkFacilitatorVisit, lProvider, TRUE);
+      END ELSE BEGIN
+        IF NOT CONFIRM(Text009) THEN
+          ERROR('');
+        lProvider.GET(pNetworkFacilitatorVisit."Provider No.");
+      END;
+
+      lProviderSetup.GET;
+
+      lProviderSetup.TESTFIELD("Visit Black List Proc.");
+      lProviderSetup.TESTFIELD("Visit Black List Proc. Status");
+
+      //<<IMH04
+      WHILE NOT lProcessManagement.GetCodeDescription(DATABASE::Provider,54501,lText) DO;
+      //  ERROR('');
+      EVALUATE(lCode, lText);
+      lProvider.VALIDATE("Black List Reason Code", lCode);
+      //>>IMH04
+
+      IF lProvider."Process Code" <> lProviderSetup."Visit Black List Proc." THEN
+        lProvider.VALIDATE("Process Code", lProviderSetup."Visit Black List Proc.");
+      lProvider.VALIDATE("Process Status No.", lProviderSetup."Visit Black List Proc. Status");
+
+      lProvider.MODIFY(TRUE);
+    END;
+
+    PROCEDURE ProviderToNotInteresting@1000000007(VAR pNetworkFacilitatorVisit@1000000003 : Record 50105);
+    VAR
+      lProviderSetup@1000000000 : Record 50011;
+      lProvider@1000000002 : Record 50000;
+    BEGIN
+      IF pNetworkFacilitatorVisit."Provider No." = '' THEN BEGIN
+        IF NOT CONFIRM(Text008) THEN
+          ERROR('');
+        CreateProvider(pNetworkFacilitatorVisit, lProvider, TRUE);
+      END ELSE BEGIN
+        IF NOT CONFIRM(Text010) THEN
+          ERROR('');
+        lProvider.GET(pNetworkFacilitatorVisit."Provider No.");
+      END;
+
+      lProviderSetup.GET;
+
+      lProviderSetup.TESTFIELD(lProviderSetup."Visit Not Interested Proc.");
+      lProviderSetup.TESTFIELD(lProviderSetup."Visit Not Inter. Proc. Status");
+
+      IF lProvider."Process Code" <> lProviderSetup."Visit Not Interested Proc." THEN
+        lProvider.VALIDATE("Process Code", lProviderSetup."Visit Not Interested Proc.");
+      lProvider.VALIDATE("Process Status No.", lProviderSetup."Visit Not Inter. Proc. Status");
+      lProvider.MODIFY(TRUE);
+    END;
+
+    PROCEDURE ProviderToVisitConfirmed@1100281003(VAR pNetworkFacilitatorVisit@1000000003 : Record 50105);
+    VAR
+      lProviderSetup@1000000000 : Record 50011;
+      lProvider@1000000002 : Record 50000;
+    BEGIN
+      pNetworkFacilitatorVisit.TESTFIELD("Provider No.");
+      lProvider.GET(pNetworkFacilitatorVisit."Provider No.");
+      IF NOT (lProvider.Status IN [lProvider.Status::Prospect, lProvider.Status::Casual]) THEN
+        EXIT;
+
+      lProviderSetup.GET;
+      lProviderSetup.TESTFIELD("Visit Confirmed Proc.");
+      lProviderSetup.TESTFIELD("Visit Confirmed Proc. Status");
+
+
+      IF lProvider."Process Code" <> lProviderSetup."Visit Confirmed Proc." THEN
+        lProvider.VALIDATE("Process Code", lProviderSetup."Visit Confirmed Proc.");
+      lProvider.VALIDATE("Process Status No.", lProviderSetup."Visit Confirmed Proc. Status");
+      lProvider.MODIFY(TRUE);
+    END;
+
+    PROCEDURE CreateVisitByProvider@1000000008(pProvider@1000000000 : Record 50000;pProviderVisitPlanning@1000000003 : Record 50167;pVisitType@1000000002 : 'Facilitator,Recruitment,Claim,Quality Control,Recruitment Visit,Formation,TH Control');
+    VAR
+      lNetworkFacilitatorVisit@1000000001 : Record 50105;
+    BEGIN
+      IF pProvider."No." = '' THEN
+        EXIT;
+
+      lNetworkFacilitatorVisit.INIT;
+      lNetworkFacilitatorVisit."No." := '';
+      lNetworkFacilitatorVisit.VALIDATE(Type, pVisitType);
+      lNetworkFacilitatorVisit.VALIDATE("Provider No.", pProvider."No.");
+      lNetworkFacilitatorVisit.VALIDATE("Planning No.", pProviderVisitPlanning."No.");
+
+      IF pVisitType = pVisitType::Facilitator THEN BEGIN
+        lNetworkFacilitatorVisit.VALIDATE("Theorical Planified Visit Date", pProvider."Planified Facilit. Visit Date");
+        lNetworkFacilitatorVisit.VALIDATE("Visit Date", pProvider."Planified Facilit. Visit Date");
+      END;
+
+      lNetworkFacilitatorVisit.VALIDATE("Create Auto", TRUE);
+      lNetworkFacilitatorVisit.INSERT(TRUE);
+    END;
+
+    PROCEDURE CalcProviderVisitNextDate@1000000009(VAR pProvider@1000000000 : Record 50000) rValue : Date;
+    VAR
+      lVisitCategorySetup@1100281000 : Record 50104;
+      lVisitLastDate@1000000002 : Date;
+    BEGIN
+      // R‚alise le calcul de la prochaine date de visite
+      rValue := 0D;
+
+      IF pProvider."Visit Category Code" = '' THEN BEGIN
+        EXIT;
+      END;
+
+      lVisitLastDate := pProvider."Facilitator Visit Last Date";
+      IF lVisitLastDate = 0D THEN BEGIN
+        lVisitLastDate := WORKDATE;
+      END;
+
+      lVisitCategorySetup.SETRANGE("Category Code",pProvider."Visit Category Code");
+      lVisitCategorySetup.SETRANGE("Building Trade No.",pProvider."Main Building Trade No.");
+      lVisitCategorySetup.SETFILTER("Mission Number",'<=%1',pProvider.GetLastIntervNbByBuild(pProvider."Main Building Trade No."));
+      IF NOT lVisitCategorySetup.FINDLAST THEN BEGIN
+        lVisitCategorySetup.SETRANGE("Building Trade No.",'');
+        lVisitCategorySetup.SETFILTER("Mission Number",'<=%1',pProvider.GetLastIntervNbByBuild(''));
+        IF NOT lVisitCategorySetup.FINDLAST THEN BEGIN
+          EXIT;
+        END;
+      END;
+
+      pProvider."Planified Facilit. Visit Date" := CALCDATE(lVisitCategorySetup.Cadence,lVisitLastDate);
+    END;
+
+    PROCEDURE CalcNextVisitTime@1000000013(pLastNetworkVisit@1000000000 : Record 50105;VAR pNextNetworkVisit@1000000001 : Record 50105);
+    BEGIN
+      IF (pLastNetworkVisit."Visit Date" = 0D) OR (pLastNetworkVisit."Visit Time" = 0T) THEN
+        EXIT;
+
+      IF (pLastNetworkVisit."Visit Date" = 0D) OR (pLastNetworkVisit."Visit Time" <> 0T) THEN
+        EXIT;
+    END;
+
+    PROCEDURE CalcRealKmProvider@1000000016(pFromProviderNo@1000000000 : Code[20];pToProviderNo@1000000001 : Code[20];VAR pDistance@1000000009 : Decimal;VAR pTravelTime@1000000008 : Decimal);
+    VAR
+      lMarketingSetup@1000000002 : Record 5079;
+      lProviderSetup@1000000003 : Record 50011;
+      lAbiGeoMgt@1000000005 : Codeunit 50011;
+      lPSRBuffer@1000000004 : TEMPORARY Record 51000;
+      lX@1000000007 : Integer;
+      lY@1000000006 : Integer;
+    BEGIN
+      lProviderSetup.GET;
+      IF NOT lProviderSetup."Geoconcept Activate Search" THEN
+        EXIT;
+      lMarketingSetup.GET;
+      lAbiGeoMgt.GetProviderGeoCode(pFromProviderNo, lMarketingSetup."Main Address Code",lX,lY);
+
+      lPSRBuffer."Provider No." := pToProviderNo;
+      lPSRBuffer.INSERT;
+      lAbiGeoMgt.SearchAround(lX,lY,lPSRBuffer);
+      pTravelTime := lPSRBuffer."Travel Time (min)";
+      pDistance := lPSRBuffer.Distance;
+    END;
+
+    PROCEDURE CreateMinuteVisit@1000000011(VAR pNetworkFacilitatorVisit@1000000001 : Record 50105;pFileName@1000000005 : Text[250]);
+    VAR
+      lProviderSetup@1000000000 : Record 50011;
+      lContact@1000000004 : Record 5050;
+      lInteractionLogEntry@1000000003 : Record 5065;
+      lSegmentLineTmp@1000000002 : TEMPORARY Record 5077;
+      lDocAttachment@1000000010 : Record 50021;
+      lFileToImport@1000000009 : Text[500];
+      lFileInStream@1000000008 : InStream;
+      lFolderMgt@1000000007 : Codeunit 50004;
+      lTempBlob@1000000006 : TEMPORARY Record 99008535;
+      lSourceAttachmentMgt@1000000011 : Codeunit 50003;
+      lAttachmentTmp@1000000012 : TEMPORARY Record 5062;
+      lOutStream@1000000013 : OutStream;
+    BEGIN
+      IF NOT CreateMinute(pNetworkFacilitatorVisit."No.", pNetworkFacilitatorVisit."Provider No.",
+              lInteractionLogEntry, pFileName) THEN
+        EXIT;
+      IF NOT pNetworkFacilitatorVisit."Minites Imported" THEN BEGIN
+        pNetworkFacilitatorVisit."Minites interaction No." := lInteractionLogEntry."Entry No.";
+        pNetworkFacilitatorVisit."Minites Imported" := TRUE;
+        IF pNetworkFacilitatorVisit.Status = pNetworkFacilitatorVisit.Status::Done THEN
+          IF NOT pNetworkFacilitatorVisit.Closed THEN
+            pNetworkFacilitatorVisit.VALIDATE(Closed, TRUE);
+        pNetworkFacilitatorVisit.MODIFY(FALSE);
+      END;
+    END;
+
+    PROCEDURE CreateMinuteByVisitHistory@1000000014(VAR pNetworkVisitHistory@1000000001 : Record 50110;pFileName@1000000005 : Text[250]);
+    VAR
+      lInteractionLogEntry@1000000000 : Record 5065;
+    BEGIN
+      CreateMinute(pNetworkVisitHistory."No.", pNetworkVisitHistory."Provider No.",
+        lInteractionLogEntry, pFileName);
+    END;
+
+    PROCEDURE CreateMinute@1000000015(pNetworkFacilitatorVisitNo@1000000001 : Code[20];pProviderNo@1000000014 : Code[20];VAR pInteractionLogEntry@1000000011 : Record 5065;pFileName@1000000000 : Text[250]) : Boolean;
+    VAR
+      lProviderSetup@1000000013 : Record 50011;
+      lContact@1000000012 : Record 5050;
+      lSegmentLineTmp@1000000010 : TEMPORARY Record 5077;
+      lDocAttachment@1000000009 : Record 50021;
+      lFileToImport@1000000008 : Text[500];
+      lFileInStream@1000000007 : InStream;
+      lFolderMgt@1000000006 : Codeunit 50004;
+      lTempBlob@1000000005 : TEMPORARY Record 99008535;
+      lSourceAttachmentMgt@1000000004 : Codeunit 50003;
+      lAttachmentTmp@1000000003 : TEMPORARY Record 5062;
+      lOutStream@1000000002 : OutStream;
+    BEGIN
+      lProviderSetup.GET;
+      lProviderSetup.TESTFIELD("Visit Minute Interaction Tmp.");
+
+      IF pFileName = '' THEN BEGIN
+        IF ISSERVICETIER THEN BEGIN
+          IF NOT UPLOADINTOSTREAM(Text011,'',Text012,lFileToImport,lFileInStream) THEN
+            EXIT;
+        END ELSE BEGIN
+          lFileToImport := lFolderMgt.GetFileName(FALSE,'','');
+          IF lFileToImport = '' THEN
+            EXIT;
+        END;
+      END ELSE BEGIN
+        lFileToImport := pFileName;
+        IF ISSERVICETIER THEN BEGIN
+          lTempBlob.Blob.IMPORT(lFileToImport);
+          lTempBlob.Blob.CREATEINSTREAM(lFileInStream);
+        END;
+      END;
+
+      lContact.GET(pProviderNo);
+      lSegmentLineTmp.SetHideWizard(2);
+      lSegmentLineTmp."Provider No." := pProviderNo;
+      lSegmentLineTmp."Document Type" := pInteractionLogEntry."Document Type"::VisitProv;
+      lSegmentLineTmp."Document No." := pNetworkFacilitatorVisitNo;
+      lSegmentLineTmp.CreateInteractionFromContact2(lContact, lProviderSetup."Visit Minute Interaction Tmp.");
+
+      pInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+      pInteractionLogEntry."Document Type" := pInteractionLogEntry."Document Type"::VisitProv;
+      pInteractionLogEntry."Document No." := pNetworkFacilitatorVisitNo;
+      pInteractionLogEntry.Description :=
+        COPYSTR(pInteractionLogEntry.Description + ' - ' + FolderMgt.GetBaseName(lFileToImport),1,
+          MAXSTRLEN(lDocAttachment.Description));
+      pInteractionLogEntry.MODIFY(FALSE);
+
+      lDocAttachment.Description :=
+        COPYSTR(FolderMgt.GetBaseName(lFileToImport),1,MAXSTRLEN(lDocAttachment.Description));
+
+      lAttachmentTmp.Attachment.CREATEOUTSTREAM(lOutStream);
+      COPYSTREAM(lOutStream, lFileInStream);
+
+      lDocAttachment.SETRANGE("Interaction Log Entry No.", pInteractionLogEntry."Entry No.");
+      lSourceAttachmentMgt.CreateAttachment(lDocAttachment, lFileToImport, lAttachmentTmp);
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE GetSearchProviderZone@1100281006(VAR pGeographicalReference@1100281008 : TEMPORARY Record 50013;pInseeCode@1100481000 : Code[10];pDistanceKm@1100481001 : Integer) : Integer;
+    VAR
+      lProviderSearchMgt@1100281007 : Codeunit 50000;
+      lADOConn@1100481002 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000514-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Connection";
+      lADORs@1100481003 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000535-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Recordset";
+      lConnexionString@1100481004 : Text[200];
+      lSQL@1100481005 : Text[250];
+      lConnectionID@1100481007 : Integer;
+      lRecordsAffected@1100281001 : Integer;
+      lOptions@1100281000 : Integer;
+      lVariant@1100281002 : Variant;
+      lDecimal@1100281003 : Decimal;
+      lInteger@1100281004 : Integer;
+      lText@1100281005 : Text[256];
+      lDialog@1100281006 : Dialog;
+    BEGIN
+      // Permet de r‚cup‚rer un ensemble de code insee en cercle en fonction d'un code insee central et une distance
+
+      // Cr‚ation de la connexion
+      CREATE(lADOConn);
+      lConnexionString := lProviderSearchMgt.GetConnectionString;
+      lADOConn.Open(lConnexionString);
+
+      lSQL := STRSUBSTNO('EXEC GetInsee ''%1'',%2',pInseeCode,pDistanceKm * 1000);
+
+      CREATE(lADORs);
+      lADORs := lADOConn.Execute(lSQL,lRecordsAffected,lOptions);
+      //ProcŠdure stock‚e
+      IF NOT lADORs.EOF  THEN BEGIN
+        lADORs.MoveFirst;
+        REPEAT
+          pGeographicalReference.Code := lADORs.Fields.Item('Insee Code').Value;
+          pGeographicalReference.INSERT;
+          lADORs.MoveNext;
+        UNTIL lADORs.EOF;
+      END;
+
+      lADORs.Close;
+      lADOConn.Close;
+      CLEAR(lADOConn);
+      CLEAR(lADORs);
+    END;
+
+    PROCEDURE UpdateClaimServVisitDT@1000000000(pNetworkVisit@1000000000 : Record 50105);
+    VAR
+      lServiceHeader@1000000001 : Record 5900;
+    BEGIN
+      IF pNetworkVisit.Type <> pNetworkVisit.Type::Claim THEN
+        EXIT;
+
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pNetworkVisit."Claim Service Header No.");
+      IF lServiceHeader."Claim Visit Date" <> pNetworkVisit."Visit Date" THEN
+        lServiceHeader."Claim Visit Date" := pNetworkVisit."Visit Date";
+
+      IF lServiceHeader."Claim Visit Time" <> pNetworkVisit."Visit Time" THEN
+        lServiceHeader."Claim Visit Time" := pNetworkVisit."Visit Time";
+
+      lServiceHeader.MODIFY(FALSE);
+    END;
+
+    PROCEDURE ShowProviderCard@1100281000(pNetworkVisit@1100281000 : Record 50105);
+    VAR
+      lProvider@1100281001 : Record 50000;
+    BEGIN
+      // Affiche la fiche prestataire si un nø est pr‚sent sur la visite
+
+      IF pNetworkVisit."Provider No." = '' THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT lProvider.GET(pNetworkVisit."Provider No.") THEN BEGIN
+        EXIT;
+      END;
+
+      FORM.RUN(0,lProvider);
+    END;
+
+    PROCEDURE CancelVisit@1000000005(VAR pNetworkVisit@1000000000 : Record 50105);
+    BEGIN
+      IF NOT CONFIRM(Text014) THEN
+        EXIT;
+      pNetworkVisit.VALIDATE(Status, pNetworkVisit.Status::Cancel);
+      pNetworkVisit.MODIFY(TRUE);
+    END;
+
+    PROCEDURE DoneVisit@1000000006(VAR pNetworkVisit@1000000000 : Record 50105);
+    BEGIN
+      IF NOT CONFIRM(Text015) THEN
+        EXIT;
+      pNetworkVisit.VALIDATE(Status, pNetworkVisit.Status::Done);
+      pNetworkVisit.MODIFY(TRUE);
+    END;
+
+    PROCEDURE ReplanVisit@1000000012(VAR pNetworkVisit@1000000000 : Record 50105);
+    BEGIN
+      IF NOT CONFIRM(Text016) THEN
+        EXIT;
+      pNetworkVisit.VALIDATE(Status, pNetworkVisit.Status::"To Replan");
+      pNetworkVisit.MODIFY(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 10/10/12 @a ISAT.ZW @v IMH6.01.115 @s Visite Animation Reseau @h mantis 3273 @c Gestion des black list */
+      /** @r IMH03 @d 02/04/12 @a ISAT.ZW @v IMH6.01.115 @s Visite Animation Reseau @h mantis 3206 @c FIltre sur rayon */
+      /** @r IMH02 @d 05/04/11 @a ISAT.ZW @v IMH6.01.115 @s Visite Animation Reseau @c Fonction CreateLastVistDateHistory */
+      /** @r IMH01 @d 01/03/11 @a ISAT.ZW @v IMH6.01.115 @s Visite Animation Reseau @c Cr‚ation */
+    }
+    END.
+  }
+}

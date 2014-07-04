@@ -1,0 +1,200 @@
+OBJECT Codeunit 63 Sales-Explode BOM
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/08/09;
+    Time=12:00:00;
+    Version List=NAVW16.00.01,KITNA6.00;
+  }
+  PROPERTIES
+  {
+    TableNo=37;
+    OnRun=VAR
+            FromDocDim@1000 : Record 357;
+            ToDocDim@1001 : Record 357;
+            TempDocDim@1002 : TEMPORARY Record 357;
+            DimMgt@1003 : Codeunit 408;
+            Selection@1004 : Integer;
+          BEGIN
+            TESTFIELD(Type,Type::Item);
+            TESTFIELD("Build Kit",FALSE);
+            TESTFIELD("Quantity Shipped",0);
+            TESTFIELD("Return Qty. Received",0);
+            CALCFIELDS("Reserved Qty. (Base)");
+            TESTFIELD("Reserved Qty. (Base)",0);
+            IF "Purch. Order Line No." <> 0 THEN
+              ERROR(
+                Text000,
+                "Purchase Order No.");
+            IF "Job Contract Entry No." <> 0 THEN BEGIN
+              TESTFIELD("Job No.",'');
+              TESTFIELD("Job Contract Entry No.",0);
+            END;
+            SalesHeader.GET("Document Type","Document No.");
+            SalesHeader.TESTFIELD(Status,SalesHeader.Status::Open);
+            Item.GET("No.");
+            IF Item."Kit BOM No." = '' THEN
+              ERROR(
+                Text001,
+                "No.");
+            KitManagement.GetKitProdBOM(Item."Kit BOM No.",TempProdBOMLine,NoOfBOMComp);
+            IF NoOfBOMComp = 0 THEN
+              ERROR(
+                Text001,
+                "No.");
+
+            Selection := STRMENU(Text004,2);
+            IF Selection = 0 THEN
+              EXIT;
+
+            ToSalesLine.RESET;
+            ToSalesLine.SETRANGE("Document Type","Document Type");
+            ToSalesLine.SETRANGE("Document No.","Document No.");
+            ToSalesLine := Rec;
+            IF ToSalesLine.FIND('>') THEN BEGIN
+              LineSpacing := (ToSalesLine."Line No." - "Line No.") DIV (1 + NoOfBOMComp);
+              IF LineSpacing = 0 THEN
+                ERROR(Text003);
+            END ELSE
+              LineSpacing := 10000;
+
+            IF "Document Type" IN ["Document Type"::Order,"Document Type"::Invoice] THEN BEGIN
+              ToSalesLine := Rec;
+              TempProdBOMLine.SETRANGE(Type,TempProdBOMLine.Type::Item);
+              TempProdBOMLine.SETFILTER("No.",'<>%1','');
+              IF TempProdBOMLine.FINDSET THEN
+                REPEAT
+                  TempProdBOMLine.TESTFIELD(Type,TempProdBOMLine.Type::Item);
+                  Item.GET(TempProdBOMLine."No.");
+                  ToSalesLine."Line No." := 0;
+                  ToSalesLine."No." := TempProdBOMLine."No.";
+                  ToSalesLine."Variant Code" := TempProdBOMLine."Variant Code";
+                  ToSalesLine."Unit of Measure Code" := TempProdBOMLine."Unit of Measure Code";
+                  ToSalesLine."Qty. per Unit of Measure" := UOMMgt.GetQtyPerUnitOfMeasure(Item,TempProdBOMLine."Unit of Measure Code");
+                  ToSalesLine."Outstanding Quantity" := ROUND("Quantity (Base)" * TempProdBOMLine."Quantity per",0.00001);
+                  IF ToSalesLine."Outstanding Quantity" > 0 THEN
+                    ItemCheckAvail.SalesLineCheck(ToSalesLine);
+                UNTIL TempProdBOMLine.NEXT = 0;
+            END;
+
+            ToSalesLine := Rec;
+            ToSalesLine.INIT;
+            ToSalesLine.Description := Description;
+            ToSalesLine."Description 2" := "Description 2";
+            ToSalesLine.MODIFY;
+
+            FromDocDim.SETRANGE("Table ID",DATABASE::"Sales Line");
+            FromDocDim.SETRANGE("Document Type","Document Type");
+            FromDocDim.SETRANGE("Document No.","Document No.");
+            FromDocDim.SETRANGE("Line No.","Line No.");
+
+            ToDocDim.SETRANGE("Table ID",DATABASE::"Sales Line");
+            ToDocDim.SETRANGE("Document Type","Document Type");
+            ToDocDim.SETRANGE("Document No.","Document No.");
+
+            DimMgt.CopyDocDimToDocDim(FromDocDim,TempDocDim);
+            CLEAR(TempDocDim);
+            FromDocDim.DELETEALL;
+
+            TempProdBOMLine.RESET;
+            TempProdBOMLine.FINDSET;
+            NextLineNo := "Line No.";
+            REPEAT
+              ToSalesLine.INIT;
+              NextLineNo := NextLineNo + LineSpacing;
+              ToSalesLine."Line No." := NextLineNo;
+              CASE TempProdBOMLine.Type OF
+                TempProdBOMLine.Type::" ":
+                  ToSalesLine.Type := ToSalesLine.Type::" ";
+                TempProdBOMLine.Type::Item:
+                  ToSalesLine.Type := ToSalesLine.Type::Item;
+                TempProdBOMLine.Type::Resource,TempProdBOMLine.Type::"Setup Resource":
+                  ToSalesLine.Type := ToSalesLine.Type::Resource;
+              END;
+              IF ToSalesLine.Type <> ToSalesLine.Type::" " THEN BEGIN
+                TempProdBOMLine.TESTFIELD("No.");
+                ToSalesLine.VALIDATE("No.",TempProdBOMLine."No.");
+                IF SalesHeader."Location Code" <> "Location Code" THEN
+                  ToSalesLine.VALIDATE("Location Code","Location Code");
+                IF TempProdBOMLine."Variant Code" <> '' THEN
+                  ToSalesLine.VALIDATE("Variant Code",TempProdBOMLine."Variant Code");
+                ToSalesLine.VALIDATE("Unit of Measure Code",TempProdBOMLine."Unit of Measure Code");
+                CASE TempProdBOMLine.Type OF
+                  TempProdBOMLine.Type::Item:
+                    BEGIN
+                      ToSalesLine."Drop Shipment" := "Drop Shipment";
+                      ToSalesLine.VALIDATE("Unit of Measure Code",TempProdBOMLine."Unit of Measure Code");
+                      ToSalesLine."Qty. per Unit of Measure" := UOMMgt.GetQtyPerUnitOfMeasure(Item,ToSalesLine."Unit of Measure Code");
+                      ToSalesLine.VALIDATE(Quantity,
+                        ROUND("Quantity (Base)" * TempProdBOMLine."Quantity per",0.00001));
+                    END;
+                  TempProdBOMLine.Type::Resource:
+                    BEGIN
+                      ToSalesLine."Drop Shipment" := FALSE;
+                      ToSalesLine.VALIDATE(Quantity,
+                        ROUND("Quantity (Base)" * TempProdBOMLine."Quantity per",0.00001));
+                    END;
+                  TempProdBOMLine.Type::"Setup Resource":
+                    BEGIN
+                      ToSalesLine."Drop Shipment" := FALSE;
+                      ToSalesLine.VALIDATE(Quantity,TempProdBOMLine."Quantity per");
+                    END;
+                END;
+              END;
+              IF SalesHeader."Language Code" = '' THEN
+                ToSalesLine.Description := TempProdBOMLine.Description
+              ELSE
+                IF NOT ItemTranslation.GET(TempProdBOMLine."No.",TempProdBOMLine."Variant Code",SalesHeader."Language Code") THEN
+                  ToSalesLine.Description := TempProdBOMLine.Description;
+
+              ToSalesLine.INSERT;
+
+              IF (ToSalesLine.Type = ToSalesLine.Type::Item) AND (ToSalesLine.Reserve = ToSalesLine.Reserve::Always) THEN
+                ToSalesLine.AutoReserve;
+
+              IF Selection = 1 THEN BEGIN
+                ToSalesLine."Shortcut Dimension 1 Code" := "Shortcut Dimension 1 Code";
+                ToSalesLine."Shortcut Dimension 2 Code" := "Shortcut Dimension 2 Code";
+                ToSalesLine.MODIFY;
+                ToDocDim.SETRANGE("Line No.",ToSalesLine."Line No.");
+                ToDocDim.DELETEALL;
+                IF TempDocDim.FINDSET THEN BEGIN
+                  REPEAT
+                    ToDocDim.INIT;
+                    ToDocDim."Table ID" := DATABASE::"Sales Line";
+                    ToDocDim."Document Type" := ToSalesLine."Document Type";
+                    ToDocDim."Document No." := ToSalesLine."Document No.";
+                    ToDocDim."Line No." := ToSalesLine."Line No.";
+                    ToDocDim."Dimension Code" := TempDocDim."Dimension Code";
+                    ToDocDim."Dimension Value Code" := TempDocDim."Dimension Value Code";
+                    ToDocDim.INSERT;
+                  UNTIL TempDocDim.NEXT = 0;
+                END;
+              END;
+            UNTIL TempProdBOMLine.NEXT = 0;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text000@1000 : TextConst 'ENU=The BOM cannot be exploded on the sales lines because it is associated with purchase order %1.;FRA=La nomenclature ne peut pas ˆtre ‚clat‚e sur les lignes vente car elle est associ‚e … la commande achat %1.';
+      Text001@1001 : TextConst 'ENU=Item %1 is not a kit item.;FRA=L''article %1 n''est pas un article de kit.';
+      Text003@1002 : TextConst 'ENU=There is not enough space to explode the BOM.;FRA=Il n''y a pas suffisamment de place pour ‚clater la nomenclature.';
+      Text004@1003 : TextConst 'ENU=&Copy dimensions from BOM,&Retrieve dimensions from components;FRA=&Copier axes … partir de nomenclature,&Supprimer axes des composants';
+      ToSalesLine@1004 : Record 37;
+      SalesHeader@1006 : Record 36;
+      ItemTranslation@1007 : Record 30;
+      Item@1008 : Record 27;
+      TempProdBOMLine@1462000 : TEMPORARY Record 99000772;
+      ItemCheckAvail@1009 : Codeunit 311;
+      UOMMgt@1010 : Codeunit 5402;
+      KitManagement@1462001 : Codeunit 25000;
+      LineSpacing@1012 : Integer;
+      NextLineNo@1013 : Integer;
+      NoOfBOMComp@1014 : Integer;
+
+    BEGIN
+    END.
+  }
+}

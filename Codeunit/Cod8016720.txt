@@ -1,0 +1,434 @@
+OBJECT Codeunit 8016720 EAI NAS Handler
+{
+  OBJECT-PROPERTIES
+  {
+    Date=11/06/12;
+    Time=14:08:47;
+    Modified=Yes;
+    Version List=ISAEAI1.00;
+  }
+  PROPERTIES
+  {
+    TableNo=8016701;
+    SingleInstance=Yes;
+    OnRun=BEGIN
+            SELECTLATESTVERSION;
+            NASHandler(Rec.Code);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProcessTemp@1100481000 : TEMPORARY Record 8016702;
+      ProcessTaskTemp@1100481001 : TEMPORARY Record 8016716;
+      CurrTask@1100281000 : TEMPORARY Record 8016716;
+      TaskTimeOut@1100281001 : DateTime;
+      Text001@1100281002 : TextConst 'ENU=Process %1 task %2 : expired.;FRA=Processus %1 tƒche %2 : expir‚.';
+      DebugMode@1100281003 : Boolean;
+      DebugPath@1100281004 : Text[250];
+
+    PROCEDURE NASHandler@1120000(pNASParameter@1120000 : Text[250]) ReturnValue : Boolean;
+    VAR
+      lNAS@1120001 : Record 8016701;
+      lText001@1120006 : TextConst 'FRA=Aucun service n''a pu ˆtre d‚marr‚ … l''aide du paramŠtre de d‚marrage %1';
+    BEGIN
+      ReturnValue := FALSE;
+      SELECTLATESTVERSION;
+
+      WITH lNAS DO BEGIN
+        IF NOT GET(pNASParameter) THEN
+          EXIT;
+        IF NOT Activated THEN
+          EXIT;
+
+        DebugMode := lNAS."Debug Mode";
+        //<<IMH01.pC
+        DebugPath := lNAS."Debug Path";
+        //>>IMH01.PC
+
+        // << EAI02 isat.eb
+        // Suppression ProcessTemp et ProcessTaskTemp pour gestion des processus … tƒches
+        ProcessTemp.DELETEALL;
+        ProcessTaskTemp.DELETEALL;
+        // >> EAI02 isat.eb
+
+        // Suppression des breakpoints
+        DeleteBreakPoints;
+
+        // Lancement des processus … tƒches
+        TaskProcessLoop(lNAS);
+        // Lancement des files d'‚mission
+        SendingMQLoop(lNAS);
+        // Lancement des files de r‚ception
+        ReceivingMQLoop(lNAS);
+      END;
+
+      ReturnValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE DeleteBreakPoints@1100481002();
+    VAR
+      lBreakPoint@1100481000 : Record 2000000059;
+    BEGIN
+      // Suppression des breakpoints si utilisation d'un NAS
+
+      IF GUIALLOWED THEN
+        EXIT;
+
+      lBreakPoint.RESET;
+      lBreakPoint.DELETEALL;
+    END;
+
+    LOCAL PROCEDURE TaskProcessLoop@1100481000(pNAS@1100481000 : Record 8016701);
+    VAR
+      lProcess@1100481001 : Record 8016702;
+    BEGIN
+      // Parcours des processus … tƒches
+
+      lProcess.SETCURRENTKEY("EAI NAS Code");
+      lProcess.SETRANGE("EAI NAS Code",pNAS.Code);
+      lProcess.SETRANGE(Type,lProcess.Type::Task);
+      IF lProcess.FINDFIRST THEN BEGIN
+        REPEAT
+          RunTaskProcess(lProcess);
+        UNTIL lProcess.NEXT = 0;
+      END;
+    END;
+
+    LOCAL PROCEDURE RunTaskProcess@1100481001(pProcess@1100481001 : Record 8016702);
+    BEGIN
+      // Contr“le et lancement du processus … tƒche
+      // - Phase de contr“le : processus actif, au moins une tƒche active et une planification.
+      // - Lancement : ex‚cution du codeunit de gestion de tƒches
+
+      WITH pProcess DO BEGIN
+        IF Type <> Type::Task THEN
+          EXIT;
+
+        IF NOT Activated THEN
+          EXIT;
+
+        IF "Task Handler Codeunit No." <> 0 THEN
+          CODEUNIT.RUN("Task Handler Codeunit No.",pProcess);
+      END;
+    END;
+
+    LOCAL PROCEDURE SendingMQLoop@1100281000(pNAS@1100481000 : Record 8016701);
+    VAR
+      lMessageQueue@1100281000 : Record 8016704;
+      lMessageQueueTemp@1100481001 : TEMPORARY Record 8016704;
+    BEGIN
+      // Parcours des files d'‚mission
+
+      WITH lMessageQueue DO BEGIN
+        SETCURRENTKEY("EAI NAS Code");
+        SETRANGE("EAI NAS Code",pNAS.Code);
+        SETRANGE(Type,Type::Sending);
+        IF FINDSET THEN BEGIN
+          REPEAT
+            IF CheckMQTemp(lMessageQueue,lMessageQueueTemp) THEN
+              RunSendingMQ(lMessageQueue);
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE ReceivingMQLoop@1100281001(pNAS@1100481000 : Record 8016701);
+    VAR
+      lMessageQueue@1100481002 : Record 8016704;
+      lMessageQueueTemp@1100481001 : TEMPORARY Record 8016704;
+    BEGIN
+      // Parcours des files de r‚ception
+
+      WITH lMessageQueue DO BEGIN
+        SETCURRENTKEY("EAI NAS Code");
+        SETRANGE("EAI NAS Code",pNAS.Code);
+        SETRANGE(Type,Type::Receiving);
+        IF FINDSET THEN BEGIN
+          REPEAT
+            IF CheckMQTemp(lMessageQueue,lMessageQueueTemp) THEN
+              RunReceivingMQ(lMessageQueue);
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE CheckMQTemp@1100481008(pMessageQueue@1100481000 : Record 8016704;VAR pMessageQueueTemp@1100481001 : Record 8016704) ReturnValue : Boolean;
+    BEGIN
+      // Contr“le de la file
+      // - Phase de contr“le : sur les tables
+
+      ReturnValue := FALSE;
+
+      WITH pMessageQueueTemp DO BEGIN
+        RESET;
+        SETRANGE("Table No.",pMessageQueue."Table No.");
+        IF NOT ISEMPTY THEN
+          EXIT;
+
+        pMessageQueueTemp := pMessageQueue;
+        IF INSERT THEN;
+      END;
+
+      ReturnValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE RunSendingMQ@1100281003(pMessageQueue@1100481001 : Record 8016704);
+    VAR
+      lProcess@1100481000 : Record 8016702;
+    BEGIN
+      // Contr“le et lancement de la file d'‚mission
+      // - Phase de contr“le : au moins un processus actif
+      // - Lacement : ex‚cution des codeunits de g‚n‚ration et de validation
+
+      WITH pMessageQueue DO BEGIN
+        IF Type <> Type::Sending THEN
+          EXIT;
+
+        lProcess.SETCURRENTKEY("EAI Message Queue Code");
+        lProcess.SETRANGE("EAI Message Queue Code",Code);
+        lProcess.SETRANGE(Activated,TRUE);
+        IF lProcess.ISEMPTY THEN
+          EXIT;
+
+        IF "Creating CU No." <> 0 THEN
+          CODEUNIT.RUN("Creating CU No.",pMessageQueue);
+
+        IF "Posting CU No." <> 0 THEN
+          CODEUNIT.RUN("Posting CU No.",pMessageQueue);
+      END;
+    END;
+
+    LOCAL PROCEDURE RunReceivingMQ@1100481009(pMessageQueue@1100481001 : Record 8016704);
+    VAR
+      lProcess@1100481000 : Record 8016702;
+    BEGIN
+      // Contr“le et lancement de la file de r‚ception
+      // - Phase de contr“le : au moins un processus actif
+      // - Lacement : ex‚cution des codeunits de g‚n‚ration et de validation
+
+      WITH pMessageQueue DO BEGIN
+        IF Type <> Type::Receiving THEN
+          EXIT;
+
+        lProcess.SETCURRENTKEY("EAI Message Queue Code");
+        lProcess.SETRANGE("EAI Message Queue Code",Code);
+        lProcess.SETRANGE(Activated,TRUE);
+        IF lProcess.ISEMPTY THEN
+          EXIT;
+
+        IF "Creating CU No." <> 0 THEN
+          CODEUNIT.RUN("Creating CU No.",pMessageQueue);
+
+        IF "Posting CU No." <> 0 THEN
+          CODEUNIT.RUN("Posting CU No.",pMessageQueue);
+      END;
+    END;
+
+    PROCEDURE AddProcessTemp@1100481006(pProcess@1100481000 : Record 8016702) ReturnValue : Boolean;
+    BEGIN
+      // EAI02 isat.eb
+      // ProcessTask --> utilis‚ codeunit EAI Task Process Management
+
+      ReturnValue := FALSE;
+
+      ProcessTemp.RESET;
+      ProcessTemp.SETRANGE(Code,pProcess.Code);
+      IF ProcessTemp.FINDFIRST THEN BEGIN
+        IF (ProcessTemp."Current Max Date" > pProcess."Current Max Date") OR
+           ((ProcessTemp."Current Max Date" = pProcess."Current Max Date") AND
+            (ProcessTemp."Current Max Time" > pProcess."Current Max Time"))
+        THEN
+          EXIT;
+
+        ProcessTemp."Current Max Date" := pProcess."Current Max Date";
+        ProcessTemp."Current Max Time" := pProcess."Current Max Time";
+        ProcessTemp.MODIFY;
+      END ELSE BEGIN
+        ProcessTemp := pProcess;
+        ProcessTemp.INSERT;
+      END;
+
+      ReturnValue := TRUE;
+    END;
+
+    PROCEDURE AddProcessTaskTemp@1100481007(pProcessTask@1100481000 : Record 8016716) ReturnValue : Boolean;
+    BEGIN
+      // EAI02 isat.eb
+      // ProcessTask --> utilis‚ codeunit EAI Task Process Management
+
+      ReturnValue := FALSE;
+
+      ProcessTaskTemp.RESET;
+      ProcessTaskTemp.SETRANGE("EAI Process Code",pProcessTask."EAI Process Code");
+      ProcessTaskTemp.SETRANGE("EAI Process Task Code",pProcessTask."EAI Process Task Code");
+      IF ProcessTaskTemp.FINDFIRST THEN BEGIN
+        IF (ProcessTaskTemp."Current Max Date" > pProcessTask."Current Max Date") OR
+           ((ProcessTaskTemp."Current Max Date" = pProcessTask."Current Max Date") AND
+            (ProcessTaskTemp."Current Max Time" > pProcessTask."Current Max Time"))
+        THEN
+          EXIT;
+
+        ProcessTaskTemp."Current Max Date" := pProcessTask."Current Max Date";
+        ProcessTaskTemp."Current Max Time" := pProcessTask."Current Max Time";
+        ProcessTaskTemp.MODIFY;
+      END ELSE BEGIN
+        ProcessTaskTemp := pProcessTask;
+        ProcessTaskTemp.INSERT;
+      END;
+
+      ReturnValue := TRUE;
+    END;
+
+    PROCEDURE IsProcessExpired@1100481014(VAR pProcess@1100481000 : Record 8016702) ReturnValue : Boolean;
+    BEGIN
+      // EAI02 isat.eb
+      // ProcessTask --> … utiliser dans les reports et codeunits … planifier en tƒches de processus
+
+      ReturnValue := TRUE;
+
+      ProcessTemp.RESET;
+      ProcessTemp.SETRANGE(Code,pProcess.Code);
+      IF ProcessTemp.FINDFIRST THEN BEGIN
+        pProcess := ProcessTemp;
+
+        IF pProcess."Current Max Date" = 0D THEN
+          EXIT(FALSE);
+
+        IF (pProcess."Current Max Date" < TODAY) OR
+           ((pProcess."Current Max Date" = TODAY) AND
+            (pProcess."Current Max Time" <= TIME)) THEN
+          EXIT;
+      END ELSE BEGIN
+        CLEAR(pProcess);
+        EXIT(FALSE); // EAI03 ISAT.EB
+      END;
+
+      ReturnValue := FALSE;
+    END;
+
+    PROCEDURE IsProcessTaskExpired@1100481013(pProcessTask@1100481000 : Record 8016716) ReturnValue : Boolean;
+    BEGIN
+      // EAI02 isat.eb
+      // ProcessTask --> … utiliser dans les reports et codeunits … planifier en tƒches de processus
+
+      ReturnValue := TRUE;
+
+      ProcessTaskTemp.RESET;
+      ProcessTaskTemp.SETRANGE("EAI Process Code",pProcessTask."EAI Process Code");
+      ProcessTaskTemp.SETRANGE("EAI Process Task Code",pProcessTask."EAI Process Task Code");
+      IF ProcessTaskTemp.FINDFIRST THEN BEGIN
+        pProcessTask := ProcessTaskTemp;
+
+        IF pProcessTask."Current Max Date" = 0D THEN
+          EXIT(FALSE);
+
+        IF (pProcessTask."Current Max Date" < TODAY) OR
+           ((pProcessTask."Current Max Date" = TODAY) AND
+            (pProcessTask."Current Max Time" <= TIME)) THEN
+          EXIT;
+      END ELSE BEGIN
+        CLEAR(pProcessTask);
+        EXIT(FALSE); // EAI03 ISAT.EB
+      END;
+
+      ReturnValue := FALSE;
+    END;
+
+    PROCEDURE DeleteProcessTemp@1100481010(pProcess@1100481000 : Record 8016702) ReturnValue : Boolean;
+    BEGIN
+      // EAI02 isat.eb
+      // ProcessTask --> utilis‚ codeunit EAI Task Process Management
+
+      ReturnValue := FALSE;
+
+      ProcessTemp.RESET;
+      ProcessTemp.SETRANGE(Code,pProcess.Code);
+      IF ProcessTemp.FINDFIRST THEN BEGIN
+        ProcessTemp.DELETE;
+      END;
+
+      ReturnValue := TRUE;
+    END;
+
+    PROCEDURE DeleteProcessTaskTemp@1100481011(pProcessTask@1100481000 : Record 8016716) ReturnValue : Boolean;
+    BEGIN
+      // EAI02 isat.eb
+      // ProcessTask --> utilis‚ codeunit EAI Task Process Management
+
+      ReturnValue := FALSE;
+
+      ProcessTaskTemp.RESET;
+      ProcessTaskTemp.SETRANGE("EAI Process Code",pProcessTask."EAI Process Code");
+      ProcessTaskTemp.SETRANGE("EAI Process Task Code",pProcessTask."EAI Process Task Code");
+      IF ProcessTaskTemp.FINDFIRST THEN BEGIN
+        ProcessTaskTemp.DELETE;
+      END;
+
+      ReturnValue := TRUE;
+    END;
+
+    PROCEDURE SetTaskTimeOut@1100281005(pCurrTask@1100281001 : Record 8016716;pNewTaskTimeOut@1100281000 : DateTime);
+    BEGIN
+      // EAI04.ST
+      CurrTask := pCurrTask;
+      TaskTimeOut := pNewTaskTimeOut;
+    END;
+
+    PROCEDURE IsTaskTimeOut@1100281006(pMsg@1100281000 : Boolean) ReturnValue : Boolean;
+    BEGIN
+      // EAI04.ST
+      ReturnValue := FALSE;
+      IF TaskTimeOut = 0DT THEN
+        EXIT;
+
+      ReturnValue := CURRENTDATETIME > TaskTimeOut;
+      IF ReturnValue AND pMsg THEN
+        MESSAGE(STRSUBSTNO(Text001, CurrTask."EAI Process Code", CurrTask."EAI Process Task Code"));
+    END;
+
+    PROCEDURE IsDebug@1100281007() : Boolean;
+    BEGIN
+      EXIT(DebugMode);
+    END;
+
+    PROCEDURE SetDebug@1100281002(pDebug@1100281000 : Boolean);
+    BEGIN
+      DebugMode := pDebug;
+    END;
+
+    PROCEDURE GetDebugPath@1100281004() : Text[1024];
+    BEGIN
+      // IMH01
+      IF NOT GUIALLOWED OR (DebugPath = '') THEN BEGIN
+        EXIT(TEMPORARYPATH);
+      END;
+
+      IF COPYSTR(DebugPath,STRLEN(DebugPath)) <> '\' THEN BEGIN
+        DebugPath := DebugPath + '\';
+      END;
+
+      EXIT(DebugPath);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 11/06/12 @a ISAT.PC @v IMH6.01.134 @s DARVA Management
+          @c Gestion du champ Debug Path
+          @c ajout fonction DebugPath */
+      /** @r EAI04 @d 27/01/11 @a ISAT.ST @v ISAEAI5.01.00.00 @s Simplification processus … tƒches
+          @c Ajout fonction SetTaskTimeOut / IsTaskTimeOut */
+      /** @r EAI03 @d 10/08/10 @a ISAT.EB @v ISAEAI5.01.00.00 @s Stabilisation processus … tƒches */
+      /** @r EAI02 @d 06/04/09 @a ISAT.EB @v ISAEAI5.01.00.00 @s Finalisation processus … tƒches
+          @c Passage du codeunit en singleinstance
+          @c Gestion des variables ProcessTemp et ProcessTaskTemp */
+      /** @r EAI01 @d 14/02/09 @a ISAT.EB @v ISAEAI5.01.00.00 @s R‚vision algo lancement des handlers
+          @c Handlers non single instance pour les files
+          @c Suppression des breakpoints */
+      /** @r EAI00 @d 12/11/08 @a ISAT.MGI @v ISAEAI5.01.00.00 @s Cr‚ation de l'objet
+          @c Ex‚cution des traitements lanc‚s par un NAS */
+    }
+    END.
+  }
+}

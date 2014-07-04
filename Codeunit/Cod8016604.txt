@@ -1,0 +1,423 @@
+OBJECT Codeunit 8016604 G/L Entry-Edit
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/09;
+    Time=12:00:00;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    TableNo=17;
+    Permissions=TableData 17=rm,
+                TableData 21=rm,
+                TableData 25=rm,
+                TableData 271=rm,
+                TableData 355=rimd,
+                TableData 5601=rm,
+                TableData 5625=rm;
+    OnRun=BEGIN
+            CheckFiscalPeriod("Posting Date");
+            UpdateGLEntry(Rec);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@8016600 : TextConst 'ENU=Fiscal Period does not exists.;FRA=L''exercice comptable n''existe pas sur la date de travail.';
+      Text002@8016601 : TextConst 'ENU=You can''t modify ledger entry on closed or locked accounting period.;FRA=Impossible de modifier une ‚criture sur un exercice clos ou verrouill‚.';
+      Description@8016602 : Text[50];
+      GLSetup@8016604 : Record 98;
+      SetupRead@8016605 : Boolean;
+      Text004@8016606 : TextConst 'ENU=The view %1 has been reset.;FRA=La vue %1 a ‚t‚ initialis‚e.';
+      Text005@8016607 : TextConst 'ENU=*******;FRA=*******';
+
+    PROCEDURE CheckFiscalPeriod@8016602(pDate@8016603 : Date);
+    VAR
+      lAccountingPeriod@8016600 : Record 50;
+    BEGIN
+      // Contr“le de l'exercice comptable
+      // Modification impossible si Clos ou v‚rouill‚
+
+      lAccountingPeriod.SETFILTER("Starting Date",'<=%1',pDate);
+      IF lAccountingPeriod.ISEMPTY THEN
+        ERROR(Text001);
+      lAccountingPeriod.FINDLAST;
+      IF lAccountingPeriod.Closed OR lAccountingPeriod."Date Locked" THEN
+        ERROR(Text002);
+    END;
+
+    PROCEDURE CheckShortCut@8016608(pCode@8016600 : Code[20]) : Integer;
+    VAR
+      GenLedgerSetup@8016601 : Record 98;
+    BEGIN
+      WITH GenLedgerSetup DO
+      BEGIN
+       GET;
+       CASE pCode OF
+        "Shortcut Dimension 1 Code":EXIT(1);
+        "Shortcut Dimension 2 Code":EXIT(2);
+        "Shortcut Dimension 3 Code":EXIT(3);
+        "Shortcut Dimension 4 Code":EXIT(4);
+        "Shortcut Dimension 5 Code":EXIT(5);
+        "Shortcut Dimension 6 Code":EXIT(6);
+        "Shortcut Dimension 7 Code":EXIT(7);
+        "Shortcut Dimension 8 Code":EXIT(8);
+        ELSE EXIT(0);
+       END;
+      END;
+    END;
+
+    LOCAL PROCEDURE UpdateGLEntry@8016603(VAR pGLEntry@8016600 : Record 17);
+    VAR
+      lGLEntry@8016601 : Record 17;
+      lCustLedgEntry@8016606 : Record 21;
+      lVendorLedgEntry@8016605 : Record 25;
+      lBankAccountLedgEntry@8016604 : Record 271;
+      lFALedgEntry@8016603 : Record 5601;
+      lMaintLedgEntry@8016602 : Record 5625;
+    BEGIN
+      // Modification d'une ‚criture comptable
+      lGLEntry := pGLEntry;
+      lGLEntry.LOCKTABLE;
+      lGLEntry.FIND;
+      lGLEntry.Description := pGLEntry.Description;
+      lGLEntry.MODIFY;
+      pGLEntry := lGLEntry;
+
+      // Modification des autres tables d'‚critures
+      IF lCustLedgEntry.GET(lGLEntry."Entry No.") THEN BEGIN
+        lCustLedgEntry.Description := lGLEntry.Description;
+        lCustLedgEntry.MODIFY;
+      END;
+
+      IF lVendorLedgEntry.GET(lGLEntry."Entry No.") THEN BEGIN
+        lVendorLedgEntry.Description := lGLEntry.Description;
+        lVendorLedgEntry.MODIFY;
+      END;
+
+      IF lBankAccountLedgEntry.GET(lGLEntry."Entry No.") THEN BEGIN
+        lBankAccountLedgEntry.Description := lGLEntry.Description;
+        lBankAccountLedgEntry.MODIFY;
+      END;
+
+      IF lFALedgEntry.WRITEPERMISSION THEN BEGIN
+        lFALedgEntry.SETCURRENTKEY("G/L Entry No.");
+        lFALedgEntry.SETRANGE("G/L Entry No.", lGLEntry."Entry No.");
+        IF NOT lFALedgEntry.ISEMPTY THEN BEGIN
+          lFALedgEntry.MODIFYALL(Description, lGLEntry.Description, FALSE);
+        END;
+      END;
+
+      IF lMaintLedgEntry.WRITEPERMISSION THEN BEGIN
+        lMaintLedgEntry.SETCURRENTKEY("G/L Entry No.");
+        lMaintLedgEntry.SETRANGE("G/L Entry No.", lGLEntry."Entry No.");
+        IF NOT lMaintLedgEntry.ISEMPTY THEN BEGIN
+          lMaintLedgEntry.MODIFYALL(Description, lGLEntry.Description, FALSE);
+        END;
+      END;
+    END;
+
+    PROCEDURE UpdateDocumentGLEntry@8016604(VAR pGLEntry@8016600 : Record 17);
+    VAR
+      lGLEntry@8016601 : Record 17;
+      lGLEntry2@8016603 : Record 17;
+    BEGIN
+      // Modification de lignes d'‚critures comptables
+      CheckFiscalPeriod(pGLEntry."Posting Date");
+
+      lGLEntry.SETCURRENTKEY("Document No.","Posting Date");
+      lGLEntry.SETRANGE("Document No.", pGLEntry."Document No.");
+      lGLEntry.SETRANGE("Posting Date", pGLEntry."Posting Date");
+      lGLEntry.SETRANGE("Transaction No.", pGLEntry."Transaction No.");
+
+      IF lGLEntry.ISEMPTY THEN
+        EXIT;
+
+      lGLEntry.FINDFIRST;
+
+      REPEAT
+        lGLEntry2 := lGLEntry;
+        lGLEntry2.Description := pGLEntry.Description;
+        UpdateGLEntry(lGLEntry2);
+        IF lGLEntry2."Entry No." = pGLEntry."Entry No." THEN
+          pGLEntry := lGLEntry2;
+      UNTIL lGLEntry.NEXT = 0;
+    END;
+
+    PROCEDURE UpdateDimLedgEntry@8016601(pTableID@8016614 : Integer;pEntryNo@8016600 : Integer;pCode@8016602 : Code[20];pValueCode@8016603 : Code[20]);
+    VAR
+      lDimEntry@8016601 : Record 355;
+      lGLEntry@8016610 : Record 17;
+      lAnalysisView@8016612 : Record 363;
+      lFALedgEntry@8016605 : Record 5601;
+      lMaintLedgEntry@8016604 : Record 5625;
+      lAnalysisDimNo@8016606 : Integer;
+    BEGIN
+      lDimEntry.LOCKTABLE;
+      IF pValueCode = '' THEN BEGIN
+        IF lDimEntry.GET(pTableID, pEntryNo, pCode) THEN
+          lDimEntry.DELETE(FALSE);
+      END ELSE BEGIN
+        IF lDimEntry.GET(pTableID, pEntryNo,pCode) THEN BEGIN
+          lDimEntry."Dimension Value Code" := pValueCode;
+          lDimEntry.MODIFY;
+        END
+        ELSE BEGIN
+          lDimEntry.INIT;
+          lDimEntry."Table ID" := pTableID;
+          lDimEntry."Entry No." := pEntryNo;
+          lDimEntry."Dimension Code" := pCode;
+          lDimEntry."Dimension Value Code" := pValueCode;
+          lDimEntry.INSERT(TRUE);
+        END;
+      END;
+
+      GetSetup;
+      // Mise … jour des tables li‚es
+      IF pCode = GLSetup."Global Dimension 1 Code" THEN
+        UpdateSourceDimTable(pTableID, pEntryNo, 1, pValueCode);
+      IF pCode = GLSetup."Global Dimension 2 Code" THEN
+        UpdateSourceDimTable(pTableID, pEntryNo, 2, pValueCode);
+
+      IF pTableID = DATABASE::"G/L Entry" THEN BEGIN
+        // Mises … jour des tables annexes
+        UpdateDimLedgEntry(DATABASE::"Cust. Ledger Entry", pEntryNo, pCode, pValueCode);
+        UpdateDimLedgEntry(DATABASE::"Vendor Ledger Entry", pEntryNo, pCode, pValueCode);
+        UpdateDimLedgEntry(DATABASE::"Bank Account Ledger Entry", pEntryNo, pCode, pValueCode);
+        IF lFALedgEntry.WRITEPERMISSION THEN BEGIN
+          lFALedgEntry.SETCURRENTKEY("G/L Entry No.");
+          lFALedgEntry.SETRANGE("G/L Entry No.", pEntryNo);
+          IF NOT lFALedgEntry.ISEMPTY THEN BEGIN
+            lFALedgEntry.FINDSET(FALSE);
+            REPEAT
+              UpdateDimLedgEntry(DATABASE::"FA Ledger Entry", lFALedgEntry."Entry No.", pCode, pValueCode);
+            UNTIL lFALedgEntry.NEXT=0;
+          END;
+        END;
+        IF lMaintLedgEntry.WRITEPERMISSION THEN BEGIN
+          lMaintLedgEntry.SETCURRENTKEY("G/L Entry No.");
+          lMaintLedgEntry.SETRANGE("G/L Entry No.", lGLEntry."Entry No.");
+          IF NOT lMaintLedgEntry.ISEMPTY THEN BEGIN
+            lMaintLedgEntry.FINDSET(FALSE);
+            REPEAT
+              UpdateDimLedgEntry(DATABASE::"Maintenance Ledger Entry", lFALedgEntry."Entry No.", pCode, pValueCode);
+            UNTIL lMaintLedgEntry.NEXT=0;
+          END;
+        END;
+
+        // Controle et mise … jour des vues d'analyses
+        // La modification d'un axe analytique doit mettre … jour les vues utilisant cet axe :
+        // -Si compression date, r‚-initialisation de la vue. Message d'avertissement sur l'initialisation
+        // -Si pas de compression, mise … jour de l'‚criture.
+        IF NOT lGLEntry.GET(pEntryNo) THEN;  // permet de r‚cup‚rer le nø de compte
+        lAnalysisView.SETFILTER("Last Entry No.",'>=%1', pEntryNo);
+        IF lAnalysisView.FINDFIRST THEN BEGIN
+          REPEAT
+            IF lAnalysisView."Date Compression" = lAnalysisView."Date Compression"::None THEN BEGIN
+              lAnalysisDimNo := 0;
+              CASE pCode OF
+                lAnalysisView."Dimension 1 Code" : lAnalysisDimNo := 1;
+                lAnalysisView."Dimension 2 Code" : lAnalysisDimNo := 2;
+                lAnalysisView."Dimension 3 Code" : lAnalysisDimNo := 3;
+                lAnalysisView."Dimension 4 Code" : lAnalysisDimNo := 4;
+              END;
+              UpdateAnalysisViewEntry(lAnalysisView.Code, lGLEntry."G/L Account No.", pEntryNo, lAnalysisDimNo, pValueCode);
+            END ELSE BEGIN
+              IF lAnalysisView."Last Entry No." <> 0 THEN BEGIN
+                lAnalysisView.AnalysisViewReset;
+                lAnalysisView.MODIFY;
+                MESSAGE(STRSUBSTNO(Text004,lAnalysisView.Name));
+              END;
+            END;
+          UNTIL lAnalysisView.NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE UpdateSourceDimTable@8016611(pTableID@8016603 : Integer;pEntryNo@8016602 : Integer;pGlobalDimNo@8016601 : Integer;pValueCode@8016600 : Code[20]);
+    VAR
+      lGLEntry@8016609 : Record 17;
+      lCustLedgEntry@8016608 : Record 21;
+      lVendorLedgEntry@8016607 : Record 25;
+      lBankAccountLedgEntry@8016606 : Record 271;
+      lFALedgEntry@8016605 : Record 5601;
+      lMaintLedgEntry@8016604 : Record 5625;
+    BEGIN
+      CASE pTableID OF
+        DATABASE::"G/L Entry" :
+          WITH lGLEntry DO BEGIN
+            IF GET(pEntryNo) THEN BEGIN
+              IF pGlobalDimNo = 1 THEN
+                "Global Dimension 1 Code" := pValueCode;
+              IF pGlobalDimNo = 2 THEN
+                "Global Dimension 2 Code" := pValueCode;
+              MODIFY(FALSE);
+            END;
+          END; //WITH
+        DATABASE::"Cust. Ledger Entry" :
+          WITH lCustLedgEntry DO BEGIN
+            IF GET(pEntryNo) THEN BEGIN
+              IF pGlobalDimNo = 1 THEN
+                "Global Dimension 1 Code" := pValueCode;
+              IF pGlobalDimNo = 2 THEN
+                "Global Dimension 2 Code" := pValueCode;
+              MODIFY(FALSE);
+            END;
+          END; //WITH
+        DATABASE::"Vendor Ledger Entry" :
+          WITH lVendorLedgEntry DO BEGIN
+            IF GET(pEntryNo) THEN BEGIN
+              IF pGlobalDimNo = 1 THEN
+                "Global Dimension 1 Code" := pValueCode;
+              IF pGlobalDimNo = 2 THEN
+                "Global Dimension 2 Code" := pValueCode;
+              MODIFY(FALSE);
+            END;
+          END; //WITH
+        DATABASE::"Bank Account Ledger Entry" :
+          WITH lBankAccountLedgEntry DO BEGIN
+            IF GET(pEntryNo) THEN BEGIN
+              IF pGlobalDimNo = 1 THEN
+                "Global Dimension 1 Code" := pValueCode;
+              IF pGlobalDimNo = 2 THEN
+                "Global Dimension 2 Code" := pValueCode;
+              MODIFY(FALSE);
+            END;
+          END; //WITH
+        DATABASE::"FA Ledger Entry" :
+          WITH lFALedgEntry DO BEGIN
+            IF GET(pEntryNo) THEN BEGIN
+              IF pGlobalDimNo = 1 THEN
+                "Global Dimension 1 Code" := pValueCode;
+              IF pGlobalDimNo = 2 THEN
+                "Global Dimension 2 Code" := pValueCode;
+              MODIFY(FALSE);
+            END;
+          END; //WITH
+        DATABASE::"Maintenance Ledger Entry" :
+          WITH lMaintLedgEntry DO BEGIN
+            IF GET(pEntryNo) THEN BEGIN
+              IF pGlobalDimNo = 1 THEN
+                "Global Dimension 1 Code" := pValueCode;
+              IF pGlobalDimNo = 2 THEN
+                "Global Dimension 2 Code" := pValueCode;
+              MODIFY(FALSE);
+            END;
+          END; //WITH
+      END; // CASE
+    END;
+
+    PROCEDURE UpdateAnalysisViewEntry@8016613(pViewCode@8016603 : Code[20];pAccountNo@8016604 : Code[20];pEntryNo@8016605 : Integer;pDimNo@8016601 : Integer;pDimValue@8016600 : Code[20]);
+    VAR
+      lAnalysisViewEntry@8016602 : Record 365;
+      lAnalysisViewEntry2@8016606 : Record 365;
+    BEGIN
+      IF pEntryNo = 0 THEN EXIT;
+      WITH lAnalysisViewEntry DO BEGIN
+        LOCKTABLE;
+        SETRANGE("Analysis View Code",pViewCode);
+        SETRANGE("G/L Account No.", pAccountNo);
+        SETRANGE("Entry No.", pEntryNo);
+        IF FINDFIRST THEN BEGIN
+          lAnalysisViewEntry2 := lAnalysisViewEntry;
+          CASE pDimNo OF
+            1: lAnalysisViewEntry2."Dimension 1 Value Code" := pDimValue;
+            2: lAnalysisViewEntry2."Dimension 2 Value Code" := pDimValue;
+            3: lAnalysisViewEntry2."Dimension 3 Value Code" := pDimValue;
+            4: lAnalysisViewEntry2."Dimension 4 Value Code" := pDimValue;
+          END;
+          lAnalysisViewEntry.DELETE;
+          lAnalysisViewEntry2.INSERT;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetSetup@8016600();
+    BEGIN
+      IF SetupRead THEN EXIT;
+      GLSetup.GET;
+      SetupRead := TRUE;
+    END;
+
+    PROCEDURE ChangeGLDim@8016605(VAR pGLEntry@8016600 : Record 17) : Boolean;
+    VAR
+      lTempJnlDim@8016601 : TEMPORARY Record 356;
+      lLedgDim@8016602 : Record 355;
+      lDimChange@8016603 : Form 8016613;
+    BEGIN
+      //ISA02.ST
+      pGLEntry.FINDFIRST;
+      REPEAT
+        lLedgDim.SETRANGE("Table ID", DATABASE::"G/L Entry");
+        lLedgDim.SETRANGE("Entry No.", pGLEntry."Entry No.");
+        IF lLedgDim.FINDFIRST THEN
+          REPEAT
+            IF lTempJnlDim.GET(lLedgDim."Table ID", '', '', 0, 0, lLedgDim."Dimension Code") THEN BEGIN
+              IF lTempJnlDim."Dimension Value Code" <> lLedgDim."Dimension Value Code" THEN BEGIN
+                lTempJnlDim."Dimension Value Code" := Text005;
+                lTempJnlDim."New Dimension Value Code" := Text005;
+                lTempJnlDim.MODIFY;
+              END;
+            END
+            ELSE BEGIN
+              lTempJnlDim.INIT;
+              lTempJnlDim."Table ID" := lLedgDim."Table ID";
+              lTempJnlDim."Dimension Code" := lLedgDim."Dimension Code";
+              lTempJnlDim."Dimension Value Code" := lLedgDim."Dimension Value Code";
+              lTempJnlDim."New Dimension Value Code" := lTempJnlDim."Dimension Value Code";
+              lTempJnlDim.INSERT;
+            END;
+          UNTIL lLedgDim.NEXT=0;
+      UNTIL pGLEntry.NEXT=0;
+      lTempJnlDim.SETRANGE("Table ID", DATABASE::"G/L Entry");
+      lDimChange.SetTempRec(lTempJnlDim);
+      lDimChange.LOOKUPMODE(TRUE);
+      IF lDimChange.RUNMODAL <> ACTION::LookupOK THEN
+        EXIT(FALSE);
+
+      lDimChange.GetTempRec(lTempJnlDim);
+      pGLEntry.FINDFIRST;
+      REPEAT
+        lTempJnlDim.CLEARMARKS;
+        lLedgDim.SETRANGE("Table ID", DATABASE::"G/L Entry");
+        lLedgDim.SETRANGE("Entry No.", pGLEntry."Entry No.");
+        IF lLedgDim.FINDFIRST THEN
+          REPEAT
+            lTempJnlDim.SETRANGE("Dimension Code", lLedgDim."Dimension Code");
+            IF lTempJnlDim.FINDFIRST THEN BEGIN
+              lTempJnlDim.MARK(TRUE);
+              IF (lTempJnlDim."New Dimension Value Code" <> lLedgDim."Dimension Value Code") AND
+                 (lTempJnlDim."New Dimension Value Code" <> Text005) THEN BEGIN
+                lTempJnlDim.TESTFIELD("New Dimension Value Code");
+                UpdateDimLedgEntry(DATABASE::"G/L Entry",pGLEntry."Entry No.",
+                                   lTempJnlDim."Dimension Code",lTempJnlDim."New Dimension Value Code");
+              END;
+            END
+            ELSE
+              UpdateDimLedgEntry(DATABASE::"G/L Entry",pGLEntry."Entry No.",
+                                 lLedgDim."Dimension Code",'');
+          UNTIL lLedgDim.NEXT=0;
+        lTempJnlDim.SETRANGE("Dimension Code");
+        IF lTempJnlDim.FINDFIRST THEN
+          REPEAT
+            IF NOT lTempJnlDim.MARK THEN BEGIN
+              lTempJnlDim.TESTFIELD("New Dimension Value Code");
+              UpdateDimLedgEntry(DATABASE::"G/L Entry",pGLEntry."Entry No.",
+                                 lTempJnlDim."Dimension Code",lTempJnlDim."New Dimension Value Code");
+            END;
+          UNTIL lTempJnlDim.NEXT=0;
+      UNTIL pGLEntry.NEXT=0;
+    END;
+
+    BEGIN
+    {
+      /**@r ISA02 @d 04/09/09 @a ISAT.ST @v ISA6.00.00.03 @s Modifications comptabilit‚
+         @c Modification analytique */
+      /**@r ISA01 @d 17/07/09 @a ISAT.LLT @v ISA6.00.00.03 @s Modifications comptabilit‚
+         @c Gestion de la modification de la d‚signation */
+    }
+    END.
+  }
+}

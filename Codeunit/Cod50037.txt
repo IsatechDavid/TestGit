@@ -1,0 +1,689 @@
+OBJECT Codeunit 50037 Proc. Intervention Act. Funct.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/11/13;
+    Time=12:22:10;
+    Modified=Yes;
+    Version List=IMH6.01,SysAgDarva,MATMUT01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      AssistMode@1100281003 : Boolean;
+      CheckMode@1100281009 : Boolean;
+      CurrRec@1100281004 : Record 50075;
+      Text001@1100281001 : TextConst 'ENU=Intervention Process Function %1 can''t be used by NAS.;FRA=La fonction processus intervention %1 ne peut ˆtre utilis‚ pas un NAS.';
+      Text002@1000000000 : TextConst 'ENU=Do you want to send a SMS %1 to %2 ?;FRA=Souhaitez-vous envoyer le SMS %1 au %2 ?';
+      Funct001_Name@1100281002 : TextConst 'ENU=Cancel auto tray activities;FRA=Annulation activit‚s corbeille auto';
+      Funct001_Assist@1100281006 : TextConst 'ENU="Team code filter (unmandatory),Tray task filter (unmandatory),Auto filtre (unmandatory : 0=Auto/1=Manuel/2=Toutes)";FRA="Filtre code corbeille (non obligatoire),Filtre tƒche corbeille (non obligatoire),Filtre activit‚ auto (non obligatoire, 0=Auto/1=Manuel/2=Toutes)"';
+      Funct002_Name@1100281015 : TextConst 'ENU=Cancel auto tray activities;FRA=Etape suivante';
+      Funct002_Assist@1100281014 : TextConst 'ENU=Selection mandatory.;FRA=S‚lection obligatoire par l''utilisateur.';
+      Funct101_Name@1100281005 : TextConst 'ENU=Ask cancel reason;FRA=Demande motif annulation';
+      ProcCommFct@1100281007 : Codeunit 50049;
+      Funct103_Assist@1100281000 : TextConst 'ENU=Values possibles : Validated,Pending,Rejected;FRA=Valeurs possibles : Valid‚, En attente, Refus‚';
+      Funct103_Name@1100281008 : TextConst 'ENU=Update current minute status;FRA=Mettre … jour le statut du PV en cours';
+      ErrorText@1100281010 : Text[250];
+      Funct130_Name@1100281013 : TextConst 'ENU=Send DARVA message.;FRA=Emission message DARVA.';
+      Funct130_Assist@1100281012 : TextConst 'ENU=Message type to send.;FRA=Type de message … envoyer.';
+      Funct130_Error@1100281011 : TextConst 'ENU=Message type unavailable;FRA=Type de message non g‚r‚';
+      Funct140_Name@1100281018 : TextConst 'ENU=Notify Creation;FRA=Cr‚ation notification';
+      Funct140_Assist@1100281017 : TextConst 'ENU="Description (80c);Type (0=Intervention,1=Contact,2=Provider)";FRA="Description (80c);Type (0=Intervention,1=Contact,2=Prestataire)"';
+      Funct140_Error2@1100281019 : TextConst 'ENU="Available type values : 0=Intervention,1=Contact,2=Provider";FRA="Valeurs possibles type : 0=Intervention,1=Contact,2=Prestataire"';
+      Funct140_Error3@1100281020 : TextConst 'ENU=Description length must be lower or equal to 80 caracters;FRA=La longueur de la description doit ˆtre inf‚rieure ou ‚gale … 80 caractŠres';
+      HideDialogBox@1100281016 : Boolean;
+      FromProcessCode@1100281022 : Code[10];
+      FromProcessNo@1100281021 : Integer;
+      ProcessSetted@1100281023 : Boolean;
+      Funct300_Name@1000000002 : TextConst 'ENU=sms auto transmission;FRA=Emission des SMS en auto';
+      Funct300_Assist@1000000001 : TextConst 'ENU=Template to send SMS.;FRA=Code modŠle SMS';
+      DARVASetup@1000000003 : Record 50126;
+
+    LOCAL PROCEDURE GetTableNo@1100281000() : Integer;
+    BEGIN
+      EXIT(DATABASE::"Service Intervention Line");
+    END;
+
+    PROCEDURE LoadFunctionList@1100281001();
+    VAR
+      lProcFunction@1100281000 : Record 50085;
+    BEGIN
+      // Source Table, Type, nø de la fonction, Description, ParamŠtre o/n
+      WITH lProcFunction DO BEGIN
+        // Plage 1 … 99 : commun DPS
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 1, Funct001_Name, TRUE);
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 2, Funct002_Name, FALSE);
+        // Plage 100 … 199 : selon la table origine
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 101, Funct101_Name , FALSE);
+      //  InitFunction(GetTableNo, "Function Type"::ActionFunction, 103, Funct103_Name , TRUE);  //IMH04.zw
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 130, Funct130_Name, TRUE);
+        //<<IMH06.PC
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 140, Funct140_Name, TRUE);
+        //>>IMH06.PC
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 300, Funct300_Name, TRUE);  //IMH12
+      END;
+      // Plage 200 : fonction communes
+      ProcCommFct.LoadActFunctionList(GetTableNo); //IMH02.ST
+    END;
+
+    PROCEDURE AssistFunction@1100281009(pFunctionNo@1100281000 : Integer);
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      AssistMode := TRUE;
+      RunFunction(pFunctionNo, '', lRecRef);
+      AssistMode := FALSE;
+    END;
+
+    PROCEDURE RunFunction@1100281003(pFunctionNo@1100281000 : Integer;pParameters@1100281001 : Text[1024];VAR pCurrRecRef@1100281002 : RecordRef) rValue : Boolean;
+    BEGIN
+      IF (NOT AssistMode) AND (NOT CheckMode) THEN
+        pCurrRecRef.SETTABLE(CurrRec);
+      CASE pFunctionNo OF
+        1 : rValue := CancelTrayLines(pParameters);
+        2 : rValue := SelectNextStep;
+        101 : rValue := InputCancelReason;
+      //  103 : rValue := UpdtMinuteStatus(pParameters);
+        130 : rValue := SendDARVA(pParameters);
+        //<<IMH06.PC
+        140 : rValue := CreateNotification(pParameters);
+        //>>IMH06.PC
+        300 : rValue := SendSMS(pParameters); //IMH12
+        ELSE BEGIN
+          //<<IMH07.ISAT.EBA
+          ProcCommFct.SetHideDialogBox(HideDialogBox);
+          //>>IMH07.ISAT.EBA
+          rValue := ProcCommFct.RunFunction(GetTableNo, pFunctionNo, pParameters); //IMH02.ST
+        END;
+      END;
+      IF (NOT AssistMode) AND (NOT CheckMode) THEN
+        pCurrRecRef.GETTABLE(CurrRec);
+    END;
+
+    PROCEDURE CheckParameters@1100281010(pFunctionNo@1100281000 : Integer;pParameter@1100281002 : Text[1024];VAR pErrorText@1100281001 : Text[250]) : Boolean;
+    VAR
+      lRecRef@1100281003 : RecordRef;
+    BEGIN
+      //IMH04.zw
+      CheckMode := TRUE;
+      RunFunction(pFunctionNo, pParameter, lRecRef);
+      pErrorText := ErrorText;
+      CheckMode := FALSE;
+      EXIT(pErrorText = '');
+    END;
+
+    LOCAL PROCEDURE "---LIB------------------------"@1100281004();
+    BEGIN
+    END;
+
+    PROCEDURE AskCode@1100281006(pTableID@1100281000 : Integer;pFieldId@1100281001 : Integer;pInstructions@1100281009 : Text[1024];VAR pReturnCode@1100281002 : Code[10]) : Boolean;
+    VAR
+      lCode@1100281007 : Record 50079;
+      lTempCode@1100281006 : TEMPORARY Record 50079;
+      lText@1100281004 : Text[1024];
+      lInt@1100281005 : Integer;
+      lSelect@1100281003 : Integer;
+      lDefaultSelect@1100281008 : Integer;
+    BEGIN
+      lCode.SETRANGE("Table ID", pTableID);
+      lCode.SETRANGE("Field ID", pFieldId);
+      lInt := 1;
+      lDefaultSelect := 0;
+      IF NOT lCode.FINDSET(FALSE) THEN
+        EXIT(TRUE);
+      REPEAT
+        IF lCode.Code = pReturnCode THEN
+          lDefaultSelect := lInt;
+        IF lCode.Description = '' THEN
+          lCode.Description := lCode.Code;
+        lTempCode := lCode;
+        lTempCode."Table ID" := lInt;
+        lTempCode."Field ID" := 0;
+        lTempCode.Description := DELCHR(lCode.Description, '=', ',');
+        lTempCode.INSERT;
+        IF lText = '' THEN
+          lText := lTempCode.Description
+        ELSE BEGIN
+          IF STRLEN(lText) + STRLEN(lTempCode.Description) + 1 <= MAXSTRLEN(lText) THEN
+            lText := lText + ',' + lTempCode.Description
+          ELSE BEGIN
+            // Ask values
+            lSelect := STRMENU(lText, lDefaultSelect, pInstructions);
+            IF lSelect > 0 THEN BEGIN
+              lTempCode.SETRANGE("Table ID", lSelect);
+              lTempCode.FINDFIRST;
+              pReturnCode := lTempCode.Code;
+              EXIT(TRUE);
+            END;
+            lText := '';
+            lDefaultSelect := 1;
+            lTempCode.DELETEALL;
+            lInt := 0;
+          END;
+        END;
+        lInt += 1;
+      UNTIL lCode.NEXT = 0;
+      // Ask Values
+      lSelect := STRMENU(lText, lDefaultSelect, pInstructions);
+      IF lSelect > 0 THEN BEGIN
+        lTempCode.SETRANGE("Table ID", lSelect);
+        lTempCode.FINDFIRST;
+        pReturnCode := lTempCode.Code;
+        EXIT(TRUE);
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE AskCodeProdReason@1100281012(VAR pProdReason@1100281000 : Record 50065;pInstructions@1100281009 : Text[1024];VAR pReturnCode@1100281002 : Code[10]) : Boolean;
+    VAR
+      lTempCode@1100281006 : TEMPORARY Record 50079;
+      lText@1100281004 : Text[1024];
+      lInt@1100281005 : Integer;
+      lSelect@1100281003 : Integer;
+      lDefaultSelect@1100281008 : Integer;
+    BEGIN
+      IF NOT pProdReason.FINDSET(FALSE) THEN
+        EXIT(TRUE);
+
+      lInt := 1;
+      lDefaultSelect := 0;
+      REPEAT
+        IF pProdReason.Code = pReturnCode THEN
+          lDefaultSelect := lInt;
+        lTempCode."Table ID" := lInt;
+        lTempCode.Code := pProdReason.Code;
+        lTempCode.Description := DELCHR(pProdReason.GetDesc, '=', ',');
+        lTempCode.INSERT;
+        IF lText = '' THEN
+          lText := lTempCode.Description
+        ELSE BEGIN
+          IF STRLEN(lText) + STRLEN(lTempCode.Description) + 1 <= MAXSTRLEN(lText) THEN
+            lText := lText + ',' + lTempCode.Description
+          ELSE BEGIN
+            // Ask values
+            lSelect := STRMENU(lText, lDefaultSelect, pInstructions);
+            IF lSelect > 0 THEN BEGIN
+              lTempCode.SETRANGE("Table ID", lSelect);
+              lTempCode.FINDFIRST;
+              pReturnCode := lTempCode.Code;
+              EXIT(TRUE);
+            END;
+            lText := '';
+            lDefaultSelect := 1;
+            lTempCode.DELETEALL;
+            lInt := 0;
+          END;
+        END;
+        lInt += 1;
+      UNTIL pProdReason.NEXT=0;
+      // Ask Values
+      lSelect := STRMENU(lText, lDefaultSelect, pInstructions);
+      IF lSelect > 0 THEN BEGIN
+        lTempCode.SETRANGE("Table ID", lSelect);
+        lTempCode.FINDFIRST;
+        pReturnCode := lTempCode.Code;
+        EXIT(TRUE);
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE "------------------------------"@1100281005();
+    BEGIN
+    END;
+
+    PROCEDURE InputCancelReason@1100281002() : Boolean;
+    VAR
+      lCode@1100281000 : Code[10];
+      lProductReason@1100281001 : Record 50065;
+    BEGIN
+      //<<IMH07.ISAT.EBA
+      IF HideDialogBox THEN
+        ERROR('');
+      //>>IMH07.ISAT.EBA
+
+      IF NOT GUIALLOWED THEN
+        ERROR(Text001, 101);
+      lCode := CurrRec."Cancel Reason Code";
+      lProductReason.SETRANGE("Corporate No.", CurrRec."Corporate No.");
+      lProductReason.SETRANGE("Service Order Type", CurrRec."Service Order Type");
+      lProductReason.SETRANGE("Code Type", lProductReason."Code Type"::InterventionCancelReason);
+      IF lProductReason.ISEMPTY THEN
+        lProductReason.SETRANGE("Corporate No.");
+      IF lProductReason.ISEMPTY THEN
+        lProductReason.SETRANGE("Service Order Type");
+      IF lProductReason.ISEMPTY THEN BEGIN
+        REPEAT
+        UNTIL AskCode(DATABASE::"Service Intervention Line", CurrRec.FIELDNO("Cancel Reason Code"), Funct101_Name, lCode);
+      END
+      ELSE BEGIN
+        REPEAT
+        UNTIL AskCodeProdReason(lProductReason, Funct101_Name, lCode);
+      END;
+      IF CurrRec."Cancel Reason Code" <> lCode THEN
+        CurrRec.VALIDATE("Cancel Reason Code", lCode);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CancelTrayLines@1100281008(pParameters@1100281000 : Text[1024]) : Boolean;
+    VAR
+      lTrayLine@1100281001 : Record 50048;
+      lTrayTask@1000000001 : Record 50080;
+      lTeamFilter@1100281003 : Text[1024];
+      lTaskFilter@1100281004 : Text[1024];
+      lParamNb@1100281005 : Integer;
+      lActType@1000000000 : Integer;
+      lToTreat@1000000002 : Boolean;
+    BEGIN
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct001_Assist);
+        EXIT;
+      END;
+      lActType := 0; //IMH08.ST
+      IF pParameters <> '' THEN BEGIN
+        lParamNb := ProcCommFct.CountParameters(pParameters, ',');
+        IF lParamNb > 3 THEN
+          ProcCommFct.ErrorNbExpectedParam(Funct001_Name, lParamNb);
+        lTeamFilter := SELECTSTR(1, pParameters);
+        IF lParamNb > 1 THEN
+          lTaskFilter := SELECTSTR(2, pParameters);
+      //<<IMH08.ST
+        IF lParamNb > 2 THEN BEGIN
+          IF SELECTSTR(3, pParameters) <> '' THEN
+            EVALUATE(lActType,SELECTSTR(3, pParameters));
+        END;
+      //>>IMH08.ST
+      END;
+      WITH lTrayLine DO BEGIN
+        SETCURRENTKEY("Service No.", "Service Header No.", "Intervention Line No.");
+        SETRANGE("Service No.", CurrRec."Service No.");
+        SETRANGE("Service Header No.", CurrRec."Service Header No.");
+        SETRANGE("Intervention Line No.", CurrRec."Line No.");
+        SETRANGE("Linked To Table", "Linked To Table"::Intervention);
+        SETRANGE(Closed, FALSE);
+        IF lTeamFilter <> '' THEN
+          SETFILTER("Team Code", lTeamFilter);
+        IF lTaskFilter <> '' THEN
+          SETFILTER("Task Code", lTaskFilter);
+      //<<IMH08.ST
+        CASE lActType OF
+          0 : SETRANGE(Manual, FALSE);
+          1 : SETRANGE(Manual, TRUE);
+        END;
+      //>>IMH08.ST
+        IF ISEMPTY THEN
+          EXIT(TRUE);
+        FINDSET(TRUE);
+        REPEAT
+          //<<IMH10
+          lToTreat := TRUE;
+          IF lTrayTask.GET(lTrayTask."Source Table"::Intervention, lTrayLine."Task Code") THEN
+            IF lTrayTask."Assist Action" <> lTrayTask."Assist Action"::OpenCard THEN
+              lToTreat := FALSE;
+          CALCFIELDS("Lock Exists");
+          //IF NOT "Lock Exists"THEN BEGIN
+          IF (NOT "Lock Exists") OR lToTreat THEN BEGIN
+          //>>IMH10
+            VALIDATE(Status, Status::Canceled);
+            MODIFY(TRUE);
+          END;
+          //>>IMH10
+        UNTIL NEXT = 0;
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE UpdtMinuteStatus@1100281007(pParameters@1100281001 : Text[1024]) : Boolean;
+    VAR
+      lServiceInterventionMinutes@1100281000 : Record 50084;
+    BEGIN
+      //IMH04 isat.zw
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct103_Assist);
+        EXIT;
+      END;
+
+      IF CheckMode THEN BEGIN
+        ErrorText := '';
+        IF (pParameters IN ['', ' ']) OR (NOT EVALUATE(lServiceInterventionMinutes.Status, pParameters)) THEN
+          ErrorText := Funct103_Assist;
+        EXIT;
+      END;
+
+      IF pParameters = '' THEN
+        EXIT;
+      lServiceInterventionMinutes.SETRANGE("Service Header No.", CurrRec."Service Header No.");
+      lServiceInterventionMinutes.SETRANGE("Service Intervention Line No.", CurrRec."Line No.");
+      lServiceInterventionMinutes.SETRANGE("Document No.", CurrRec."Minutes Document");
+      IF lServiceInterventionMinutes.FINDFIRST THEN BEGIN
+        EVALUATE(lServiceInterventionMinutes.Status, pParameters);
+        lServiceInterventionMinutes.VALIDATE(Status);
+        lServiceInterventionMinutes.MODIFY(TRUE);
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SendDARVA@1100281011(pParameters@1100281000 : Text[1024]) : Boolean;
+    VAR
+      lInterfaceSetup@1100281008 : Record 50139;
+      lServHeader@1100281007 : Record 5900;
+      lServiceInterventionLine@1100281006 : Record 50075;
+      lServiceCode@1100281005 : Record 50040;
+      lInterventionDescription@1100281004 : Record 50070;
+      lRecRef@1100281003 : RecordRef;
+      lDARVAMgt@1100281002 : Codeunit 50150;
+      lSDR64Mgt@1100281010 : Codeunit 50210;
+      lOKToSend@1100281001 : Boolean;
+      lText001@1100281009 : TextConst 'ENU=SDR64 function disabled in process.;FRA=Fonction SDR64 dans les processus d‚sactiv‚s';
+    BEGIN
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct130_Assist);
+        EXIT;
+      END;
+
+      IF NOT CheckMode THEN BEGIN
+        IF NOT lServHeader.GET(lServHeader."Document Type"::Invoice, CurrRec."Service Header No.") THEN
+          EXIT(FALSE);
+        IF NOT lServHeader."DARVA Interface" THEN
+          EXIT(TRUE);
+      END;
+
+      //<<IMH17.ACO
+      DARVASetup.GET;
+      //>>IMH17.ACO
+
+      lRecRef.GETTABLE(CurrRec);
+      CASE UPPERCASE(pParameters) OF
+        // CARENCE DU LESE
+        //<<IMH17.ACO
+        //'SDR13' : BEGIN
+        DARVASetup."DARVA SD13 Code" : BEGIN
+        //>>IMH17.ACO
+          lServiceInterventionLine.SETRANGE("Service Header No.",CurrRec."Service Header No.");
+          lServiceInterventionLine.SETFILTER("Intervention Status",'<>%1',lServiceInterventionLine."Intervention Status"::Cancel);
+          IF lServiceInterventionLine.ISEMPTY THEN BEGIN
+            lInterfaceSetup.GET;
+            lInterfaceSetup.TESTFIELD("DARVA Canc. Reason Code SDR13");
+            lServiceInterventionLine.SETRANGE("Intervention Status");
+            lServiceInterventionLine.SETRANGE("Cancel Reason Code",lInterfaceSetup."DARVA Canc. Reason Code SDR13");
+            IF NOT lServiceInterventionLine.ISEMPTY THEN BEGIN
+              IF NOT CheckMode THEN BEGIN
+                //<<IMH15.PC
+                //IF lDARVAMgt.CreateSendMQ_SDR(lRecRef, pParameters) THEN;
+                lDARVAMgt.CreateSendMQ_SDR(
+                  lRecRef,pParameters,
+                  lServiceInterventionLine."Corporate No.",lServiceInterventionLine."Corporate Region Code",
+                  lServiceInterventionLine."Service Order Type");
+                //>>IMH15.PC
+              END;
+            END;
+          END;
+          EXIT(TRUE);
+        END;
+        // CARENCE DU PRESTATAIRE / FIN DE MISSION
+        //<<IMH17.ACO
+        //'SDR61' : BEGIN
+        DARVASetup."DARVA SD61 Code" : BEGIN
+        //>>IMH17.ACO
+          lServiceInterventionLine.SETRANGE("Service Header No.",CurrRec."Service Header No.");
+          lServiceInterventionLine.SETFILTER("Intervention Status",'<>%1',lServiceInterventionLine."Intervention Status"::Cancel);
+          IF lServiceInterventionLine.ISEMPTY THEN BEGIN
+            lInterfaceSetup.GET;
+            lInterfaceSetup.TESTFIELD("DARVA Canc. Reason Code SDR13");
+            lServiceInterventionLine.SETRANGE("Intervention Status");
+            lServiceInterventionLine.SETRANGE("Cancel Reason Code",lInterfaceSetup."DARVA Canc. Reason Code SDR13");
+            IF lServiceInterventionLine.ISEMPTY THEN BEGIN
+              IF NOT CheckMode THEN BEGIN
+                //<<IMH15.PC
+                //IF lDARVAMgt.CreateSendMQ_SDR(lRecRef, pParameters) THEN;
+                lDARVAMgt.CreateSendMQ_SDR(
+                  lRecRef,pParameters,
+                  lServiceInterventionLine."Corporate No.",lServiceInterventionLine."Corporate Region Code",
+                  lServiceInterventionLine."Service Order Type");
+                //>>IMH15.PC
+              END;
+            END;
+          END;
+          EXIT(TRUE);
+        END;
+        // DESIGNATION PRESTATAIRE
+        //<<IMH17.ACO
+        //'SDR64' : BEGIN
+        DARVASetup."DARVA SD64 Code" : BEGIN
+        //>>IMH17.ACO
+          //<<IMH16.PC
+          {
+          //<<IMH09.PC
+          ERROR(lText001);
+          //>>IMH09.PC
+          // On n'envoi le sdr64 que si l'ensemble des sp‚cialit‚s ont ‚t‚ assign‚es … un prestataire
+          lOKToSend := TRUE;
+          lInterventionDescription.SETRANGE("Service Header No.",CurrRec."Service Header No.");
+          IF lInterventionDescription.FINDSET THEN BEGIN
+            REPEAT
+              // Recherche une ligne de desriptif portant la sp‚cialit‚
+              lServiceCode.SETCURRENTKEY("Service Type","Service Header No.","Code Type",Code);
+              lServiceCode.SETRANGE("Service Type",lServiceCode."Service Type"::Intervention);
+              lServiceCode.SETRANGE("Service Header No.",CurrRec."Service Header No.");
+              lServiceCode.SETRANGE("Code Type",lServiceCode."Code Type"::Speciality);
+              lServiceCode.SETRANGE(Code,lInterventionDescription."Speciality Code");
+              IF lServiceCode.FINDSET THEN BEGIN
+                REPEAT
+                  // V‚rification du statut de la ligne d'intervention
+                  lServiceInterventionLine.SETRANGE("Service Header No.",lServiceCode."Service Header No.");
+                  lServiceInterventionLine.SETRANGE("Line No.",lServiceCode."Intervention Line No.");
+                  lServiceInterventionLine.SETFILTER(
+                    "Intervention Status",'<>%1',lServiceInterventionLine."Intervention Status"::Cancel);
+                  lServiceInterventionLine.SETFILTER("Mission Status",'<>%1',lServiceInterventionLine."Mission Status"::Canceled);
+                  lOKToSend := NOT lServiceInterventionLine.ISEMPTY;
+                UNTIL (NOT lOKToSend) OR (lServiceCode.NEXT = 0);
+              END ELSE BEGIN
+                lOKToSend := FALSE;
+              END;
+            UNTIL (NOT lOKToSend) OR (lInterventionDescription.NEXT = 0);
+          END;
+          IF lOKToSend THEN BEGIN
+            IF NOT CheckMode THEN BEGIN
+              //<<IMH15.PC
+              //IF lDARVAMgt.CreateSendMQ_SDR(lRecRef, pParameters) THEN;
+              lDARVAMgt.CreateSendMQ_SDR(
+                lRecRef,pParameters,
+                lServiceInterventionLine."Corporate No.",lServiceInterventionLine."Corporate Region Code",
+                lServiceInterventionLine."Service Order Type");
+              //>>IMH15.PC
+            END;
+          END;
+          EXIT(TRUE);
+          }
+          lSDR64Mgt.NewSendSDR64(CurrRec,FALSE);
+          //>>IMH16.PC
+          EXIT(TRUE);
+        END;
+        ELSE
+          ERROR(Funct130_Error);
+      END;
+    END;
+
+    PROCEDURE CreateNotification@1100281014(pParameters@1100281000 : Text[1024]) rValue : Boolean;
+    VAR
+      lProviderNotification@1100281001 : Codeunit 50148;
+      lProvider@1100281002 : Record 50000;
+      lText001@1100281003 : TextConst 'ENU=Provider no. %1 don''t exists;FRA=Prestataire %1 inexistant';
+      lType@1100281004 : 'Intervention,Contact,Provider';
+      lTypeText@1100281005 : Text[1];
+      lCommaPos@1100281006 : Integer;
+    BEGIN
+      // IMH06.PC
+      rValue := FALSE;
+
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct140_Assist);
+        EXIT;
+      END;
+
+      lCommaPos := STRPOS(pParameters,';');
+      IF (lCommaPos = 0) OR
+         ((lCommaPos + 1) > STRLEN(pParameters))
+      THEN BEGIN
+        //<<IMH07.ISAT.EBA
+        IF HideDialogBox THEN
+          ERROR('');
+        //>>IMH07.ISAT.EBA
+
+        ERROR(Funct140_Assist);
+      END;
+
+      lTypeText := COPYSTR(pParameters,STRPOS(pParameters,';') + 1,1);
+      IF NOT EVALUATE(lType,lTypeText) THEN BEGIN
+        //<<IMH07.ISAT.EBA
+        IF HideDialogBox THEN
+          ERROR('');
+        //>>IMH07.ISAT.EBA
+
+        ERROR(Funct140_Assist);
+      END;
+
+      IF NOT (lType IN [0,1,2]) THEN BEGIN
+        //<<IMH07.ISAT.EBA
+        IF HideDialogBox THEN
+          ERROR('');
+        //>>IMH07.ISAT.EBA
+
+        ERROR(Funct140_Error2);
+      END;
+
+      IF STRLEN(COPYSTR(pParameters,1,lCommaPos - 1)) > 80 THEN BEGIN
+        //<<IMH07.ISAT.EBA
+        IF HideDialogBox THEN
+          ERROR('');
+        //>>IMH07.ISAT.EBA
+
+        ERROR(Funct140_Error3);
+      END;
+
+      IF CurrRec."Provider No." = '' THEN BEGIN
+        EXIT;
+      END;
+
+      lProviderNotification.CreateCommentToNotification(
+        CurrRec."Provider No.",
+        CurrRec."Service No.",
+        CurrRec."Service Header No.",
+        CurrRec."Line No.",
+        DATABASE::"Service Intervention Line",
+        lType,
+        COPYSTR(pParameters,1,lCommaPos - 1),
+        CurrRec."Address No.");
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SelectNextStep@1100281013() : Boolean;
+    VAR
+      lIntervProcess@1100281000 : Codeunit 50041;
+    BEGIN
+      IF AssistMode THEN
+        EXIT;
+      //<<IMH11
+      IF ProcessSetted THEN BEGIN
+        CurrRec."Process Code" := FromProcessCode;
+        CurrRec."Process Status No." := FromProcessNo;
+      END;
+      //>>IMH11
+      EXIT(lIntervProcess.SelectNextStep(CurrRec));
+    END;
+
+    PROCEDURE SetHideDialogBox@57(NewHideDialogBox@1000 : Boolean);
+    BEGIN
+      //<<IMH07.ISAT.EBA
+      HideDialogBox := NewHideDialogBox;
+      //>>IMH07.ISAT.EBA
+    END;
+
+    PROCEDURE SetFromProcess@1100281015(pFromProcessCode@1100281000 : Code[10];pFromProcessNo@1100281001 : Integer);
+    BEGIN
+      //IMH11
+      ProcessSetted := TRUE;
+      FromProcessCode := pFromProcessCode;
+      FromProcessNo := pFromProcessNo;
+    END;
+
+    PROCEDURE SendSMS@1000000001(pParameters@1100281002 : Text[1024]) : Boolean;
+    VAR
+      lContact@1000000001 : Record 5050;
+      lSMSTemplate@1000000000 : Record 50185;
+      lSMSMgt@1100281000 : Codeunit 50225;
+      lType@1100281001 : 'Service,Service Header,Intervention';
+      lParamNb@1100281003 : Integer;
+    BEGIN
+      //IMH12
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct300_Assist);
+        EXIT;
+      END;
+
+      IF pParameters <> '' THEN BEGIN
+        lParamNb := ProcCommFct.CountParameters(pParameters, ',');
+        IF lParamNb > 1 THEN
+          ProcCommFct.ErrorNbExpectedParam(Funct300_Name, lParamNb);
+
+        IF  lParamNb =1 THEN BEGIN
+          //<<IMH14
+          IF NOT lSMSTemplate.GET(pParameters) THEN
+            EXIT(TRUE);
+          //>>IMH14
+          CurrRec.CALCFIELDS("Mobile Phone No.");    //<<IMH14
+          IF lSMSMgt.CheckPhoneNo(CurrRec."Mobile Phone No.") THEN BEGIN
+            IF GUIALLOWED THEN BEGIN
+              IF NOT CONFIRM(STRSUBSTNO(Text002, lSMSTemplate.Description, CurrRec."Mobile Phone No.")) THEN
+                EXIT(TRUE);
+            END;
+            lSMSMgt.SendSMSFromIntervention(0,CurrRec,pParameters, 1, FALSE);
+          END;
+          EXIT(TRUE)
+        END
+        ELSE
+         EXIT(TRUE);  //IMH14
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH17 @d 03/09/13 @a ISAT.ACO @v IMH6.01.350 @s SystŠme d'aiguillage */
+      /** @r IMH16 @d 27/08/13 @a ISAT.PC @v IMH6.01.348 @s DARVA MATMUT Lot 1 @c Gestion du SDR64 */
+      /** @r IMH15 @d 25/06/13 @a ISAT.PC @v IMH6.01.350 @s SystŠme d'aiguillage */
+      /** @r IMH14 @d 28/11/12 @a ISAT.ZW @v IMH6.01.330 @s Projet SMS V1.1 @h 4135
+          @c Correction */
+      /** @r IMH13 @d 28/11/12 @a ISAT.ZW @v IMH6.01.330 @s Projet SMS V1.1 @h 4134
+          @c Correction */
+      /** @r IMH12 @d 15/11/12 @a ISAT.ZW @v IMH6.01.330 @s Projet SMS V1.1
+          @c ajout fonction SendSMS */
+      /** @r IMH11 @d 13/11/12 @a ISAT.ZW @v IMH6.01.215 @s NEP000006 @h 3702 @c Gestion processus*/
+      /** @r IMH10 @d 23/08/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h mantis 3545
+          @c Modification CancelTrayLines : validation de l'activit‚ en cours de traitement */
+      /** @r IMH09 @d 15/06/12 @a ISAT.PC @v IMH6.01.134 @h 0003473 @s D‚sactivation SDR64 */
+      /** @r IMH08 @d 07/06/12 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Modification CancelTrayLines : ajout d'un paramŠtre */
+      /** @r IMH07 @d 15/11/11 @a ISAT.EBA @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout de fonction "SetHideDialogBox" */
+      /** @r IMH06 @d 16/09/11 @a ISAT.PC @v IMH6.01.165 @s Extranet @c Cr‚ation notification */
+      /** @r IMH05 @d 31/05/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Fonction UpdtMinuteStatus nø 3 -> 103 + fonction d‚sactive (non utilis‚)
+          @c Ajout SendDARVA */
+      /** @r IMH04 @d 05/05/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction UpdtMinuteStatus, CheckParameters */
+      /** @r IMH03 @d 25/03/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction CancelTrayLines */
+      /** @r IMH02 @d 02/04/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Appel fonctions communes */
+      /** @r IMH01 @d 12/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Cr‚ation objet
+          @c Pr‚voir la gestion de la s‚curit‚ TableData */
+    }
+    END.
+  }
+}

@@ -1,0 +1,444 @@
+OBJECT Report 50159 Reminder Provider 2 NAS
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/03/13;
+    Time=17:00:09;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Reminder Provider 2;
+               FRA=Relance prestataire 2];
+    TopMargin=0;
+    ProcessingOnly=Yes;
+    OnPreReport=BEGIN
+                  AppFont := 'Calibri';
+                  HtmlMgt.SetFont(AppFont, 11);
+                END;
+
+    HorzGrid=210;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50000;
+        DataItemTableView=SORTING(No.);
+        NewPagePerRecord=Yes;
+        OnPreDataItem=BEGIN
+                        CompanyInfo.GET;
+                        CompanyInfo.CALCFIELDS(Picture);
+                        FormatAddrCodeunit.Company(CompanyAddr,CompanyInfo);
+
+                        Email := CompanyInfo."DPR E-Mail";  //IMH08 Correction
+                        FootText1 := STRSUBSTNO(Text027, CompanyInfo.Name, CompanyInfo.Address, CompanyInfo."Address 2",
+                                        CompanyInfo."Post Code", CompanyInfo.City);
+                        FootText2 := STRSUBSTNO(Text028, CompanyInfo."Stock Capital");
+                        FootText3 := STRSUBSTNO(Text029, COPYSTR(CompanyInfo."Registration No.", 1, 9), CompanyInfo."Registration No.",
+                                        CompanyInfo."Phone No.", CompanyInfo."Fax No.", Email);
+                        //<<IMH06
+                        //SETRANGE("No.", '101146F');
+                        IF Provider.GETFILTER("No.") = '' THEN
+                          ERROR(Text041);
+                        //>>IMH06
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lCompletnessTask@1100281000 : Record 50004;
+                         BEGIN
+                           CLEAR(MailBody);
+                           CurrReport.LANGUAGE := Language.GetLanguageID("Language Code");
+
+                           CurrReport.PAGENO := 1;
+
+                           //NameWithSalutation := STRSUBSTNO(Text018,Provider.GetSalutation(1,Provider."Language Code"),Provider.Name);
+                           NameWithSalutation := Text036;
+
+                           lCompletnessTask.SETRANGE("Provider No.", "No.");
+
+                           IF lCompletnessTask.FINDFIRST THEN BEGIN
+                             LastCompTaskDate := lCompletnessTask."Validity End Date";
+                             REPEAT
+                               IF (LastCompTaskDate = 0D) OR (LastCompTaskDate > lCompletnessTask."Validity End Date") THEN
+                                 IF lCompletnessTask."Validity End Date" <> 0D THEN
+                                  LastCompTaskDate := lCompletnessTask."Validity End Date";
+                             UNTIL lCompletnessTask.NEXT = 0;
+                           END;
+                           Provider.CALCFIELDS("Network Assistant Name");
+
+                           ExportProviderHeader;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         CreateInteractionLogEntry(Provider,FALSE);
+                       END;
+
+        ReqFilterFields=No.;
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        OnPostDataItem=BEGIN
+                         ExportProviderFooter;
+                       END;
+
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table50004;
+        DataItemTableView=SORTING(Provider No.,Document Code,Specialization Code);
+        DataItemVarName=CompletnessTask;
+        OnPreDataItem=BEGIN
+                        TaskFirstLine := TRUE ;//IMH05
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lSpecialization@1100281000 : Record 50005;
+                         BEGIN
+                           IF "Validity End Date" = 0D THEN
+                             CurrReport.SKIP;
+                           IF (NOT Mandatory) AND (NOT "Renew Mandatory") THEN
+                             CurrReport.SKIP;
+
+                           IF Mandatory THEN
+                             IF NOT Receive THEN
+                               CurrReport.SKIP;
+
+                           IF "Renew Mandatory" THEN
+                             IF "Validity End Date" > WORKDATE THEN
+                               CurrReport.SKIP;
+                           SpecializationDesc := '';
+                           IF lSpecialization.GET("Specialization Code") THEN
+                             SpecializationDesc := lSpecialization.Description;
+                           IF TaskFirstLine THEN BEGIN
+                             ExportCompTaskHead(0);
+                             TaskFirstLine := FALSE;
+                           END;
+                           ExportCompTaskLine(CompletnessTask);
+                         END;
+
+        OnPostDataItem=BEGIN
+                         ExportCompTaskFooter;
+                       END;
+
+        DataItemLinkReference=Provider;
+        DataItemLink=Provider No.=FIELD(No.);
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table50004;
+        DataItemTableView=SORTING(Provider No.,Document Code,Specialization Code);
+        DataItemVarName=CompletnessTask2;
+        OnPreDataItem=BEGIN
+                        TaskFirstLine := TRUE ;//IMH05
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lSpecialization@1100281000 : Record 50005;
+                           lTempDate@1100281001 : Date;
+                         BEGIN
+                           IF "Validity End Date" = 0D THEN
+                             CurrReport.SKIP;
+
+                           IF (NOT Mandatory) AND (NOT "Renew Mandatory") THEN
+                             CurrReport.SKIP;
+
+                           IF Mandatory THEN
+                             IF NOT Receive THEN
+                               CurrReport.SKIP;
+
+                           //<<IMH03.PC
+                           //IF "Renew Mandatory" THEN
+                           IF "Validity End Date" < WORKDATE THEN
+                             CurrReport.SKIP;
+                           lTempDate := CALCDATE('<-1M>',"Validity End Date");
+                           IF lTempDate > WORKDATE THEN
+                             CurrReport.SKIP;
+                           //>>IMH03.PC
+
+                           SpecializationDesc := '';
+                           IF lSpecialization.GET("Specialization Code") THEN
+                             SpecializationDesc := lSpecialization.Description;
+
+                           IF TaskFirstLine THEN BEGIN
+                             ExportCompTaskHead(1);
+                             TaskFirstLine := FALSE;
+                           END;
+                           ExportCompTaskLine(CompletnessTask2);
+                         END;
+
+        OnPostDataItem=BEGIN
+                         ExportCompTaskFooter;
+                       END;
+
+        DataItemLinkReference=Provider;
+        DataItemLink=Provider No.=FIELD(No.);
+      }
+      SECTIONS
+      {
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=3850;
+      Height=990;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   //LogInteraction := SegManagement.FindInteractTmplCode(8) <> '';
+                   //RequestOptionsForm.LogInteraction.ENABLED(LogInteraction);
+                 END;
+
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      Text000@1000000022 : TextConst 'ENU=Excel not found.;FRA=Programme Excel non trouv‚.;NLB=Kan Excel niet vinden.';
+      Text002@1002 : TextConst 'ENU=Page %1;FRA=Page %1';
+      CompanyInfo@1004 : Record 79;
+      Language@1007 : Record 8;
+      ProviderSetup@1100281030 : Record 50011;
+      InteractionTemp@1100281029 : Record 5064;
+      HtmlMgt@1100281034 : Codeunit 50121;
+      MailBody@1100281033 : BigText;
+      FormatAddrCodeunit@1008 : Codeunit 365;
+      ProviderAddr@1010 : ARRAY [8] OF Text[50];
+      CompanyAddr@1011 : ARRAY [8] OF Text[50];
+      Text003@1100281000 : TextConst 'ENU=%1;FRA=Le %1';
+      Text006@1000000023 : TextConst 'ENU=%1%3%4%3Page %2;FRA=%1%3%4%3Page %2;NLB=%1%3%4%3Pagina %2';
+      Text009@1000000000 : TextConst 'FRA="Pour votre information, vous trouverez ci-dessous ceux dont les dates de fin de validit‚ arrivent … ‚ch‚ance prochainement : "';
+      Text009_@1100281026 : TextConst 'FRA=Objet : Mise … jour dossier administratif - Relance 1';
+      Text013@1000000026 : TextConst 'ENU=&B;FRA=&G;NLB=&B';
+      Text014@1000000025 : TextConst 'ENU=&D;FRA=&D;NLB=&D';
+      Text015@1000000024 : TextConst 'ENU=&P;FRA=&P;NLB=&P';
+      Text016@1000000034 : TextConst 'ENU=A1;FRA=A1;NLB=A1';
+      Text017@1000000033 : TextConst 'ENU=SUMIF;FRA=SOMME.SI;NLB=SUMIF';
+      Text018@1100281001 : TextConst 'FRA=%1 %2';
+      Text019@1100281002 : TextConst 'FRA=Suite … notre dernier rappel, nous vous informons que certains documents administratifs en notre possession ne sont plus valides … compter de ce jour.';
+      LastCompTaskDate@1100281003 : Date;
+      Text020@1100281004 : TextConst 'FRA=Nous vous remercions de bien vouloir nous faire parvenir dans un d‚lai maximum de 30 jours le(s) document(s) suivant(s) :';
+      Text021@1100281005 : TextConst 'FRA=Par fax au %1';
+      Text022@1100281006 : TextConst 'FRA=Par Courrier … l''adresse situ‚e en bas de page';
+      Text023@1100281007 : TextConst 'FRA=Par mail … l''adresse suivante : %1';
+      Text024@1100281008 : TextConst 'FRA=Je vous rappelle que vous ˆtes r‚f‚renc‚ sous le code prestataire nø %1 auprŠs de nos services de gestion.';
+      Text025@1100281009 : TextConst 'FRA=Nous vous prions d''agr‚er, %1, nos salutations distingu‚es.';
+      NameWithSalutation@1100281010 : Text[250];
+      Text026@1100281011 : TextConst 'FRA=D‚partement Pilotage R‚seau';
+      Text027@1100281012 : TextConst 'FRA="%1 %2 %2 %3 %4 "';
+      Text028@1100281013 : TextConst 'FRA=G.I.E. au capital de %1 euros';
+      Text029@1100281014 : TextConst 'FRA=%1-Siret:%2-T‚l:%3-Fax:%4-Email:%5';
+      Email@1100281015 : Text[50];
+      Text030@1100281016 : TextConst 'FRA=Nos r‚f : DPR/Dossier administratif - Relance 1';
+      Text031@1100281017 : TextConst 'FRA=Vos r‚f : %1';
+      FootText1@1100281018 : Text[250];
+      FootText2@1100281019 : Text[250];
+      FootText3@1100281020 : Text[250];
+      Text032@1100281021 : TextConst 'FRA=dpr@imha.fr';
+      SkipInteraction@1100281022 : Boolean;
+      Text033@1100281023 : TextConst 'FRA=Pour votre information, vous trouverez ci-dessous ceux dont les dates de fin de validit‚ arrivent … ‚ch‚ance prochainement :';
+      Text034@1100281024 : TextConst 'FRA="Sans retour rapide de votre part, nous serions dans l''obligation de suspendre notre collaboration. "';
+      Text035@1100281025 : TextConst 'FRA=Nous vous rappelons que ces documents peuvent ˆtre envoy‚s au D‚partement Pilotage R‚seau :';
+      Text036@1100281027 : TextConst 'FRA=Madame, Monsieur';
+      SpecializationDesc@1100281028 : Text[50];
+      CorrespondenceType@1100281032 : ' ,Hard Copy,E-Mail,Fax';
+      CorrespondenceTypeSet@1100281031 : Boolean;
+      Window@1000000009 : Dialog;
+      TotalCpt@1000000008 : Integer;
+      Cpt@1000000007 : Integer;
+      CurrCpt@1000000006 : Integer;
+      EntryNo@1000000005 : Integer;
+      AppFont@1000000004 : Text[250];
+      AppFontSize@1000000003 : Integer;
+      TaskFirstLine@1000000002 : Boolean;
+      LastColNo@1000000001 : Integer;
+      Text050@1000000032 : TextConst 'ENU=Description;FRA=D‚signation';
+      Text051@1000000031 : TextConst 'ENU=Speciality;FRA=Sp‚cialit‚';
+      Text052@1000000030 : TextConst 'FRA=P‚riode renouvellement';
+      Text053@1000000029 : TextConst 'FRA=Date d‚but validit‚';
+      Text054@1000000028 : TextConst 'FRA=Date fin validit‚';
+      Text040@1000000027 : TextConst 'FRA="%1 - %2 - %3 - %4 %5 "';
+      Text041@1000000035 : TextConst 'ENU=The provider No. is obligatory.;FRA=Le nø prestataire est obligatoire.';
+      Text042@1100281037 : TextConst 'ENU=INTER MUTUELLES HABITAT;FRA=INTER MUTUELLES HABITAT';
+      Text043@1100281036 : TextConst 'ELL=Tel : %1;FRA=T‚l : %1';
+      Text044@1100281035 : TextConst 'ENU=Email : %1;FRA=Email : %1';
+
+    PROCEDURE CreateInteractionLogEntry@1100281001(pProvider@1100281012 : Record 50000;pPrintReport@1100281019 : Boolean);
+    VAR
+      lSegMgt@1100281002 : Codeunit 5051;
+      lFolderMgt@1100281007 : Codeunit 50004;
+      lSourceAttchMgt@1100281011 : Codeunit 50003;
+      lSegLineTmp@1100281001 : TEMPORARY Record 5077;
+      lInteractionLogEntry@1100281000 : Record 5065;
+      lTextFileName@1100281018 : TextConst 'FRA=RELDOCS ADMIN 2';
+      lTextReportName@1100281004 : TextConst 'ENU=Reminder Provider 1;FRA=Relance';
+      lProvider@1100281005 : Record 50000;
+      lFileName@1100281008 : Text[1024];
+      lNewFileName@1100281009 : Text[1024];
+      lProviderMgt@1100281015 : Codeunit 50018;
+      lBodyArray@1100281016 : ARRAY [10] OF Text[1024];
+      lTextMail001@1100281017 : TextConst 'FRA="Madame, Monsieur, "';
+      lTextMail002@1100281010 : TextConst 'FRA=Nous vous remercions de bien vouloir prendre connaissance du document ci-joint relatif … votre dossier administratif en tant que prestataire du r‚seau dÉInter Mutuelles Habitat.';
+      lTextMail003@1100281003 : TextConst 'FRA=Meilleures salutations,';
+      lTextMail004@1100281013 : TextConst 'FRA=Le D‚partement Pilotage R‚seau';
+      lMailAttchName@1100281014 : Text[250];
+    BEGIN
+      //IMH02
+      ProviderSetup.GET;
+      ProviderSetup.TESTFIELD("Interac. Tmpl. Code Reminder 2");
+      InteractionTemp.GET(ProviderSetup."Interac. Tmpl. Code Reminder 2");
+      IF NOT CorrespondenceTypeSet THEN BEGIN
+        IF InteractionTemp."Ignore Contact Corres. Type" THEN
+          CorrespondenceType := InteractionTemp."Correspondence Type (Default)"
+        ELSE
+          CorrespondenceType := pProvider."Correspondence Type";
+      END;
+
+      lMailAttchName := lTextFileName;
+      IF InteractionTemp."Mail Attachment Name" <> '' THEN
+        lMailAttchName := InteractionTemp."Mail Attachment Name";
+
+      //Creation Document joint
+      lFileName := lFolderMgt.CreateCompanyTmpFileName('msg');
+      lNewFileName := lFolderMgt.GetPathForFile(lFileName) + lMailAttchName + '.msg';
+      IF EXISTS(lNewFileName) THEN
+        IF NOT ERASE(lNewFileName) THEN BEGIN
+          SLEEP(2000);
+          ERASE(lNewFileName);
+        END;
+      lFileName := lNewFileName;
+
+      lProviderMgt.SendReminderProvider(pProvider, InteractionTemp.Code,
+        lTextReportName, lBodyArray, lFileName, CorrespondenceType, MailBody);
+      ERASE(lFileName);
+    END;
+
+    PROCEDURE ExportProviderHeader@1100281003();
+    BEGIN
+      // Export de l'entete
+      HtmlMgt.AddBeginHtmlMail(MailBody);
+      HtmlMgt.AddTextLineHtmlMail(MailBody, NameWithSalutation);
+      //HtmlMgt.AddTextLineHtmlMail(MailBody, '');
+      HtmlMgt.AddTextLineHtmlMail(MailBody, STRSUBSTNO(Text019,LastCompTaskDate));
+    END;
+
+    PROCEDURE ExportCompTaskHead@1100281004(pLineNo@1000000000 : Integer);
+    BEGIN
+      //IMH05
+      //HtmlMgt.AddTextLineHtmlMail(MailBody, '');
+      CASE pLineNo OF
+        0:BEGIN
+          HtmlMgt.AddTextLineHtmlMail(MailBody, STRSUBSTNO(Text020,LastCompTaskDate));;
+        END;
+        1:BEGIN
+          HtmlMgt.AddTextLineHtmlMail(MailBody, FORMAT(Text033));
+        END;
+      END;
+      //HtmlMgt.AddTextLineHtmlMail(MailBody, '');
+      HtmlMgt.AddBeginHtmlTable(MailBody);
+      HtmlMgt.AddBeginHtmlLine(MailBody);
+
+      //Titre tableau
+      HtmlMgt.AddHtmlTitle(MailBody, FORMAT(Text050), 0);
+      HtmlMgt.AddHtmlTitle(MailBody, FORMAT(Text051), 0);
+      HtmlMgt.AddHtmlTitle(MailBody, FORMAT(Text052), 0);
+      HtmlMgt.AddHtmlTitle(MailBody, FORMAT(Text053), 0);
+      HtmlMgt.AddHtmlTitle(MailBody, FORMAT(Text054), 0);
+
+      HtmlMgt.AddEndHtmlLine(MailBody);
+    END;
+
+    PROCEDURE ExportCompTaskLine@1100281005(VAR pComTask@1000000000 : Record 50004);
+    BEGIN
+      //IMH05
+      HtmlMgt.AddBeginHtmlLine(MailBody);
+
+      HtmlMgt.AddHtmlColumn(MailBody, FORMAT(pComTask.Description), 0);
+      HtmlMgt.AddHtmlColumn(MailBody, FORMAT(SpecializationDesc), 0);
+      HtmlMgt.AddHtmlColumn(MailBody, FORMAT(pComTask."Renew Period"), 1);
+      HtmlMgt.AddHtmlColumn(MailBody, FORMAT(pComTask."Validity Start Date"), 1);
+      HtmlMgt.AddHtmlColumn(MailBody, FORMAT(pComTask."Validity End Date"), 1);
+
+      HtmlMgt.AddEndHtmlLine(MailBody);
+    END;
+
+    PROCEDURE ExportCompTaskFooter@1100281000();
+    BEGIN
+      //IMH05
+      HtmlMgt.AddEndHtmlTable(MailBody);
+    END;
+
+    PROCEDURE ExportProviderFooter@1100281006();
+    BEGIN
+      //IMH05
+      HtmlMgt.AddEndHtmlTable(MailBody);
+      //HtmlMgt.AddTextLineHtmlMail(MailBody, '');
+
+      HtmlMgt.AddTextLineHtmlMail(MailBody, FORMAT(Text034));
+      //HtmlMgt.AddTextLineHtmlMail(MailBody, '');
+      HtmlMgt.AddTextLineHtmlMail(MailBody, FORMAT(Text035));
+
+      HtmlMgt.AddBeginHtmlPuce(MailBody);
+      HtmlMgt.AddPuceLineHtmlMail(MailBody, STRSUBSTNO(Text021,CompanyInfo."DPR Fax No."));       //IMH08
+      HtmlMgt.AddPuceLineHtmlMail(MailBody, FORMAT(Text022));
+      HtmlMgt.AddPuceLineHtmlMail(MailBody, FORMAT(STRSUBSTNO(Text023,Email)));
+      HtmlMgt.AddEndHtmlPuce(MailBody);
+
+      //HtmlMgt.AddTextLineHtmlMail(MailBody, '');
+      HtmlMgt.AddTextLineHtmlMail(MailBody, FORMAT(STRSUBSTNO(Text025, NameWithSalutation)));
+      HtmlMgt.AddTextHtmlMail(MailBody, FORMAT(Provider."Network Assistant Name" + '<br>'));
+      HtmlMgt.AddTextHtmlMail(MailBody, FORMAT(Text026) + '<br>');
+      HtmlMgt.AddTextHtmlMail(MailBody, FORMAT(Text042) + '<br>');
+      HtmlMgt.AddTextHtmlMail(MailBody, FORMAT(STRSUBSTNO(Text043, CompanyInfo."DPR Phone No.")) + '<br>');
+      HtmlMgt.AddTextHtmlMail(MailBody, FORMAT(STRSUBSTNO(Text044, Text032)) + '<br>');
+    END;
+
+    BEGIN
+    {
+      /** @r IMH08 @d 14/08/12 @a ISAT.ZW @v IMH6.01.223 @s NEP00003 @h 2950 @s Reporting @c Correction */
+      /** @r IMH07 @d 07/07/12 @a ISAT.ZW @v IMH6.01.115 @h 3338 @s Reporting @c Export en mail */
+      /** @r IMH06 @d 20/04/12 @a ISAT.ZW @v IMH6.01.115 @s Reporting @c Export Excel */
+      /** @r IMH05 @d 18/04/12 @a ISAT.LLT @v IMH6.01.115 @s Reporting @c Export Excel */
+      /** @r IMH03 @d 20/10/11 @a ISAT.EBA @v IMH6.01.115 @s Reporting @c correction */
+      /** @r IMH02 @d 12/05/11 @a ISAT.ZW @v IMH6.01.115 @s Creation ligne interaction aprŠs lancement du report */
+      /** @r IMH01 @d 04/03/11 @a ISAT.ZW @v IMH6.01.115 @s Create objet */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

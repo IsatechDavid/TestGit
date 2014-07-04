@@ -1,0 +1,361 @@
+OBJECT Codeunit 50012 Employee Update
+{
+  OBJECT-PROPERTIES
+  {
+    Date=23/11/11;
+    Time=14:03:02;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=5200;
+    OnRun=BEGIN
+            SynchEmployee(Rec,Res.READPERMISSION AND NOT NoResourceUpdate,
+                              Salesperson.READPERMISSION AND NOT NoSalespersonUpdate,
+                              Contact.READPERMISSION AND NOT NoContactUpdate);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Employee@1100281007 : Record 5200;
+      OldEmployee@1100281006 : Record 5200;
+      Res@1100281005 : Record 156;
+      Salesperson@1100281004 : Record 13;
+      Contact@1100281003 : Record 5050;
+      NoResourceUpdate@1100281002 : Boolean;
+      NoSalespersonUpdate@1100281001 : Boolean;
+      NoContactUpdate@1100281000 : Boolean;
+
+    PROCEDURE SetSynchEmployee@1000000008(pResourceUpdate@1000000000 : Boolean;pSalespersonUpdate@1000000001 : Boolean;pContactUpdate@1000000002 : Boolean);
+    BEGIN
+      NoResourceUpdate := NOT pResourceUpdate;
+      NoSalespersonUpdate := NOT pSalespersonUpdate;
+      NoContactUpdate := NOT pContactUpdate;
+    END;
+
+    PROCEDURE SynchEmployee@1000000011(VAR pEmployee@1000000000 : Record 5200;ToResource@1000000001 : Boolean;ToSalesperson@1000000002 : Boolean;ToContact@1000000003 : Boolean);
+    BEGIN
+      IF ToResource AND Res.READPERMISSION AND (pEmployee."Resource No."<>'') THEN BEGIN
+        UpdateRes(pEmployee);
+      END;
+      IF ToSalesperson AND Salesperson.READPERMISSION AND (pEmployee."Salespers./Purch. Code"<>'') THEN BEGIN
+        UpdateSalesperson(pEmployee);
+      END;
+      IF ToContact AND Contact.READPERMISSION AND (pEmployee."Contact No."<>'') THEN BEGIN
+        UpdateContact(pEmployee);
+      END;
+    END;
+
+    PROCEDURE OnModifyRes@1000000002(VAR pResource@1000000000 : Record 156);
+    VAR
+      lTempContact@1100281000 : TEMPORARY Record 5050;
+    BEGIN
+      //synchro infos en modification ressource
+      IF pResource."No."='' THEN EXIT;
+      pResource.TESTFIELD(Type,pResource.Type::Person);
+      WITH Employee DO BEGIN
+        SETRANGE("Resource No.",pResource."No.");
+        IF FIND('-') THEN BEGIN
+          OldEmployee := Employee;
+          //Gestion de nom par fonction de contact
+          lTempContact.Name := pResource.Name;
+          lTempContact.NameBreakdown;
+          "Last Name" := lTempContact.Surname;
+          "First Name" := lTempContact."First Name";
+          "Middle Name" := lTempContact."Middle Name";
+          "Search Name" := pResource."Search Name";
+          Address := pResource.Address;
+          "Address 2" := pResource."Address 2";
+          County := pResource.County;
+          "Post Code" := pResource."Post Code";
+          City := pResource.City;
+          "Country/Region Code" := pResource."Country/Region Code";
+          "Job Title" := pResource."Job Title";
+          "Social Security No." := pResource."Social Security No.";
+          "Employment Date" := pResource."Employment Date";
+          TouchRecord(FALSE);
+          Employee.SetResourceUpdate(FALSE);
+          OnModify(OldEmployee);
+          MODIFY;
+        END;
+      END; // WITH Employee
+    END;
+
+    PROCEDURE OnModifySalesperson@1000000003(VAR pSalesperson@1000000000 : Record 13);
+    VAR
+      lTempContact@1100281000 : TEMPORARY Record 5050;
+    BEGIN
+      //synchro infos en modification vendeur
+      IF pSalesperson.Code='' THEN EXIT;
+      WITH Employee DO BEGIN
+        SETRANGE("Salespers./Purch. Code",pSalesperson.Code);
+        IF FIND('-') THEN BEGIN
+          OldEmployee := Employee;
+          //Gestion de nom par fonction de contact
+          lTempContact.Name := pSalesperson.Name;
+          lTempContact.NameBreakdown;
+          "Last Name" := lTempContact.Surname;
+          "First Name" := lTempContact."First Name";
+          "Middle Name" := lTempContact."Middle Name";
+
+          "E-Mail" := pSalesperson."E-Mail";
+          "Phone No." := pSalesperson."Phone No.";
+          "Job Title" := pSalesperson."Job Title";
+          "Search E-Mail" := pSalesperson."Search E-Mail";
+          "E-Mail 2" := pSalesperson."E-Mail 2";
+          TouchRecord(FALSE);
+          Employee.SetSalespersonUpdate(FALSE);
+          OnModify(OldEmployee);
+          MODIFY;
+        END;
+      END; // WITH Employee
+    END;
+
+    PROCEDURE OnModifyContact@1000000004(VAR pContact@1000000000 : Record 5050);
+    BEGIN
+      //synchro infos en modification contact
+      IF pContact."No."='' THEN EXIT;
+      WITH Employee DO BEGIN
+        SETRANGE("Contact No.",pContact."No.");
+        IF FIND('-') THEN BEGIN
+          OldEmployee := Employee;
+          "First Name" := pContact."First Name";
+          "Middle Name" := pContact."Middle Name";
+          "Last Name" := pContact.Surname;
+          "Search Name" := pContact."Search Name";
+
+          Initials := pContact.Initials;
+          Address := pContact.Address;
+          "Address 2" := pContact."Address 2";
+          City := pContact.City;
+          "Post Code" := pContact."Post Code";
+          County := pContact.County;
+          "Country/Region Code" := pContact."Country/Region Code";
+          "E-Mail" := pContact."E-Mail";
+          "Phone No." := pContact."Phone No.";
+          "Mobile Phone No." := pContact."Mobile Phone No.";
+          Extension := pContact."Extension No.";
+          Pager := pContact."Phone No. 2";
+          "Fax No." := pContact."Fax No.";
+          "Job Title" := pContact."Job Title";
+          "Search E-Mail" := pContact."Search E-Mail";
+          "E-Mail 2" := pContact."E-Mail 2";
+          TouchRecord(FALSE);
+          Employee.SetContactUpdate(FALSE);
+          OnModify(OldEmployee);
+          MODIFY;
+        END;
+      END; // WITH Employee
+    END;
+
+    PROCEDURE UpdateRes@1000000007(VAR pEmployee@1000000000 : Record 5200);
+    VAR
+      lTempContact@1100281000 : TEMPORARY Record 5050;
+    BEGIN
+      //Synchro info ressource
+      WITH Res DO BEGIN
+        GET(pEmployee."Resource No.");
+        TESTFIELD(Type,Type::Person);
+        //Gestion de nom par fonction de contact
+        lTempContact."First Name" := pEmployee."First Name";
+        lTempContact."Middle Name" := pEmployee."Middle Name";
+        lTempContact.Surname := pEmployee."Last Name";
+        Name := lTempContact.CalculatedName;
+        "Search Name" := pEmployee."Search Name";
+        Address := pEmployee.Address;
+        "Address 2" := pEmployee."Address 2";
+        County := pEmployee.County;
+        "Post Code" := pEmployee."Post Code";
+        City := pEmployee.City;
+        "Country/Region Code" := pEmployee."Country/Region Code";
+        "Job Title" := pEmployee."Job Title";
+        "Social Security No." := pEmployee."Social Security No.";
+        "Employment Date" := pEmployee."Employment Date";
+        MODIFY(TRUE);
+      END; // WITH Res
+    END;
+
+    PROCEDURE UpdateSalesperson@1000000006(VAR pEmployee@1000000001 : Record 5200);
+    VAR
+      lTempContact@1100281000 : TEMPORARY Record 5050;
+    BEGIN
+      //Synchro infos vendeur
+      WITH Salesperson DO BEGIN
+        GET(pEmployee."Salespers./Purch. Code");
+        //Gestion de nom par fonction de contact
+        lTempContact."First Name" := pEmployee."First Name";
+        lTempContact."Middle Name" := pEmployee."Middle Name";
+        lTempContact.Surname := pEmployee."Last Name";
+        Name := lTempContact.CalculatedName;
+        "E-Mail" := pEmployee."E-Mail";
+        "Phone No." := pEmployee."Phone No.";
+        "Job Title" := pEmployee."Job Title";
+        "Search E-Mail" := pEmployee."Search E-Mail";
+        "E-Mail 2" := pEmployee."E-Mail 2";
+        MODIFY(TRUE);
+      END; // WITH Salesperson
+    END;
+
+    PROCEDURE UpdateContact@1000000005(VAR pEmployee@1000000000 : Record 5200);
+    BEGIN
+      //Synchro infos contact
+      WITH Contact DO BEGIN
+        GET(pEmployee."Contact No.");
+      //"First Name" := pEmployee."First Name";
+        "Middle Name" := pEmployee."Middle Name";
+      //SurName := pEmployee."Last Name";
+        VALIDATE(Name,STRSUBSTNO('%1 %2',pEmployee."First Name",pEmployee."Last Name"));
+        Initials := pEmployee.Initials;
+      //"Search Name" := pEmployee."Search Name";
+        Address := pEmployee.Address;
+        "Address 2" := pEmployee."Address 2";
+        City := pEmployee.City;
+        "Post Code" := pEmployee."Post Code";
+        County := pEmployee.County;
+        "Country/Region Code" := pEmployee."Country/Region Code";
+        "E-Mail" := pEmployee."E-Mail";
+        "Phone No." := pEmployee."Phone No.";
+        "Extension No." := pEmployee.Extension;  // AP02 isat.sf
+        "Mobile Phone No." := pEmployee."Mobile Phone No.";
+        "Extension No." := pEmployee.Extension;
+        "Phone No. 2" := pEmployee.Pager;
+        "Fax No." := pEmployee."Fax No.";
+        "Job Title" := pEmployee."Job Title";
+        MODIFY(TRUE);
+      END; // WITH Contact
+    END;
+
+    LOCAL PROCEDURE InsertNewContactPerson@4(VAR pEmployee@1001 : Record 5200);
+    VAR
+      lContComp@1000 : Record 5050;
+      lRMSetup@1000000000 : Record 5079;
+    BEGIN
+      //Cr‚ation contact
+      IF pEmployee."Contact No."<>'' THEN EXIT;
+      lRMSetup.GET;
+      lRMSetup.TESTFIELD("Company Contact No.");
+      lContComp.GET(lRMSetup."Company Contact No.");
+
+      WITH Contact DO BEGIN
+        INIT;
+        "Company No." := lContComp."No.";
+        Type := Type::Person;
+        "No." := '';
+        IF INSERT(TRUE) THEN;
+        VALIDATE(Type,Type::Person);
+        InheritCompanyToPersonData(lContComp,FALSE);
+        "Correspondence Type" := "Correspondence Type"::" ";
+        MODIFY(TRUE);
+      END;
+
+      // Met … jour la fiche contact
+      pEmployee.VALIDATE("Contact No.",Contact."No.");
+      pEmployee.TouchRecord(FALSE);
+      pEmployee.MODIFY;
+      UpdateContact(pEmployee);
+    END;
+
+    LOCAL PROCEDURE InsertNewSalesperson@1000000000(VAR pEmployee@1000000000 : Record 5200);
+    BEGIN
+      //Cr‚ation Vendeur
+      IF pEmployee."Salespers./Purch. Code"<>'' THEN EXIT;
+      Salesperson.INIT;
+      Salesperson.Code := pEmployee."No.";
+      IF Salesperson.INSERT(TRUE) THEN; // provoque l'erreur si le vendeur existe
+      pEmployee.VALIDATE("Salespers./Purch. Code",Salesperson.Code);
+      pEmployee.TouchRecord(FALSE);
+      pEmployee.MODIFY;
+      UpdateSalesperson(pEmployee);
+    END;
+
+    LOCAL PROCEDURE InsertNewResource@1000000001(VAR pEmployee@1000000000 : Record 5200;pResourceNo@1100281000 : Code[20]);
+    BEGIN
+      //Cr‚ation Ressource
+      IF pEmployee."Resource No."<>'' THEN EXIT;
+      Res.INIT;
+      Res.Type := Res.Type::Person;
+      Res."No." := pResourceNo;
+      IF Res.INSERT(TRUE) THEN;
+      pEmployee.VALIDATE("Resource No.",Res."No.");
+      pEmployee.TouchRecord(FALSE);
+      pEmployee.MODIFY;
+      UpdateRes(pEmployee);
+    END;
+
+    PROCEDURE CreateAs@1000000009(VAR pEmployee@1000000001 : Record 5200;What@1000000000 : 'All,Contact,Resource,Salesperson');
+    BEGIN
+      // Controle des donn‚es mini
+      //pEmployee.TESTFIELD("First Name");
+      pEmployee.TESTFIELD("Last Name");
+      //pEmployee.TESTFIELD(City);
+
+      IF What IN [What::All,What::Contact] THEN
+        InsertNewContactPerson(pEmployee);
+
+      IF What IN [What::All,What::Resource] THEN
+        InsertNewResource(pEmployee, '');
+
+      IF What IN [What::All,What::Salesperson] THEN
+        InsertNewSalesperson(pEmployee);
+    END;
+
+    PROCEDURE CreateUserByWizard@1100281000(VAR pUserSetup@1100281001 : Record 91);
+    VAR
+      lCreateUserWizard@1100281000 : Form 50130;
+      lEmployeeToCreate@1100281002 : Record 5200;
+      lOptionResourceCode@1100281005 : 'Code,Series';
+      lCreateResource@1100281004 : Boolean;
+      lCreateSalesperson@1100281003 : Boolean;
+      lCreateContact@1100281006 : Boolean;
+      lResourceNo@1100281007 : Code[10];
+    BEGIN
+      //IMH02 isat.zw
+      IF pUserSetup."User ID" = '' THEN
+        EXIT;
+
+      lCreateUserWizard.SetValue(pUserSetup);
+      lCreateUserWizard.LOOKUPMODE(TRUE);
+      IF lCreateUserWizard.RUNMODAL <> ACTION::LookupOK THEN BEGIN
+        EXIT;
+      END;
+      lCreateUserWizard.CheckValue;
+      //<<IMH03.PC
+      //lCreateUserWizard.GetValue(lEmployeeToCreate, lOptionResourceCode, lCreateResource, lCreateSalesperson);
+      lCreateUserWizard.GetValue(lEmployeeToCreate, lOptionResourceCode, lCreateResource, lCreateSalesperson, lCreateContact);
+      //>>IMH03.PC
+      lResourceNo := lEmployeeToCreate."No.";
+      IF lEmployeeToCreate.INSERT(TRUE) THEN;
+
+      IF lOptionResourceCode = lOptionResourceCode::Code THEN BEGIN
+        IF lResourceNo = '' THEN
+          lResourceNo := pUserSetup."User ID";
+      END ELSE
+        lResourceNo := '';
+
+      IF lCreateResource THEN
+        InsertNewResource(lEmployeeToCreate, lResourceNo);
+
+      IF lCreateSalesperson THEN
+        InsertNewSalesperson(lEmployeeToCreate);
+
+      //<<IMH03.PC
+      IF lCreateContact THEN
+        InsertNewContactPerson(lEmployeeToCreate);
+      //>>IMH03.PC
+
+      pUserSetup.VALIDATE("Employee No.", lEmployeeToCreate."No.");
+      pUserSetup.MODIFY(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 28/09/11 @a ISAT.PC @v IMH6.01.013 @s Gestion des corbeilles @h mantis1645 @c Cr‚ation de contact */
+      /** @r IMH02 @d 01/11/10 @a ISAT.ZW @v IMH6.01.013 @s Gestion des corbeilles @c Fonction CreateUserByWizard */
+      /** @r IMH01 @d 05/10/10 @a ISAT.ZW @v IMH6.01.013 @s Gestion des corbeilles @c Cr‚ation objet */
+    }
+    END.
+  }
+}

@@ -1,0 +1,1052 @@
+OBJECT Codeunit 50150 DARVA Managment
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/05/14;
+    Time=10:40:40;
+    Modified=Yes;
+    Version List=IMH6.01,SysAgDarva,JUIN,MATMUT01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 50124=rimd;
+    OnRun=VAR
+            lPathName@1100281000 : Text[250];
+          BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ConstPathName@1100281011 : TextConst 'FRA=\\IMHIDC01\GPO$\Bureau\Test DARVA';
+      InterfaceSetup@1000000008 : Record 50139;
+      EAISentMQBufferSpecificXML@1000000001 : TEMPORARY Record 8016720;
+      EAIMQBufferMgt@1100281012 : Codeunit 8016708;
+      EAIXMLMgt@1000000000 : Codeunit 8016710;
+      ManageSpecificXMLToDarva@1000000002 : Boolean;
+      DARVASetup@1000000003 : Record 50126;
+      Text001@1000000004 : TextConst 'ENU=Send message queue for %1 act not found;FRA=File d''‚mission pour l''acte %1 non trouv‚e.';
+
+    PROCEDURE CreateSendMQByAdvComment@1100281005(VAR pAdvCommentLine@1100281000 : Record 50056;pActionType@1100281001 : 'Insert,Modify';pCorporateNo@1100281005 : Code[20];pCorporateRegionCode@1100281004 : Code[20];pServiceOrderType@1100281003 : Code[10]);
+    VAR
+      lInterfaceSetup@1000000001 : Record 50139;
+      lServiceHeader@1100281002 : Record 5900;
+      lRecRef@1100281006 : RecordRef;
+      lText@1000000000 : Text[30];
+    BEGIN
+      IF pAdvCommentLine.Publication <> pAdvCommentLine.Publication::Darva THEN
+        EXIT;
+
+      IF pActionType = pActionType::Modify THEN
+        EXIT;
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pAdvCommentLine."Source No. 2") THEN
+        EXIT;
+
+      // Pas d'‚mission commentaire si ne provient pas de DARVA
+      IF NOT lServiceHeader."DARVA Interface" THEN
+        EXIT;
+
+      lRecRef.GETTABLE(pAdvCommentLine);
+      //<<IMH04
+      //CreateSendMQ_SDR(lRecRef,'SDR99');
+      //<<IMH12
+      //lText := 'SDR99';
+      DARVASetup.GET;
+      lText := DARVASetup."DARVA SD99 Code";
+      //>>IMH12
+      lInterfaceSetup.GET;
+      IF lInterfaceSetup."DARVA Comment SDR99 NDT Code" <> '' THEN BEGIN
+        IF pAdvCommentLine.Code = lInterfaceSetup."DARVA Comment SDR99 NDT Code" THEN BEGIN
+          lText := lInterfaceSetup."DARVA Comment SDR99 NDT Code";
+        END;
+      END;
+      //<<IMH10.ACO
+      //<<IMH09.ACO
+      //CreateSendMQ_SDR(lRecRef,lText);
+      CreateSendMQ_SDR(lRecRef,lText,pCorporateNo,pCorporateRegionCode,pServiceOrderType);
+      //>>IMH04
+    END;
+
+    PROCEDURE CreateSendMQ_SDR@1100281013(VAR pRecRef@1100281000 : RecordRef;pMsg@1100281001 : Code[20];pCorporateNo@1100281005 : Code[20];pCorporateRegionCode@1100281006 : Code[20];pServiceOrderType@1100281007 : Code[10]) : Boolean;
+    VAR
+      lDARVASwitchSystemSetup@1100281004 : Record 50180;
+      lPartnerCode@1100281002 : Code[20];
+      lAct@1100281003 : Code[20];
+    BEGIN
+      //<<IMH09.ACO
+      WITH lDARVASwitchSystemSetup DO BEGIN
+        SETRANGE("Corporate No.",pCorporateNo);
+        SETRANGE("Corporate Region Code",pCorporateRegionCode);
+        SETRANGE("DARVA Data Flow Type",pMsg);
+        SETRANGE(Direction,Direction::Send);
+        SETRANGE("Line Type","Line Type"::"Service Order Type");
+        SETRANGE("Service Order Type",pServiceOrderType);
+        IF ISEMPTY THEN BEGIN
+          SETRANGE("Corporate Region Code");
+        END;
+        IF ISEMPTY THEN BEGIN
+          SETRANGE("Line Type","Line Type"::Default);
+          SETRANGE("Service Order Type");
+        END;
+
+        IF ISEMPTY THEN BEGIN
+          EXIT(FALSE);
+        END;
+        FINDFIRST;
+        EXIT(CreateSendMQ("Partner Code","EAI Act Type Code","Act Code",pRecRef));
+      END;
+      //>>IMH09.ACO
+    END;
+
+    PROCEDURE GetNodeValue@1100281007(pIXMLDOMElement@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";pNodeName@1100281000 : Text[30]) : Text[250];
+    VAR
+      lDOMNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      lDOMNode := pIXMLDOMElement.selectSingleNode(pNodeName);
+      IF ISCLEAR(lDOMNode) THEN
+        EXIT('');
+      EXIT(lDOMNode.text);
+    END;
+
+    PROCEDURE GetNodeAttribute@1100281010(pIXMLDOMElement@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";pNodeName@1100281000 : Text[30];pAttributeName@1100281002 : Text[30]) : Text[250];
+    VAR
+      lEAIXMLMgt@1100281006 : Codeunit 8016710;
+      lXMLNodeMap@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF83-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNamedNodeMap";
+      lDOMNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lDOMNode2@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      lDOMNode := pIXMLDOMElement.selectSingleNode(pNodeName);
+      IF ISCLEAR(lDOMNode) THEN
+        EXIT('');
+      EXIT(lEAIXMLMgt.FindNodeAttribute(lDOMNode,pAttributeName));
+    END;
+
+    PROCEDURE FormatDateTime@1100281001(pDate@1100281003 : Date;pTime@1100281004 : Time;pMinutes@1100281000 : Integer;pMilliseconds@1100281002 : Boolean) : Text[80];
+    VAR
+      lDateTime@1100281001 : DateTime;
+    BEGIN
+      lDateTime := CREATEDATETIME(pDate, pTime + (-7200 * 1000 + pMinutes * 60 * 1000));
+      //IF NOT pMilliseconds THEN
+        EXIT(FORMAT(lDateTime,0,'<Year4>-<Month,2>-<Day,2>T<Hours24,2>:<Minutes,2>:<Seconds,2>Z'))
+      //ELSE
+      //  EXIT(FORMAT(lDateTime,0,'<Year4>-<Month,2>-<Day,2>T<Hours24>:<Minutes,2>:<Seconds,2><Second Dec>Z'))
+    END;
+
+    PROCEDURE FormatDate@1100281008(pValue@1100281000 : Text[30]) : Date;
+    VAR
+      lYear@1100281001 : Integer;
+      lMonth@1100281002 : Integer;
+      lDay@1100281003 : Integer;
+    BEGIN
+      IF NOT EVALUATE(lYear,COPYSTR(pValue,1,4)) THEN
+        EXIT(0D);
+      IF NOT EVALUATE(lMonth,COPYSTR(pValue,6,2)) THEN
+        EXIT(0D);
+      IF NOT EVALUATE(lDay,COPYSTR(pValue,9,2)) THEN
+        EXIT(0D);
+      EXIT(DMY2DATE(lDay,lMonth,lYear));
+    END;
+
+    PROCEDURE CreateSendMQ@1100281012(pPartnerCode@1100281007 : Code[20];pActType@1100281001 : Code[20];pAct@1100281002 : Code[20];VAR pRecRef@1100281000 : RecordRef) : Boolean;
+    VAR
+      lEAISentMQBuffer@1100281003 : TEMPORARY Record 8016720;
+      lEAIAct@1100281005 : Record 8016706;
+      lEAIMessQueue@1100281006 : Record 8016704;
+      lEAIActMgt@1100281004 : Codeunit 8016703;
+      lEAILogMgt@1100281008 : Codeunit 8016711;
+      lFieldRef@1100281010 : FieldRef;
+    BEGIN
+      lEAIAct.GET(pActType,pAct);
+      lEAIActMgt.GetMQFromEAIAct(lEAIAct, lEAIMessQueue);
+      lEAISentMQBuffer.INIT;
+      lEAISentMQBuffer."Entry No." := '';
+      lEAISentMQBuffer."EAI Partner Code" := pPartnerCode;
+      lEAISentMQBuffer."EAI MQ Code" := lEAIMessQueue.Code;
+      lEAISentMQBuffer."EAI Act Type Code" := lEAIAct."EAI Act Type Code";
+      lEAISentMQBuffer."EAI Act Code" := lEAIAct.Code;
+      lEAISentMQBuffer."Act Priority" := lEAIAct."Act Priority";
+      lEAISentMQBuffer.RecordId := pRecRef.RECORDID;
+      lEAISentMQBuffer."Date Creation" := WORKDATE;
+      lEAISentMQBuffer."Time Creation" := DT2TIME(CURRENTDATETIME);
+      lEAISentMQBuffer."User Creation" := USERID;
+      IF ManageSpecificXMLToDarva THEN BEGIN
+        EAISentMQBufferSpecificXML.CALCFIELDS("To Generate XML Source");
+        lEAISentMQBuffer."To Generate XML Source" := EAISentMQBufferSpecificXML."To Generate XML Source";
+      END;
+      CASE pRecRef.NUMBER OF
+        25 : BEGIN
+          lFieldRef := pRecRef.FIELD(50013);
+          lEAISentMQBuffer."Service Header No." := lFieldRef.VALUE;
+          //<<IMH11.PC
+          lFieldRef := pRecRef.FIELD(50002);
+          lEAISentMQBuffer."Reference No." := lFieldRef.VALUE;
+          lFieldRef := pRecRef.FIELD(50012);
+          lEAISentMQBuffer."Service No." := lFieldRef.VALUE;
+          //>>IMH11.PC
+        END;
+        5900 : BEGIN
+          lFieldRef := pRecRef.FIELD(3);
+          lEAISentMQBuffer."Service Header No." := lFieldRef.VALUE;
+          //<<IMH11.PC
+          lFieldRef := pRecRef.FIELD(11);
+          lEAISentMQBuffer."Your Reference" := lFieldRef.VALUE;
+          lFieldRef := pRecRef.FIELD(50000);
+          lEAISentMQBuffer."Service No." := lFieldRef.VALUE;
+          lFieldRef := pRecRef.FIELD(50002);
+          lEAISentMQBuffer."Reference No." := lFieldRef.VALUE;
+          //>>IMH11.PC
+        END;
+        //<<IMH11.PC
+        50075 : BEGIN
+          lFieldRef := pRecRef.FIELD(3);
+          lEAISentMQBuffer."Service Header No." := lFieldRef.VALUE;
+          lFieldRef := pRecRef.FIELD(31);
+          lEAISentMQBuffer."Service No." := lFieldRef.VALUE;
+        END;
+        //>>IMH11.PC
+      END;
+      lEAISentMQBuffer.INSERT;
+      EAIMQBufferMgt.CreateSentMQBufferToSentMQ(lEAISentMQBuffer);
+      EXIT;
+    END;
+
+    PROCEDURE StorageAllDT@1000000005(pEAIEntryNo@1000000000 : Code[20];pEAIMQ@1000000002 : Code[20];pServiceNo@1000000006 : Code[20];pServiceHeaderNo@1000000007 : Code[20];pXMLDom@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument") rValue : Boolean;
+    VAR
+      lRootNode@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lDarvaDTStorage@1000000004 : Record 50124;
+      lDarvaDTStorage2@1000000005 : Record 50124;
+      lEntryNo@1000000009 : Integer;
+    BEGIN
+      //IMH10.ACO
+      IF pEAIEntryNo <> '' THEN BEGIN // ne vient pas de "affect DT"
+        lDarvaDTStorage2.SETRANGE("EAI Entry No.", pEAIEntryNo);
+        lDarvaDTStorage2.SETRANGE("EAI MQ Code", pEAIMQ);
+        IF lDarvaDTStorage2.FINDFIRST THEN
+          EXIT(FALSE);
+      END;
+
+      //Nø de s‚quence
+      lDarvaDTStorage2.RESET;
+      lDarvaDTStorage2.SETRANGE("Service No.", pServiceNo);
+      lDarvaDTStorage2.SETRANGE("Service Header No.", pServiceHeaderNo);
+      lEntryNo := 0;
+      IF lDarvaDTStorage2.FINDLAST THEN
+        lEntryNo := lDarvaDTStorage2."Entry No.";
+
+      lEntryNo += 1;
+
+      EAIXMLMgt.FindRootNode(pXMLDom, lRootNode); //R‚cup‚ration du noeud root
+      EXIT(StorageDT(pEAIEntryNo, pEAIMQ, pServiceNo, pServiceHeaderNo, lEntryNo, lDarvaDTStorage , lRootNode));
+    END;
+
+    LOCAL PROCEDURE StorageDT@1000000000(pEAIEntryNo@1000000000 : Code[20];pEAIMQ@1000000006 : Code[20];pServiceNo@1000000013 : Code[20];pServiceHeaderNo@1000000012 : Code[20];pEntryNo@1000000011 : Integer;pParentDARVADTStorage@1000000001 : Record 50124;pXMLNode@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode") rValue : Boolean;
+    VAR
+      lXMLDomElem@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      i@1000000004 : Integer;
+      lElemEntryNo@1000000005 : Integer;
+      lDarvaDTStorage@1000000007 : Record 50124;
+      j@1000000008 : Integer;
+      lTempXMLAttributeList@1000000009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF83-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNamedNodeMap";
+      lTempXMLNodeList@1000000010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+    BEGIN
+      //IMH10.ACO
+      CASE FORMAT(pXMLNode.nodeType) OF
+        '1' : BEGIN //Element
+          IF StorageElement(pEAIEntryNo, pEAIMQ, pServiceNo, pServiceHeaderNo,
+                            pEntryNo, pParentDARVADTStorage."Tag Entry No.",
+                            pXMLNode, lDarvaDTStorage) THEN BEGIN
+
+            //Attributes
+            lTempXMLAttributeList := pXMLNode.attributes;
+            FOR i := 0 TO lTempXMLAttributeList.length - 1 DO
+              StorageDT(pEAIEntryNo, pEAIMQ, pServiceNo, pServiceHeaderNo, pEntryNo, lDarvaDTStorage, lTempXMLAttributeList.item(i));
+
+            //Noeuds fils (text et element)
+            lTempXMLNodeList := pXMLNode.childNodes;
+            FOR j := 0 TO lTempXMLNodeList.length - 1 DO
+              StorageDT(pEAIEntryNo, pEAIMQ, pServiceNo, pServiceHeaderNo, pEntryNo, lDarvaDTStorage, lTempXMLNodeList.item(j));
+          END
+        END;
+        '2' : BEGIN //attribute
+          StorageAttribute(pParentDARVADTStorage, pXMLNode, lDarvaDTStorage);
+        END;
+        '3' : BEGIN // noeud text
+          StorageText(pXMLNode, pParentDARVADTStorage);
+        END
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE StorageElement@1000000007(pEAIEntryNo@1000000000 : Code[20];pEAIMQCode@1000000005 : Code[20];pServiceNo@1000000002 : Code[20];pServiceHeaderNo@1000000007 : Code[20];pEntryNo@1000000009 : Integer;pParentEntryNo@1000000008 : Integer;pXMLDomNode@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pDarvaDTStorage@1000000003 : Record 50124) rValue : Boolean;
+    VAR
+      lTagEntryNo@1000000004 : Integer;
+      lDarvaStorage@1000000006 : Record 50124;
+    BEGIN
+      //IMH10.ACO
+      IF STRPOS(pXMLDomNode.nodeName, '?') = 1 THEN
+        EXIT(FALSE);
+
+      lDarvaStorage.SETRANGE("Service No.",pServiceNo);
+      lDarvaStorage.SETRANGE("Service Header No.",pServiceHeaderNo);
+      lDarvaStorage.SETRANGE("Entry No.", pEntryNo);
+      IF lDarvaStorage.FINDLAST THEN
+        lTagEntryNo := lDarvaStorage."Tag Entry No."
+      ELSE
+        lTagEntryNo := 0;
+
+      lTagEntryNo += 1;
+
+      pDarvaDTStorage.INIT;
+      pDarvaDTStorage."Service No." := pServiceNo;
+      pDarvaDTStorage."Service Header No." := pServiceHeaderNo;
+      pDarvaDTStorage."Entry No." := pEntryNo;
+      pDarvaDTStorage."Tag Entry No." := lTagEntryNo;
+      pDarvaDTStorage."Parent Tag Entry No." := pParentEntryNo;
+      pDarvaDTStorage."Tag Description" := pXMLDomNode.nodeName;
+      pDarvaDTStorage."EAI MQ Code" := pEAIMQCode;
+      pDarvaDTStorage."EAI Entry No." := pEAIEntryNo;
+      pDarvaDTStorage."Tag Type" := pDarvaDTStorage."Tag Type":: Tag;
+      pDarvaDTStorage.INSERT;
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE StorageAttribute@1000000015(pParentDARVADTStorage@1000000008 : Record 50124;pXMLDomNode@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pDarvaDTStorage@1000000003 : Record 50124) rValue : Boolean;
+    VAR
+      lTagEntryNo@1000000004 : Integer;
+      lDarvaStorage@1000000006 : Record 50124;
+      lElementText@1000000007 : Text[250];
+    BEGIN
+      //IMH10.ACO
+      lDarvaStorage.SETRANGE("Service No.", pParentDARVADTStorage."Service No.");
+      lDarvaStorage.SETRANGE("Service Header No.", pParentDARVADTStorage."Service Header No.");
+      lDarvaStorage.SETRANGE("Entry No.", pParentDARVADTStorage."Entry No.");
+      IF lDarvaStorage.FINDLAST THEN
+        lTagEntryNo := lDarvaStorage."Tag Entry No."
+      ELSE
+        lTagEntryNo := 0;
+
+      lTagEntryNo +=1;
+
+      pDarvaDTStorage.INIT;
+      pDarvaDTStorage."Service No." := pParentDARVADTStorage."Service No.";
+      pDarvaDTStorage."Service Header No." := pParentDARVADTStorage."Service Header No.";
+      pDarvaDTStorage."Entry No." := pParentDARVADTStorage."Entry No.";
+      pDarvaDTStorage."Tag Entry No." := lTagEntryNo;
+      pDarvaDTStorage."Parent Tag Entry No." := pParentDARVADTStorage."Tag Entry No.";
+      pDarvaDTStorage."Tag Description" := pXMLDomNode.nodeName;
+      pDarvaDTStorage."EAI MQ Code" := pParentDARVADTStorage."EAI MQ Code";
+      pDarvaDTStorage."EAI Entry No." := pParentDARVADTStorage."EAI Entry No.";
+      pDarvaDTStorage."Tag Type" := pDarvaDTStorage."Tag Type":: Attribute;
+      pDarvaDTStorage.INSERT;
+
+      //Remplissage de la valeur
+      StorageValue(pXMLDomNode, pDarvaDTStorage);
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE StorageText@1000000023(pXMLDomNode@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pDarvaDTStorage@1000000000 : Record 50124) rValue : Boolean;
+    VAR
+      lElementText@1000000002 : Text[250];
+    BEGIN
+      //IMH10.ACO
+      EXIT(StorageValue(pXMLDomNode, pDarvaDTStorage));
+    END;
+
+    LOCAL PROCEDURE StorageValue@1000000018(pXMLDomNode@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pDarvaDTStorage@1000000001 : Record 50124) rValue : Boolean;
+    VAR
+      lText@1000000000 : BigText;
+      lValue@1000000003 : Text[250];
+    BEGIN
+      //IMH10.ACO
+
+      lText.ADDTEXT(FORMAT(pXMLDomNode.nodeValue));
+
+      IF lText.LENGTH < 250 THEN
+        lText.GETSUBTEXT(pDarvaDTStorage."Value 1", 1)
+      ELSE BEGIN
+        lText.GETSUBTEXT(pDarvaDTStorage."Value 1", 1, 250);
+        IF lText.LENGTH < 500 THEN
+          lText.GETSUBTEXT(pDarvaDTStorage."Value 2", 251)
+        ELSE BEGIN
+          lText.GETSUBTEXT(pDarvaDTStorage."Value 2", 251, 250);
+          IF lText.LENGTH < 750 THEN
+            lText.GETSUBTEXT(pDarvaDTStorage."Value 3", 250)
+          ELSE BEGIN
+            lText.GETSUBTEXT(pDarvaDTStorage."Value 3", 501, 250);
+            IF lText.LENGTH < 1000 THEN
+              lText.GETSUBTEXT(pDarvaDTStorage."Value 4", 751)
+            ELSE BEGIN
+              lText.GETSUBTEXT(pDarvaDTStorage."Value 4", 751, 250);
+            IF lText.LENGTH < 1250 THEN
+              lText.GETSUBTEXT(pDarvaDTStorage."Value 5", 1001)
+            ELSE
+              lText.GETSUBTEXT(pDarvaDTStorage."Value 5", 1001, 250);
+            END
+          END
+        END
+      END;
+
+      pDarvaDTStorage.MODIFY;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetSpecificXMLToDARVA@1000000006(pEAISentMQBuffer@1000000000 : TEMPORARY Record 8016720);
+    BEGIN
+      // IMH11.PC
+      EAISentMQBufferSpecificXML := pEAISentMQBuffer;
+      ManageSpecificXMLToDarva := TRUE;
+    END;
+
+    PROCEDURE GetNextLogEntryNo@1100281002(VAR pInteractionLogEntry@1100281000 : Record 5065);
+    VAR
+      lInteractionlogEntry@1100281001 : Record 5065;
+    BEGIN
+      CLEAR(pInteractionLogEntry);
+      lInteractionlogEntry.LOCKTABLE(TRUE);
+      lInteractionlogEntry.FINDLAST;
+      pInteractionLogEntry."Entry No." := lInteractionlogEntry."Entry No." + 1;
+      pInteractionLogEntry.INSERT(TRUE);
+    END;
+
+    PROCEDURE GetAffectedLocationCode@1100281016(pAffectedLocationDesc@1100281000 : Text[30];pEAIPartnerCode@1100281003 : Code[10]) : Code[10];
+    VAR
+      lFaultArea@1100281001 : Record 5915;
+      lPartnerCrossRef@1100281002 : Record 8016748;
+    BEGIN
+      //IMH03.ST
+      IF STRLEN(pAffectedLocationDesc) <= MAXSTRLEN(lFaultArea.Code) THEN
+        IF lFaultArea.GET(pAffectedLocationDesc) THEN
+          EXIT(pAffectedLocationDesc);
+
+      lFaultArea.SETRANGE(Description, pAffectedLocationDesc);
+      IF NOT lFaultArea.ISEMPTY THEN BEGIN
+        lFaultArea.FINDFIRST;
+        EXIT(lFaultArea.Code);
+      END;
+      IF lPartnerCrossRef.GetFromCrossRef(DATABASE::"Fault Area", pEAIPartnerCode, pAffectedLocationDesc, lPartnerCrossRef) THEN BEGIN
+        IF lPartnerCrossRef."Source No." <> '' THEN
+          EXIT(lPartnerCrossRef."Source No.");
+      END;
+    END;
+
+    PROCEDURE GetTransparentAccesDARVA@1100281003(pReferenceNo@1100281000 : Text[30];pCorporateNo@1100281001 : Code[20];pCorporateRegionCode@1100281005 : Code[10]) rValue : Boolean;
+    VAR
+      lInterfaceSetup@1100281002 : Record 50139;
+      lCorporateRegion@1100281006 : Record 50058;
+      lEAIPartnerCrossReference@1100281003 : Record 8016748;
+      lEAISetup@1100281007 : Record 8016700;
+      lDARVAXMLMgt@1100281008 : Codeunit 50154;
+      lGTACode@1100281004 : Code[10];
+    BEGIN
+      // IMH03.PC
+      rValue := FALSE;
+
+      lInterfaceSetup.GET;
+      IF (lInterfaceSetup."DARVA Start Transparent URL" = '') OR
+         (lInterfaceSetup."DARVA Login Transparent" = '') OR
+         (lInterfaceSetup."DARVA Password Transparent" = '') OR
+         (lInterfaceSetup."DARVA Service Transparent" = '')
+      THEN BEGIN
+        EXIT;
+      END;
+
+      IF (pReferenceNo = '') OR (pCorporateNo = '') THEN BEGIN
+        //<<IMH05.PC
+        //EXIT;
+        HYPERLINK(
+          lInterfaceSetup."DARVA Start Transparent URL" +
+          '?userid=' + lInterfaceSetup."DARVA Login Transparent" +
+          '&password=' + lInterfaceSetup."DARVA Password Transparent" +
+          '&Service=' + lInterfaceSetup."DARVA Service Transparent");
+        EXIT;
+        //>>IMH05.PC
+      END;
+
+      lEAISetup.GET;
+      IF pCorporateNo = lEAISetup."MACIF Customer No." THEN BEGIN
+        FormatStr(pReferenceNo, '0', 17);
+      END;
+
+      // Si pCorporateRegionCode renseign‚ alors on recherche le nø de grand compte en fonction
+      IF pCorporateRegionCode <> '' THEN BEGIN
+        IF NOT lCorporateRegion.GET(pCorporateNo,pCorporateRegionCode) THEN BEGIN
+          EXIT;
+        END;
+        IF lCorporateRegion."Sell-to Customer No." = '' THEN BEGIN
+          EXIT;
+        END;
+        pCorporateNo := lCorporateRegion."Sell-to Customer No.";
+      END;
+
+      // recup du code GTA
+      lEAIPartnerCrossReference.SETRANGE("Table ID",DATABASE::Customer);
+      lEAIPartnerCrossReference.SETRANGE("Source No.",pCorporateNo);
+      lEAIPartnerCrossReference.SETRANGE("Source No. 2",'');
+      lEAIPartnerCrossReference.SETRANGE("Source Int",0);
+      lEAIPartnerCrossReference.SETRANGE("Field ID",0);
+      IF lEAIPartnerCrossReference.FINDFIRST THEN BEGIN
+        lGTACode := lEAIPartnerCrossReference."Partner Reference";
+      END;
+
+      IF lGTACode = '' THEN BEGIN
+        EXIT;
+      END;
+
+      HYPERLINK(
+        lInterfaceSetup."DARVA Start Transparent URL" +
+        '?userid=' + lInterfaceSetup."DARVA Login Transparent" +
+        '&password=' + lInterfaceSetup."DARVA Password Transparent" +
+        '&Service=' + lInterfaceSetup."DARVA Service Transparent" +
+        '&sinistre=' + pReferenceNo +
+        '&gta=' + lGTACode);
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetDarvaCorporateNo@1100281004(pCorporateNo@1100281002 : Code[20];pCorporateRegion@1100281005 : Code[20];pProviderNo@1100281006 : Code[20];pEAIPartnerCode@1100281003 : Code[20];pAgreement@1100281007 : Boolean) rValue : Code[20];
+    VAR
+      lEAIPartnerCrossReference@1100281000 : Record 8016748;
+      lCorporateRegion@1100281001 : Record 50058;
+      lProviderAgreement@1100281004 : Record 50012;
+      lAgreement@1100281008 : Record 50114;
+    BEGIN
+      // IMH02.PC
+      // Permet de r‚cup‚rer soit le nø agr‚ement en focntion du code partenaire ou IMH
+
+
+      //<<IMH04
+      IF pAgreement THEN BEGIN
+        IF lCorporateRegion.GET(pCorporateNo,pCorporateRegion) THEN BEGIN
+          lProviderAgreement.RESET;
+          lProviderAgreement.SETRANGE("Provider No.",pProviderNo);
+          lProviderAgreement.SETRANGE("Corporate No.",lCorporateRegion."Sell-to Customer No.");
+          IF lProviderAgreement.FINDFIRST THEN BEGIN
+            rValue := lProviderAgreement."Agreement No.";
+          END;
+        END;
+        IF rValue <> '' THEN BEGIN
+          EXIT;
+        END ELSE BEGIN
+          lCorporateRegion.SETRANGE("Corporate No.",pCorporateNo);
+          IF lCorporateRegion.FINDSET THEN BEGIN
+            REPEAT
+              lProviderAgreement.RESET;
+              lProviderAgreement.SETRANGE("Provider No.",pProviderNo);
+              lProviderAgreement.SETRANGE("Corporate No.",lCorporateRegion."Sell-to Customer No.");
+              IF lProviderAgreement.FINDFIRST THEN BEGIN
+                rValue := lProviderAgreement."Agreement No.";
+                IF rValue <> '' THEN BEGIN
+                  EXIT;
+                END;
+              END;
+            UNTIL lCorporateRegion.NEXT = 0;
+          END;
+        END;
+      END;
+      //>>IMH04
+      rValue := 'IMH';
+      WITH lEAIPartnerCrossReference DO BEGIN
+        RESET;
+        "Table ID" := DATABASE::Customer;
+        "Source No." := pCorporateNo;
+        "Partner Code" := pEAIPartnerCode;
+        IF GetPartnerCrossRef THEN BEGIN
+          rValue := "Partner Reference";
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE FormatStr@1100281006(VAR pText@1100281000 : Text[30];pAddRight@1100281001 : Text[1];pLen@1100281002 : Integer);
+    BEGIN
+      IF STRLEN(pText) >= pLen THEN BEGIN
+        EXIT;
+      END;
+
+      REPEAT
+        pText := pAddRight + pText;
+      UNTIL STRLEN(pText) = pLen;
+    END;
+
+    PROCEDURE ReferenceNoWithOutZero@1000000001(pServiceRefNo@1100281000 : Code[20]) rValue : Code[20];
+    BEGIN
+      // IMH06.PC
+      rValue := '';
+
+      IF COPYSTR(pServiceRefNo,1,1) <> '0' THEN BEGIN
+        rValue := pServiceRefNo;
+        EXIT;
+      END;
+
+      WHILE (COPYSTR(pServiceRefNo,1,1) = '0') DO BEGIN
+        pServiceRefNo := COPYSTR(pServiceRefNo,2);
+      END;
+
+      rValue := '*' + pServiceRefNo;
+    END;
+
+    PROCEDURE ReplaceSpecialChar@1000000003(pText@1100281000 : Text[80]) rValue : Text[80];
+    VAR
+      lToolsMgt@1100281002 : Codeunit 8016602;
+      lTab@1100281001 : Char;
+      lMilleSeparator@1100281003 : Char;
+      lFromChar@1100281004 : Text[1024];
+      lToChar@1100281005 : Text[1024];
+    BEGIN
+      // IMH07.PC
+      lTab := 9;
+      rValue := DELCHR(pText,'=',FORMAT(lTab));
+
+      //<<IMH19.PC
+      lMilleSeparator := 31;
+      rValue := CONVERTSTR(rValue,FORMAT(lMilleSeparator),' ');
+      //>>IMH19.PC
+      //<<IMH24.ST
+      lMilleSeparator := 255;
+      rValue := CONVERTSTR(rValue,FORMAT(lMilleSeparator),' ');
+      //>>IMH24.ST
+
+      //<<IMH18.PC
+      //<<IMH16.PC
+      //rValue := CONVERTSTR(rValue,'°Éƒ´ÙÍ','e''a   ');
+      //rValue := CONVERTSTR(rValue,'°Éƒ´ÙÍÈÊ[]','e''a   e"  ');
+      //>>IMH16.PC
+      //<<IMH21.ACO
+      //rValue := CONVERTSTR(rValue,'°Éƒ´ÙÍÈÊ[]À','e''a   e"   ');
+      lFromChar := '·µ¶ÇŽ… ƒÆ„†€‡ÔÒÓŠ‚ˆ‰ÞÖ×Ø¡Œ‹ãàâå™•¢“ä”ëéêš—£–íì˜’Ñ¥žèá‘Ð¤ö›çøñý';
+      lToChar   := 'AAAAAAaaaaaaCcEEEEeeeeIIIIiiiiOOOOOoooooUUUUuuuuYyy                ';
+      rValue := CONVERTSTR(rValue,lFromChar,lToChar);
+      //<<IMH23.ACO
+      rValue := CONVERTSTR(rValue,'°Éƒ´ÙÍÈÊ[]À','e''a   e"   ');
+      //>>IMH23.ACO
+      //>>IMH21.ACO
+      //>>IMH18.PC
+    END;
+
+    PROCEDURE GetEAIActSendDARVAType@1000000002(pEAISentMQBuffer@1000000000 : Record 8016720;VAR pType@1000000001 : ' ,SD64,SD99');
+    VAR
+      lDARVASetup@1000000002 : Record 50126;
+      lRecId@1000000004 : RecordID;
+    BEGIN
+      //IMH13.ACO
+      //<<IMH14.ACO
+      {lDARVASetup.GET;
+      lRecId := pEAISentMQBuffer.RecordId;
+      pRecRef := lRecId.GETRECORD;
+
+        //TODO : comment savoir qu'on a un SDR64 ?
+        IF (lRecId.TABLENO = DATABASE::"Service Intervention Line")
+          AND (STRPOS(pEAISentMQBuffer."EAI Act Code", '64')<>0) THEN BEGIN
+          pRecRef.LOCKTABLE;
+          pType := pType::SD64;
+        END
+        ELSE
+          pType := pType::" ";
+      END
+      ELSE
+        pType := pType::" ";
+      }
+
+      IF STRPOS(pEAISentMQBuffer."EAI Act Code", '64') <> 0 THEN BEGIN
+        pType := pType::SD64;
+      END
+      ELSE
+        pType := pType::" ";
+      //>>IMH14.ACO
+    END;
+
+    PROCEDURE ModifyStatusSendMQ_SDR@1000000008(pCorporateNo@1000000000 : Code[20];pCorporateRegionCode@1000000001 : Code[20];pDARVAFlowType@1000000002 : Code[10];pLineType@1000000004 : 'Default,Service Order Type,Page';pServiceOrderType@1000000005 : Code[20];pRecordId@1000000011 : RecordID;pStatus@1000000012 : 'Unprocessed,Processing,Error,Unit Test,Sent,Warning';pStep@1000000003 : 'Generation,Validation') rValue : Boolean;
+    VAR
+      lDARVASwitchSystemSetup@1000000006 : Record 50180;
+      lEAIAct@1000000009 : Record 8016706;
+      lEAIMessQueue@1000000008 : Record 8016704;
+      lEAIActMgt@1000000007 : Codeunit 8016703;
+      lEAISentMQ1@1000000010 : Record 8016722;
+      lEAISentMQ2@1000000013 : Record 8016723;
+      lEAISentMQ3@1000000014 : Record 8016724;
+      lEAISentMQ4@1000000015 : Record 8016725;
+      lEAISentMQ5@1000000016 : Record 8016726;
+    BEGIN
+      //IMH15.ACO
+      rValue := FALSE;
+
+      //R‚cup‚ration de l'acte
+      IF NOT lDARVASwitchSystemSetup.GET(pCorporateNo,
+                                  pCorporateRegionCode,
+                                  lDARVASwitchSystemSetup.Direction::Send,pDARVAFlowType,
+                                   pLineType, pServiceOrderType) THEN
+        lDARVASwitchSystemSetup.GET(pCorporateNo,
+                                  '',
+                                  lDARVASwitchSystemSetup.Direction::Send,pDARVAFlowType,
+                                   pLineType, pServiceOrderType);
+
+      lEAIAct.GET(lDARVASwitchSystemSetup."EAI Act Type Code", lDARVASwitchSystemSetup."Act Code");
+
+      //R‚cup‚ration de la file
+      lEAIActMgt.GetMQFromEAIAct(lEAIAct, lEAIMessQueue);
+
+      //R‚cup‚ration du message
+      CASE lEAIMessQueue."Table No." OF
+        DATABASE::"EAI Sent MQ 1" : BEGIN
+          WITH lEAISentMQ1 DO BEGIN
+            SETRANGE(RecordId, pRecordId);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            //<<IMH20.ACO
+            Step := pStep;
+            //>>IMH20.ACO
+            MODIFY;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 2" : BEGIN
+          WITH lEAISentMQ2 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE(RecordId, pRecordId);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            //<<IMH20.ACO
+            Step := pStep;
+            //>>IMH20.ACO
+
+            MODIFY;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 3" : BEGIN
+          WITH lEAISentMQ3 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE(RecordId, pRecordId);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            //<<IMH20.ACO
+            Step := pStep;
+            //>>IMH20.ACO
+
+            MODIFY;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 4" : BEGIN
+          WITH lEAISentMQ4 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE(RecordId, pRecordId);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            //<<IMH20.ACO
+            Step := pStep;
+            //>>IMH20.ACO
+
+            MODIFY;
+
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 5" : BEGIN
+          WITH lEAISentMQ5 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE(RecordId, pRecordId);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            //<<IMH20.ACO
+            Step := pStep;
+            //>>IMH20.ACO
+
+            MODIFY;
+          END;
+        END
+        ELSE
+          ERROR(Text001,lEAIAct.Code);
+      END;
+    END;
+
+    PROCEDURE ModifyStatusSendMQ_SrvHd@1100281000(pCorporateNo@1000000000 : Code[20];pCorporateRegionCode@1000000001 : Code[20];pDARVAFlowType@1000000002 : Code[10];pLineType@1000000004 : 'Default,Service Order Type,Page';pServiceOrderType@1000000005 : Code[20];pServHeaderNo@1000000011 : Code[20];pStatus@1000000012 : 'Unprocessed,Processing,Error,Unit Test,Sent,Warning';pStep@1000000003 : 'Generation,Validation') rValue : Boolean;
+    VAR
+      lDARVASwitchSystemSetup@1000000006 : Record 50180;
+      lEAIAct@1000000009 : Record 8016706;
+      lEAIMessQueue@1000000008 : Record 8016704;
+      lEAIActMgt@1000000007 : Codeunit 8016703;
+      lEAISentMQ1@1000000010 : Record 8016722;
+      lEAISentMQ2@1000000013 : Record 8016723;
+      lEAISentMQ3@1000000014 : Record 8016724;
+      lEAISentMQ4@1000000015 : Record 8016725;
+      lEAISentMQ5@1000000016 : Record 8016726;
+    BEGIN
+      //IMH22.ZW : cr‚ation fonction
+      rValue := FALSE;
+
+      //R‚cup‚ration de l'acte
+      IF NOT lDARVASwitchSystemSetup.GET(pCorporateNo,
+                                  pCorporateRegionCode,
+                                  lDARVASwitchSystemSetup.Direction::Send,pDARVAFlowType,
+                                   pLineType, pServiceOrderType) THEN
+        lDARVASwitchSystemSetup.GET(pCorporateNo,
+                                  '',
+                                  lDARVASwitchSystemSetup.Direction::Send,pDARVAFlowType,
+                                   pLineType, pServiceOrderType);
+
+      lEAIAct.GET(lDARVASwitchSystemSetup."EAI Act Type Code", lDARVASwitchSystemSetup."Act Code");
+
+      //R‚cup‚ration de la file
+      lEAIActMgt.GetMQFromEAIAct(lEAIAct, lEAIMessQueue);
+
+      //R‚cup‚ration du message
+      CASE lEAIMessQueue."Table No." OF
+        DATABASE::"EAI Sent MQ 1" : BEGIN
+          WITH lEAISentMQ1 DO BEGIN
+            SETRANGE("Service Header No.", pServHeaderNo);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            Step := pStep;
+            MODIFY;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 2" : BEGIN
+          WITH lEAISentMQ2 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServHeaderNo);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            Step := pStep;
+
+            MODIFY;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 3" : BEGIN
+          WITH lEAISentMQ3 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServHeaderNo);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            Step := pStep;
+
+            MODIFY;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 4" : BEGIN
+          WITH lEAISentMQ4 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServHeaderNo);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            Step := pStep;
+
+            MODIFY;
+
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 5" : BEGIN
+          WITH lEAISentMQ5 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServHeaderNo);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            Status := pStatus;
+            Step := pStep;
+
+            MODIFY;
+          END;
+        END
+        ELSE
+          ERROR(Text001,lEAIAct.Code);
+      END;
+    END;
+
+    PROCEDURE SendMQ_SrvHd_ErrorExist@1100281020(pServiceHeader@1100281000 : Record 5900;pDARVAFlowType@1000000002 : Code[10];pLineType@1000000004 : 'Default,Service Order Type,Page';pServiceOrderType@1100281002 : Code[10];VAR pErrorText@1100281001 : Text[250]) rValue : Boolean;
+    VAR
+      lDARVASwitchSystemSetup@1000000006 : Record 50180;
+      lEAIAct@1000000009 : Record 8016706;
+      lEAIMessQueue@1000000008 : Record 8016704;
+      lEAIActMgt@1000000007 : Codeunit 8016703;
+      lEAISentMQ1@1000000010 : Record 8016722;
+      lEAISentMQ2@1000000013 : Record 8016723;
+      lEAISentMQ3@1000000014 : Record 8016724;
+      lEAISentMQ4@1000000015 : Record 8016725;
+      lEAISentMQ5@1000000016 : Record 8016726;
+    BEGIN
+      //IMH22.ZW : cr‚ation fonction
+      rValue := FALSE;
+
+      //R‚cup‚ration de l'acte
+      IF NOT lDARVASwitchSystemSetup.GET(pServiceHeader."Corporate No.",
+                                  pServiceHeader."Corporate Region Code",
+                                  lDARVASwitchSystemSetup.Direction::Send,pDARVAFlowType,
+                                   pLineType, pServiceOrderType) THEN
+        lDARVASwitchSystemSetup.GET(pServiceHeader."Corporate No.",
+                                  '',
+                                  lDARVASwitchSystemSetup.Direction::Send,pDARVAFlowType,
+                                   pLineType, pServiceOrderType);
+
+      lEAIAct.GET(lDARVASwitchSystemSetup."EAI Act Type Code", lDARVASwitchSystemSetup."Act Code");
+
+      //R‚cup‚ration de la file
+      lEAIActMgt.GetMQFromEAIAct(lEAIAct, lEAIMessQueue);
+
+      //R‚cup‚ration du message
+      CASE lEAIMessQueue."Table No." OF
+        DATABASE::"EAI Sent MQ 1" : BEGIN
+          WITH lEAISentMQ1 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServiceHeader."No.");
+            SETRANGE(Status, Status::Error);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            pErrorText := "Comment Status";
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 2" : BEGIN
+          WITH lEAISentMQ2 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServiceHeader."No.");
+            SETRANGE(Status, Status::Error);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            pErrorText := "Comment Status";
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 3" : BEGIN
+          WITH lEAISentMQ3 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServiceHeader."No.");
+            SETRANGE(Status, Status::Error);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            pErrorText := "Comment Status";
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 4" : BEGIN
+          WITH lEAISentMQ4 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServiceHeader."No.");
+            SETRANGE(Status, Status::Error);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            pErrorText := "Comment Status";
+
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 5" : BEGIN
+          WITH lEAISentMQ5 DO BEGIN
+            SETCURRENTKEY("Service No.", "Service Header No.");
+            SETRANGE("Service Header No.", pServiceHeader."No.");
+            SETRANGE(Status, Status::Error);
+
+            IF NOT FINDFIRST THEN
+              EXIT;
+
+            rValue := TRUE;
+            pErrorText := "Comment Status";
+          END;
+        END
+        ELSE
+          ERROR(Text001,lEAIAct.Code);
+      END;
+    END;
+
+    PROCEDURE RemoveUnauthorisedChar@1100281009(pText@1100281000 : Text[1024]) : Text[1024];
+    BEGIN
+    END;
+
+    BEGIN
+    {
+      /** @r IMH24 @d 19/05/14 @a ISAT.ST @v IMH6.01.5070 @h 5070 @s SUPPORT @c Errreur caractŠre milliers dans certains cas
+          @c Correspond … la mantis 5070 aussi */
+      /** @r IMH23 @d 19/02/14 @a ISAT.ACO @v IMH6.01.4922 @h 4958 @s SUPPORT
+          @c Modification caractŠres sp‚ciaux */
+      /** @r IMH22 @d 19/03/14 @a ISAT.ZW @v IMH6.01.5049 @h 5049 @s Gestion erreur SDR
+          @c Gestion SDR 64 en erreur MACIF & AGPM : Ajout fonction ModifyStatusSendMQ_SrvHd */
+      /** @r IMH21 @d 18/02/14 @a ISAT.ACO @v IMH6.01.4958 @h 4958 @s SUPPORT
+          @c Modification caractŠres sp‚ciaux */
+      /** @r IMH20 @d 18/02/14 @a ISAT.ACO @v IMH6.01.4978 @h 4978 @s SUPPORT
+          @c Ajout paramŠtre "step" ModifyStatusSendMQ_SDR */
+      /** @r IMH19 @d 27/12/13 @a ISAT.PC @v IMH6.01.4925 @h 4925 @s Darva @ Ajout nouveau caractŠre sp‚cial s‚parateur de millier*/
+      /** @r IMH18 @d 27/12/13 @a ISAT.PC @v IMH6.01.4922 @h 4922 @s Darva @ Ajout nouveau caractŠre sp‚cial */
+      /** @r IMH17 @d 19/12/13 @a ISAT.ZW @v IMH6.01.4917 @h 4917 @s Darva @ Ajout permission sur la table 50124 */
+      /** @r IMH16 @d 29/11/13 @a ISAT.PC @v IMH6.01.4755 @h 4755 @s Darva @ Ajout nouveau caractŠre sp‚cial */
+      /** @r IMH16 @d 29/11/13 @a ISAT.PC @v IMH6.01.4815 @h 4815 @s Darva @ Ajout nouveau caractŠre sp‚cial */
+      /** @r IMH15 @d 13/11/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1
+          @c Ajout fonction ModifyStatusSendMQ_SDR */
+      /** @r IMH14 @d 23/10/13 @a ISAT.ACO @v IMH6.01.348 @h 4804 @s DARVA MATMUT Lot 1
+          @c Modification test sur type flux */
+      /** @r IMH13 @d 22/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4804
+          @c R‚cup‚ration type flux ‚mission */
+      /** @r IMH12 @d 03/09/13 @a ISAT.ACO @v IMH6.01.350 @s SystŠme d'aiguillage @c ParamŠtres DARVA*/
+      /** @r IMH11 @d 26/08/13 @a ISAT.PC @v IMH6.01.348 @s DARVA MATMUT Lot 1
+          @c Gestion du SDR64
+          @c Ajout de la fonction SetXMLToCancel */
+      /** @r IMH10 @d 17/07/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @c Stockage DT */
+      /** @r IMH09 @d 24/06/13 @a ISAT.ACO @v IMH6.01.350 @s SystŠme d'aiguillage
+          @c Modifciation de la fonction CreateSendMQByAdvComment ajout des paramŠtres suivants
+          @c    - pCorporateNo
+          @c    - pCorporateRegionCode
+          @c    - pServiceOrderType
+          @c Modifciation de la fonction CreateSendMQ_SDR ajout des paramŠtres suivants
+          @c    - pCorporateNo
+          @c    - pCorporateRegionCode
+          @c    - pServiceOrderType */
+      /** @r IMH08 @d 11/02/13 @a ISAT.PC @v IMH6.01.222 @s Uniformisation Darva
+          @c Suppression de la fonction DischargeDocument, d‚placer dans les codeunit 8016725 et 8016727 */
+      /** @r IMH07 @d 28/09/12 @a ISAT.PC @v IMH6.01.228 @h 3958 @s NEP00011 */
+      /** @r IMH06 @d 24/09/12 @a ISAT.PC @v IMH6.01.228 @s NEP00011 @c Correctif @h 3931 */
+      /** @r IMH05 @d 13/06/12 @a ISAT.PC @v IMH6.01.134 @s AccŠs transparent sans service @h 2997
+          @c Gestion de l'accŠs transparent sans service */
+      /** @r IMH04 @d 21/03/12 @a ISAT.LLT @v IMH6.01.134 @s DARVA Management @s Envoi SDR64 @h 2834 */
+      /** @r IMH03 @d 14/03/12 @a ISAT.PC @v IMH6.01.134 @s DARVA @h 2851 @s Gestion de l'accŠs transparent */
+      /** @r IMH02 @d 04/11/11 @a ISAT.ZW @v IMH6.01.134 @s DARVA Management @s gestion acquitement sur erreur */
+      /** @r IMH01 @d 13/07/11 @a ISAT.MA @v IMH6.01.134 @s DARVA Management @s Cr‚ation */
+    }
+    END.
+  }
+}

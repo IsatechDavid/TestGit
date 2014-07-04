@@ -1,0 +1,229 @@
+OBJECT Report 5183 Resend Attachments
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/11/11;
+    Time=11:33:59;
+    Modified=Yes;
+    Version List=NAVW16.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Resend Attachments;
+               FRA=Renvoyer les documents joints];
+    ProcessingOnly=Yes;
+    OnPreReport=VAR
+                  LoggedSeg@1000 : Record 5075;
+                BEGIN
+                  IF "Interaction Log Entry".GETFILTER("Logged Segment Entry No.") = '' THEN
+                    ERROR(Text000,"Interaction Log Entry".FIELDCAPTION("Logged Segment Entry No."));
+
+                  IF "Interaction Log Entry".GETFILTER("Logged Segment Entry No.") <> '0' THEN BEGIN
+                    LoggedSeg.SETFILTER("Entry No.","Interaction Log Entry".GETFILTER("Logged Segment Entry No."));
+                    IF LoggedSeg.COUNT <> 1 THEN
+                      ERROR(
+                        Text001,LoggedSeg.TABLECAPTION);
+                  END;
+                END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table5065;
+        DataItemTableView=SORTING(Logged Segment Entry No.)
+                          WHERE(Postponed=CONST(No));
+        OnAfterGetRecord=VAR
+                           Attachment@1000 : Record 5062;
+                           InteractionLogEntryNew@1001 : Record 5065;
+                           SegLine@1007 : Record 5077;
+                           InterLogEntryCommentLine@1008 : Record 5123;
+                           SegManagement@1006 : Codeunit 5051;
+                           NewEntryNo@1002 : Integer;
+                           lDocumentAttachment@1100281000 : Record 50021;
+                         BEGIN
+                           //IF NOT Attachment.GET("Attachment No.") THEN
+                           //  CurrReport.SKIP;
+                           //IF Attachment."Storage Type" = Attachment."Storage Type"::"Exchange Storage" THEN
+                           //  CurrReport.SKIP;
+                           IF CorrespondenceType = CorrespondenceType::"Same as Entry" THEN
+                             TESTFIELD("Correspondence Type");
+
+                           IF UpdateMergeFields THEN BEGIN
+                             IF DeliveryBufferTemp.GET("Entry No.") THEN
+                               CurrReport.SKIP;
+                             InteractionLogEntryNew.TRANSFERFIELDS("Interaction Log Entry",FALSE);
+                             InteractionLogEntryNew.VALIDATE(Date,WORKDATE);
+                             InteractionLogEntryNew.VALIDATE("Time of Interaction",TIME);
+                             IF STRPOS("Interaction Log Entry".Description,Text003) <> 1 THEN BEGIN
+                               IF STRLEN("Interaction Log Entry".Description) + STRLEN(Text003) <= MAXSTRLEN(InteractionLogEntryNew.Description) THEN
+                                 InteractionLogEntryNew.VALIDATE(Description,Text003 + "Interaction Log Entry".Description)
+                               ELSE
+                                 InteractionLogEntryNew.VALIDATE(Description,COPYSTR(
+                                   Text003 + "Interaction Log Entry".Description,1,MAXSTRLEN(InteractionLogEntryNew.Description)))
+                             END;
+                             IF CorrespondenceType <> CorrespondenceType::"Same as Entry" THEN
+                               InteractionLogEntryNew."Correspondence Type" := CorrespondenceType;
+                             SegManagement.CopyFieldsFromInteractLogEntry(SegLine,InteractionLogEntryNew);
+                             InterLogEntryCommentLine.SETRANGE("Entry No.","Entry No.");
+                             IF InterLogEntryCommentLine.FIND('-') THEN;
+                             Attachment.CALCFIELDS(Attachment);
+                             CLEAR(Attachment."Merge Source");
+                             NewEntryNo := SegManagement.LogInteraction(SegLine,Attachment,InterLogEntryCommentLine,FALSE,FALSE);
+                             InteractionLogEntryNew.GET(NewEntryNo);
+                             InteractionLogEntryNew.VALIDATE("Logged Segment Entry No.","Logged Segment Entry No.");
+                             InteractionLogEntryNew.VALIDATE("Delivery Status","Delivery Status"::"In Progress");
+                             InteractionLogEntryNew.VALIDATE("E-Mail Logged",FALSE);
+                             InteractionLogEntryNew.MODIFY(TRUE)
+                           END ELSE BEGIN
+                             IF CorrespondenceType <> CorrespondenceType::"Same as Entry" THEN
+                               "Correspondence Type" := CorrespondenceType;
+                             "Delivery Status" := "Delivery Status"::"In Progress";
+                             "E-Mail Logged" := FALSE;
+                             MODIFY
+                           END;
+
+                           DeliveryBufferTemp.INIT;
+                           IF UpdateMergeFields THEN BEGIN
+                             DeliveryBufferTemp."No." := NewEntryNo;
+                             //DeliveryBufferTemp."Attachment No." := InteractionLogEntryNew."Attachment No.";
+                             DeliveryBufferTemp."Correspondence Type" := InteractionLogEntryNew."Correspondence Type";
+                             //<<IMH02 isat.zw
+                             lDocumentAttachment.SETCURRENTKEY("Interaction Log Entry No.");
+                             lDocumentAttachment.SETRANGE("Interaction Log Entry No.", NewEntryNo);
+                             IF NOT lDocumentAttachment.FINDFIRST THEN
+                               CurrReport.SKIP;
+                               //CLEAR(lDocumentAttachment);
+                             //>>IMH02 isat.zw
+                           END ELSE BEGIN
+                             DeliveryBufferTemp."No." := "Entry No.";
+                             //DeliveryBufferTemp."Attachment No." := "Attachment No.";
+                             DeliveryBufferTemp."Correspondence Type" := "Correspondence Type";
+                             //<<IMH02 isat.zw
+                             lDocumentAttachment.SETCURRENTKEY("Interaction Log Entry No.");
+                             lDocumentAttachment.SETRANGE("Interaction Log Entry No.", "Entry No.");
+                             IF NOT lDocumentAttachment.FINDFIRST THEN
+                               CurrReport.SKIP;
+                               //CLEAR(lDocumentAttachment);
+                             //>>IMH02 isat.zw
+                           END;
+                           //<<IMH02 isat.zw
+                           DeliveryBufferTemp."Attachment No." := lDocumentAttachment."Entry No.";
+                           DeliveryBufferTemp."Attach. Referent Table No." := lDocumentAttachment."Referent Table No.";
+                           DeliveryBufferTemp."Attach. Key Integer 1" := lDocumentAttachment."Key Integer 1";
+                           DeliveryBufferTemp."Attach. Key Integer 2" := lDocumentAttachment."Key Integer 2";
+                           DeliveryBufferTemp."Attach. Key Code 1" := lDocumentAttachment."Key Code 1";
+                           DeliveryBufferTemp."Attach. Key Code 2" := lDocumentAttachment."Key Code 2";
+                           //>>IMH02 isat.zw
+                           DeliveryBufferTemp.Subject := Subject;
+                           DeliveryBufferTemp."Send Word Docs. as Attmt." := "Send Word Docs. as Attmt.";
+                           DeliveryBufferTemp.INSERT;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         IF DeliveryBufferTemp.COUNT = 0 THEN
+                           ERROR(Text002);
+
+                         COMMIT;
+                         AttachmentManagement.Send(DeliveryBufferTemp);
+                       END;
+
+        ReqFilterFields=Logged Segment Entry No.,Entry No.,Delivery Status,Correspondence Type,Contact No.,Campaign No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=6160;
+      Height=1100;
+    }
+    CONTROLS
+    {
+      { 3   ;TextBox      ;3410 ;0    ;2750 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Correspondence Type;
+                                                              FRA=Moyen de communication privil‚gi‚];
+                                                   OptionCaptionML=[ENU=Same as Entry,Hard Copy,E-Mail,Fax;
+                                                                    FRA=,Courrier,E-mail,Fax];
+                                                   SourceExpr=CorrespondenceType }
+      { 4   ;Label        ;0    ;0    ;3300 ;440  ;ParentControl=3 }
+      { 7   ;CheckBox     ;3410 ;660  ;440  ;440  ;Name=Update Merge Fields;
+                                                   Visible=No;
+                                                   InPage=-1;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Update Merge Fields;
+                                                              FRA=Mettre … jour les champs de fusion];
+                                                   SourceExpr=UpdateMergeFields }
+      { 8   ;Label        ;0    ;660  ;3300 ;440  ;ParentControl=7 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+      { 1900000001;0;Container;
+                  ContainerType=ContentArea }
+
+      { 1900000002;1;Group  ;
+                  CaptionML=[ENU=Options;
+                             FRA=Options] }
+
+      { 3   ;2   ;Field     ;
+                  CaptionML=[ENU=Correspondence Type;
+                             FRA=Moyen de communication privil‚gi‚];
+                  OptionCaptionML=[ENU=Same as Entry,Hard Copy,E-Mail,Fax;
+                                   FRA=,Courrier,E-mail,Fax];
+                  SourceExpr=CorrespondenceType }
+
+      { 7   ;2   ;Field     ;
+                  Name=Update Merge Fields;
+                  CaptionML=[ENU=Update Merge Fields;
+                             FRA=Mettre … jour les champs de fusion];
+                  SourceExpr=UpdateMergeFields;
+                  Visible=false }
+
+    }
+  }
+  CODE
+  {
+    VAR
+      Text000@1000 : TextConst 'ENU=%1 must be specified.;FRA=%1 doit ˆtre sp‚cifi‚(e).';
+      Text001@1001 : TextConst 'ENU=The interaction log entries must always be from the same %1.;FRA=Les ‚critures du journal interaction doivent appartenir au mˆme %1.';
+      Text002@1002 : TextConst 'ENU=Nothing to send.\\Please note that only Microsoft Word documents can be resend.;FRA=Il n''y a rien … envoyer.\\Remarque : seuls les documents Microsoft Word peuvent ˆtre renvoy‚s.';
+      DeliveryBufferTemp@1003 : TEMPORARY Record 5074;
+      AttachmentManagement@1004 : Codeunit 5052;
+      CorrespondenceType@1005 : 'Same as Entry,Hard Copy,E-Mail,Fax';
+      UpdateMergeFields@1006 : Boolean;
+      Text003@1007 : TextConst 'ENU=Resend:;FRA=Renvoyer :';
+
+    BEGIN
+    {
+      /** @r IMH03 @d 26/09/11 @a ISAT.PC @v IMH6.01.108 @s Interactions @h mantis1247
+          @c Changement des options de correspondance Identique ‚criture,Impression,E-mail,T‚l‚copie … vide,Courrier,E-mail,Fax */
+      /** @r IMH02 @d 07/09/11 @a ISAT.ZW @v IMH6.01.108 @s Interactions @c changer talbe 5062 Attachment --> 50021 */
+      /** @r IMH01 @d 25/01/11 @a ISAT.LLT @v IMH6.01.108 @s Interactions @c Renommage champ Correspondance Type */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

@@ -1,0 +1,166 @@
+OBJECT [Dataport 8016603 Ledger Cust. Not Apply Import ]
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/09;
+    Time=12:00:00;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU="Ledger Customer Not Apply Import ";
+               FRA=Import ‚critures client non lettr‚es];
+    Import=Yes;
+    FileFormat=Variable;
+    FieldStartDelimiter=<>;
+    FieldEndDelimiter=<>;
+    FieldSeparator=[;];
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table81;
+        AutoSave=No;
+        AutoUpdate=No;
+        AutoReplace=No;
+        ReqFilterFields=Journal Template Name,Journal Batch Name;
+        OnPreDataItem=BEGIN
+                        JnlTempName := GETFILTER("Gen. Journal Line"."Journal Template Name");
+                        JnlBatchName := GETFILTER("Gen. Journal Line"."Journal Batch Name");
+
+                        IF JnlTempName = '' THEN
+                          ERROR(Text001);
+                        IF JnlBatchName = '' THEN
+                          JnlBatchName := 'DEFAULT';
+
+                        NumLig := 0;
+                        CurrFile.TEXTMODE := TRUE;
+                        CurrFile.READ(NomSociete);   // pour supprimer la 1ere ligne de texte
+
+                        IF COPYSTR(NomSociete,1,6) = 'CLIENT' THEN
+                          AccountType := AccountType::Customer;
+
+                        IF COPYSTR(NomSociete,1,11) = 'FOURNISSEUR' THEN
+                          AccountType := AccountType::Vendor;
+
+                        IF NOT (AccountType IN [AccountType::Customer,AccountType::Vendor]) THEN
+                          ERROR(Text002);
+                      END;
+
+        OnBeforeImportRecord=BEGIN
+                               "Gen. Journal Line".INIT;
+                               Mtt := 0;
+                               sens := '';
+                               LibA := '';
+                             END;
+
+        OnAfterImportRecord=BEGIN
+                              IF "Posting Date" = 0D THEN
+                                CurrDataport.SKIP;
+
+                                NumLig := NumLig +10000;
+                                "Line No." := NumLig ;
+
+                                "Journal Template Name" := JnlTempName;
+                                "Journal Batch Name" := JnlBatchName;
+
+                                //<<ISA01
+                                IF NOT GenJournalTemplate.GET(JnlTempName) THEN;
+                                "Source Code"  := GenJournalTemplate."Source Code";
+                                //>>ISA01
+
+                                INSERT(TRUE);
+                                VALIDATE("Account Type",AccountType);
+
+                                Customer.Name:= '';
+                                "Account No." := AccountNo;
+
+                                  IF sens = 'D'THEN
+                                  VALIDATE("Debit Amount",Mtt)
+                                ELSE
+                                  VALIDATE("Credit Amount",Mtt);
+
+                                VALIDATE("Document Type",0);
+                                CASE COPYSTR(LibA,1,2) OF
+                                  'FA' : "Gen. Journal Line".VALIDATE("Document Type","Gen. Journal Line"."Document Type"::Invoice);
+                                  'AV' : "Gen. Journal Line".VALIDATE("Document Type","Gen. Journal Line"."Document Type"::"Credit Memo");
+                                  'RE','VI' : BEGIN
+                                     IF sens='D' THEN
+                                       "Gen. Journal Line".VALIDATE("Document Type","Gen. Journal Line"."Document Type"::Reminder)
+                                     ELSE
+                                       "Gen. Journal Line".VALIDATE("Document Type","Gen. Journal Line"."Document Type"::Payment)
+                                  END;
+                                END;
+
+                                VALIDATE("Bal. Account Type","Gen. Journal Line"."Bal. Account Type"::"G/L Account");
+
+                                CASE "Account Type" OF
+                                  "Account Type"::Customer : VALIDATE("Bal. Account No.");
+                                  "Account Type"::Vendor : VALIDATE("Bal. Account No.");
+                                END;
+
+                                Description := LibE;
+                                "Due Date"  := Duedate;
+                                MODIFY(TRUE);
+                            END;
+
+      }
+      FIELDS
+      {
+        {      ;     ;"Posting Date"       }
+        {      ;     ;AccountNo            }
+        {      ;     ;"Document No."       }
+        {      ;     ;"Document Date"     ;CallFieldValidate=Yes }
+        {      ;     ;LibA                ;OnBeforeEvaluateField=BEGIN
+                                                                   Text := Convert.Ansi2Ascii(Text);
+                                                                 END;
+                                                                  }
+        {      ;     ;LibE                ;OnBeforeEvaluateField=BEGIN
+                                                                   Text := Convert.Ansi2Ascii(Text);
+                                                                 END;
+                                                                  }
+        {      ;     ;sens                 }
+        {      ;     ;Mtt                  }
+        {      ;     ;Duedate              }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=7040;
+      Height=1760;
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      Customer@8016636 : Record 18;
+      GenJournalTemplate@8016600 : Record 80;
+      NumLig@8016601 : Integer;
+      Convert@8016602 : Codeunit 8016602;
+      JnlTempName@8016617 : Code[10];
+      JnlBatchName@8016620 : Code[10];
+      AccountType@8016635 : 'G/L Account,Customer,Vendor,Bank Account,Fixed Asset';
+      AccountNo@8016619 : Code[11];
+      LibA@8016609 : Text[30];
+      LibE@8016613 : Text[30];
+      sens@8016604 : Text[1];
+      Mtt@8016605 : Decimal;
+      Duedate@8016650 : Date;
+      NomSociete@8016606 : Text[250];
+      Text001@8016618 : TextConst 'FRA=Vous devez indiquer un modŠle de feuille de saisie.';
+      Text002@8016634 : TextConst 'FRA=Le debut du fichier doit commencer par CLIENT ou FOURNISSEUR';
+
+    BEGIN
+    {
+      /** @r ISA01 @d 07/07/09 @a ISAT.MA @v ISA6.00.00.01 @s Migration v6 **/
+    }
+    END.
+  }
+}

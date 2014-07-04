@@ -1,0 +1,732 @@
+OBJECT Codeunit 50299 Test Extranet Provider
+{
+  OBJECT-PROPERTIES
+  {
+    Date=17/12/13;
+    Time=17:17:32;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lExtranetProviderWebServ@1100281000 : Codeunit 50197;
+            lFileNameToExport@1100281001 : Text[1024];
+            lBigText@1000000000 : BigText;
+          BEGIN
+            //WebServiceAddress := 'http://simhns03:7065/NST2009R2_RECETTE_IMH/WS/IMH - Recette/Codeunit/ExtranetProvider';
+            WebServiceAddress := 'http://simhns05:7061/NST2009R2_DEV_IMH/WS/IMH - Dev/Codeunit/ExtranetProvider';
+
+            lFileNameToExport := CommonDialogMgt.OpenFile(Text005,'',4,Text008,1);
+            IF lFileNameToExport = '' THEN BEGIN
+              MESSAGE(Text001);
+              EXIT;
+            END;
+
+            {
+            TestUpdateOperationnalAddress(
+              lFileNameToExport,'101167M',
+              '233 Rue Marie Curie','',
+              '01960','PERONNAS','PCabel','Philippe','CABEL');
+
+            TestUpdateAdministrativeAdd(
+              lFileNameToExport,'101167M',
+              '233, rue Marie Curie','',
+              '01960','PERONNAS','PCabel','Philippe','CABEL');
+            }
+            {
+            TestDeclareAbsencePeriod(
+              lFileNameToExport,'323830E',TRUE,'036',
+              CREATEDATETIME(021211D,100000T),CREATEDATETIME(031211D,100000T),
+              'ML','PCabel','Philippe','CABEL');
+            }
+
+            {
+            lExtranetProviderWebServ.DeclareAbsencePeriod(
+              '323830E',FALSE,'',
+              CREATEDATETIME(101011D,100000T),CREATEDATETIME(101011D,100000T),
+              'ML','PCabel','Philippe','CABEL');
+            }
+            lExtranetProviderWebServ.ListUnavailabilityPeriod(
+              '323830E',FALSE,'', lBigText);
+
+            //TestGetDaySchedule(lFileNameToExport,'339655R',FALSE);
+            {
+            TestUpdatePhones(
+              lFileNameToExport,'101167M',
+              '01 02 03 04 05',
+              '02 02 03 04 05',
+              '03 02 03 04 05',
+              '04 02 03 04 05',
+              '05 02 03 04 05',
+              '06 02 03 04 05',
+              'PCabel','Philippe','CABEL');
+            }
+
+            //TestListUnavailabilityPeriod(lFileNameToExport,'323830E',FALSE,'');
+            //TestListUnavailabilityPeriod(lFileNameToExport,'323830E',TRUE,'');
+            //TestGetAbsenceSpecialization(lFileNameToExport,'323830E','',0,CREATEDATETIME(100911D,TIME));
+            TestHasPendingUpdates(lFileNameToExport,'323830E',2);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      CommonDialogMgt@1100281000 : Codeunit 412;
+      Text001@1100281003 : TextConst 'FRA=Veuilllez sÇlectionner une sortie';
+      Text005@1100281002 : TextConst 'ENU=Export Attachment;FRA=Rep document';
+      Text008@1100281001 : TextConst 'ENU=Files XML (*.XML)|*.XML;FRA=Fichiers XML (*.XML)|*.XML';
+      WebServiceAddress@1100281004 : Text[1024];
+      Text009@1100281005 : TextConst 'ENU=Files XML (*.XML)|*.XML;FRA=Tous Fichiers (*.*)|*.*';
+
+    PROCEDURE TestGetAbsenceSpecialization@1100281006(pFileNameToExport@1100281003 : Text[1024];pProviderNo@1100281002 : Code[20];pSpecializationCode@1100281000 : Code[10];pEmergency@1100281001 : Integer;pDate@1100281013 : DateTime);
+    VAR
+      lSentMQBuffer@1100281012 : Record 8016720;
+      lwinHTTPService@1100281011 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lFileToAdd@1100281009 : File;
+      lOutStream@1100281008 : OutStream;
+      lInStream@1100281007 : InStream;
+      lInStreamToAdd@1100281006 : InStream;
+      lFilePathToAdd@1100281005 : Text[1024];
+      lTempText@1100281004 : Text[1024];
+    BEGIN
+
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<GetAbsenceSpecialization xmlns="urn:microsoft-dynamics-schemas/codeunit/ExtranetProvider">');
+      // Paramätre de fonction
+      IF pProviderNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pProviderNo/>');
+      END;
+      IF pSpecializationCode <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pSpecializationCode>' + pSpecializationCode + '</pSpecializationCode>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pSpecializationCode/>');
+      END;
+      lOutStream.WRITETEXT('<pEmergency>' + FORMAT(pEmergency) + '</pEmergency>');
+      IF pDate <> 0DT THEN BEGIN
+        lOutStream.WRITETEXT('<pDate>' + FORMAT(pDate,0,9) + '</pDate>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pDate/>');
+      END;
+      lOutStream.WRITETEXT('<pSpecializationList/>');
+
+      lOutStream.WRITETEXT('</GetAbsenceSpecialization>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'GetAbsenceSpecialization_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'GetAbsenceSpecialization_Response.xml');
+      HYPERLINK(pFileNameToExport + 'GetAbsenceSpecialization_Response.xml');
+    END;
+
+    PROCEDURE TestListUnavailabilityPeriod@1100281004(pFileNameToExport@1100281007 : Text[1024];pProviderNo@1100281023 : Code[20];pEmergency@1100281022 : Boolean;pSpecializationCode@1100281021 : Code[10]);
+    VAR
+      lSentMQBuffer@1100281010 : Record 8016720;
+      lwinHTTPService@1100281009 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lFileToAdd@1100281006 : File;
+      lOutStream@1100281005 : OutStream;
+      lInStream@1100281004 : InStream;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lTempText@1100281000 : Text[1024];
+    BEGIN
+
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<ListUnavailabilityPeriod xmlns="urn:microsoft-dynamics-schemas/codeunit/ExtranetProvider">');
+      // Paramätre de fonction
+      IF pProviderNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pProviderNo/>');
+      END;
+      IF pEmergency THEN BEGIN
+        lOutStream.WRITETEXT('<pEmergency>true</pEmergency>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pEmergency>false</pEmergency>');
+      END;
+      IF pSpecializationCode <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pSpecializationCode>' + pSpecializationCode + '</pSpecializationCode>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pSpecializationCode/>');
+      END;
+      lOutStream.WRITETEXT('<pAbsencePeriods/>');
+      lOutStream.WRITETEXT('<pList/>');
+
+      lOutStream.WRITETEXT('</ListUnavailabilityPeriod>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'ListUnavailabilityPeriod_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'ListUnavailabilityPeriod_Response.xml');
+      HYPERLINK(pFileNameToExport + 'ListUnavailabilityPeriod_Response.xml');
+    END;
+
+    PROCEDURE TestUpdatePhones@1100281002(pFileNameToExport@1100281007 : Text[1024];pProviderNo@1100281019 : Code[20];pPhoneNo@1100281018 : Text[30];pMobilePhoneNo@1100281017 : Text[30];pMobilePhone2No@1100281016 : Text[30];pFaxNo@1100281015 : Text[30];pBusinessPhoneNo@1100281014 : Text[30];pConstraintPhoneNo@1100281013 : Text[30];pExtranetContactNo@1100281012 : Code[20];pExtranetContactName@1100281011 : Text[50];pExtranetContactFirstName@1100281003 : Text[30]);
+    VAR
+      lSentMQBuffer@1100281010 : Record 8016720;
+      lwinHTTPService@1100281009 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lFileToAdd@1100281006 : File;
+      lOutStream@1100281005 : OutStream;
+      lInStream@1100281004 : InStream;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lTempText@1100281000 : Text[1024];
+    BEGIN
+
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<UpdatePhones xmlns="urn:microsoft-dynamics-schemas/codeunit/ExtranetProvider">');
+      // Paramätre de fonction
+      IF pProviderNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pProviderNo/>');
+      END;
+      IF pPhoneNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pPhoneNo>' + pPhoneNo + '</pPhoneNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pPhoneNo/>');
+      END;
+      IF pMobilePhoneNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pMobilePhoneNo>' + pMobilePhoneNo + '</pMobilePhoneNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pMobilePhoneNo/>');
+      END;
+      IF pMobilePhone2No <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pMobilePhone2No>' + pMobilePhone2No + '</pMobilePhone2No>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pMobilePhone2No/>');
+      END;
+      IF pFaxNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pFaxNo>' + pFaxNo + '</pFaxNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pFaxNo/>');
+      END;
+      IF pBusinessPhoneNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pBusinessPhoneNo>' + pBusinessPhoneNo + '</pBusinessPhoneNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pBusinessPhoneNo/>');
+      END;
+      IF pConstraintPhoneNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pConstraintPhoneNo>' + pConstraintPhoneNo + '</pConstraintPhoneNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pConstraintPhoneNo/>');
+      END;
+      IF pExtranetContactNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactNo>' + pExtranetContactNo + '</pExtranetContactNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactNo/>');
+      END;
+      IF pExtranetContactName <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactName>' + pExtranetContactName + '</pExtranetContactName>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactName/>');
+      END;
+      IF pExtranetContactFirstName <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactFirstName>' + pExtranetContactFirstName + '</pExtranetContactFirstName>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactFirstName/>');
+      END;
+
+      lOutStream.WRITETEXT('</UpdatePhones>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'UpdatePhones_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'UpdatePhones_Response.xml');
+      HYPERLINK(pFileNameToExport + 'UpdatePhones_Response.xml');
+    END;
+
+    PROCEDURE TestGetDaySchedule@1100281003(pFileNameToExport@1100281007 : Text[1024];pProviderNo@1100281012 : Code[20];pEmergency@1100281011 : Boolean);
+    VAR
+      lSentMQBuffer@1100281010 : Record 8016720;
+      lwinHTTPService@1100281009 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lFileToAdd@1100281006 : File;
+      lOutStream@1100281005 : OutStream;
+      lInStream@1100281004 : InStream;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lTempText@1100281000 : Text[1024];
+    BEGIN
+
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<GetDaySchedule xmlns="urn:microsoft-dynamics-schemas/codeunit/ExtranetProvider">');
+      // Paramätre de fonction
+      IF pProviderNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pProviderNo/>');
+      END;
+      IF pEmergency THEN BEGIN
+        lOutStream.WRITETEXT('<pEmergency>true</pEmergency>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pEmergency>false</pEmergency>');
+      END;
+      lOutStream.WRITETEXT('<pDayScheduleList/>');
+
+      lOutStream.WRITETEXT('</GetDaySchedule>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'GetDaySchedule_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'GetDaySchedule_Response.xml');
+      HYPERLINK(pFileNameToExport + 'GetDaySchedule_Response.xml');
+    END;
+
+    PROCEDURE TestDeclareAbsencePeriod@1100281001(pFileNameToExport@1100281007 : Text[1024];pProviderNo@1100281018 : Code[20];pEmergency@1100281017 : Boolean;pSpecializationCode@1100281016 : Code[10];pStartDate@1100281015 : DateTime;pEndDate@1100281014 : DateTime;pAbsenceReasonCode@1100281013 : Code[10];pExtranetContactNo@1100281012 : Code[20];pExtranetContactName@1100281011 : Text[30];pExtranetContactFirstName@1100281003 : Text[30]);
+    VAR
+      lSentMQBuffer@1100281010 : Record 8016720;
+      lwinHTTPService@1100281009 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lFileToAdd@1100281006 : File;
+      lOutStream@1100281005 : OutStream;
+      lInStream@1100281004 : InStream;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lTempText@1100281000 : Text[1024];
+    BEGIN
+
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<DeclareAbsencePeriod xmlns="urn:microsoft-dynamics-schemas/codeunit/ExtranetProvider">');
+      // Paramätre de fonction
+      IF pProviderNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pProviderNo/>');
+      END;
+      IF pEmergency THEN BEGIN
+        lOutStream.WRITETEXT('<pEmergency>true</pEmergency>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pEmergency>false</pEmergency>');
+      END;
+      IF pSpecializationCode <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pSpecializationCode>' + pSpecializationCode + '</pSpecializationCode>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pSpecializationCode/>');
+      END;
+
+      IF pStartDate <> 0DT THEN BEGIN
+        lOutStream.WRITETEXT('<pStartDate>' + FORMAT(pStartDate,0,9) + '</pStartDate>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pStartDate/>');
+      END;
+      IF pEndDate <> 0DT THEN BEGIN
+        lOutStream.WRITETEXT('<pEndDate>' + FORMAT(pEndDate,0,9) + '</pEndDate>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pEndDate/>');
+      END;
+
+      IF pAbsenceReasonCode <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pAbsenceReasonCode>' + pAbsenceReasonCode + '</pAbsenceReasonCode>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pAbsenceReasonCode/>');
+      END;
+      IF pExtranetContactNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactNo>' + pExtranetContactNo + '</pExtranetContactNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactNo/>');
+      END;
+      IF pExtranetContactName <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactName>' + pExtranetContactName + '</pExtranetContactName>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactName/>');
+      END;
+      IF pExtranetContactFirstName <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactFirstName>' + pExtranetContactFirstName + '</pExtranetContactFirstName>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactFirstName/>');
+      END;
+
+      lOutStream.WRITETEXT('</DeclareAbsencePeriod>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'DeclareAbsencePeriod_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'DeclareAbsencePeriod_Response.xml');
+      HYPERLINK(pFileNameToExport + 'DeclareAbsencePeriod_Response.xml');
+    END;
+
+    PROCEDURE TestUpdateOperationnalAddress@1100281010(pFileNameToExport@1100281007 : Text[1024];pProviderNo@1100281003 : Code[20];pAddress1@1100281011 : Text[50];pAddress2@1100281012 : Text[50];pPostCode@1100281013 : Code[20];pCity@1100281014 : Text[30];pExtranetContactNo@1100281015 : Code[20];pExtranetContactName@1100281016 : Text[30];pExtranetContactFirstName@1100281017 : Text[30]);
+    VAR
+      lSentMQBuffer@1100281010 : Record 8016720;
+      lwinHTTPService@1100281009 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lFileToAdd@1100281006 : File;
+      lOutStream@1100281005 : OutStream;
+      lInStream@1100281004 : InStream;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lTempText@1100281000 : Text[1024];
+    BEGIN
+
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<UpdateOperationnalAddress xmlns="urn:microsoft-dynamics-schemas/codeunit/ExtranetProvider">');
+
+      // Paramätre de fonction
+      IF pProviderNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pProviderNo/>');
+      END;
+      IF pAddress1 <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pAddress1>' + pAddress1 + '</pAddress1>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pAddress1/>');
+      END;
+      IF pAddress2 <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pAddress2>' + pAddress2 + '</pAddress2>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pAddress2/>');
+      END;
+      IF pPostCode <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pPostCode>' + pPostCode + '</pPostCode>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pPostCode/>');
+      END;
+      IF pCity <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pCity>' + pCity + '</pCity>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pCity/>');
+      END;
+      IF pExtranetContactNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactNo>' + pExtranetContactNo + '</pExtranetContactNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactNo/>');
+      END;
+      IF pExtranetContactName <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactName>' + pExtranetContactName + '</pExtranetContactName>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactName/>');
+      END;
+      IF pExtranetContactFirstName <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactFirstName>' + pExtranetContactFirstName + '</pExtranetContactFirstName>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactFirstName/>');
+      END;
+
+      lOutStream.WRITETEXT('</UpdateOperationnalAddress>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'UpdateOperationnalAddress_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'UpdateOperationnalAddress_Response.xml');
+      HYPERLINK(pFileNameToExport + 'UpdateOperationnalAddress_Response.xml');
+    END;
+
+    PROCEDURE TestUpdateAdministrativeAdd@1100281000(pFileNameToExport@1100281007 : Text[1024];pProviderNo@1100281003 : Code[20];pAddress1@1100281011 : Text[50];pAddress2@1100281012 : Text[50];pPostCode@1100281013 : Code[20];pCity@1100281014 : Text[30];pExtranetContactNo@1100281015 : Code[20];pExtranetContactName@1100281016 : Text[30];pExtranetContactFirstName@1100281017 : Text[30]);
+    VAR
+      lSentMQBuffer@1100281010 : Record 8016720;
+      lwinHTTPService@1100281009 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lFileToAdd@1100281006 : File;
+      lOutStream@1100281005 : OutStream;
+      lInStream@1100281004 : InStream;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lTempText@1100281000 : Text[1024];
+    BEGIN
+
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<UpdateAdministrativeAddress xmlns="urn:microsoft-dynamics-schemas/codeunit/ExtranetProvider">');
+
+      // Paramätre de fonction
+      IF pProviderNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pProviderNo/>');
+      END;
+      IF pAddress1 <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pAddress1>' + pAddress1 + '</pAddress1>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pAddress1/>');
+      END;
+      IF pAddress2 <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pAddress2>' + pAddress2 + '</pAddress2>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pAddress2/>');
+      END;
+      IF pPostCode <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pPostCode>' + pPostCode + '</pPostCode>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pPostCode/>');
+      END;
+      IF pCity <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pCity>' + pCity + '</pCity>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pCity/>');
+      END;
+      IF pExtranetContactNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactNo>' + pExtranetContactNo + '</pExtranetContactNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactNo/>');
+      END;
+      IF pExtranetContactName <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactName>' + pExtranetContactName + '</pExtranetContactName>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactName/>');
+      END;
+      IF pExtranetContactFirstName <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactFirstName>' + pExtranetContactFirstName + '</pExtranetContactFirstName>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pExtranetContactFirstName/>');
+      END;
+
+      lOutStream.WRITETEXT('</UpdateAdministrativeAddress>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'UpdateAdministrativeAddress_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'UpdateAdministrativeAddress_Response.xml');
+      HYPERLINK(pFileNameToExport + 'UpdateAdministrativeAddress_Response.xml');
+    END;
+
+    PROCEDURE TestHasPendingUpdates@1100281005(pFileNameToExport@1100281007 : Text[1024];pProviderNo@1100281003 : Code[20];pUseCase@1100281011 : Integer);
+    VAR
+      lSentMQBuffer@1100281010 : Record 8016720;
+      lwinHTTPService@1100281009 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lFileToAdd@1100281006 : File;
+      lOutStream@1100281005 : OutStream;
+      lInStream@1100281004 : InStream;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lTempText@1100281000 : Text[1024];
+    BEGIN
+
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<HasPendingUpdates xmlns="urn:microsoft-dynamics-schemas/codeunit/ExtranetProvider">');
+
+      // Paramätre de fonction
+      IF pProviderNo <> '' THEN BEGIN
+        lOutStream.WRITETEXT('<pProviderNo>' + pProviderNo + '</pProviderNo>');
+      END ELSE BEGIN
+        lOutStream.WRITETEXT('<pProviderNo/>');
+      END;
+      lOutStream.WRITETEXT('<pForValue>' + FORMAT(pUseCase) + '</pForValue>');
+      lOutStream.WRITETEXT('</HasPendingUpdates>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'HasPendingUpdates_Send.xml');
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'HasPendingUpdates_Response.xml');
+      HYPERLINK(pFileNameToExport + 'HasPendingUpdates_Response.xml');
+    END;
+
+    BEGIN
+    END.
+  }
+}

@@ -1,0 +1,881 @@
+OBJECT Report 8016613 G/L Det. Trial Bal. Isatech +
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=14:55:28;
+    Modified=Yes;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=G/L Detail Trial Balance Isatech +;
+               FRA=Grand livre comptes g‚n‚raux Isatech +];
+    TopMargin=1000;
+    BottomMargin=500;
+    LeftMargin=1000;
+    OnInitReport=BEGIN
+                   TotalBy := TotalBy::Month
+                 END;
+
+    OnPreReport=BEGIN
+                  Filter := "G/L Account".GETFILTERS;
+
+                  //<<ISA01
+                  //FiltreGestion := "G/L Account".GETFILTER("Responsibility Center Filter");
+                  FiltreType := "G/L Account".GETFILTER("G/L Entry Type Filter");
+                  //>>ISA01
+
+                  FiltreGL := "G/L Account".GETFILTER("No.");
+                  FiltreDate := "G/L Account".GETFILTER("Date Filter");
+                END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table15;
+        DataItemTableView=SORTING(No.)
+                          WHERE(Account Type=CONST(Posting));
+        OnPreDataItem=BEGIN
+                        IF GETFILTER("Date Filter") = '' THEN
+                          ERROR(Text1120000,FIELDCAPTION("Date Filter"));
+                        IF COPYSTR(GETFILTER("Date Filter"),1,1) = '.' THEN
+                          ERROR(Text1120001);
+
+                        StartDate := GETRANGEMIN("Date Filter");
+                        PreviousEndDate := CLOSINGDATE(StartDate - 1);
+
+                        FiltreDateCalc.CreateFiscalYearFilter(TextDate,TextDate,StartDate,0);
+                        TextDate := CONVERTSTR(TextDate,'.',',');
+                        TextDate := SELECTSTR(1,TextDate);
+                        EVALUATE(PreviousStartDate,TextDate);
+                        IF COPYSTR(GETFILTER("Date Filter"),STRLEN(GETFILTER("Date Filter")),1) = '.' THEN
+                          EndDate := 0D
+                        ELSE
+                          EndDate := GETRANGEMAX("Date Filter");
+
+                        TestCentralization; //ISAT03.ST
+                        CurrReport.CREATETOTALS(
+                          GLAccount2."Debit Amount",GLAccount2."Credit Amount",
+                          "Debit Amount","Credit Amount",tot_deb,tot_cre);
+
+                        ShowTotalWithFilter := "G/L Account".GETFILTER("No.") <> '';
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           GLAccount2 := "G/L Account";
+
+                           IF "G/L Account".GETFILTER("G/L Entry Type Filter") <> '' THEN
+                             "G/L Account".COPYFILTER("G/L Entry Type Filter",GLAccount2."G/L Entry Type Filter");
+
+                           WITH GLAccount2 DO BEGIN
+                             SETRANGE("Date Filter",0D,PreviousEndDate);
+
+
+                             IF "G/L Account".GETFILTER("G/L Entry Type Filter") <>'' THEN                         //**@r ISA02
+                                "G/L Account".COPYFILTER("G/L Entry Type Filter",GLAccount2."G/L Entry Type Filter");//**@r ISA02
+
+                             CALCFIELDS("Debit Amount","Credit Amount");
+                             Solde := GLAccount2."Debit Amount" - GLAccount2."Credit Amount";
+                             tot_deb:=GLAccount2."Debit Amount";
+                             tot_cre:=GLAccount2."Credit Amount";
+                             //<< ISA02 isat.jo
+                             Debit2TotalWithFilter += GLAccount2."Debit Amount";
+                             Credit2TotalWithFilter += GLAccount2. "Credit Amount";
+                             //>> ISA02 isat.jo
+
+                           END;
+
+                           SETRANGE("Date Filter",StartDate,EndDate);
+                           CALCFIELDS("Debit Amount","Credit Amount");
+
+                           //<< ISA02 isat.jo
+                           //SoldeTotalWithFilter += "Debit Amount" - "Credit Amount";
+                           //>> ISA02 isat.jo
+                           DebitTotalWithFilter += "Debit Amount";
+                           CreditTotalWithFilter += "Credit Amount";
+
+                           IF (Solde = 0) AND
+                              ("Debit Amount" = 0) AND
+                              ("Credit Amount" = 0)
+                           THEN
+                             IF NOT PrintFlag THEN
+                               CurrReport.SKIP;
+                         END;
+
+        ReqFilterFields=No.,Date Filter,G/L Entry Type Filter;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19425;
+            SectionHeight=1692;
+          }
+          CONTROLS
+          {
+            { 1120004;TextBox   ;16575;0    ;2850 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1120006;TextBox   ;75   ;423  ;10650;423  ;FontSize=8;
+                                                         SourceExpr=COMPANYNAME }
+            { 1120008;TextBox   ;16575;423  ;2850 ;423  ;FontSize=8;
+                                                         SourceExpr=STRSUBSTNO(Text1120002,USERID) }
+            { 1120010;TextBox   ;75   ;846  ;10650;477  ;FontSize=8;
+                                                         SourceExpr=STRSUBSTNO(Text1120003,PreviousStartDate) }
+            { 1120012;TextBox   ;16575;846  ;2850 ;477  ;FontSize=8;
+                                                         SourceExpr=STRSUBSTNO(Text1120004,CurrReport.PAGENO) }
+            { 1120000;TextBox   ;75   ;0    ;10650;423  ;FontSize=12;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text000 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19425;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(FiltreGL <> '');
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120014;TextBox   ;150  ;0    ;16750;423  ;FontSize=8;
+                                                         SourceExpr="G/L Account".TABLECAPTION + ': ' + FiltreGL }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=19425;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF (FiltreDate <> '' ) THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000010;TextBox;150  ;0    ;16750;423  ;FontSize=8;
+                                                         SourceExpr="G/L Account".FIELDCAPTION("Date Filter") + ': ' + FiltreDate }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=19425;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF (FiltreType <> '' ) THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000012;TextBox;150  ;0    ;16750;423  ;FontSize=8;
+                                                         SourceExpr="G/L Account".FIELDCAPTION("G/L Entry Type Filter") + ': ' + FiltreType }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=19425;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT := "G/L Account".GETFILTER("G/L Entry Type Filter") = '';
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000043;TextBox;150  ;0    ;16750;423  ;FontSize=8;
+                                                         SourceExpr=Text1120008 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19425;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1000000109;Shape  ;19300;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000110;Shape  ;16950;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000111;Shape  ;12150;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000112;Shape  ;14550;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000113;Shape  ;3150 ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000114;Shape  ;5100 ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000115;Shape  ;7125 ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000116;Shape  ;1500 ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000117;Shape  ;0    ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000030;Shape  ;0    ;0    ;19300;30   ;ShapeStyle=HorzLine }
+            { 1000000031;Shape  ;0    ;846  ;19300;30   ;ShapeStyle=HorzLine }
+            { 1120001;TextBox   ;150  ;0    ;1350 ;846  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text001 }
+            { 1120002;TextBox   ;1650 ;0    ;1500 ;846  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text002 }
+            { 1120003;TextBox   ;3300 ;0    ;1650 ;846  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text003 }
+            { 1120005;TextBox   ;5250 ;0    ;1800 ;846  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text004 }
+            { 1120007;TextBox   ;7200 ;0    ;4650 ;846  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text005 }
+            { 1120009;TextBox   ;12300;0    ;2100 ;846  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text006 }
+            { 1120011;TextBox   ;14700;0    ;2100 ;846  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text007 }
+            { 1120013;TextBox   ;17100;0    ;1950 ;846  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=Text008 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19425;
+            SectionHeight=453;
+            OnPreSection=BEGIN
+                           //EC 23/06/05 : ne pas imprimer les comptes non mouvement‚s
+                           // mg mais … controler db
+                           IF (Solde = 0) AND
+                              ("Debit Amount"=0) AND ("Credit Amount" = 0) THEN
+
+                           //IF (Solde = 0) AND
+                           // ("Debit Amount" - "Credit Amount" = 0) THEN
+                             IF NOT PrintFlag THEN
+                               CurrReport.SHOWOUTPUT := FALSE;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120032;TextBox   ;150  ;0    ;1350 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=No.;
+                                                                    FRA=Nø];
+                                                         SourceExpr="No." }
+            { 1120034;TextBox   ;1800 ;0    ;5250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Name;
+                                                                    FRA=Nom];
+                                                         SourceExpr=Name }
+            { 1000000091;Shape  ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000092;Shape  ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000093;Shape  ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000094;Shape  ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000098;Shape  ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000099;Shape  ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000033;Shape  ;0    ;423  ;19300;30   ;ShapeStyle=HorzLine }
+            { 1000000009;Shape  ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000011;Shape  ;0    ;0    ;19300;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=19425;
+            SectionHeight=453;
+          }
+          CONTROLS
+          {
+            { 1000000100;Shape  ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000101;Shape  ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000102;Shape  ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000103;Shape  ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000106;Shape  ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000107;Shape  ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000108;Shape  ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000032;Shape  ;0    ;423  ;19300;30   ;ShapeStyle=HorzLine }
+            { 1000000014;TextBox;1800 ;0    ;5250 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Name;
+                                                                    FRA=Nom];
+                                                         SourceExpr=Name }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19425;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           //EC 23/06/05 : ne pas imprimer les comptes non mouvement‚s
+                           IF (Solde = 0) AND
+                              ("Debit Amount" - "Credit Amount" = 0) THEN
+                             IF NOT PrintFlag THEN
+                               CurrReport.SHOWOUTPUT := FALSE;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120044;TextBox   ;7200 ;0    ;2700 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text1120005,PreviousEndDate) }
+            { 1120050;TextBox   ;17100;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GLAccount2."Debit Amount" - GLAccount2."Credit Amount" }
+            { 1000000082;Shape  ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000083;Shape  ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000084;Shape  ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000085;Shape  ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000086;Shape  ;3150 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000087;Shape  ;5100 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000088;Shape  ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000089;Shape  ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000090;Shape  ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000013;TextBox;9900 ;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GLAccount2."Debit Amount"-GLAccount2."Credit Amount" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19425;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT((Solde = "Debit Amount" - "Credit Amount") OR
+                                                 ("Account Type" <> 0));
+
+                           //EC 15/06/05 : ne pas imprimer les comptes non mouvement‚s
+                           IF (Solde = 0) AND
+                              ("Debit Amount" - "Credit Amount" = 0) THEN
+                             IF NOT PrintFlag THEN
+                               CurrReport.SHOWOUTPUT := FALSE;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120052;TextBox   ;7200 ;0    ;2700 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text1120005,EndDate) }
+            { 1000000073;Shape  ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000074;Shape  ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000075;Shape  ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000076;Shape  ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000077;Shape  ;3150 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000078;Shape  ;5100 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000079;Shape  ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000080;Shape  ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000081;Shape  ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000035;TextBox;12300;0    ;2100 ;423  ;FontSize=7;
+                                                         SourceExpr="Debit Amount" }
+            { 1000000036;TextBox;14700;0    ;2100 ;423  ;FontSize=7;
+                                                         SourceExpr="Credit Amount" }
+            { 1000000037;TextBox;17100;0    ;2100 ;423  ;FontSize=7;
+                                                         SourceExpr=Solde }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransFooter;
+            SectionWidth=19425;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 1000000046;Shape  ;0    ;0    ;19300;30   ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=19425;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(ShowTotalWithFilter);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120015;Shape     ;0    ;423  ;19300;30   ;ShapeStyle=HorzLine }
+            { 1120016;Shape     ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120018;Shape     ;0    ;0    ;19300;30   ;ShapeStyle=HorzLine }
+            { 1120020;Shape     ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120021;TextBox   ;14700;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CreditTotalWithFilter }
+            { 1120022;Shape     ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120023;TextBox   ;12300;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=DebitTotalWithFilter }
+            { 1120024;Shape     ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120025;Label     ;7200 ;30   ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Grand Total;
+                                                                    FRA=Total g‚n‚ral] }
+            { 1120026;Shape     ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120027;Shape     ;5100 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120028;Shape     ;3150 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120029;Shape     ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120030;Shape     ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120053;TextBox   ;9900 ;30   ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Debit2TotalWithFilter-Credit2TotalWithFilter }
+            { 1120054;TextBox   ;17100;30   ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=(Debit2TotalWithFilter+DebitTotalWithFilter)-(Credit2TotalWithFilter+CreditTotalWithFilter) }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=19425;
+            SectionHeight=876;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(NOT ShowTotalWithFilter);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120031;Shape     ;0    ;423  ;19300;30   ;ShapeStyle=HorzLine }
+            { 1120033;Shape     ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120035;TextBox   ;17100;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="Debit Amount"-"Credit Amount" }
+            { 1120036;Shape     ;0    ;0    ;19300;30   ;ShapeStyle=HorzLine }
+            { 1120037;Shape     ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120038;TextBox   ;14700;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="Credit Amount" }
+            { 1120039;Shape     ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120040;TextBox   ;12300;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="Debit Amount" }
+            { 1120041;Shape     ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120042;TextBox   ;9900 ;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GLAccount2."Debit Amount"-GLAccount2."Credit Amount" }
+            { 1120045;Label     ;7200 ;0    ;2550 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Grand Total;
+                                                                    FRA=Total g‚n‚ral] }
+            { 1120046;Shape     ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120047;Shape     ;5100 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120048;Shape     ;3150 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120049;Shape     ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120051;Shape     ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000007;
+        DataItemTableView=SORTING(Period Type,Period Start);
+        PrintOnlyIfDetail=Yes;
+        OnPreDataItem=BEGIN
+                        SETRANGE("Period Start",StartDate,CLOSINGDATE(EndDate));
+                        CurrReport.CREATETOTALS("G/L Entry"."Debit Amount","G/L Entry"."Credit Amount");
+                        //<<ISA03.ST
+                        IF "G/L Account".Centralization AND (Glob_centr <> Glob_centr::Aucune) THEN
+                          SETRANGE("Period Type", "Period Type"::Month)
+                        ELSE
+                          SETRANGE("Period Type", "Period Type"::Date);
+                        //>>ISA03.ST
+                      END;
+
+        GroupTotalFields=Period Type;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=19425;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+            { 1000000000;Shape  ;19300;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000015;Shape  ;0    ;816  ;19300;30   ;ShapeStyle=HorzLine }
+            { 1000000034;Shape  ;0    ;0    ;19300;30   ;ShapeStyle=HorzLine }
+            { 1000000016;TextBox;17100;423  ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=("G/L Entry"."Debit Amount" + GLAccount2."Debit Amount") - ("G/L Entry"."Credit Amount" + GLAccount2."Credit Amount") }
+            { 1000000026;TextBox;17100;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="G/L Entry"."Debit Amount" - "G/L Entry"."Credit Amount" }
+            { 1000000027;Shape  ;16950;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000028;TextBox;14700;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="G/L Entry"."Credit Amount" }
+            { 1000000044;Shape  ;14550;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000047;TextBox;12300;0    ;2100 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="G/L Entry"."Debit Amount" }
+            { 1000000070;Shape  ;12150;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000071;Label  ;7200 ;0    ;3450 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Total Date Range;
+                                                                    FRA=Total de la p‚riode] }
+            { 1000000072;TextBox;7200 ;423  ;4650 ;423  ;HorzGlue=Right;
+                                                         HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text1120006,EndDate) }
+            { 1000000095;Shape  ;7125 ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000129;Shape  ;5100 ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000130;Shape  ;3150 ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000131;Shape  ;1500 ;0    ;30   ;846  ;ShapeStyle=VertLine }
+            { 1000000132;Shape  ;0    ;0    ;30   ;846  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table17;
+        DataItemTableView=SORTING(G/L Account No.,Posting Date,Source Code);
+        OnPreDataItem=BEGIN
+                        IF "G/L Account".Centralization AND (Glob_centr = Glob_centr::"Journal et mois") THEN
+                          SETCURRENTKEY("Source Code","Posting Date","Document No.");
+
+                        SETRANGE("Posting Date",Date."Period Start",Date."Period End");
+                        EditerTotalMois := FALSE;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           Solde := Solde + "Debit Amount" - "Credit Amount";
+
+                           EditerTotalMois := TRUE;
+                         END;
+
+        TotalFields=Debit Amount,Credit Amount;
+        GroupTotalFields=Source Code;
+        DataItemLinkReference=G/L Account;
+        DataItemLink=G/L Account No.=FIELD(No.),
+                     Entry Type=FIELD(G/L Entry Type Filter);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19425;
+            SectionHeight=423;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(TRUE);
+                           IF "G/L Account".Centralization THEN
+                            IF Glob_centr<>Glob_centr::Aucune THEN
+                              CurrReport.SHOWOUTPUT(FALSE);;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120101;TextBox   ;75   ;0    ;1350 ;423  ;FontSize=7;
+                                                         CaptionML=[ENU=Posting Date;
+                                                                    FRA=Date comptabilisation];
+                                                         SourceExpr="Posting Date" }
+            { 1120104;TextBox   ;1725 ;0    ;1350 ;423  ;FontSize=7;
+                                                         CaptionML=[ENU=Source Code;
+                                                                    FRA=Code journal];
+                                                         SourceExpr="Source Code" }
+            { 1120107;TextBox   ;3300 ;0    ;1800 ;423  ;FontSize=7;
+                                                         CaptionML=[ENU=Document No.;
+                                                                    FRA=Nø document];
+                                                         SourceExpr="Document No." }
+            { 1120110;TextBox   ;5325 ;0    ;1800 ;423  ;FontSize=7;
+                                                         CaptionML=[ENU=External Document No.;
+                                                                    FRA=Nø doc. externe];
+                                                         SourceExpr="External Document No." }
+            { 1120111;Shape     ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1120113;TextBox   ;7275 ;0    ;4800 ;423  ;FontSize=7;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=D‚signation];
+                                                         SourceExpr=Description }
+            { 1120116;TextBox   ;12300;0    ;2100 ;423  ;FontSize=7;
+                                                         SourceExpr="Debit Amount" }
+            { 1120119;TextBox   ;14700;0    ;2100 ;423  ;FontSize=7;
+                                                         SourceExpr="Credit Amount" }
+            { 1120122;TextBox   ;17100;0    ;2100 ;423  ;FontSize=7;
+                                                         SourceExpr=Solde }
+            { 1000000001;Shape  ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000002;Shape  ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000003;Shape  ;3150 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000004;Shape  ;5100 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000005;Shape  ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000006;Shape  ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000007;Shape  ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000008;Shape  ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=19425;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF (CurrReport.TOTALSCAUSEDBY = FIELDNO("Source Code")) AND
+                              (Glob_centr=Glob_centr::"Journal et mois") AND
+                              "G/L Account".Centralization THEN
+                             CurrReport.SHOWOUTPUT(TRUE)
+                           ELSE
+                             CurrReport.SHOWOUTPUT(FALSE);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000021;Shape  ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000020;TextBox;17100;0    ;2100 ;423  ;FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Solde }
+            { 1000000019;TextBox;14700;0    ;2100 ;423  ;FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="Credit Amount" }
+            { 1000000023;Shape  ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000018;TextBox;12300;0    ;2100 ;423  ;FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="Debit Amount" }
+            { 1000000022;Shape  ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000017;TextBox;7200 ;0    ;2550 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="Source Code" }
+            { 1000000024;Shape  ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000069;Shape  ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000068;Shape  ;5100 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000067;Shape  ;3150 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000064;Shape  ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000025;Shape  ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        OnPreDataItem=BEGIN
+                        IF (NOT "G/L Account".Centralization) OR
+                          (Glob_centr = Glob_centr::Aucune) OR
+                          (NOT EditerTotalMois)
+                        THEN
+                          CurrReport.BREAK;
+                      END;
+
+        GroupTotalFields=Number;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=19425;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 1000000096;Shape  ;19300;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000097;Shape  ;0    ;393  ;19300;30   ;ShapeStyle=HorzLine }
+            { 1000000104;TextBox;17100;0    ;2100 ;423  ;FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Solde }
+            { 1000000105;Shape  ;0    ;0    ;19300;30   ;ShapeStyle=HorzLine }
+            { 1000000118;TextBox;14700;0    ;2100 ;423  ;FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="G/L Entry"."Credit Amount" }
+            { 1000000119;Shape  ;16950;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000120;TextBox;12300;0    ;2100 ;423  ;FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr="G/L Entry"."Debit Amount" }
+            { 1000000121;Shape  ;14550;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000122;TextBox;7200 ;0    ;4725 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Text1120007 + ' ' + FORMAT(Date."Period Type") + ' ' + Date."Period Name" }
+            { 1000000123;Shape  ;12150;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000124;Shape  ;7125 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000125;Shape  ;5100 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000126;Shape  ;3150 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000127;Shape  ;1500 ;0    ;30   ;423  ;ShapeStyle=VertLine }
+            { 1000000128;Shape  ;0    ;0    ;30   ;423  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=7150;
+      Height=2640;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   PrintFlag := TRUE;
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1120144;Label     ;75   ;0    ;2200 ;440  ;CaptionML=[ENU=Centralized by;
+                                                              FRA=Centralisation] }
+      { 1000000000;OptionButton;2860;0;3740 ;440  ;SourceExpr=Glob_centr;
+                                                   OptionValue=Aucune }
+      { 1000000001;OptionButton;2860;550;3740;440 ;SourceExpr=Glob_centr;
+                                                   OptionValue=Mois }
+      { 1000000002;OptionButton;2860;1100;3740;440;SourceExpr=Glob_centr;
+                                                   OptionValue=Journal et mois }
+      { 1000000003;CheckBox;3485;1870 ;550  ;440  ;ShowCaption=No;
+                                                   SourceExpr=PrintFlag }
+      { 1000000004;Label  ;110  ;1870 ;3150 ;440  ;CaptionML=[ENU=Print G/L Accs. without balance;
+                                                              FRA=Impr. cptes no mouvement‚s] }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      Text1120000@1120000 : TextConst 'ENU=You must fill in the %1 field.;FRA=Vous devez renseigner le champ %1.';
+      Text1120001@1120001 : TextConst 'ENU=You must specify a Starting Date value.;FRA=Vous devez sp‚cifier une date d‚but.';
+      Text1120002@1120002 : TextConst 'ENU=Printed by %1;FRA=Imprim‚ par %1';
+      Text1120003@1120003 : TextConst 'ENU=Fiscal Year Start Date : %1;FRA=D‚but exercice comptable : %1';
+      Text1120004@1120004 : TextConst 'ENU=Page %1;FRA=Page %1';
+      Text1120005@1120005 : TextConst 'ENU="Balance at %1 ";FRA="Solde au %1 "';
+      Text1120006@1120006 : TextConst 'ENU=Balance at %1;FRA=Solde au %1';
+      Text1120007@1120007 : TextConst 'ENU=Total;FRA=Total';
+      GLAccount2@1120008 : Record 15;
+      FiltreDateCalc@1120009 : Codeunit 358;
+      StartDate@1120010 : Date;
+      EndDate@1120011 : Date;
+      PreviousStartDate@1120012 : Date;
+      PreviousEndDate@1120013 : Date;
+      TextDate@1120014 : Text[30];
+      Solde@1120015 : Decimal;
+      TotalBy@1120016 : ' ,Week,Month,Quarter,Year';
+      DocNumSort@1120017 : Boolean;
+      Filter@1120018 : Text[250];
+      PeriodText@1120019 : Text[30];
+      Glob_centr@1000000000 : 'Aucune,Mois,Journal et mois';
+      tot_deb@1000000001 : Decimal;
+      tot_cre@1000000002 : Decimal;
+      EditerTotalMois@1000000003 : Boolean;
+      PrintFlag@1000000004 : Boolean;
+      FiltreGL@1000000005 : Text[250];
+      FiltreDate@1000000006 : Text[30];
+      FiltreType@1000000007 : Text[30];
+      Text1120008@1000000008 : TextConst 'ENU=This report includes simulation entries.;FRA=Cet ‚tat inclut les ‚critures de simulation.';
+      Text000@1120028 : TextConst 'ENU=G/L Detail Trial Balance;FRA=Grand livre comptes g‚n‚raux';
+      Text001@1120020 : TextConst 'ENU=Posting Date;FRA=Date comptabilisation';
+      Text002@1120021 : TextConst 'ENU=Source Code;FRA=Code journal';
+      Text003@1120022 : TextConst 'ENU=Document No.;FRA=No document';
+      Text004@1120023 : TextConst 'ENU=External Doc No.;FRA=No doc. externe';
+      Text005@1120024 : TextConst 'ENU=Description;FRA=D‚signation';
+      Text006@1120025 : TextConst 'ENU=Debit;FRA=D‚bit';
+      Text007@1120026 : TextConst 'ENU=Credit;FRA=Cr‚dit';
+      Text008@1120027 : TextConst 'ENU=Balance;FRA=Solde';
+      DebitTotalWithFilter@1120032 : Decimal;
+      CreditTotalWithFilter@1120031 : Decimal;
+      SoldeTotalWithFilter@1120030 : Decimal;
+      ShowTotalWithFilter@1120029 : Boolean;
+      Debit2TotalWithFilter@1120033 : Decimal;
+      Credit2TotalWithFilter@1120034 : Decimal;
+      Text017@8016602 : TextConst 'ENU=Period must be full month. Do you want to print without centralisation ?;FRA=La p‚riode doit correspondre … des mois entiers. Souhaitez-vous l''‚xecuter sans centralisation ?';
+
+    LOCAL PROCEDURE TestCentralization@8016603();
+    VAR
+      lAskQuestion@8016602 : Boolean;
+    BEGIN
+      //ISA03.ST
+      IF Glob_centr = Glob_centr::Aucune THEN
+        EXIT;
+
+      IF StartDate <> 0D THEN
+        IF DATE2DMY(StartDate,1) <> 1 THEN
+          lAskQuestion := TRUE;
+
+      IF EndDate <> 0D THEN
+        IF DATE2DMY(EndDate+1,1) <> 1 THEN
+          lAskQuestion := TRUE;
+
+      IF NOT lAskQuestion THEN
+        EXIT;
+      IF CONFIRM(Text017, FALSE) THEN
+        Glob_centr := Glob_centr::Aucune
+      ELSE
+        CurrReport.QUIT;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 26/08/10 @a isat.ST @v IMH6.01.040 @s Cr‚ation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

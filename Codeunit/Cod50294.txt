@@ -1,0 +1,173 @@
+OBJECT Codeunit 50294 Invoice To Force Post Mgt.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/02/12;
+    Time=14:59:03;
+    Modified=Yes;
+    Version List=A supprimer;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lInvoiceReconError@1100281004 : Record 50175;
+            lInvoiceReconError2@1100281005 : Record 50175;
+            lCounter@1100281003 : Integer;
+            lTotal@1100281002 : Integer;
+            lModulo@1100281001 : Integer;
+            lWDialog@1100281000 : Dialog;
+          BEGIN
+            IF NOT CONFIRM(Text002) THEN BEGIN
+              EXIT;
+            END;
+
+            // Suppression des messages d'erreur
+            lInvoiceReconError.SETRANGE(Type,lInvoiceReconError.Type::"Force Validation");
+            IF lInvoiceReconError.FINDSET THEN BEGIN
+              REPEAT
+                lInvoiceReconError."Error Step" := '';
+                lInvoiceReconError.Error := '';
+                lInvoiceReconError.MODIFY;
+              UNTIL lInvoiceReconError.NEXT = 0;
+            END;
+
+            lTotal := lInvoiceReconError.COUNT;
+            lModulo := ROUND(lTotal * 5 / 100,1,'>');
+            lWDialog.OPEN(STRSUBSTNO(Text023,Text020,Text021));
+            // Correction avant validation
+            lCounter := 0;
+            IF CONFIRM(Text001) THEN BEGIN
+              lInvoiceReconError.SETRANGE(Type,lInvoiceReconError.Type::"Force Validation");
+              lInvoiceReconError.SETRANGE("Posted Invoice No.",'');
+              lInvoiceReconError.SETRANGE("Error Step",'');
+              lInvoiceReconError.SETRANGE(Error,'');
+              IF lInvoiceReconError.FINDSET THEN BEGIN
+                REPEAT
+                  lCounter += 1;
+                  IF lCounter MOD lModulo = 1 THEN BEGIN
+                    lWDialog.UPDATE(1,ROUND(lCounter / lTotal * 9999,1,'>'));
+                  END;
+                  CLEARLASTERROR;
+                  COMMIT;
+                  CLEAR(CorrectInvoiceBeforeToPost);
+                  IF NOT CorrectInvoiceBeforeToPost.RUN(lInvoiceReconError) THEN BEGIN
+                    lInvoiceReconError2 := lInvoiceReconError;
+                    lInvoiceReconError2."Error Step" := Text008;
+                    lInvoiceReconError2.Error := COPYSTR(GETLASTERRORTEXT,1,MAXSTRLEN(lInvoiceReconError2.Error));
+                    lInvoiceReconError2.MODIFY;
+                  END;
+                UNTIL lInvoiceReconError.NEXT = 0;
+              END;
+            END;
+
+            // Validation des factures
+            lCounter := 0;
+            IF CONFIRM(Text003) THEN BEGIN
+              lInvoiceReconError.SETRANGE(Type,lInvoiceReconError.Type::"Force Validation");
+              lInvoiceReconError.SETFILTER("Posted Invoice No.",'=%1','');
+              lInvoiceReconError.SETRANGE("Error Step",'');
+              lInvoiceReconError.SETRANGE(Error,'');
+              lInvoiceReconError.SETRANGE("Apply Correction",TRUE);
+              IF lInvoiceReconError.FINDSET THEN BEGIN
+                REPEAT
+                  lCounter += 1;
+                  IF lCounter MOD lModulo = 1 THEN BEGIN
+                    lWDialog.UPDATE(1,ROUND(lCounter / lTotal * 9999,1,'>'));
+                  END;
+                  ValidateInvoice(lInvoiceReconError,FALSE);
+                UNTIL lInvoiceReconError.NEXT = 0;
+              END;
+            END;
+            lWDialog.CLOSE;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281005 : TextConst 'FRA=Souhaitez-vous lancer la correction des factures ?';
+      Text002@1100281004 : TextConst 'ENU=Do you want to launch invoice force posting process ?;FRA=Souhaitez-vous lancer le traitement de facturation ?';
+      Text003@1100281003 : TextConst 'FRA=Souhaitez-vous lancer la validation des factures ?';
+      Text005@1100281009 : TextConst 'ENU=Invoice no. %1 not found;FRA=Facture %1 non trouv‚e';
+      Text006@1100281008 : TextConst 'ENU=Service header no. %1 not found;FRA=Nø ligne de produit %1 non trouv‚e';
+      Text007@1100281007 : TextConst 'ENU=Intervention no. %1 not found;FRA=Nø intervention %1 non trouv‚e';
+      Text008@1100281011 : TextConst 'ENU=Before posting;FRA=Correction avant validation';
+      Text010@1100281006 : TextConst 'ENU=Posting Invoice;FRA=Validation facture';
+      Text020@1100281002 : TextConst 'ENU=Correct invoices... @1@@@@@@@@@@@@@@@@@;FRA=Correction des factures... @1@@@@@@@@@@@@@@@@@';
+      Text021@1100281001 : TextConst 'ENU=Post invoices... @2@@@@@@@@@@@@@@@@@;FRA=Validation des factures... @2@@@@@@@@@@@@@@@@@';
+      Text023@1100281000 : TextConst 'FRA=%1\%2';
+      CorrectInvoiceBeforeToPost@1100281010 : Codeunit 50295;
+
+    PROCEDURE ValidateInvoice@1100281001(pInvoiceReconError@1100281001 : Record 50175;pWithConfirm@1100281000 : Boolean);
+    VAR
+      lInvoiceReconError@1100281003 : Record 50175;
+      lPurchaseHeader@1100281002 : Record 38;
+      lPurchaseLine@1000000000 : Record 39;
+      lPurchasesPayablesSetup@1100281004 : Record 312;
+      lPurchPost@1100281005 : Codeunit 90;
+      lPurchRelease@1100281006 : Codeunit 415;
+    BEGIN
+      IF pWithConfirm THEN BEGIN
+        IF NOT CONFIRM(Text001) THEN BEGIN
+          EXIT;
+        END;
+      END;
+
+      IF (pInvoiceReconError."Posted Invoice No." <> '') OR
+         (pInvoiceReconError."Error Step" <> '') OR
+         (pInvoiceReconError.Error <> '') OR
+         (NOT pInvoiceReconError."Apply Correction") OR
+         (pInvoiceReconError.Type <> pInvoiceReconError.Type::"Force Validation")
+      THEN BEGIN
+        EXIT;
+      END;
+      lInvoiceReconError := pInvoiceReconError;
+      IF NOT lPurchaseHeader.GET(lPurchaseHeader."Document Type"::Invoice,lInvoiceReconError."Current Invoice No.") THEN BEGIN
+        lInvoiceReconError."Error Step" := Text010;
+        lInvoiceReconError.Error := STRSUBSTNO(Text005,lInvoiceReconError."Current Invoice No.");
+        lInvoiceReconError.MODIFY;
+        EXIT;
+      END;
+
+      CODEUNIT.RUN(CODEUNIT::"Release Purchase Document",lPurchaseHeader);
+
+      // R‚application de la quantit‚ des lignes de type compte comptable
+      WITH lPurchaseLine DO BEGIN
+        RESET;
+        SETRANGE("Document Type",lPurchaseHeader."Document Type");
+        SETRANGE("Document No.",lPurchaseHeader."No.");
+        SETRANGE(Type,Type::"G/L Account");
+        SETRANGE(Quantity,0);
+        IF FINDSET THEN BEGIN
+          lPurchRelease.Reopen(lPurchaseHeader);
+          REPEAT
+            VALIDATE(Quantity,-1);
+            MODIFY(TRUE);
+          UNTIL NEXT = 0;
+          CODEUNIT.RUN(CODEUNIT::"Release Purchase Document",lPurchaseHeader);
+        END;
+      END;
+
+      IF lPurchaseHeader."Receiving No. Series" = '' THEN BEGIN
+        lPurchasesPayablesSetup.GET;
+        lPurchaseHeader."Receiving No. Series" := lPurchasesPayablesSetup."Posted Receipt Nos.";
+      END;
+
+      lPurchaseHeader."Posting Date" := TODAY;
+      lPurchaseHeader.Invoice := TRUE;
+      COMMIT;
+      CLEAR(lPurchPost);
+      CLEARLASTERROR;
+      IF lPurchPost.RUN(lPurchaseHeader) THEN BEGIN
+        lInvoiceReconError."Posted Invoice No." := lPurchPost.GetPurchInvHeader;
+      END ELSE BEGIN
+        lInvoiceReconError."Error Step" := Text010;
+        lInvoiceReconError.Error := COPYSTR(GETLASTERRORTEXT,1,MAXSTRLEN(lInvoiceReconError.Error));
+      END;
+      lInvoiceReconError.MODIFY;
+    END;
+
+    BEGIN
+    END.
+  }
+}

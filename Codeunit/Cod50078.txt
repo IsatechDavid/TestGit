@@ -1,0 +1,2178 @@
+OBJECT Codeunit 50078 Transmission Managment
+{
+  OBJECT-PROPERTIES
+  {
+    Date=13/06/14;
+    Time=15:28:20;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.P010;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 3=rim,
+                TableData 15=rim,
+                TableData 17=rim,
+                TableData 18=rim,
+                TableData 23=rim,
+                TableData 25=rim,
+                TableData 79=r,
+                TableData 81=rimd,
+                TableData 93=r,
+                TableData 98=r,
+                TableData 122=rim,
+                TableData 123=rim,
+                TableData 252=r,
+                TableData 352=rimd,
+                TableData 355=rimd,
+                TableData 356=rimd,
+                TableData 380=rim,
+                TableData 5050=r,
+                TableData 5900=r,
+                TableData 50000=r,
+                TableData 50012=r,
+                TableData 50058=r,
+                TableData 50066=r,
+                TableData 50075=r,
+                TableData 50078=r,
+                TableData 50137=rm,
+                TableData 50145=rimd,
+                TableData 50146=rimd;
+    OnRun=BEGIN
+            IF GUIALLOWED THEN BEGIN
+              IF NOT CONFIRM(Text001) THEN BEGIN
+                EXIT;
+              END;
+            END;
+
+            TransfertRepayment;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      CompanyInfo@1100281018 : Record 79;
+      InvoicingMatrixSetup@1100281015 : Record 50137;
+      ServiceInterventionLineBuffer@1100281014 : TEMPORARY Record 50075;
+      PMUSetup@1100281026 : Record 50102;
+      PurchInvMgt@1100281021 : Codeunit 50080;
+      XlApp@1100281005 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024500-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Application";
+      XlWrkBk@1100281004 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";
+      XlWrkSht@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020820-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Worksheet";
+      XlPivotTable@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";
+      XlPivotCache@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002441C-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotCache";
+      XlPivotField@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020874-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotField";
+      XlRange@1100281020 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";
+      CurrentRowNo@1100281010 : Integer;
+      HeaderText@1100281009 : ARRAY [6] OF Text[30];
+      HeaderTextToExcel@1100281008 : ARRAY [6] OF Text[30];
+      PivotFieldName@1100281007 : Text[100];
+      HeadingType@1100281006 : 'Date Interval,Number of Days';
+      Text001@1100281011 : TextConst 'ENU=Do you want to launch tranfer processing ?;FRA=Souhaitez-vous lancer le traitement de transmission ?';
+      Text002@1100281012 : TextConst 'ENU=Transfer processing \Customer #1##############;FRA=Transmission en cours \Client #1##############';
+      WDialog@1100281013 : Dialog;
+      LineFound@1100281016 : Boolean;
+      CallFromReport@1100281017 : Boolean;
+      Text003@1100281019 : TextConst 'ENU=External Cost %1 %2;FRA=Co–t externes %1 %2';
+      RegenerateMode@1100281022 : Boolean;
+      RegenerateModeTransmissionNo@1100281023 : Code[20];
+      RegenerateDocumentFilter@1100281024 : Text[250];
+      DARVASetup@1100281025 : Record 50126;
+
+    PROCEDURE TransfertRepayment@1100281000();
+    VAR
+      lInvoicingMatrixSetup@1100281001 : Record 50137;
+      lServiceInterventionLine@1100281003 : Record 50075;
+      lTransmissionNo@1100281000 : Code[20];
+      lCreationLine@1100281005 : Boolean;
+      lDateFilter@1100281002 : Text[250];
+    BEGIN
+      WITH lInvoicingMatrixSetup DO BEGIN
+        //<<IMH09.ISAT.EBA
+        IF CallFromReport THEN
+          COPYFILTERS(InvoicingMatrixSetup);
+        //>>IMH09.ISAT.EBA
+        //<<IMH09.ISAT.EBA
+        IF GETFILTER("Repayment Customer No.") = '' THEN
+        //<<IMH09.ISAT.EBA
+          SETFILTER("Repayment Customer No.",'<>%1','');
+
+        //<<IMH09.ISAT.EBA
+        IF GETFILTER("Provider Invoice Payment") = '' THEN
+        //>>IMH09.ISAT.EBA
+          SETFILTER("Provider Invoice Payment",'<>%1',"Provider Invoice Payment"::" ");
+        FILTERGROUP(5);//IMH20.ST
+        SETRANGE(Enable,TRUE);
+        SETRANGE("Purchase Order Creation",TRUE);
+        SETRANGE("Corporate Declaration",TRUE);
+        //<<IMH07.PC
+        SETFILTER("Corporate Transfer Mode",'<>%1',"Corporate Transfer Mode"::None);
+        SETFILTER("File Frequency Send",'<>%1',lInvoicingMatrixSetup."File Frequency Send"::Any);
+        //>>IMH07.PC
+        FILTERGROUP(0);//IMH20.ST
+        lDateFilter := GETFILTER("Posting Date Filter"); //IMH20.ST
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+        IF GUIALLOWED THEN BEGIN
+          WDialog.OPEN(Text002);
+        END;
+
+        FINDSET;
+        REPEAT
+
+          IF GUIALLOWED THEN BEGIN
+            WDialog.UPDATE(1,"Corporate No." + '-' + "Corporate Region Code");
+          END;
+
+          //<<IMH07.PC
+          IF CheckDateToSend("File Send Last Date","File Frequency Send") THEN BEGIN
+            //<<IMH24
+            IF NOT RegenerateMode THEN
+            //>>IMH24
+              MODIFY;
+          //>>IMH07.PC
+            //lTransmissionNo := GetNextTransmissionNo(FALSE);
+
+            //<<IMH24
+            IF NOT RegenerateMode THEN
+              lTransmissionNo := GetNextTransmissionNo(TRUE)
+            ELSE
+              lTransmissionNo := RegenerateModeTransmissionNo;
+            //<<IMH24
+
+            //IMH03
+            LineFound := FALSE;
+
+            // Transfert des ‚critures
+            lCreationLine := ProcessPurchInvoices(
+              "Corporate No.","Corporate Region Code","Service Order Type",
+              "Provider Invoice Payment",lTransmissionNo,"Repayment Customer No.",lInvoicingMatrixSetup,
+              lDateFilter);
+
+            //IMH03
+            IF NOT RegenerateMode THEN BEGIN //IMH24
+              IF lCreationLine THEN BEGIN
+                CreateHeader(lInvoicingMatrixSetup,lTransmissionNo);
+                //lTransmissionNo := GetNextTransmissionNo(TRUE);
+                COMMIT;
+                // G‚n‚ration du fichier
+                GenerateFlow(lTransmissionNo,lInvoicingMatrixSetup);
+              END;
+            END;//IMH24
+          END;
+        UNTIL NEXT = 0;
+
+        IF GUIALLOWED THEN BEGIN
+          WDialog.CLOSE;
+        END;
+      END;
+    END;
+
+    PROCEDURE ProcessPurchInvoices@1100281011(pCorporateNo@1100281008 : Code[20];pCorporateRegionCode@1100281009 : Code[10];pServiceOrderType@1100281010 : Code[10];pProviderInvoicePayment@1100281001 : ' ,IMH,Corporate';pTransmissionNo@1100281000 : Code[20];pRepaymentCustNo@1100281005 : Code[20];pInvoicingMatrixSetup@1100281007 : Record 50137;pPostingDateFilter@1100281006 : Text[250]) rValue : Boolean;
+    VAR
+      lPurchInvHeader@1100281004 : Record 122;
+      lGLEntry@1100281002 : Record 17;
+      lGenJnlLine@1100281003 : Record 81;
+      lProvider@1100281011 : Record 50000;
+      lService@1100281012 : Record 50066;
+      lServiceHeader@1100281018 : Record 5900;
+      lRefPurchaseInvHeader@1100281017 : RecordRef;
+      lLineCheckOK@1100281013 : Boolean;
+      lAgreementOK@1100281014 : Boolean;
+      lPostingDate@1100281015 : Date;
+      lReferenceDate@1100281016 : Date;
+    BEGIN
+      // Parcours des lignes de factures d'achat pour transfert
+      rValue := FALSE;
+
+      //<<IMH06
+      ServiceInterventionLineBuffer.RESET;
+      ServiceInterventionLineBuffer.DELETEALL;
+      //>>IMH06
+
+      //<<IMH23
+      //WITH lPurchInvLine DO BEGIN
+      WITH lPurchInvHeader DO BEGIN
+      //>>IMH23
+        SETCURRENTKEY("Corporate No.","Corporate Region Code","Service Order Type");
+        SETRANGE("Corporate No.",pCorporateNo);
+        SETRANGE("Corporate Region Code",pCorporateRegionCode);
+        SETRANGE("Service Order Type",pServiceOrderType);
+      //<<IMH20.ST
+        IF pPostingDateFilter <> '' THEN
+          SETFILTER("Posting Date", pPostingDateFilter);
+      //>>IMH20.ST
+
+        //<<IMH24
+        IF RegenerateMode THEN
+          SETFILTER("No.",RegenerateDocumentFilter);
+        //>>IMH24
+
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+
+        FINDSET;
+        REPEAT
+
+          //<<IMH15.ISAT.EBA
+          // ProcessPurchInvLine(lPurchInvLine,pProviderInvoicePayment,pTransmissionNo,pRepaymentCustNo);
+          lPostingDate := GetPeriodEndDate("Posting Date",pInvoicingMatrixSetup."File Frequency Send");
+          //<<IMH30.PC
+          lPostingDate := CheckPostingDate(lPostingDate);
+          //>>IMH30.PC
+          lLineCheckOK := lPostingDate < WORKDATE;
+
+          IF lLineCheckOK THEN BEGIN
+            IF lService.GET("Service No.") THEN BEGIN
+              //<<IMH28.ISAT.RC
+              CLEAR(lRefPurchaseInvHeader);
+              lRefPurchaseInvHeader.GETTABLE(lPurchInvHeader);
+              lReferenceDate:=pInvoicingMatrixSetup.GetPurchaseReferenceDate(lRefPurchaseInvHeader);
+              //lLineCheckOK :=
+              //  (pInvoicingMatrixSetup."Starting Date" <= DT2DATE(lService."Creation Date")) AND
+              //  ((pInvoicingMatrixSetup."Ending Date" = 0D) OR
+              //    (pInvoicingMatrixSetup."Ending Date" >= DT2DATE(lService."Creation Date")));
+              lLineCheckOK :=
+                (pInvoicingMatrixSetup."Starting Date" <= lReferenceDate) AND
+                ((pInvoicingMatrixSetup."Ending Date" = 0D) OR
+                  (pInvoicingMatrixSetup."Ending Date" >= lReferenceDate));
+
+            END;
+
+            IF lLineCheckOK THEN BEGIN
+              lAgreementOK := FALSE;
+              IF lProvider.GET("Buy-from Vendor No.") THEN
+                lAgreementOK := lProvider.AgreementExists("Corporate No.","Corporate Region Code","Service Order Type");
+
+              IF lAgreementOK THEN
+                lLineCheckOK :=
+                  (pInvoicingMatrixSetup."Accredited Provider Filter" = pInvoicingMatrixSetup."Accredited Provider Filter"::" ") OR
+                  (pInvoicingMatrixSetup."Accredited Provider Filter" = pInvoicingMatrixSetup."Accredited Provider Filter"::Yes)
+              ELSE
+                lLineCheckOK :=
+                  (pInvoicingMatrixSetup."Accredited Provider Filter" = pInvoicingMatrixSetup."Accredited Provider Filter"::" ") OR
+                  (pInvoicingMatrixSetup."Accredited Provider Filter" = pInvoicingMatrixSetup."Accredited Provider Filter"::No);
+            END;
+
+            //<<IMH34
+            //Controle type produit DARVA/non DARVA
+            IF lLineCheckOK THEN BEGIN
+              IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, lPurchInvHeader."Service Header No.") THEN
+                CASE pInvoicingMatrixSetup."Corporate Transfer Mode" OF
+                  pInvoicingMatrixSetup."Corporate Transfer Mode"::Excel :
+                    IF lServiceHeader."DARVA Interface" THEN
+                      lLineCheckOK := FALSE;
+                  pInvoicingMatrixSetup."Corporate Transfer Mode"::DARVA :
+                    IF NOT lServiceHeader."DARVA Interface" THEN
+                      lLineCheckOK := FALSE;
+                END;
+            END;
+            //>>IMH34
+
+            IF lLineCheckOK THEN BEGIN
+              //<<IMH23
+              //ProcessPurchInvLine(lPurchInvLine,pProviderInvoicePayment,pTransmissionNo,pRepaymentCustNo,lPostingDate);
+              {
+              IF pInvoicingMatrixSetup."File Frequency Send" = pInvoicingMatrixSetup."File Frequency Send"::Daily THEN
+                ProcessPurchInvHeader(lPurchInvHeader,pProviderInvoicePayment,pTransmissionNo,pRepaymentCustNo,WORKDATE)
+              ELSE
+              }
+                ProcessPurchInvHeader(lPurchInvHeader,pProviderInvoicePayment,pTransmissionNo,pRepaymentCustNo,lPostingDate);
+              //>>IMH23
+              rValue := TRUE;
+            END;
+          END;
+          //>>IMH15.ISAT.EBA
+        //<<IMH23
+        //UNTIL lPurchInvLine.NEXT = 0;
+        UNTIL lPurchInvHeader.NEXT = 0;
+        //>>IMH23
+      END;
+
+      //<<IMH15.ISAT.EBA
+      //rValue := TRUE;
+      //>>IMH15.ISAT.EBA
+    END;
+
+    PROCEDURE ProcessPurchInvHeader@1100281015(pPurchInvHeader@1100281002 : Record 122;pProviderInvoicePayment@1100281009 : ' ,IMH,Corporate';pTransmissionNo@1100281005 : Code[20];pRepaymentCustNo@1100281004 : Code[20];pPostingDate@1100281001 : Date) rValue : Boolean;
+    VAR
+      lGenJournalLine@1100281000 : Record 81;
+      lVendorLedgerEntry@1100281003 : Record 25;
+      lVendorLedgerEntryTemp@1100281014 : TEMPORARY Record 25;
+      lJournalLineDimensionTemp@1100281010 : TEMPORARY Record 356;
+      lLedgerEntryDimension@1100281007 : Record 355;
+      lGenJnlPostLine@1100281011 : Codeunit 12;
+      lDimensionMgt@1100281006 : Codeunit 408;
+      lGLAccountNo@1100281008 : Code[20];
+      GLEntry@1100281012 : Record 17;
+      lVendPostingGroup@1100281013 : Record 93;
+    BEGIN
+      rValue := FALSE;
+
+      lVendorLedgerEntryTemp.DELETEALL;
+
+      lVendorLedgerEntry.SETCURRENTKEY("Document No.");
+      //<<IMH23
+      //lVendorLedgerEntry.SETRANGE("Document No.",pPurchInvLine."Document No.");
+      lVendorLedgerEntry.SETRANGE("Document No.",pPurchInvHeader."No.");
+      //>>IMH23
+      lVendorLedgerEntry.SETRANGE("Corporate Transfert",FALSE);
+      lVendorLedgerEntry.SETFILTER("Document Type"
+        ,'%1|%2'
+        ,lVendorLedgerEntry."Document Type"::"Credit Memo"
+        ,lVendorLedgerEntry."Document Type"::Invoice);
+
+      lVendorLedgerEntry.SETRANGE("Request reimbursement blocked", ''); //IMH21 isat.zw
+
+      IF lVendorLedgerEntry.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      lVendorLedgerEntry.FINDSET;
+      REPEAT
+        IF CheckVendLedgerEntry(lVendorLedgerEntry) THEN BEGIN
+          lVendorLedgerEntry.CALCFIELDS(Amount,"Amount (LCY)");
+          LineFound := TRUE;
+          lVendorLedgerEntryTemp.INIT;
+          lVendorLedgerEntryTemp := lVendorLedgerEntry;
+          lVendorLedgerEntryTemp.INSERT;
+          CASE pProviderInvoicePayment OF
+            //<<IMH03
+            pProviderInvoicePayment::IMH :
+            BEGIN
+              //<<IMH23
+              //GenerateIMHEntry(
+              //  pPurchInvLine,pProviderInvoicePayment,pTransmissionNo,pRepaymentCustNo,lVendorLedgerEntryTemp,pPostingDate);
+              GenerateIMHEntry(
+                pPurchInvHeader,pProviderInvoicePayment,pTransmissionNo,pRepaymentCustNo,lVendorLedgerEntryTemp,pPostingDate);
+              //>>IMH23
+            END;
+            pProviderInvoicePayment::Corporate :
+            BEGIN
+              //<<IMH23
+              //GenerateCorporateEntry(
+              //  pPurchInvLine,pProviderInvoicePayment,pTransmissionNo,pRepaymentCustNo,lVendorLedgerEntryTemp,pPostingDate);
+              GenerateCorporateEntry(
+                pPurchInvHeader,pProviderInvoicePayment,pTransmissionNo,pRepaymentCustNo,lVendorLedgerEntryTemp,pPostingDate);
+              //>>IMH23
+            //>>IMH03
+            END;
+          END;
+        END;
+      UNTIL lVendorLedgerEntry.NEXT = 0;
+
+      lVendorLedgerEntryTemp.RESET;
+      IF lVendorLedgerEntryTemp.FINDSET THEN
+      REPEAT
+        lVendorLedgerEntry.GET(lVendorLedgerEntryTemp."Entry No.");
+        lVendorLedgerEntry."Corporate Transfert" := TRUE;
+        lVendorLedgerEntry."Transmission No." := pTransmissionNo;
+        lVendorLedgerEntry."Transmission Generate Date" := WORKDATE;
+        lVendorLedgerEntry.MODIFY;
+      UNTIL (lVendorLedgerEntryTemp.NEXT = 0);
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetNextTransmissionNo@1100281010(pInsert@1100281000 : Boolean) rValue : Code[20];
+    VAR
+      lGeneralLedgerSetup@1100281002 : Record 98;
+      lNoSeriesMgt@1100281001 : Codeunit 396;
+    BEGIN
+      //IMH24 ISAT.ZW : passer la fonction locale en globale
+      rValue := '';
+      lGeneralLedgerSetup.GET;
+      lGeneralLedgerSetup.TESTFIELD("Transmission Nos.");
+      rValue := lNoSeriesMgt.GetNextNo(lGeneralLedgerSetup."Transmission Nos.",0D,pInsert);
+    END;
+
+    PROCEDURE GetRepaymentCustNo@1100281021(VAR pRepaymentCustNo@1100281000 : Code[20];pCorporateNo@1100281002 : Code[20];pServiceOrderType@1100281003 : Code[10];pCorporateRegionCode@1100281004 : Code[10]) rValue : Boolean;
+    VAR
+      lInvoicingSetup@1100281001 : Record 50137;
+    BEGIN
+      rValue := FALSE;
+
+      lInvoicingSetup.SETRANGE("Corporate No.",pCorporateNo);
+      lInvoicingSetup.SETRANGE("Service Order Type",pServiceOrderType);
+      lInvoicingSetup.SETRANGE("Corporate Region Code",pCorporateRegionCode);
+      IF lInvoicingSetup.ISEMPTY THEN
+        EXIT;
+      lInvoicingSetup.FINDFIRST;
+      pRepaymentCustNo := lInvoicingSetup."Repayment Customer No.";
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetGLAccountNo@1100281009(pPurchInvLine@1100281001 : Record 123;VAR pGLAccountNo@1100281000 : Code[20]) : Boolean;
+    VAR
+      lPurchInvHeader@1100281002 : Record 122;
+      lGeneralPostingSetup@1100281003 : Record 252;
+    BEGIN
+      // R‚cup‚ration du compte d'achat
+
+      pGLAccountNo := '';
+
+      IF NOT lGeneralPostingSetup.GET(pPurchInvLine."Gen. Bus. Posting Group",pPurchInvLine."Gen. Prod. Posting Group") THEN BEGIN
+        EXIT;
+      END;
+
+      pGLAccountNo := lGeneralPostingSetup."Purch. Account";
+    END;
+
+    PROCEDURE CheckVendLedgerEntry@1100281004(pVendorLedgerEntry@1100281000 : Record 25) rValue : Boolean;
+    VAR
+      lService@1100281003 : Record 50066;
+      lServiceInterventionLine@1100281002 : Record 50075;
+      lContact@1100281001 : Record 5050;
+      lVendor@1100281004 : Record 23;
+      lVoucherServHeader@1100281005 : Record 50103;
+    BEGIN
+      rValue := FALSE;
+
+      // Remplissage des donn‚es
+      IF NOT lService.GET(pVendorLedgerEntry."Service No.") THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT lServiceInterventionLine.GET(pVendorLedgerEntry."Service Header No.",pVendorLedgerEntry."Intervention Line No.") AND
+      //<<IMH31.SB
+      NOT lVoucherServHeader.GET(pVendorLedgerEntry."Service Header No.",pVendorLedgerEntry."Service Header Voucher No.") THEN BEGIN
+      //>>IMH31.SB
+        EXIT;
+      END;
+
+
+      IF NOT lContact.GET(lService."Contact No.") THEN BEGIN
+        EXIT;
+      END;
+
+      //<<IMH25.RC
+      {
+      //<<IMH13.PC
+      IF NOT pVendorLedgerEntry.Open THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH13.PC
+      }
+      IF (pVendorLedgerEntry."Transmission No." <> '') AND (pVendorLedgerEntry."Transmission Generate Date" <>0D) THEN
+        EXIT;
+      //>>IMH25.RC
+
+
+      //<<IMH21 isat.zw
+      IF lVendor.GET(pVendorLedgerEntry."Vendor No.") THEN
+        IF lVendor."Request reimbursement blocked" THEN
+          EXIT;
+      //>>IMH21 isat.zw
+      rValue := TRUE;
+    END;
+
+    PROCEDURE CreateExcel@1100281007();
+    VAR
+      lText100@1100281010 : TextConst 'ENU=Excel program not found.;FRA=Programme Excel non trouv‚.';
+      lText101@1100281000 : TextConst 'ENU=DatasSource;FRA=SourceDonnees';
+      lText104@1100281020 : TextConst 'FRA=Nø Client';
+      lText105@1100281002 : TextConst 'ENU=Description;FRA=Description';
+      lText106@1100281003 : TextConst 'ENU=Service No.;FRA=Nø service';
+      lText107@1100281004 : TextConst 'ENU=Reference No.;FRA=Nø sinistre';
+      lText108@1100281005 : TextConst 'ENU=Creation Date;FRA=Date cr‚ation';
+      lText109@1100281006 : TextConst 'ENU=Menber No.;FRA=Nø soci‚taire';
+      lText110@1100281007 : TextConst 'ENU=Menber Name;FRA=Nom soci‚taire';
+      lText111@1100281008 : TextConst 'ENU=Member Firstname;FRA=Pr‚nom soci‚taire';
+      lText112@1100281009 : TextConst 'ENU=Provider No.;FRA=Nø prestataire';
+      lText113@1100281013 : TextConst 'ENU=Provider Name;FRA=Nom prestataire';
+      lText114@1100281012 : TextConst 'ENU=External Document No.;FRA=Nø document externe';
+      lText115@1100281018 : TextConst 'ENU=Invoiced to pay;FRA=Montant factures … payer';
+      lText116@1100281019 : TextConst 'ENU=Deductile Information;FRA=Franchise pour Info';
+      lStartCounter@1100281001 : Integer;
+      lCounter@1100281011 : Integer;
+      lText117@1100281014 : TextConst 'ENU=Event No.;FRA=Nø ‚vŠnement';
+      lText118@1100281015 : TextConst 'ENU=Agreement No.;FRA=Nø agr‚ment';
+      lText120@1100281016 : TextConst 'ENU=Entry No.;FRA=Nø s‚quence';
+    BEGIN
+      // Cr‚ation du fichier Excel
+
+      IF NOT CREATE(XlApp,TRUE,TRUE) THEN BEGIN
+        ERROR(lText100);
+      END;
+
+      //Cr‚ation de la feuille source de donn‚e du tableau crois‚ dynamique
+      XlApp.Visible := FALSE;
+      XlApp.DisplayAlerts := FALSE;
+      XlWrkBk := XlApp.Workbooks.Add;
+      XlWrkSht := XlWrkBk.Worksheets.Add;
+      XlWrkSht.Name := lText101;
+      //Suppression des feuilles par d‚faut
+      lStartCounter := XlWrkBk.Worksheets.Count;
+      FOR lCounter := lStartCounter DOWNTO 2 DO BEGIN
+        XlWrkSht := XlWrkBk.Worksheets.Item(lCounter);
+        XlWrkSht.Delete;
+      END;
+
+      XlWrkSht := XlWrkBk.Worksheets.Item(1);
+      XlWrkSht.Range('A1').Value := FORMAT(lText104);
+      XlWrkSht.Range('B1').Value := FORMAT(lText106);
+      XlWrkSht.Range('C1').Value := FORMAT(lText107);
+      XlWrkSht
+      .Range('D1').Value := FORMAT(lText108);
+      XlWrkSht.Range('E1').Value := FORMAT(lText109);
+      XlWrkSht.Range('F1').Value := FORMAT(lText110);
+      XlWrkSht.Range('G1').Value := FORMAT(lText111);
+      XlWrkSht.Range('H1').Value := FORMAT(lText112);
+      //<<IMH04.PC
+      XlWrkSht.Range('I1').Value := FORMAT(lText118);
+      //>>IMH04.PC
+      XlWrkSht.Range('J1').Value := FORMAT(lText113);
+      XlWrkSht.Range('K1').Value := FORMAT(lText114);
+      XlWrkSht.Range('L1').Value := FORMAT(lText115);
+      XlWrkSht.Range('M1').Value := FORMAT(lText116);
+      //<<IMH19.ISAT.EBA
+      XlWrkSht.Range('N1').Value := FORMAT(lText120);
+      //>>IMH19.ISAT.EBA
+      CurrentRowNo := 1;
+    END;
+
+    PROCEDURE ClearExcel@1100281013();
+    BEGIN
+      CLEAR(XlPivotCache);
+      CLEAR(XlPivotTable);
+      CLEAR(XlPivotField);
+      CLEAR(XlWrkSht);
+      XlWrkBk.Close;
+      CLEAR(XlWrkBk);
+      XlApp.Quit;
+      CLEAR(XlApp);
+    END;
+
+    PROCEDURE AddVendorLedgerEntryOnExcel@1100281008(pVendorLedgerEntry@1100281000 : Record 25;pRefundCustomer@1100281003 : Code[20]);
+    VAR
+      lService@1100281001 : Record 50066;
+      lServiceInterventionLine@1100281012 : Record 50075;
+      lContact@1100281011 : Record 5050;
+      lProviderAgreement@1100281002 : Record 50012;
+      lCorporateRegion@1100281004 : Record 50058;
+      lProvider@1100281006 : Record 50000;
+      lAgreementCode@1100281005 : Text[30];
+      lVoucherServHeader@1100281007 : Record 50103;
+    BEGIN
+      // Ajout des donn‚es
+
+      // Remplissage des donn‚es
+      IF lService.GET(pVendorLedgerEntry."Service No.") THEN
+        IF NOT lServiceInterventionLine.GET(pVendorLedgerEntry."Service Header No.",pVendorLedgerEntry."Intervention Line No.") THEN
+        BEGIN
+          //<<IMH31.SB
+          //lService.INIT;
+          //>>IMH31.SB
+          lServiceInterventionLine.INIT;
+        END;
+
+      IF NOT lContact.GET(lService."Contact No.") THEN
+        lContact.INIT;
+
+      CurrentRowNo += 1;
+      //<<IMH05.ST
+      //XlWrkSht.Range('A' + FORMAT(CurrentRowNo)).Value := FORMAT(pVendorLedgerEntry."Corporate No.");
+      XlWrkSht.Range('A' + FORMAT(CurrentRowNo)).Value := FORMAT(pRefundCustomer);
+      //>>IMH05.ST
+      XlWrkSht.Range('B' + FORMAT(CurrentRowNo)).Value := FORMAT(pVendorLedgerEntry."Service No.");
+      XlWrkSht.Range('C' + FORMAT(CurrentRowNo)).Value := FORMAT(lService."Reference No.");
+      XlWrkSht.Range('D' + FORMAT(CurrentRowNo)).Value := FORMAT(lService."Creation Date");
+      XlWrkSht.Range('E' + FORMAT(CurrentRowNo)).Value := FORMAT(lContact."Member No.");
+      XlWrkSht.Range('F' + FORMAT(CurrentRowNo)).Value := FORMAT(lContact.Name);
+      XlWrkSht.Range('G' + FORMAT(CurrentRowNo)).Value := FORMAT(lContact."First Name");
+      XlWrkSht.Range('H' + FORMAT(CurrentRowNo)).Value := FORMAT(lServiceInterventionLine."Provider No.");
+      //<<IMH04.PC
+      // Agr‚ment
+
+      //<<IMH17.ISAT.EBA
+      {**
+      lCorporateRegion.SETRANGE("Corporate No.",lServiceInterventionLine."Corporate No.");
+      lCorporateRegion.SETRANGE("Region Code",lServiceInterventionLine."Corporate Region Code");
+      IF lCorporateRegion.FINDFIRST THEN BEGIN
+        lProviderAgreement.SETRANGE("Provider No.",lServiceInterventionLine."Provider No.");
+        lProviderAgreement.SETRANGE("Corporate No.",lCorporateRegion."Sell-to Customer No.");
+        lProviderAgreement.SETFILTER("Service Order Type",'%1|%2','',lServiceInterventionLine."Service Order Type");
+        lProviderAgreement.SETRANGE("Exclusion Type",lProviderAgreement."Exclusion Type"::Agree);
+        IF lProviderAgreement.FINDFIRST THEN BEGIN
+          lAgreementCode := lProviderAgreement."Agreement No.";
+        END;
+        IF lAgreementCode = '' THEN BEGIN
+          lAgreementCode := lCorporateRegion."SDR64 Provider No.";
+        END;
+      END;
+      IF lAgreementCode = '' THEN BEGIN
+        lProviderAgreement.SETRANGE("Provider No.",lServiceInterventionLine."Provider No.");
+        lProviderAgreement.SETRANGE("Corporate No.",lServiceInterventionLine."Corporate No.");
+        lProviderAgreement.SETFILTER("Service Order Type",'%1|%2','',lServiceInterventionLine."Service Order Type");
+        lProviderAgreement.SETRANGE("Exclusion Type",lProviderAgreement."Exclusion Type"::Agree);
+        IF lProviderAgreement.FINDFIRST THEN BEGIN
+          lAgreementCode := lProviderAgreement."Agreement No.";
+        END;
+
+        IF lAgreementCode = '' THEN BEGIN
+          lAgreementCode := lServiceInterventionLine."Provider No.";
+        END;
+      END;
+      **}
+
+      lAgreementCode := '';
+      IF lProvider.GET(lServiceInterventionLine."Provider No.") THEN
+        lAgreementCode := lProvider.GetAgreement(
+          lServiceInterventionLine."Corporate No.",
+          lServiceInterventionLine."Corporate Region Code",
+          lServiceInterventionLine."Service Order Type");
+      //>>IMH17.ISAT.EBA
+
+      XlWrkSht.Range('I' + FORMAT(CurrentRowNo)).Value := FORMAT(lAgreementCode);
+      //>>IMH04.PC
+
+      XlWrkSht.Range('J' + FORMAT(CurrentRowNo)).Value := FORMAT(lServiceInterventionLine."Provider Name");
+      XlWrkSht.Range('K' + FORMAT(CurrentRowNo)).Value := FORMAT(pVendorLedgerEntry."External Document No.");
+      pVendorLedgerEntry.CALCFIELDS(Amount);
+      XlWrkSht.Range('L' + FORMAT(CurrentRowNo)).Value := FORMAT(-1 * pVendorLedgerEntry.Amount,0,1);
+      // Montant franchise
+      XlWrkSht.Range('M' + FORMAT(CurrentRowNo)).Value := FORMAT(pVendorLedgerEntry."Deductible Amount",0,1);
+      //<<IMH19.ISAT.EBA
+      XlWrkSht.Range('N' + FORMAT(CurrentRowNo)).Value := FORMAT(pVendorLedgerEntry."Entry No.");
+      //>>IMH19.ISAT.EBA
+    END;
+
+    PROCEDURE SaveTransmissionFile@1100281012(pTransmissionNo@1100281000 : Code[20];pExcelPath@1100281008 : Text[250];pCorporateNo@1100281009 : Code[20];pRegionCode@1100281010 : Code[10]);
+    VAR
+      lText101@1100281003 : TextConst 'ENU=DatasSource;FRA=SourceDonnees';
+      lText102@1100281002 : TextConst 'ENU=Analysis;FRA=Analyse';
+      lText103@1100281001 : TextConst 'ENU=PivotTableExcel;FRA=PivotTableExcel';
+      lPosition@1100281007 : Integer;
+      lGovDocHeader@1100281011 : Record 50145;
+      lText104@1100281026 : TextConst 'FRA=Nø Client';
+      lText105@1100281025 : TextConst 'ENU=Description;FRA=Description';
+      lText106@1100281024 : TextConst 'ENU=Service No.;FRA=Nø service';
+      lText107@1100281023 : TextConst 'ENU=Reference No.;FRA=Nø sinistre';
+      lText108@1100281022 : TextConst 'ENU=Creation Date;FRA=Date cr‚ation';
+      lText109@1100281021 : TextConst 'ENU=Menber No.;FRA=Nø soci‚taire';
+      lText110@1100281020 : TextConst 'ENU=Menber Name;FRA=Nom soci‚taire';
+      lText111@1100281019 : TextConst 'ENU=Member Firstname;FRA=Pr‚nom soci‚taire';
+      lText112@1100281018 : TextConst 'ENU=Provider No.;FRA=Nø prestataire';
+      lText113@1100281017 : TextConst 'ENU=Provider Name;FRA=Nom prestataire';
+      lText114@1100281016 : TextConst 'ENU=External Document No.;FRA=Nø document externe';
+      lText115@1100281015 : TextConst 'ENU=Invoiced to pay;FRA=Montant factures … payer';
+      lText116@1100281014 : TextConst 'ENU=Deductile Information;FRA=Franchise pour Info';
+      lText117@1100281013 : TextConst 'ENU=Event No.;FRA=Nø ‚vŠnement';
+      lText118@1100281012 : TextConst 'ENU=Agreement No.;FRA=Nø agr‚ment';
+      lCellID@1100281004 : Code[10];
+      lFileName@1100281005 : Text[1024];
+      lFileFullName@1100281029 : Text[1024];
+      lReturnValue@1100281006 : Boolean;
+      lInStr@1100281027 : InStream;
+      lVariant@1100281028 : Variant;
+      lCpt@1100281030 : Integer;
+      lText119@1100281031 : TextConst 'FRA=Donn‚es';
+      lText120@1100281032 : TextConst 'ENU=Entry No.;FRA=Nø s‚quence';
+    BEGIN
+      // G‚n‚ration du tableau crois‚
+
+      IF CurrentRowNo > 1 THEN BEGIN
+        //Cr‚ation de la feuille du tableau crois‚ dynamique
+        XlApp.ActiveWorkbook.Sheets.Add;
+        XlPivotCache := XlApp.ActiveWorkbook.PivotCaches.Add(1,FORMAT(lText101 + '!A1:N' + FORMAT(CurrentRowNo)));
+        XlPivotCache.CreatePivotTable('',FORMAT(lText103));
+        XlWrkSht := XlApp.ActiveSheet; //XlWrkBk.Worksheets.Add;
+        XlPivotTable := XlWrkSht.PivotTables(FORMAT(lText103));
+        XlWrkSht.Name := lText102;
+
+        //<<IMH10.ISAT.EBA
+        PivotFieldName := FORMAT(lText104);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 3;
+        XlPivotField.Position := 1;
+        //>>IMH10.ISAT.EBA
+
+        // LIGNE
+        //<<IMH19.ISAT.EBA
+        PivotFieldName := FORMAT(lText120);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 1;
+        XlPivotField.Subtotals(1,FALSE);
+        //>>IMH19.ISAT.EBA
+
+        //<<IMH10.ISAT.EBA
+        // Code Site
+        //PivotFieldName := FORMAT(lText104);
+        //XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        //XlPivotField.Orientation := 1; //xlRowField
+        //XlPivotField.Position := 1;
+
+        PivotFieldName := FORMAT(lText108);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 2;
+        XlPivotField.Subtotals(1,FALSE);
+
+        PivotFieldName := FORMAT(lText107);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 3;
+        XlPivotField.Subtotals(1,FALSE);
+
+        PivotFieldName := FORMAT(lText106);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 4;
+        XlPivotField.Subtotals(1,FALSE);
+
+        PivotFieldName := FORMAT(lText109);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 5;
+        XlPivotField.Subtotals(1,FALSE);
+
+        PivotFieldName := FORMAT(lText110);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 6;
+        XlPivotField.Subtotals(1,FALSE);
+
+        PivotFieldName := FORMAT(lText111);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 7;
+        XlPivotField.Subtotals(1,FALSE);
+
+        PivotFieldName := FORMAT(lText112);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 8;
+        XlPivotField.Subtotals(1,FALSE);
+
+        PivotFieldName := FORMAT(lText118);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 9;
+        XlPivotField.Subtotals(1,FALSE);
+
+        PivotFieldName := FORMAT(lText113);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Orientation := 1; //xlRowField
+        XlPivotField.Position := 10;
+        XlPivotField.Subtotals(1,FALSE);
+        //>>IMH10.ISAT.EBA
+
+        // Sommes
+        lPosition := 0;
+
+        lPosition += 1;
+        PivotFieldName := FORMAT(lText115);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Caption := FORMAT(lText115);
+        XlPivotField.Orientation := 4; // xlDataField
+        XlPivotField.Position := lPosition;
+
+        //<<IMH10.ISAT.EBA
+        lPosition += 1;
+        PivotFieldName := FORMAT(lText116);
+        XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField.Caption := FORMAT(lText116);
+        XlPivotField.Orientation := 4; // xlDataField
+        XlPivotField.Position := lPosition;
+        //>>IMH10.ISAT.EBA
+
+        // Colonne donn‚es
+        lPosition := 0;
+
+        lPosition += 1;
+        //PivotFieldName := FORMAT(lText119);
+        //XlPivotField := XlPivotTable.PivotFields(PivotFieldName);
+        XlPivotField := XlPivotTable.DataPivotField;
+        XlPivotField.Orientation := 2; // xlColumnField
+
+
+        //<<IMH10.ISAT.EBA
+        XlRange := XlWrkSht.Range('A1');
+        FOR lCpt := 1 TO 8 DO
+         XlRange.EntireRow.Insert;
+
+        CompanyInfo.GET;
+        CompanyInfo.CALCFIELDS(CompanyInfo.Picture);
+        IF CompanyInfo.Picture.HASVALUE THEN BEGIN
+          lFileName := 'logo5.bmp';
+          IF ISSERVICETIER THEN BEGIN
+            CompanyInfo.Picture.CREATEINSTREAM(lInStr);
+            DOWNLOADFROMSTREAM(lInStr,'','<TEMP>','',lFileName);
+            lFileFullName := lFileName;
+          END ELSE BEGIN
+            lFileFullName := TEMPORARYPATH + lFileName;
+            CompanyInfo.Picture.EXPORT(lFileFullName);
+          END;
+
+          XlWrkSht.Shapes.AddPicture(lFileFullName, 1, 1, 10, 1, 100, 100);
+        END;
+
+        XlRange := XlWrkSht.Range('C2:J2');
+        XlRange.Merge;
+
+        lCellID := 'C2';
+        XlWrkSht.Range(lCellID).Value := STRSUBSTNO(Text003,pCorporateNo + pRegionCode,FORMAT(TODAY,0,'<Month Text>-<Year>'));
+        XlWrkSht.Range(lCellID).Font.Bold := TRUE;
+        XlWrkSht.Range(lCellID).Font.Size := 24;
+        //>>IMH10.ISAT.EBA
+
+        // Affichage du fichier Excel
+        XlWrkSht.Range('C1' + ':' + 'C' + FORMAT(CurrentRowNo)).Columns.AutoFit;
+        //XlWrkSht.Range('B:C').NumberFormat := '@';
+
+        // Sauvegarde du fichier
+        XlWrkBk.SaveCopyAs(pExcelPath + pCorporateNo + pRegionCode + '-' + pTransmissionNo + '.xlsx');
+
+        //<<IMH04
+        lGovDocHeader.GET(lGovDocHeader.Type::GC,pTransmissionNo);
+        //<<IMH11.ISAT.EBA
+        //lGovDocHeader."Line Matrix Setup" += 1;
+        lGovDocHeader."Excel File Nb" := lGovDocHeader."Excel File Nb" + 1;
+        //>>IMH11.ISAT.EBA
+        lGovDocHeader."File Path" := pExcelPath;
+        lGovDocHeader."File Name" := pCorporateNo + pRegionCode + '-' + pTransmissionNo + '.xlsx';
+        lGovDocHeader.MODIFY(TRUE);
+        //>>IMH04
+      END;
+    END;
+
+    PROCEDURE GenerateIMHEntry@1100281001(pPurchInvHeader@1100281013 : Record 122;pProviderInvoicePayment@1100281012 : ' ,IMH,Corporate';pTransmissionNo@1100281011 : Code[20];pRepaymentCustNo@1100281010 : Code[20];pVendorLedgerEntry@1100281009 : Record 25;pPostingDate@1100281018 : Date);
+    VAR
+      lGenJournalLine@1100281008 : Record 81;
+      lJournalLineDimensionTemp@1100281006 : TEMPORARY Record 356;
+      lLedgerEntryDimension@1100281005 : Record 355;
+      lGenJnlPostLine@1100281004 : Codeunit 12;
+      lDimensionMgt@1100281003 : Codeunit 408;
+      lGLAccountNo@1100281002 : Code[20];
+      GLEntry@1100281001 : Record 17;
+      lVendPostingGroup@1100281000 : Record 93;
+      lCust@1100281007 : Record 18;
+      lPaymentTerms@1100281014 : Record 3;
+      JnlLineDim@1100281015 : Record 356;
+      DimMgt@1100281016 : Codeunit 408;
+      lDefDim@1100281017 : Record 352;
+      lService@1100281019 : Record 50066;
+    BEGIN
+      //IMH03
+      CLEAR(lGenJournalLine);
+      WITH lGenJournalLine DO BEGIN
+        lVendPostingGroup.GET(pVendorLedgerEntry."Vendor Posting Group");
+
+        // Chargement des axes analytiques
+        lLedgerEntryDimension.SETRANGE("Table ID",DATABASE::"Vendor Ledger Entry");
+        lLedgerEntryDimension.SETRANGE("Entry No.",pVendorLedgerEntry."Entry No.");
+        lJournalLineDimensionTemp.RESET;
+        lJournalLineDimensionTemp.DELETEALL;
+        lDimensionMgt.CopyLedgEntryDimToJnlLineDim(lLedgerEntryDimension,lJournalLineDimensionTemp);
+
+        INIT;
+        //<<IMH14.ISAT.EBA
+        //VALIDATE("Posting Date",pVendorLedgerEntry."Posting Date");
+        //VALIDATE("Document Date",pVendorLedgerEntry."Document Date");
+        VALIDATE("Posting Date",pPostingDate);
+        VALIDATE("Document Date",pPostingDate);
+        //>>IMH14.ISAT.EBA
+        VALIDATE("Shortcut Dimension 1 Code",pVendorLedgerEntry."Global Dimension 1 Code");
+        VALIDATE("Shortcut Dimension 2 Code",pVendorLedgerEntry."Global Dimension 2 Code");
+        VALIDATE("Account Type","Account Type"::Customer);
+        VALIDATE("Account No.",pRepaymentCustNo);
+        "Document No." := pVendorLedgerEntry."Document No." + 'T';
+        VALIDATE(Amount,-pVendorLedgerEntry.Amount);
+        VALIDATE("Amount (LCY)",-pVendorLedgerEntry."Amount (LCY)");
+        VALIDATE("Source Code",pVendorLedgerEntry."Source Code");
+        "Allow Zero-Amount Posting" := TRUE;
+        //<<IMH23
+        //"Service No." := pPurchInvLine."Service No.";
+        //"Service Header No." := pPurchInvLine."Service Header No.";
+        //"Intervention Line No." := pPurchInvLine."Intervention Line No.";
+        "Service No." := pPurchInvHeader."Service No.";
+        "Service Header No." := pPurchInvHeader."Service Header No.";
+        "Intervention Line No." := pPurchInvHeader."Intervention Line No.";
+        //IMH23
+        //<<IMH27.SB
+        lService.GET(pPurchInvHeader."Service No.");
+        "Reference No." := lService."Reference No.";
+        //>>IMH27.SB
+        "Corporate No." := pRepaymentCustNo;
+        "Transmission No." := pTransmissionNo;
+        "Transmission Generate Date" := TODAY;
+        IF lCust.GET(pRepaymentCustNo) THEN
+        BEGIN
+          lGenJournalLine.VALIDATE("Payment Terms Code",lCust."Payment Terms Code");
+          IF (lGenJournalLine."Payment Terms Code" <> '') AND (lGenJournalLine."Document Date" <> 0D) THEN BEGIN
+            lPaymentTerms.GET(lGenJournalLine."Payment Terms Code");
+            lGenJournalLine."Due Date" := CALCDATE(lPaymentTerms."Due Date Calculation",lGenJournalLine."Document Date");
+          END;
+        END;
+
+        lDefDim.RESET;
+        lDefDim.SETRANGE("Table ID",18);
+        lDefDim.SETRANGE("No.",pRepaymentCustNo);
+        lDefDim.SETFILTER("Dimension Value Code",'<>%1','');
+        IF lDefDim.FINDSET THEN
+        REPEAT
+          lJournalLineDimensionTemp."Dimension Code" := lDefDim."Dimension Code";
+          lJournalLineDimensionTemp."Dimension Value Code" := lDefDim."Dimension Value Code";
+          IF NOT lJournalLineDimensionTemp.INSERT THEN
+            lJournalLineDimensionTemp.MODIFY;
+        UNTIL (lDefDim.NEXT = 0);
+        lGenJnlPostLine.RunWithCheck(lGenJournalLine,lJournalLineDimensionTemp);
+
+        GLEntry.RESET;
+        GLEntry.SETCURRENTKEY("Document No.","Posting Date");
+        GLEntry.SETRANGE("Document No.",pVendorLedgerEntry."Document No.");
+        GLEntry.SETRANGE("Posting Date",pVendorLedgerEntry."Posting Date");
+        GLEntry.SETFILTER("G/L Account No.",'<>%1',lVendPostingGroup."Payables Account");
+        IF GLEntry.FINDFIRST THEN
+        REPEAT
+          // Chargement des axes analytiques
+          lLedgerEntryDimension.SETRANGE("Table ID",DATABASE::"G/L Entry");
+          lLedgerEntryDimension.SETRANGE("Entry No.",GLEntry."Entry No.");
+          lJournalLineDimensionTemp.RESET;
+          lJournalLineDimensionTemp.DELETEALL;
+          lDimensionMgt.CopyLedgEntryDimToJnlLineDim(lLedgerEntryDimension,lJournalLineDimensionTemp);
+
+          INIT;
+          //<<IMH14.ISAT.EBA
+          //VALIDATE("Posting Date",pVendorLedgerEntry."Posting Date");
+          //VALIDATE("Document Date",pVendorLedgerEntry."Document Date");
+          VALIDATE("Posting Date",pPostingDate);
+          VALIDATE("Document Date",pPostingDate);
+          //>>IMH14.ISAT.EBA
+          VALIDATE("Shortcut Dimension 1 Code",pVendorLedgerEntry."Global Dimension 1 Code");
+          VALIDATE("Shortcut Dimension 2 Code",pVendorLedgerEntry."Global Dimension 2 Code");
+          VALIDATE("Account Type","Account Type"::"G/L Account");
+          VALIDATE("Account No.",GLEntry."G/L Account No.");
+          "Document No." := pVendorLedgerEntry."Document No." + 'T';
+          VALIDATE(Amount,-GLEntry.Amount);
+          VALIDATE("Source Code",pVendorLedgerEntry."Source Code");
+          "Allow Zero-Amount Posting" := TRUE;
+          "Corporate No." := pRepaymentCustNo;
+          "Gen. Posting Type" := 0;
+          "Gen. Bus. Posting Group" := '';
+          "Gen. Prod. Posting Group" := '';
+          "VAT Bus. Posting Group" := '';
+          "VAT Prod. Posting Group" := '';
+          //<<IMH23
+          //"Service No." := pPurchInvLine."Service No.";
+          //"Service Header No." := pPurchInvLine."Service Header No.";
+          //"Intervention Line No." := pPurchInvLine."Intervention Line No.";
+          "Service No." := pPurchInvHeader."Service No.";
+          "Service Header No." := pPurchInvHeader."Service Header No.";
+          "Intervention Line No." := pPurchInvHeader."Intervention Line No.";
+          //IMH23
+          "Transmission No." := pTransmissionNo;
+          "Transmission Generate Date" := TODAY;
+
+          lDefDim.RESET;
+          lDefDim.SETRANGE("Table ID",18);
+          lDefDim.SETRANGE("No.",pRepaymentCustNo);
+          lDefDim.SETFILTER("Dimension Value Code",'<>%1','');
+          IF lDefDim.FINDSET THEN
+          REPEAT
+            lJournalLineDimensionTemp."Dimension Code" := lDefDim."Dimension Code";
+            lJournalLineDimensionTemp."Dimension Value Code" := lDefDim."Dimension Value Code";
+            IF NOT lJournalLineDimensionTemp.INSERT THEN
+              lJournalLineDimensionTemp.MODIFY;
+          UNTIL (lDefDim.NEXT = 0);
+          lGenJnlPostLine.RunWithCheck(lGenJournalLine,lJournalLineDimensionTemp);
+        UNTIL (GLEntry.NEXT = 0);
+      END;
+    END;
+
+    PROCEDURE GenerateCorporateEntry@1100281005(pPurchInvHeader@1100281013 : Record 122;pProviderInvoicePayment@1100281012 : ' ,IMH,Corporate';pTransmissionNo@1100281011 : Code[20];pRepaymentCustNo@1100281010 : Code[20];pVendorLedgerEntry@1100281009 : Record 25;pPostingDate@1100281018 : Date);
+    VAR
+      lGenJournalLine@1100281008 : Record 81;
+      lJournalLineDimensionTemp@1100281006 : TEMPORARY Record 356;
+      lLedgerEntryDimension@1100281005 : Record 355;
+      lGenJnlPostLine@1100281004 : Codeunit 12;
+      lDimensionMgt@1100281003 : Codeunit 408;
+      lGLAccountNo@1100281002 : Code[20];
+      GLEntry@1100281001 : Record 17;
+      lVendPostingGroup@1100281000 : Record 93;
+      lCust@1100281007 : Record 18;
+      lPaymentTerms@1100281014 : Record 3;
+      JnlLineDim@1100281015 : Record 356;
+      DimMgt@1100281016 : Codeunit 408;
+      lDefDim@1100281017 : Record 352;
+      lService@1100281019 : Record 50066;
+    BEGIN
+      //IMH03
+      CLEAR(lGenJournalLine);
+      WITH lGenJournalLine DO BEGIN
+        lVendPostingGroup.GET(pVendorLedgerEntry."Vendor Posting Group");
+
+        // Chargement des axes analytiques
+        lLedgerEntryDimension.SETRANGE("Table ID",DATABASE::"Vendor Ledger Entry");
+        lLedgerEntryDimension.SETRANGE("Entry No.",pVendorLedgerEntry."Entry No.");
+        lJournalLineDimensionTemp.RESET;
+        lJournalLineDimensionTemp.DELETEALL;
+        lDimensionMgt.CopyLedgEntryDimToJnlLineDim(lLedgerEntryDimension,lJournalLineDimensionTemp);
+
+        INIT;
+        //<<IMH14.ISAT.EBA
+        //VALIDATE("Posting Date",pVendorLedgerEntry."Posting Date");
+        //VALIDATE("Document Date",pVendorLedgerEntry."Document Date");
+        VALIDATE("Posting Date",pPostingDate);
+        VALIDATE("Document Date",pPostingDate);
+        //>>IMH14.ISAT.EBA
+        VALIDATE("Shortcut Dimension 1 Code",pVendorLedgerEntry."Global Dimension 1 Code");
+        VALIDATE("Shortcut Dimension 2 Code",pVendorLedgerEntry."Global Dimension 2 Code");
+        VALIDATE("Account Type","Account Type"::Customer);
+        VALIDATE("Account No.",pRepaymentCustNo);
+        "Document No." := pVendorLedgerEntry."Document No." + 'T';
+        VALIDATE(Amount,-pVendorLedgerEntry.Amount);
+        VALIDATE("Amount (LCY)",-pVendorLedgerEntry."Amount (LCY)");
+        VALIDATE("Source Code",pVendorLedgerEntry."Source Code");
+        "Allow Zero-Amount Posting" := TRUE;
+        "Corporate No." := pRepaymentCustNo;
+        //<<IMH23
+        //"Service No." := pPurchInvLine."Service No.";
+        //"Service Header No." := pPurchInvLine."Service Header No.";
+        //"Intervention Line No." := pPurchInvLine."Intervention Line No.";
+        "Service No." := pPurchInvHeader."Service No.";
+        "Service Header No." := pPurchInvHeader."Service Header No.";
+        "Intervention Line No." := pPurchInvHeader."Intervention Line No.";
+        //IMH23
+        //<<IMH27.SB
+        lService.GET(pPurchInvHeader."Service No.");
+        "Reference No." := lService."Reference No.";
+        //>>IMH27.SB
+        "Transmission No." := pTransmissionNo;
+        "Transmission Generate Date" := TODAY;
+        IF lCust.GET(pRepaymentCustNo) THEN
+        BEGIN
+          VALIDATE("Payment Terms Code",lCust."Payment Terms Code");
+          IF ("Payment Terms Code" <> '') AND ("Document Date" <> 0D) THEN BEGIN
+            lPaymentTerms.GET("Payment Terms Code");
+            "Due Date" := CALCDATE(lPaymentTerms."Due Date Calculation","Document Date");
+          END;
+        END;
+
+        lDefDim.RESET;
+        lDefDim.SETRANGE("Table ID",18);
+        lDefDim.SETRANGE("No.",pRepaymentCustNo);
+        lDefDim.SETFILTER("Dimension Value Code",'<>%1','');
+        IF lDefDim.FINDSET THEN
+        REPEAT
+          lJournalLineDimensionTemp."Dimension Code" := lDefDim."Dimension Code";
+          lJournalLineDimensionTemp."Dimension Value Code" := lDefDim."Dimension Value Code";
+          IF NOT lJournalLineDimensionTemp.INSERT THEN
+            lJournalLineDimensionTemp.MODIFY;
+        UNTIL (lDefDim.NEXT = 0);
+        lGenJnlPostLine.RunWithCheck(lGenJournalLine,lJournalLineDimensionTemp);
+
+        GLEntry.RESET;
+        GLEntry.SETCURRENTKEY("Document No.","Posting Date");
+        GLEntry.SETRANGE("Document No.",pVendorLedgerEntry."Document No.");
+        GLEntry.SETRANGE("Posting Date",pVendorLedgerEntry."Posting Date");
+        GLEntry.SETFILTER("G/L Account No.",'<>%1',lVendPostingGroup."Payables Account");
+        IF GLEntry.FINDFIRST THEN
+        REPEAT
+          // Chargement des axes analytiques
+          lLedgerEntryDimension.SETRANGE("Table ID",DATABASE::"G/L Entry");
+          lLedgerEntryDimension.SETRANGE("Entry No.",GLEntry."Entry No.");
+          lJournalLineDimensionTemp.RESET;
+          lJournalLineDimensionTemp.DELETEALL;
+          lDimensionMgt.CopyLedgEntryDimToJnlLineDim(lLedgerEntryDimension,lJournalLineDimensionTemp);
+
+          INIT;
+          //<<IMH14.ISAT.EBA
+          //VALIDATE("Posting Date",pVendorLedgerEntry."Posting Date");
+          //VALIDATE("Document Date",pVendorLedgerEntry."Document Date");
+          VALIDATE("Posting Date",pPostingDate);
+          VALIDATE("Document Date",pPostingDate);
+          //>>IMH14.ISAT.EBA
+          VALIDATE("Shortcut Dimension 1 Code",pVendorLedgerEntry."Global Dimension 1 Code");
+          VALIDATE("Shortcut Dimension 2 Code",pVendorLedgerEntry."Global Dimension 2 Code");
+          VALIDATE("Account Type","Account Type"::"G/L Account");
+          VALIDATE("Account No.",GLEntry."G/L Account No.");
+          "Document No." := pVendorLedgerEntry."Document No." + 'T';
+          VALIDATE(Amount,-GLEntry.Amount);
+          VALIDATE("Source Code",pVendorLedgerEntry."Source Code");
+          "Allow Zero-Amount Posting" := TRUE;
+          "Corporate No." := pRepaymentCustNo;
+          "Gen. Posting Type" := 0;
+          "Gen. Bus. Posting Group" := '';
+          "Gen. Prod. Posting Group" := '';
+          "VAT Bus. Posting Group" := '';
+          "VAT Prod. Posting Group" := '';
+          //<<IMH23
+          //"Service No." := pPurchInvLine."Service No.";
+          //"Service Header No." := pPurchInvLine."Service Header No.";
+          //"Intervention Line No." := pPurchInvLine."Intervention Line No.";
+          "Service No." := pPurchInvHeader."Service No.";
+          "Service Header No." := pPurchInvHeader."Service Header No.";
+          "Intervention Line No." := pPurchInvHeader."Intervention Line No.";
+          //IMH23
+          //<<IMH27.SB
+          lService.GET(pPurchInvHeader."Service No.");
+          "Reference No." := lService."Reference No.";
+          //>>IMH27.SB
+
+          "Transmission No." := pTransmissionNo;
+          "Transmission Generate Date" := TODAY;
+
+          lGenJnlPostLine.RunWithCheck(lGenJournalLine,lJournalLineDimensionTemp);
+        UNTIL (GLEntry.NEXT = 0);
+
+        INIT;
+        //<<IMH14.ISAT.EBA
+        //VALIDATE("Posting Date",pVendorLedgerEntry."Posting Date");
+        //VALIDATE("Document Date",pVendorLedgerEntry."Document Date");
+        VALIDATE("Posting Date",pPostingDate);
+        VALIDATE("Document Date",pPostingDate);
+        //>>IMH14.ISAT.EBA
+        VALIDATE("Shortcut Dimension 1 Code",pVendorLedgerEntry."Global Dimension 1 Code");
+        VALIDATE("Shortcut Dimension 2 Code",pVendorLedgerEntry."Global Dimension 2 Code");
+        VALIDATE("Account Type","Account Type"::Customer);
+        VALIDATE("Account No.",pRepaymentCustNo);
+        "Document No." := pVendorLedgerEntry."Document No." + 'P';
+        VALIDATE(Amount,pVendorLedgerEntry.Amount);
+        VALIDATE("Amount (LCY)",pVendorLedgerEntry."Amount (LCY)");
+        VALIDATE("Source Code",pVendorLedgerEntry."Source Code");
+        "Allow Zero-Amount Posting" := TRUE;
+        "Corporate No." := pRepaymentCustNo;
+        "Applies-to Doc. No." := pVendorLedgerEntry."Document No." + 'T';
+        //<<IMH23
+        //"Service No." := pPurchInvLine."Service No.";
+        //"Service Header No." := pPurchInvLine."Service Header No.";
+        //"Intervention Line No." := pPurchInvLine."Intervention Line No.";
+        "Service No." := pPurchInvHeader."Service No.";
+        "Service Header No." := pPurchInvHeader."Service Header No.";
+        "Intervention Line No." := pPurchInvHeader."Intervention Line No.";
+        //IMH23
+        "Transmission No." := pTransmissionNo;
+        "Transmission Generate Date" := TODAY;
+        IF lCust.GET(pRepaymentCustNo) THEN
+        BEGIN
+          VALIDATE("Payment Terms Code",lCust."Payment Terms Code");
+          IF ("Payment Terms Code" <> '') AND ("Document Date" <> 0D) THEN BEGIN
+            lPaymentTerms.GET("Payment Terms Code");
+            "Due Date" := CALCDATE(lPaymentTerms."Due Date Calculation","Document Date");
+          END;
+        END;
+
+        lDefDim.RESET;
+        lDefDim.SETRANGE("Table ID",18);
+        lDefDim.SETRANGE("No.",pRepaymentCustNo);
+        lDefDim.SETFILTER("Dimension Value Code",'<>%1','');
+        IF lDefDim.FINDSET THEN
+        REPEAT
+          lJournalLineDimensionTemp."Dimension Code" := lDefDim."Dimension Code";
+          lJournalLineDimensionTemp."Dimension Value Code" := lDefDim."Dimension Value Code";
+          IF NOT lJournalLineDimensionTemp.INSERT THEN
+            lJournalLineDimensionTemp.MODIFY;
+        UNTIL (lDefDim.NEXT = 0);
+        lGenJnlPostLine.RunWithCheck(lGenJournalLine,lJournalLineDimensionTemp);
+
+        INIT;
+        //<<IMH14.ISAT.EBA
+        //VALIDATE("Posting Date",pVendorLedgerEntry."Posting Date");
+        //VALIDATE("Document Date",pVendorLedgerEntry."Document Date");
+        VALIDATE("Posting Date",pPostingDate);
+        VALIDATE("Document Date",pPostingDate);
+        //>>IMH14.ISAT.EBA
+        VALIDATE("Shortcut Dimension 1 Code",pVendorLedgerEntry."Global Dimension 1 Code");
+        VALIDATE("Shortcut Dimension 2 Code",pVendorLedgerEntry."Global Dimension 2 Code");
+        VALIDATE("Account Type","Account Type"::Vendor);
+        VALIDATE("Account No.",pVendorLedgerEntry."Vendor No.");
+        "Document No." := pVendorLedgerEntry."Document No." + 'P';
+        VALIDATE(Amount,-pVendorLedgerEntry.Amount);
+        VALIDATE("Amount (LCY)",-pVendorLedgerEntry."Amount (LCY)");
+        VALIDATE("Source Code",pVendorLedgerEntry."Source Code");
+        "Allow Zero-Amount Posting" := TRUE;
+        //"Corporate No." := pRepaymentCustNo;
+        pVendorLedgerEntry.CALCFIELDS("Remaining Amt. (LCY)");
+        IF (pVendorLedgerEntry."Remaining Amt. (LCY)" <> 0) THEN
+        BEGIN
+          lGenJournalLine."Applies-to Doc. Type" := pVendorLedgerEntry."Document Type";
+          lGenJournalLine."Applies-to Doc. No." := pVendorLedgerEntry."Document No.";
+        END;
+        //<<IMH23
+        //"Service No." := pPurchInvLine."Service No.";
+        //"Service Header No." := pPurchInvLine."Service Header No.";
+        //"Intervention Line No." := pPurchInvLine."Intervention Line No.";
+        "Service No." := pPurchInvHeader."Service No.";
+        "Service Header No." := pPurchInvHeader."Service Header No.";
+        "Intervention Line No." := pPurchInvHeader."Intervention Line No.";
+        //IMH23
+        "Transmission No." := pTransmissionNo;
+        "Transmission Generate Date" := TODAY;
+
+        lDefDim.RESET;
+        lDefDim.SETRANGE("Table ID",23);
+        lDefDim.SETRANGE("No.",pVendorLedgerEntry."Vendor No.");
+        lDefDim.SETFILTER("Dimension Value Code",'<>%1','');
+        IF lDefDim.FINDSET THEN
+        REPEAT
+          lJournalLineDimensionTemp."Dimension Code" := lDefDim."Dimension Code";
+          lJournalLineDimensionTemp."Dimension Value Code" := lDefDim."Dimension Value Code";
+          IF NOT lJournalLineDimensionTemp.INSERT THEN
+            lJournalLineDimensionTemp.MODIFY;
+        UNTIL (lDefDim.NEXT = 0);
+        lGenJnlPostLine.RunWithCheck(lGenJournalLine,lJournalLineDimensionTemp);
+
+      END;
+    END;
+
+    PROCEDURE GenerateFlow@1100281016(pTransmissionNo@1100281000 : Code[20];pInvoicingMatrixSetup@1100281001 : Record 50137);
+    VAR
+      lVendorLedgerEntry@1100281002 : Record 25;
+      lServiceHeader@1100281006 : Record 5900;
+      lServiceInterventionLineBuffer@1100281005 : TEMPORARY Record 50075;
+      lGovDocHeader@1100281009 : Record 50145;
+      lDarvaMgt@1100281004 : Codeunit 50150;
+      lRecRef@1100281003 : RecordRef;
+      lFile@1100281007 : File;
+      lPMUFileName@1100281008 : Text[1024];
+      lPMUFileLine@1100281010 : Text[1024];
+    BEGIN
+      // IMH08.PC
+      // G‚nŠre le fichier Excel ou la g‚n‚ration du flux DARVA DRT en filtrant sur les ‚critures ayant le nø de transmission
+
+      WITH pInvoicingMatrixSetup DO BEGIN
+        CASE "Corporate Transfer Mode" OF
+          "Corporate Transfer Mode"::Excel : BEGIN
+            TESTFIELD("Corporate Decl. File Path");
+            CreateExcel;
+
+            lVendorLedgerEntry.RESET;
+            lVendorLedgerEntry.SETCURRENTKEY("Transmission No.");
+            lVendorLedgerEntry.SETRANGE("Transmission No.",pTransmissionNo);
+            lVendorLedgerEntry.SETFILTER("Document No.",'<>*P');
+            IF lVendorLedgerEntry.FINDSET THEN BEGIN
+              REPEAT
+                //<<IMH.PC
+                IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,lVendorLedgerEntry."Service Header No.") THEN BEGIN
+                  IF NOT lServiceHeader."DARVA Interface" THEN BEGIN
+                //>>IMH.PC
+                    AddVendorLedgerEntryOnExcel(lVendorLedgerEntry,"Repayment Customer No.");
+                  END;
+                END;
+              UNTIL (lVendorLedgerEntry.NEXT = 0);
+            END;
+
+            SaveTransmissionFile(pTransmissionNo
+              ,"Corporate Decl. File Path"
+              ,"Corporate No."
+              ,"Service Order Type");
+            ClearExcel;
+          END;
+          "Corporate Transfer Mode"::DARVA : BEGIN
+            // il g‚n‚rer une DRT par intervention et nø de transmission
+            lVendorLedgerEntry.RESET;
+            lVendorLedgerEntry.SETCURRENTKEY("Transmission No.");
+            lVendorLedgerEntry.SETRANGE("Transmission No.",pTransmissionNo);
+            lVendorLedgerEntry.SETFILTER("Document No.",'<>*P');
+            IF lVendorLedgerEntry.FINDSET THEN BEGIN
+              REPEAT
+                IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,lVendorLedgerEntry."Service Header No.") THEN BEGIN
+                  IF lServiceHeader."DARVA Interface" THEN BEGIN
+                    IF NOT lServiceInterventionLineBuffer.GET(
+                             lVendorLedgerEntry."Service Header No.",
+                             lVendorLedgerEntry."Intervention Line No.")
+                    THEN BEGIN
+                      lServiceInterventionLineBuffer."Service Header No." := lVendorLedgerEntry."Service Header No.";
+                      lServiceInterventionLineBuffer."Line No." := lVendorLedgerEntry."Intervention Line No.";
+                      lServiceInterventionLineBuffer.INSERT;
+                    END;
+                  END;
+                END;
+              UNTIL (lVendorLedgerEntry.NEXT = 0);
+            END;
+
+            IF lServiceInterventionLineBuffer.FINDSET THEN BEGIN
+              REPEAT
+                lVendorLedgerEntry.RESET;
+                lVendorLedgerEntry.SETCURRENTKEY("Transmission No.");
+                lVendorLedgerEntry.SETRANGE("Transmission No.",pTransmissionNo);
+                lVendorLedgerEntry.SETRANGE("Intervention Line No.",lServiceInterventionLineBuffer."Line No.");
+                lVendorLedgerEntry.SETRANGE("Service Header No.",lServiceInterventionLineBuffer."Service Header No.");
+                IF lVendorLedgerEntry.FINDFIRST THEN BEGIN
+                  lRecRef.GETTABLE(lVendorLedgerEntry);
+                  CLEAR(lDarvaMgt);
+                  //<<IMH32.PC
+                  //lDarvaMgt.CreateSendMQ_SDR(lRecRef,'DRT');
+                  //<<IMH33.ACO
+                  {lDarvaMgt.CreateSendMQ_SDR(
+                    lRecRef,'DRT',
+                    lVendorLedgerEntry."Corporate No.",
+                    lVendorLedgerEntry."Corporate Region Code",
+                    lVendorLedgerEntry."Service Order Type");}
+
+                  DARVASetup.GET;
+                  lDarvaMgt.CreateSendMQ_SDR(
+                    lRecRef,DARVASetup."DARVA DRT Code",
+                    lVendorLedgerEntry."Corporate No.",
+                    lVendorLedgerEntry."Corporate Region Code",
+                    lVendorLedgerEntry."Service Order Type");
+
+                  //>>IMH33.ACO
+                  //>>IMH32.PC
+                  //<<IMH12.PC
+                  lVendorLedgerEntry."DRT Generate" := TRUE;
+                  lVendorLedgerEntry."DRT Generate Date" := TODAY;
+                  //>>IMH12.PC
+                  lVendorLedgerEntry.MODIFY; //IMH16.ST
+                  COMMIT;
+                END;
+              UNTIL lServiceInterventionLineBuffer.NEXT = 0;
+            END;
+          END;
+          //<<IMH36
+          "Corporate Transfer Mode"::PMU : BEGIN
+            TESTFIELD("Corporate Decl. File Path");
+            lPMUFileName := "Corporate Decl. File Path" + "Corporate No." + "Service Order Type" + '-' + pTransmissionNo + '.csv';
+            lFile.WRITEMODE := TRUE;
+            lFile.TEXTMODE := TRUE;
+            IF EXISTS(lPMUFileName) THEN
+              ERASE(lPMUFileName);
+            lFile.CREATE(lPMUFileName);
+            PMUSetup.GET;
+
+            lVendorLedgerEntry.RESET;
+            lVendorLedgerEntry.SETCURRENTKEY("Transmission No.");
+            lVendorLedgerEntry.SETRANGE("Transmission No.",pTransmissionNo);
+            lVendorLedgerEntry.SETFILTER("Document No.",'<>*P');
+            IF lVendorLedgerEntry.FINDSET THEN BEGIN
+              REPEAT
+                lPMUFileLine := '';
+                AddVendorLedgerEntryToPMUFile(lPMUFileLine, lVendorLedgerEntry);
+                lFile.WRITE(lPMUFileLine);
+              UNTIL (lVendorLedgerEntry.NEXT = 0);
+            END;
+            lFile.CLOSE;
+
+            lGovDocHeader.GET(lGovDocHeader.Type::GC,pTransmissionNo);
+            lGovDocHeader."Excel File Nb" := lGovDocHeader."Excel File Nb" + 1;
+            lGovDocHeader."File Path" := "Corporate Decl. File Path";
+            lGovDocHeader."File Name" := lPMUFileName;
+            lGovDocHeader.MODIFY(TRUE);
+          END;
+          //>>IMH36
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE AddVendorLedgerEntryToPMUFile@1100281025(VAR pFileLine@1100281008 : Text[1024];pVendorLedgerEntry@1100281000 : Record 25);
+    VAR
+      lService@1100281001 : Record 50066;
+      lServiceHeader@1100281009 : Record 5900;
+      lServiceInterventionLine@1100281012 : Record 50075;
+      lContact@1100281011 : Record 5050;
+      lServiceCode@1100281010 : Record 50040;
+      lSpecialization@1100281013 : Record 50005;
+    BEGIN
+      //IMH36
+      // Ajout des donn‚es
+
+      // Remplissage des donn‚es
+      IF lService.GET(pVendorLedgerEntry."Service No.") THEN
+        IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,  pVendorLedgerEntry."Service Header No.") THEN
+          IF NOT lServiceInterventionLine.GET(pVendorLedgerEntry."Service Header No.",pVendorLedgerEntry."Intervention Line No.") THEN
+            lServiceInterventionLine.INIT;
+
+      //R‚f‚rence interne MAIF
+      pFileLine += lService."Reference No." + ';';
+      //Nom assureur
+      pFileLine += lServiceHeader."Corporate No." + ';';
+      //Entit‚ de gestion MAIF
+      lService.CALCFIELDS("Corporate Contact Name");
+      pFileLine += lService."Corporate Contact Name" + ';';
+      //T‚l‚phone entit‚ MAIF
+      IF NOT lContact.GET(lService."Corporate Contact No.") THEN
+        lContact.INIT;
+      pFileLine += DELCHR(lContact."Phone No.", '=', ' ') + ';';
+      //Code r‚gion
+      pFileLine += lService."Corporate Region Code" + ';';
+      //Code r‚gion
+      pFileLine += PMUSetup."Auxiliary No." + ';';
+      //B‚n‚ficiaire
+      //Nø de soci‚taire
+      pFileLine += lService."Contact No." + ';';
+      //Nom du soci‚taire
+      pFileLine += lService."Contact Name" + ';';
+      //Pr‚nom du soci‚taire
+      IF NOT lContact.GET(lService."Contact No.") THEN
+        lContact.INIT;
+      pFileLine += lContact."First Name" + ';';
+      //Adresse
+      //Adresse1
+      pFileLine += lContact.Address + ';';
+      //Adresse2
+      pFileLine += lContact."Address 2" + ';';
+      //Adresse3
+      pFileLine += lContact."Address 3" + ';';
+      //CodePostal
+      pFileLine += lContact."Post Code" + ';';
+      //Ville
+      pFileLine += lContact.City + ';';
+      //Facturation
+      //Nø de Facture
+      pFileLine += pVendorLedgerEntry."Document No." + ';';            //**************
+      //Date de la facture
+      pFileLine += FORMAT(CREATEDATETIME(pVendorLedgerEntry."Document Date", 0T), 0, 9) + ';';
+      //              '<Year4>-<Month,2>-<Day,2>T<Hours24>:<Minutes,2>:<Seconds,2>') + ';';
+      //Sp‚cialit‚ du prestataire missionn‚
+      lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+      lServiceCode.SETRANGE("Service No.", pVendorLedgerEntry."Service No.");
+      lServiceCode.SETRANGE("Service Header No.", pVendorLedgerEntry."Service Header No.");
+      lServiceCode.SETRANGE("Intervention Line No.", pVendorLedgerEntry."Intervention Line No.");
+      lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+      IF lServiceCode.FINDFIRST THEN
+        IF lSpecialization.GET(lServiceCode.Code) THEN;
+      pFileLine += lSpecialization.Description + ';';
+      //Nombre de prestataire missionn‚
+      //pFileLine += FORMAT(lServiceCode.COUNT) + ';';
+      //Montant global facture
+      pVendorLedgerEntry.CALCFIELDS(Amount);
+      pFileLine += CONVERTSTR(FORMAT(-1 * pVendorLedgerEntry.Amount,0,1), ',', '.') + ';';
+      //Montant Franchise retenue entreprise
+      pFileLine += CONVERTSTR(FORMAT(pVendorLedgerEntry."Deductible Amount",0,1), ',', '.') + ';';
+      //Type de Prestation
+      pFileLine += pVendorLedgerEntry."Service Order Type" + ';';
+      //D‚placement
+      pFileLine += 'N' + ';';
+      //Mesure Conservatoire
+      pFileLine += 'O' + ';';
+      //R‚paration D‚finitive
+      pFileLine += 'N' + ';';
+      //Poursuite en non Urgent
+      pFileLine += 'O' + ';';
+      //Dossier
+      //R‚f‚rence interne IMH
+      pFileLine += pVendorLedgerEntry."Service Header No." + ';';
+      //Date heure d'ouverture
+      pFileLine += FORMAT(lServiceHeader."Creation Date", 0, 9) + ';';
+                    //'<Year4>-<Month,2>-<Day,2>T<Hours24>:<Minutes,2>:<Seconds,2>') + ';';
+    END;
+
+    PROCEDURE CreateHeader@1100281002(pInvoicingMatrixSetup@1100281001 : Record 50137;pTransmissionNo@1100281002 : Code[20]);
+    VAR
+      lDocumentHeader@1100281000 : Record 50145;
+    BEGIN
+      //IMH03
+      lDocumentHeader.RESET;
+      lDocumentHeader.Type := lDocumentHeader.Type::GC;
+      lDocumentHeader."No." := pTransmissionNo;
+      lDocumentHeader."Posting Date" := TODAY;
+      lDocumentHeader."User Creation" := USERID;
+      lDocumentHeader."Date Creation" := TODAY;
+      lDocumentHeader."Time Creation" := TIME;
+      lDocumentHeader."Output Type" := pInvoicingMatrixSetup."Corporate Transfer Mode";
+      lDocumentHeader."Line Matrix Setup" := pInvoicingMatrixSetup."Line No.";
+      lDocumentHeader.INSERT (TRUE);
+    END;
+
+    PROCEDURE CheckDateToSend@1100281003(VAR pLastDate@1100281000 : DateTime;pFrequency@1100281001 : 'Daily,Decade,Week,Fortnight,Monthly,Any') rValue : Boolean;
+    VAR
+      lLastDate@1100281002 : Date;
+      lCurrentDate@1100281009 : Date;
+      lTemp1@1100281003 : Integer;
+      lTemp2@1100281005 : Integer;
+      lYear1@1100281004 : Integer;
+      lYear2@1100281007 : Integer;
+      lMonth1@1100281006 : Integer;
+      lMonth2@1100281008 : Integer;
+    BEGIN
+      // IMH07.PC
+      // v‚rifie s'il faut envoyer le fichier en fonction de la fr‚quence d'envoi et de la derniŠre date d'envoi
+      // retourne vrai s'il faut envoyer le fichier
+      // Met … jour la derniŠre date d'‚mission
+
+      rValue := FALSE;
+
+      IF pFrequency = pFrequency::Any THEN BEGIN
+        EXIT;
+      END;
+
+      IF pLastDate = 0DT THEN BEGIN
+        pLastDate := CURRENTDATETIME;
+        EXIT(TRUE);
+      END;
+
+      lLastDate := DT2DATE(pLastDate);
+      lCurrentDate := DT2DATE(CURRENTDATETIME);
+      lYear1 := DATE2DMY(lLastDate,3);
+      lYear2 := DATE2DMY(lCurrentDate,3);
+      IF lYear1 <= lYear2 THEN BEGIN
+        lMonth1 := DATE2DMY(lLastDate,2);
+        lMonth2 := DATE2DMY(lCurrentDate,2);
+        IF lMonth1 <= lMonth2 THEN BEGIN
+          CASE pFrequency OF
+            pFrequency::Daily : BEGIN
+              IF lCurrentDate <= lLastDate THEN BEGIN
+                EXIT;
+              END;
+            END;
+            pFrequency::Decade : BEGIN
+              lTemp1 := GetDecadeFortNightNo(1,DATE2DMY(lLastDate,1));
+              lTemp2 := GetDecadeFortNightNo(1,DATE2DMY(lCurrentDate,1));
+              IF lTemp1 = lTemp2 THEN BEGIN
+                EXIT;
+              END;
+            END;
+            pFrequency::Week : BEGIN
+              lTemp1 := DATE2DWY(lLastDate,2);
+              lTemp2 := DATE2DWY(lCurrentDate,2);
+              //<<IMH35
+              //IF lTemp2 <= lTemp1 THEN BEGIN
+              //  EXIT;
+              //END;
+              lYear1 := DATE2DWY(lLastDate,3);
+              lYear2 := DATE2DWY(lCurrentDate,3);
+              IF lYear1 = lYear2 THEN BEGIN
+                IF lTemp2 <= lTemp1 THEN BEGIN
+                  EXIT;
+                END;
+              END;
+              //>>IMH35
+            END;
+            pFrequency::Fortnight : BEGIN
+              lTemp1 := GetDecadeFortNightNo(2,DATE2DMY(lLastDate,1));
+              lTemp2 := GetDecadeFortNightNo(2,DATE2DMY(lCurrentDate,1));
+              IF lTemp1 = lTemp2 THEN BEGIN
+                EXIT;
+              END;
+            END;
+          END;
+        END;
+      END;
+
+      pLastDate := CURRENTDATETIME;
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetDecadeFortNightNo@1100281006(pType@1100281000 : 'Decade,Fortnight';pDay@1100281001 : Integer) rValue : Integer;
+    BEGIN
+      // IMH07.PC
+      // Permet de savoir la decade ou la quinzaine du jour
+
+      rValue := 0;
+
+      CASE pType OF
+        pType::Decade : BEGIN
+          IF pDay IN [1,2,3,4,5,6,7,8,9,10] THEN BEGIN
+            rValue := 1;
+          END;
+          IF pDay IN [11,12,13,14,15,16,17,18,19,20] THEN BEGIN
+            rValue := 2;
+          END;
+          IF pDay IN [21,22,23,24,25,26,27,28,29,30,31] THEN BEGIN
+            rValue := 3;
+          END;
+        END;
+        pType::Fortnight : BEGIN
+          IF pDay IN [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15] THEN BEGIN
+            rValue := 1;
+          END;
+          IF pDay IN [16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31] THEN BEGIN
+            rValue := 2;
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE SetCallFromReport@1100281014(VAR pInvoicingMatrixSetup@1100281001 : Record 50137);
+    BEGIN
+      //<<IMH09.ISAT.EBA
+      CallFromReport := TRUE;
+      InvoicingMatrixSetup.COPYFILTERS(pInvoicingMatrixSetup);
+      //>>IMH09.ISAT.EBA
+    END;
+
+    PROCEDURE GetPeriodEndDate@1100281017(pRefDate@1100281000 : Date;pInvFreq@1100281001 : 'Daily,Decade,Week,Fortnight,Monthly,Any') : Date;
+    VAR
+      lRefDay@1100281002 : Integer;
+      lPeriodEndDate@1100281003 : Date;
+    BEGIN
+      //<<IMH18.ISAT.EBA
+      lPeriodEndDate := pRefDate;
+      lRefDay := DATE2DMY(pRefDate,1);
+
+      CASE pInvFreq OF
+        pInvFreq::Daily :
+          BEGIN
+            //<<IMH22.PC
+            //lPeriodEndDate := prefdate;
+            lPeriodEndDate := CALCDATE('<-1D>',WORKDATE);
+            //>>IMH22.PC
+          END;
+
+        pInvFreq::Decade :
+          BEGIN
+            IF lRefDay < 11 THEN
+              lPeriodEndDate := CALCDATE('<-1M+CM+10D>',pRefDate)
+            ELSE IF lRefDay < 21 THEN
+              lPeriodEndDate := CALCDATE('<-1M+CM+20D>',pRefDate)
+            ELSE
+              lPeriodEndDate := CALCDATE('<CM>',pRefDate)
+          END;
+
+        pInvFreq::Week :
+          BEGIN
+            lPeriodEndDate := CALCDATE('<CW>',pRefDate);
+      //<<IMH20.ST Rupture par mois
+            IF DATE2DMY(pRefDate, 2) <> DATE2DMY(lPeriodEndDate,2) THEN
+              lPeriodEndDate := CALCDATE('<CM>', pRefDate);
+      //>>IMH20.ST
+          END;
+
+        pInvFreq::Fortnight :
+          BEGIN
+            IF lRefDay < 16 THEN
+              lPeriodEndDate := CALCDATE('<-1M+CM+15D>',pRefDate)
+            ELSE
+              lPeriodEndDate := CALCDATE('<CM>',pRefDate)
+          END;
+
+        pInvFreq::Monthly :
+          BEGIN
+            lPeriodEndDate := CALCDATE('<CM>',pRefDate);
+          END;
+      END;
+
+      EXIT(lPeriodEndDate);
+      //>>IMH18.ISAT.EBA
+    END;
+
+    PROCEDURE SetRegenerateMode@1100281018(pRegenerateMode@1100281000 : Boolean;pRegenerateModeTransmissionNo@1100281001 : Code[20];pRegenerateDocumentFilter@1100281002 : Text[250]);
+    BEGIN
+      //<<IMH24
+      RegenerateMode := pRegenerateMode;
+      RegenerateModeTransmissionNo := pRegenerateModeTransmissionNo;
+      RegenerateDocumentFilter := pRegenerateDocumentFilter;
+      //>>IMH24
+    END;
+
+    PROCEDURE GLEntriesApplication@1100281020();
+    VAR
+      lGeneralLedgerSetup@1100281005 : Record 98;
+      lGLEntryInvoices@1100281003 : Record 17;
+      lGLEntry@1100281002 : Record 17;
+      lGLEntriesApplication@1100281001 : Codeunit 10842;
+      lAmount@1100281000 : Decimal;
+      Text001@1100281004 : TextConst 'FRA=471200';
+    BEGIN
+      //<<IMH26.RC
+
+      lGeneralLedgerSetup.GET;
+      lGeneralLedgerSetup.TESTFIELD("Corp. Transf. Clearing Account");
+      lGLEntryInvoices.SETRANGE("G/L Account No.",lGeneralLedgerSetup."Corp. Transf. Clearing Account");
+      //lGLEntryInvoices.SETRANGE("Document No.",'A017386');
+      lGLEntryInvoices.SETFILTER("Document Type",'%1|%2',
+                                 lGLEntryInvoices."Document Type"::Invoice,
+                                 lGLEntryInvoices."Document Type"::"Credit Memo");
+      lGLEntryInvoices.SETRANGE(Letter,'');
+      IF lGLEntryInvoices.FINDSET THEN
+      REPEAT
+          lGLEntry.SETCURRENTKEY("G/L Account No.","Document No.");
+          lGLEntry.SETFILTER("G/L Account No.",lGLEntryInvoices."G/L Account No.");
+          lGLEntry.SETFILTER(Letter,'');
+          lGLEntry.SETFILTER("Document No.",'%1', lGLEntryInvoices."Document No." +'*');
+          lGLEntry.SETFILTER("Service No." ,lGLEntryInvoices."Service No.");
+          lGLEntry.SETFILTER("Service Header No." ,lGLEntryInvoices."Service Header No.");
+          lGLEntry.SETRANGE("Intervention Line No.",lGLEntryInvoices."Intervention Line No.");
+          IF lGLEntry.FINDSET THEN
+          REPEAT
+            lAmount += lGLEntry.Amount;
+          UNTIL lGLEntry.NEXT =0;
+
+          IF lAmount = 0  THEN
+          BEGIN
+            IF lGLEntry.FINDSET(TRUE) THEN
+            REPEAT
+              lGLEntry.MARK(TRUE);
+              lGLEntry."Applies-to ID" := USERID;
+              lGLEntry.MODIFY;
+            UNTIL  lGLEntry.NEXT = 0;
+            lGLEntriesApplication.SetHideDialog(TRUE);
+            lGLEntriesApplication.Validate(lGLEntry);
+          END
+
+      UNTIL lGLEntryInvoices.NEXT =0
+      //<<IMH26.RC
+    END;
+
+    PROCEDURE CheckPostingDate@1100281019(pPostingDate@1100281003 : Date) : Date;
+    VAR
+      lUserSetup@1100281000 : Record 91;
+      lGeneralLedgerSetup@1100281001 : Record 98;
+      lGenJnlCheckLine@1100281002 : Codeunit 11;
+    BEGIN
+      // IMH30.PC
+
+      IF NOT lGenJnlCheckLine.DateNotAllowed(pPostingDate) THEN BEGIN
+        EXIT(pPostingDate);
+      END;
+
+      IF lUserSetup.GET(USERID) THEN BEGIN
+        IF lUserSetup."Allow Posting From" <> 0D THEN BEGIN
+          EXIT(lUserSetup."Allow Posting From");
+        END ELSE BEGIN
+          lGeneralLedgerSetup.GET;
+          IF lGeneralLedgerSetup."Allow Posting From" <> 0D THEN BEGIN
+            EXIT(lGeneralLedgerSetup."Allow Posting From");
+          END ELSE BEGIN
+            EXIT(pPostingDate);
+          END;
+        END;
+      END;
+    END;
+
+    EVENT XlApp@1100281005::NewWorkbook@1565(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetSelectionChange@1558(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetBeforeDoubleClick@1559(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetBeforeRightClick@1560(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetActivate@1561(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetDeactivate@1562(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetCalculate@1563(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetChange@1564(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookOpen@1567(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookActivate@1568(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookDeactivate@1569(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookBeforeClose@1570(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookBeforeSave@1571(Wb@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";SaveAsUI@1100281001 : Boolean;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookBeforePrint@1572(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookNewSheet@1573(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookAddinInstall@1574(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookAddinUninstall@1575(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WindowResize@1554(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WindowActivate@1556(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WindowDeactivate@1557(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetFollowHyperlink@1854(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetPivotTableUpdate@2157(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookPivotTableCloseConnect@2160(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookPivotTableOpenConnecti@2161(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookSync@2289(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";SyncEventType@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookBeforeXmlImport@2290(Wb@1100281004 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281002 : Text[1024];IsRefresh@1100281001 : Boolean;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookAfterXmlImport@2291(Wb@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";IsRefresh@1100281001 : Boolean;Result@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookBeforeXmlExport@2292(Wb@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281001 : Text[1024];VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookAfterXmlExport@2293(Wb@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281001 : Text[1024];Result@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookRowsetComplete@2611(Wb@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Description@1100281002 : Text[1024];Sheet@1100281001 : Text[1024];Success@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::AfterCalculate@2612();
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetPivotTableAfterValueChang@2895(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetPivotTableBeforeAllocateC@2896(Sh@1100281004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetPivotTableBeforeCommitCha@2897(Sh@1100281004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::SheetPivotTableBeforeDiscardCh@2898(Sh@1100281003 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281001 : Integer;ValueChangeEnd@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::ProtectedViewWindowOpen@2903(Pvw@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::ProtectedViewWindowBeforeEdit@2905(Pvw@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::ProtectedViewWindowBeforeClose@2906(Pvw@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow";Reason@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::ProtectedViewWindowResize@2908(Pvw@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::ProtectedViewWindowActivate@2909(Pvw@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::ProtectedViewWindowDeactivate@2910(Pvw@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookAfterSave@2911(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Success@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281005::WorkbookNewChart@2912(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Ch@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020821-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Chart");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::Open@1923();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::Activate@304();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::Deactivate@1530();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::BeforeClose@1546(VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::BeforeSave@1547(SaveAsUI@1100281001 : Boolean;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::BeforePrint@1549(VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::NewSheet@1550(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::AddinInstall@1552();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::AddinUninstall@1553();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::WindowResize@1554(Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::WindowActivate@1556(Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::WindowDeactivate@1557(Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetSelectionChange@1558(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetBeforeDoubleClick@1559(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetBeforeRightClick@1560(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetActivate@1561(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetDeactivate@1562(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetCalculate@1563(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetChange@1564(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetFollowHyperlink@1854(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetPivotTableUpdate@2157(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::PivotTableCloseConnection@2158(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::PivotTableOpenConnection@2159(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::Sync@2266(SyncEventType@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::BeforeXmlImport@2283(Map@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281002 : Text[1024];IsRefresh@1100281001 : Boolean;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::AfterXmlImport@2285(Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";IsRefresh@1100281001 : Boolean;Result@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::BeforeXmlExport@2287(Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281001 : Text[1024];VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::AfterXmlExport@2288(Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281001 : Text[1024];Result@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::RowsetComplete@2610(Description@1100281002 : Text[1024];Sheet@1100281001 : Text[1024];Success@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetPivotTableAfterValueChang@2895(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetPivotTableBeforeAllocateC@2896(Sh@1100281004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetPivotTableBeforeCommitCha@2897(Sh@1100281004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetPivotTableBeforeDiscardCh@2898(Sh@1100281003 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281001 : Integer;ValueChangeEnd@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::SheetPivotTableChangeSync@2899(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::AfterSave@2900(Success@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281004::NewChart@2901(Ch@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020821-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Chart");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::SelectionChange@1543(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::BeforeDoubleClick@1537(Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::BeforeRightClick@1534(Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::Activate@304();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::Deactivate@1530();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::Calculate@279();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::Change@1545(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::FollowHyperlink@1470(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::PivotTableUpdate@2156(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::PivotTableAfterValueChange@2886(TargetPivotTable@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::PivotTableBeforeAllocateChange@2889(TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::PivotTableBeforeCommitChanges@2892(TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::PivotTableBeforeDiscardChanges@2893(TargetPivotTable@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281001 : Integer;ValueChangeEnd@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281003::PivotTableChangeSync@2894(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    BEGIN
+    {
+      /** @r IMH36 @d 06/06/14 @a ISAT.ZW @v IMH6.01.P010 @s Projet PMU @c Ajout type export PMU */
+      /** @r IMH35 @d 30/12/13 @a ISAT.ZW @v IMH6.01.4930 @h 4930 @s Correction @c Correction Controle date traitement semaine */
+      /** @r IMH34 @d 25/11/13 @a ISAT.ZW @v IMH6.01.350 @h 4864 @s SystŠme d'aiguillage @c Correction gestion darva */
+      /** @r IMH33 @d 03/09/13 @a ISAT.ACO @v IMH6.01.350 @s SystŠme d'aiguillage @c ParamŠtres DARVA */
+      /** @r IMH32 @d 27/06/13 @a ISAT.PC @v IMH6.01.350 @s SystŠme d'aiguillage @c Modification */
+      /** @r IMH31 @d 01/03/13 @a ISAT.SB @v IMH6.01.347 @s Juin @h 4249 */
+      /** @r IMH30 @d 08/01/13 @a ISAT.PC @v IMH6.01.336 @s NEP Urgente @h 4217 */
+      /** @r IMH29 @d 19/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3730
+          @a Ajout permission TableData Payment Terms=rim,
+          @a Ajout permission TableData G/L Account=rim,
+          @a Ajout permission TableData G/L Entry=rim,
+          @a Ajout permission TableData Customer=rim,
+          @a Ajout permission TableData Vendor=rim,
+          @a Ajout permission TableData Vendor Ledger Entry=rim,
+          @a Ajout permission TableData Company Information=r,
+          @a Ajout permission TableData Gen. Journal Line=rimd,
+          @a Ajout permission TableData Vendor Posting Group=r,
+          @a Ajout permission TableData General Ledger Setup=r,
+          @a Ajout permission TableData Purch. Inv. Header=rim,
+          @a Ajout permission TableData Purch. Inv. Line=rim,
+          @a Ajout permission TableData General Posting Setup=r,
+          @a Ajout permission TableData Default Dimension=rimd,
+          @a Ajout permission TableData Ledger Entry Dimension=rimd,
+          @a Ajout permission TableData Journal Line Dimension=rimd,
+          @a Ajout permission TableData Detailed Vendor Ledg. Entry=rim,
+          @a Ajout permission TableData Contact=r,
+          @a Ajout permission TableData Service Header=r,
+          @a Ajout permission TableData Provider=r,
+          @a Ajout permission TableData Provider Agreement=r,
+          @a Ajout permission TableData Corporate Region=r,
+          @a Ajout permission TableData Service=r,
+          @a Ajout permission TableData Service Intervention Line=r,
+          @a Ajout permission TableData Code Usage=r,
+          @a Ajout permission TableData Invoicing Matrix Setup=rm,
+          @a Ajout permission TableData Government Document Header=rimd,
+          @a Ajout permission TableData Government Document Line=rimd */
+      /** @r IMH28 @d 23/08/12 @a ISAT.RC @v IMH6.01.212 @s Gestion date de reference matrice @h 3795 */
+      /** @r IMH27 @d 02/08/12 @a ISAT.SB @v IMH6.01.212 @h 3790 @s Copie nø ‚vŠnement */
+      /** @r IMH26 @d 23/07/12 @a ISAT.RC @v IMH6.01.212 @h 3035 @s lettrage automatique du compte 471200 */
+      /** @r IMH25 @d 23/07/12 @a ISAT.RC @v IMH6.01.212 @h 3580
+          @s Les ecritures fournisseurs doivent avoir un Nø Transmission = ''*/
+      /** @r IMH24 @d 06/04/12 @a ISAT.ZW @v IMH6.01.146 @s Gestion facturation @h 3102 @c Ajout fonction SetRegenerateMode */
+      /** @r IMH23 @d 08/03/12 @a ISAT.ZW @v IMH6.01.146 @s Gestion facturation
+          @c les transmission parcours les entetes achat au lieu de ligne achat */
+      /** @r IMH22 @d 01/03/12 @a ISAT.PC @v IMH6.01.146 @s Gestion facturation
+          @c Gestion … la workdate pour le journalier de la fonction GetPeriodEndDate*/
+      /** @r IMH21 @d 06/02/12 @a ISAT.ZW @v IMH6.01.146 @s Gestion facturation
+          @c gestion des blocage demande de remboursement */
+      /** @r IMH20 @d 20/01/12 @a ISAT.ST @v IMH6.01.146 @s Gestion facturation
+          @c Gestion des filtres cumul‚s + Ajout filtre date */
+      /** @r IMH19 @d 26/12/11 @a ISAT.EBA @v IMH6.01.146 @s Gestion facturation
+          @c Ajout no. s‚quence dans le fichier excel */
+      /** @r IMH18 @d 21/12/11 @a ISAT.EBA @v IMH6.01.146 @s Gestion facturation
+          @c Ajout de fonction "GetPeriodEndDate" */
+      /** @r IMH17 @d 21/12/11 @a ISAT.EBA @v IMH6.01.018 @s Gestion des agr‚ments */
+      /** @r IMH16 @d 20/12/11 @a ISAT.ST @v IMH6.01.146 @s Gestion facturation */
+      /** @r IMH15 @d 20/12/11 @a ISAT.EBA @v IMH6.01.146 @s Gestion facturation */
+      /** @r IMH14 @d 19/12/11 @a ISAT.EBA @v IMH6.01.146 @s Correctif date de comptabilisation */
+      /** @r IMH13 @d 09/12/11 @a ISAT.PC @v IMH6.01.146 @s Les ecritures fournisseur doivent ˆtre ouvertes */
+      /** @r IMH12 @d 05/12/11 @a ISAT.PC @v IMH6.01.146 @s Gestion de la DRT */
+      /** @r IMH11 @d 03/11/11 @a ISAT.EBA @v IMH6.01.146 @s Historique des transmissions */
+      /** @r IMH10 @d 27/09/11 @a ISAT.EBA @v IMH6.01.146 @s Correctif */
+      /** @r IMH09 @d 23/09/11 @a ISAT.EBA @v IMH6.01.146 @s Correctif */
+      /** @r IMH08 @d 08/09/11 @a ISAT.PC @v IMH6.01.146 @s Correctif */
+      /** @r IMH07 @d 06/09/11 @a ISAT.PC @v IMH6.01.146 @s Gestion de la DRT */
+      /** @r IMH06 @d 25/08/11 @a ISAT.PC @v IMH6.01.146 @s Gestion de la DRT */
+      /** @r IMH05 @d 18/08/11 @a ISAT.ST @v IMH6.01.146 @s Correction des programmes */
+      /** @r IMH04 @d 20/07/11 @a ISAT.PC @v IMH6.01.146 @s Modification majeur g‚n‚ral
+          @c ajout Nø agr‚ment dans fichier g‚n‚r‚*/
+      /** @r IMH03 @d 05/07/11 @a ISAT.VA @v IMH6.01.146 @s Modification majeur g‚n‚ral*/
+      /** @r IMH02 @d 23/06/11 @a ISAT.MA @v IMH6.01.132 @s DARVA Management
+          @c Fonction d'envoi de la demande de rŠglement (DRT) */
+      /** @r IMH01 @d 14/03/11 @a ISAT.PC @v IMH6.01.146 @s Gestion facturation @c Cr‚ation
+          @c gŠre les transmissions aux grands comptes */
+    }
+    END.
+  }
+}

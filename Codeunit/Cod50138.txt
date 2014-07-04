@@ -1,0 +1,496 @@
+OBJECT Codeunit 50138 CTI Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=02/05/12;
+    Time=14:47:39;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+            // Test prestataire
+            //ShowCard('072030N');
+            // Test grand compte
+            //ShowCard('CT000005');
+            // Test b‚n‚ficiaire
+            ShowCard('CT0001298750');
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      CTISetup@1100281000 : Record 50162;
+      CtiCtrl@1100281001 : Automation "{566FB465-0696-4340-A726-2202654A157A} 1.0:{789AC929-8AC2-4AD1-9C0A-22650E323702}:'CtiServerConnector'.Control";
+      Text001@1100281002 : TextConst 'ENU=Do you want to call the number %1?;FRA=Souhaitez-vous appeler le num‚ro %1?';
+      Text002@1100281003 : TextConst 'FRA=La connexion n''a pas pu ˆtre ‚tablie avec le serveur CTI.';
+
+    PROCEDURE GetParameters@1100281001(VAR ServerIP@1100281004 : Text[50];VAR PortNo@1100281003 : Integer;VAR AgentNo@1100281002 : Text[50];VAR DisplayEvent@1100281001 : Integer;VAR InternalNoLenght@1100281000 : Integer;VAR ReportNo@1100281006 : Integer) : Boolean;
+    VAR
+      lUserSetup@1100281005 : Record 91;
+    BEGIN
+      IF NOT CTISetup.GET THEN
+        EXIT(FALSE);
+
+      IF NOT lUserSetup.GET(USERID) THEN
+        EXIT(FALSE);
+
+      IF lUserSetup."Agent No." = '' THEN
+        EXIT(FALSE);
+
+      CTISetup.TESTFIELD("Server IP");
+      CTISetup.TESTFIELD("Port No.");
+      //lUserSetup.TESTFIELD("Agent No.");
+
+      ServerIP  := CTISetup."Server IP";
+      PortNo  := CTISetup."Port No.";
+      AgentNo := lUserSetup."Agent No.";
+
+      CASE CTISetup."Definition Type" OF
+        CTISetup."Definition Type"::"By Company" :
+          BEGIN
+            DisplayEvent := CTISetup."Card Call Type"; //0 Sur d‚crocher,1 Sur Sonnerie
+          END;
+
+        CTISetup."Definition Type"::"By User" :
+          BEGIN
+            DisplayEvent := lUserSetup."Card Call Type";
+          END;
+      END;
+
+      InternalNoLenght := CTISetup."Internal No. Lenght";
+
+      ReportNo := 50073;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetContact@1100281000(PhoneNo@1100281015 : Text[1024];VAR ContactNo@1100281014 : Code[20];VAR ContactName@1100281013 : Text[50]) ContFound : Boolean;
+    VAR
+      lCont@1100281001 : Record 5050;
+      lPhoneNoList@1100281010 : Record 50055;
+      lUserSetup@1100281000 : Record 91;
+    BEGIN
+      IF (PhoneNo = '') OR (PhoneNo = ' ') THEN
+        EXIT(FALSE);
+
+      lPhoneNoList.SETCURRENTKEY("Search Phone No.");
+      lPhoneNoList.SETRANGE("Search Phone No.",PhoneNo);
+      IF NOT lPhoneNoList.FINDFIRST THEN
+        EXIT(FALSE);
+
+      IF NOT lCont.GET(lPhoneNoList."Contact No.") THEN
+        EXIT(FALSE);
+
+      ContactNo := lCont."No.";
+      ContactName := lCont.Name;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateInteraction@1100281002(ContactNo@1100281004 : Code[20];PhoneNo@1100281003 : Text[50];Incoming@1100281002 : Boolean;EstablishedCall@1100281001 : Boolean);
+    VAR
+      lCont@1100281011 : Record 5050;
+      lSegLine@1100281010 : Record 5077;
+      AttachmentTmp@1100281009 : Record 5062;
+      InterLogEntryCommentLineTmp@1100281008 : TEMPORARY Record 5123;
+      SegManagement@1100281007 : Codeunit 5051;
+      send@1100281006 : Boolean;
+      Flag@1100281005 : Boolean;
+      IsFinish@1100281000 : Boolean;
+    BEGIN
+    END;
+
+    PROCEDURE ShowCard@1100281005(ContactNo@1100281005 : Code[20]);
+    VAR
+      lCont@1100281010 : Record 5050;
+      lProvider@1100281009 : Record 50000;
+      lVend@1100281008 : Record 23;
+      lCust@1100281007 : Record 18;
+      lContBusinessRelation@1100281006 : Record 5054;
+      lServIntervLine@1100281001 : Record 50075;
+      lService@1100281004 : Record 50066;
+      lUserSetup@1100281003 : Record 91;
+      lServIntervLinesList@1100281011 : Page 50069;
+      lServList@1100281002 : Page 50068;
+      ProviderFound@1100281000 : Boolean;
+    BEGIN
+      IF NOT lCont.GET(ContactNo) THEN
+        ContactNo := '';
+      IF ContactNo = '' THEN BEGIN
+        PAGE.RUN(50050);
+        EXIT;
+      END;
+      lUserSetup.GET(USERID);
+      CASE lCont."Service Contact" OF
+        lCont."Service Contact"::Provider :
+          BEGIN
+            CASE lUserSetup."Provider Card Call" OF
+              lUserSetup."Provider Card Call"::None :
+                EXIT;
+              lUserSetup."Provider Card Call"::"Provider Card" :
+                IF ShowProvCard(lCont."Company No.") THEN
+                  EXIT;
+              lUserSetup."Provider Card Call"::"Vendor Card" :
+                IF ShowVendCard(lCont."Company No.") THEN
+                  EXIT;
+              lUserSetup."Provider Card Call"::"Interventions List" :
+                IF ShowProvIntervList(lCont."Company No.") THEN
+                  EXIT;
+              lUserSetup."Provider Card Call"::"Service Search" :
+                IF ShowServSearch(lCont."Company No.",2) THEN
+                  EXIT;
+            END; // CASE "Provider Card Call"
+          END; // Provider
+        lCont."Service Contact"::"Corporate Customer" :
+          BEGIN
+            CASE lUserSetup."Corporate Card Call" OF
+              lUserSetup."Corporate Card Call"::None :
+                EXIT;
+              lUserSetup."Corporate Card Call"::"Service Search" :
+                IF ShowServSearch(lCont."Company No.",1) THEN
+                  EXIT;
+              lUserSetup."Corporate Card Call"::"Customer Card" :
+                IF ShowCustCard(lCont."Company No.") THEN
+                  EXIT;
+            END; // CASE "Corporate Card Call"
+          END; // Corporate Customer
+        lCont."Service Contact"::Expert :
+          BEGIN
+            IF lUserSetup."Expert Card Call" = lUserSetup."Expert Card Call"::None THEN
+              EXIT;
+          END; // Expert
+        lCont."Service Contact"::Beneficiary :
+          BEGIN
+            CASE lUserSetup."Beneficiary Card Call" OF
+              lUserSetup."Beneficiary Card Call"::None :
+                EXIT;
+              lUserSetup."Beneficiary Card Call"::"Service List" :
+                IF ShowServiceList(lCont."Company No.", 0) THEN
+                  EXIT;
+            END; // CASE "Beneficiary Card Call"
+          END; // Beneficiary
+      END;
+      FORM.RUN(5050,lCont);
+    END;
+
+    PROCEDURE MakeCall@1100281003(pPhoneNo@1100281000 : Text[80]);
+    VAR
+      lUserSetup@1100281002 : Record 91;
+    BEGIN
+      IF NOT CONFIRM(STRSUBSTNO(Text001,pPhoneNo)) THEN
+        EXIT;
+
+      CTISetup.GET;
+      CTISetup.TESTFIELD("Server IP");
+      CTISetup.TESTFIELD("Port No.");
+
+      lUserSetup.GET(USERID);
+
+      lUserSetup.TESTFIELD("Agent No.");
+
+      IF NOT ISCLEAR(CtiCtrl) THEN
+        CLEAR(CtiCtrl);
+
+      CREATE(CtiCtrl,TRUE,TRUE);
+
+      //<<IMH03.ISAT.EBA
+      //IF CtiCtrl.Connect(CTISetup."Server IP",CTISetup."Port No.",lUserSetup."Agent No.") THEN
+      //  CtiCtrl.MakeCall(pPhoneNo);
+
+      CtiCtrl.Connect(CTISetup."Server IP",CTISetup."Port No.",lUserSetup."Agent No.");
+      SLEEP(500);
+      CtiCtrl.MakeCall(pPhoneNo);
+      CtiCtrl.UnregisterAgent(lUserSetup."Agent No.");
+
+      CLEAR(CtiCtrl);
+      //>>IMH03.ISAT.EBA
+    END;
+
+    LOCAL PROCEDURE ShowProvCard@1100281004(pContNo@1100281000 : Code[20]) : Boolean;
+    VAR
+      lContBusRel@1100281001 : Record 5054;
+      lProvider@1100281002 : Record 50000;
+    BEGIN
+      WITH lContBusRel DO BEGIN
+        SETRANGE("Contact No.", pContNo);
+        SETRANGE("Link to Table", "Link to Table"::Provider);
+        IF NOT FINDFIRST THEN
+          EXIT(FALSE);
+      END;
+      IF NOT lProvider.GET(lContBusRel."No.") THEN
+        EXIT(FALSE);
+      IF ISSERVICETIER THEN
+        PAGE.RUN(50000,lProvider)
+      ELSE
+        FORM.RUN(50000, lProvider);
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE ShowCustCard@1100281006(pContNo@1100281000 : Code[20]) : Boolean;
+    VAR
+      lContBusRel@1100281001 : Record 5054;
+      lCust@1100281002 : Record 18;
+    BEGIN
+      WITH lContBusRel DO BEGIN
+        SETRANGE("Contact No.", pContNo);
+        SETRANGE("Link to Table", "Link to Table"::Customer);
+        IF NOT FINDFIRST THEN
+          EXIT(FALSE);
+      END;
+      IF NOT lCust.GET(lContBusRel."No.") THEN
+        EXIT(FALSE);
+      IF ISSERVICETIER THEN
+        PAGE.RUN(21,lCust)
+      ELSE
+        FORM.RUN(21,lCust);
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE ShowVendCard@1100281007(pContNo@1100281000 : Code[20]) : Boolean;
+    VAR
+      lContBusRel@1100281001 : Record 5054;
+      lVend@1100281002 : Record 23;
+    BEGIN
+      WITH lContBusRel DO BEGIN
+        SETRANGE("Contact No.", pContNo);
+        SETRANGE("Link to Table", "Link to Table"::Vendor);
+        IF NOT FINDFIRST THEN
+          EXIT(FALSE);
+      END;
+      IF NOT lVend.GET(lContBusRel."No.") THEN
+        EXIT(FALSE);
+      IF ISSERVICETIER THEN
+        PAGE.RUN(26,lVend)
+      ELSE
+        FORM.RUN(26,lVend);
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE ShowProvIntervList@1100281008(pProvNo@1100281000 : Code[20]) : Boolean;
+    VAR
+      lContBusRel@1100281001 : Record 5054;
+      lServIntervLine@1100281003 : Record 50075;
+      lServIntervLinesList@1100281002 : Form 50069;
+    BEGIN
+      lServIntervLine.SETCURRENTKEY("Provider No.","Mission Status","Intervention Status",Suspended,Closed);
+      lServIntervLine.FILTERGROUP(2);
+      lServIntervLine.SETFILTER("Provider No.", pProvNo);
+      lServIntervLine.FILTERGROUP(0);
+      IF lServIntervLine.ISEMPTY THEN
+        EXIT(FALSE);
+      lServIntervLinesList.SETTABLEVIEW(lServIntervLine);
+      lServIntervLinesList.RUN;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE ShowServSearch@1100281009(pContNo@1100281000 : Code[20];pContRelation@1100281002 : 'Beneficiary,Corporate,Provider') : Boolean;
+    VAR
+      lContBusRel@1100281001 : Record 5054;
+      lServSearch@1100281003 : Codeunit 50060;
+      lTempServ@1100281004 : TEMPORARY Record 50066;
+    BEGIN
+      CASE pContRelation OF
+        pContRelation::Beneficiary : BEGIN
+          lTempServ.SETRANGE("Contact No.", pContNo);
+        END;
+      END;
+      lServSearch.SearchService2(lTempServ);
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE ShowServiceList@1100281020(pContNo@1100281000 : Code[20];pContRelation@1100281002 : 'Beneficiary,Corporate') : Boolean;
+    VAR
+      lService@1100281004 : Record 50066;
+      lServList@1100281003 : Form 50068;
+    BEGIN
+      IF pContRelation = pContRelation::Corporate THEN
+        EXIT;
+      lService.SETCURRENTKEY("Contact No.","Event Date");
+      lService.FILTERGROUP(2);
+      lService.SETRANGE("Contact No.", pContNo);
+      lService.FILTERGROUP(0);
+      lService.SETFILTER(Status, '<%1',lService.Status::Finished);
+      IF lService.ISEMPTY THEN
+        EXIT(FALSE);
+      lService.ASCENDING(FALSE);
+      lServList.SETTABLEVIEW(lService);
+      lServList.RUN;
+      EXIT(TRUE);
+    END;
+
+    EVENT CtiCtrl@1100281001::Incoming_Call_Event@1(agentNum@1100281002 : Text[1024];caller@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Incoming_Call_With_Data_Event@2(agentNum@1100281002 : Text[1024];data@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Identification_Asked_Event@3(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];caller@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Established_Call_Event@4(agentNum@1100281002 : Text[1024];caller@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Established_Call_With_Data_Eve@5(agentNum@1100281002 : Text[1024];data@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::End_Of_Call@6(agentNum@1100281002 : Text[1024];caller@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Agent_State_Event@7(agentNum@1100281001 : Text[1024];AgentState@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Agent_Informations_Event@8(agentNum@1100281003 : Text[1024];agentName@1100281002 : Text[1024];agentNumber@1100281001 : Text[1024];num_post@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Automate_Call_Event@9(agentNum@1100281003 : Text[1024];ticketId@1100281002 : Text[1024];ContactId@1100281001 : Text[1024];info@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Automate_Preview_Call_Event@10(agentNum@1100281003 : Text[1024];ticketId@1100281002 : Text[1024];ContactId@1100281001 : Text[1024];info@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Automate_Preview_Result_Event@11(agentNum@1100281003 : Text[1024];ticketId@1100281002 : Text[1024];ContactId@1100281001 : Text[1024];info@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Incoming_Script_Event@12(agentNum@1100281003 : Text[1024];scriptId@1100281002 : Text[1024];acdId@1100281001 : Text[1024];ContactId@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Acd_Call_Informations_Event@13(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];acd_name@1100281001 : Text[1024];time_wait@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Terminated_Event@14(agentNum@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Manually_Show_Data_Event@15(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];caller@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Manually_Show_Data_Webcallback@16(agentNum@1100281004 : Text[1024];refCom@1100281003 : Text[1024];caller@1100281002 : Text[1024];called@1100281001 : Text[1024];idList@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Recall_Event@17(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];recallDate@1100281001 : Text[1024];recallResult@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::Qualification_Event@18(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];QualificationId@1100281001 : Text[1024];QualificationLabel@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaAlerting_Event@19(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];caller@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaClearCall_Event@20(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];caller@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaConference_Event@21(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];conf1@1100281001 : Text[1024];conf2@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaConnectionClear_Event@22(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];caller@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaDelivered_Event@23(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaDiverted_Event@24(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];caller@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaEstablished_Event@25(agentNum@1100281003 : Text[1024];refCom@1100281002 : Text[1024];caller@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaFailed_Event@26(agentNum@1100281001 : Text[1024];refCom@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaHoldMe_Event@27(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];caller@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaHoldOther_Event@28(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];caller@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaNetworkReached_Event@29(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaOriginated_Event@30(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];called@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaQueue_Event@31(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];caller@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaRetrieved_Event@32(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];caller@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaServiceInitiated_Event@33(agentNum@1100281001 : Text[1024];refCom@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaTransfered_Event@34(agentNum@1100281003 : Text[1024];oldRefCom@1100281002 : Text[1024];caller@1100281001 : Text[1024];newRefCom@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::TransferedData_Event@35(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];data@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CstaRecord_Event@36(agentNum@1100281002 : Text[1024];refCom@1100281001 : Text[1024];recordId@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CTIServerDebug_Event@37(debug_info@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CTIServerVersion_Event@38(version@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CTIServerConnected_Event@39();
+    BEGIN
+    END;
+
+    EVENT CtiCtrl@1100281001::CTIServerDisconnected_Event@40();
+    BEGIN
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 02/05/12 @a ISAT.ST @v IMH6.01.129 @s Interface CTI @h 2933
+          @c Gestion des remont‚es de fiche / r‚-‚criture codeunit */
+      /** @r IMH03 @d 26/03/12 @a ISAT.EBA @v IMH6.01.129 @s Interface CTI
+          @c Modification fonction MakeCall */
+      /** @r IMH02 @d 04/11/11 @a ISAT.EBA @v IMH6.01.129 @s Interface CTI
+          @c Gestion remont‚e fiche soci‚taire */
+      /** @r IMH01 @d 15/10/11 @a ISAT.EBA @v IMH6.01.129 @s Interface CTI */
+    }
+    END.
+  }
+}

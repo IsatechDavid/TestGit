@@ -1,0 +1,826 @@
+OBJECT Codeunit 50210 SDR64 Managment
+{
+  OBJECT-PROPERTIES
+  {
+    Date=07/05/14;
+    Time=11:24:51;
+    Modified=Yes;
+    Version List=IMH6.01,JUIN,MATMUT01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 5900=rm,
+                TableData 50000=r,
+                TableData 50056=rimd,
+                TableData 50075=r,
+                TableData 50139=r,
+                TableData 50164=rimd,
+                TableData 50168=r,
+                TableData 50169=r,
+                TableData 8016700=r;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ServiceHeader@1100281000 : Record 5900;
+      ServiceOrderType@1100281001 : Record 5903;
+      DARVAMgt@1100281002 : Codeunit 50150;
+      Text001@1100281003 : TextConst 'FRA=Reg‚n‚rer SDR99 ?';
+      Text002@1100281004 : TextConst 'FRA=La SDR64 a-t-elle ‚t‚ faite sous DARVA ?';
+      Text003@1100281007 : TextConst 'FRA=%1 - %2 - %3 - %4 - %5';
+      Text004@1100281006 : TextConst 'FRA=Raison sociale - Nø agr‚ment - Corps de m‚tier assign‚';
+      Text005@1100281008 : TextConst 'FRA=Il reste des sp‚cialit‚s … couvrir';
+      Text006@1000000000 : TextConst 'ENU=Ask new DT;FRA=Demande nouvelle DT';
+      Text007@1100281005 : TextConst 'ENU=SDR64 Send;FRA=SDR64 envoy‚';
+      Text008@1000000001 : TextConst 'ENU=SDR99 Send;FRA=SDR99 envoy‚';
+      Text009@1100281010 : TextConst 'ENU=You must fill previsit date on one intervention;FRA=Au moins une intervention doit avoir une date de pr‚visite de saisie';
+      Text010@1100281009 : TextConst 'ENU=Do you want to resend SDR64 ?;FRA=Souhaitez-vous r‚exp‚dier le SDR64 ?';
+      Text011@1000000002 : TextConst 'ENU=Not automatic service header creation.\Please do it on DARVA site.;FRA=Ligne produit cr‚‚e manuellement\Veuillez utiliser le lien URL Darva';
+      Text012@1000000003 : TextConst 'ENU=No event no..\Please do it on DARVA site.;FRA=Il n''y a pas de nø d''‚vŠnement\Veuillez utiliser le lien URL Darva';
+      Text013@1100281011 : TextConst 'ENU=Service header has been created defore 01/01/12\Please do it on DARVA site.;FRA=Ligne produit cr‚‚ avant le 01/01/2012\Veuillez utiliser le lien URL Darva';
+      Text014@1100281012 : TextConst 'ENU=You should post the DT from the hyperlink (https://pro.darva.com).;FRA=Merci de valider la DT par le lien terre (https://pro.darva.com)';
+      NotUseCard@1100281014 : Boolean;
+      Text015@1000000005 : TextConst 'ENU=SDR99 Send / Ask new DT;FRA=SDR99 envoy‚ / Demande nouvelle DT';
+      Text016@1000000004 : TextConst 'ENU=Service Header %1 do not exists;FRA=La ligne produit %1 n''existe pas';
+      DARVASetup@1000000006 : Record 50126;
+      Text017@1000000007 : TextConst 'ENU=Because of changes, would you like to send a new SDR64 ?;FRA=Suite … modification, souhaitez-vous envoyer un nouveau SDR64 ?';
+      Text018@1000000008 : TextConst 'ENU=SDR64 have not been sent.;FRA=Le SDR64 n''a pas ‚t‚ envoy‚.';
+      NotUseChangeMessage@1000000009 : Boolean;
+
+    PROCEDURE Code@1100281001(VAR pServiceHeader@1100281000 : Record 5900);
+    VAR
+      lDARVALottravaux@1000000000 : Record 50169;
+      lEAISetup@1100281001 : Record 8016700;
+      lSDR64Card@1100281004 : Page 50336;
+      lNbProvider@1100281002 : Integer;
+      lNbLot@1100281003 : Integer;
+    BEGIN
+      ServiceHeader := pServiceHeader;
+      ServiceOrderType.GET(ServiceHeader."Service Order Type");
+
+      //<<IMH07.PC
+      IF NOT ServiceHeader."DARVA Interface" THEN BEGIN
+        ERROR(Text011);
+      END;
+      IF ServiceHeader."Reference No." = '' THEN BEGIN
+        ERROR(Text012);
+      END;
+      //<<IMH08.PC
+      //IF pServiceHeader."Order Date" < 010112D THEN BEGIN
+      IF DT2DATE(pServiceHeader."Creation Date") < 010112D THEN BEGIN
+        ERROR(Text013);
+      END;
+      //>>IMH08.PC
+      //>>IMH07.PC
+
+      IF NOT(CheckSpeciality) THEN BEGIN
+        MESSAGE(Text005);
+        EXIT;
+      END;
+
+      //<<IMH10
+      IF NOT CheckMultiDarvaMission(pServiceHeader) THEN
+        ERROR(Text014);
+      //>>IMH10
+
+      lNbProvider := CountProvider;
+      IF lNbProvider = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      pServiceHeader.CALCFIELDS("SDR64 Send");
+
+      IF pServiceHeader."SDR64 Send" THEN BEGIN
+
+        //<<IMH17.ACO
+        IF NOT NotUseChangeMessage THEN
+          IF NOT CONFIRM(Text017) THEN
+            ERROR(Text018);
+        //>>IMH17.ACO
+
+        //<<IMH02.PC
+        IF lNbProvider = 1 THEN BEGIN
+        //<<IMH17.ACO
+         { IF NOT CONFIRM(Text010) THEN BEGIN
+            EXIT;
+          END ELSE BEGIN
+            SendSDR64;
+            EXIT;
+          END;}
+          IF NotUseChangeMessage THEN
+            IF NOT CONFIRM(Text010) THEN
+              EXIT;
+
+          SendSDR64;
+          EXIT;
+        //>>IMH17.ACO
+        END ELSE BEGIN
+        //>>IMH02.PC
+          //<<IMH05.PC
+          //OpenDarva;
+          //OpenNotePad;
+          //<<IMH11.PC
+          //<<IMH17.ACO
+          //IF NOT NotUseCard THEN BEGIN
+          //>>IMH17.ACO
+          //>>IMH11.PC
+            lSDR64Card.SetServiceHeader(pServiceHeader."No.");
+            lSDR64Card.RUN;
+          //<<IMH17.ACO
+          //END;
+          //>>IMH17.ACO
+          //>>IMH05.PC
+          EXIT;
+        END;
+      END;
+
+      lEAISetup.GET;
+      CASE ServiceHeader."Corporate No." OF
+        lEAISetup."MACIF Customer No.": BEGIN
+          // Un seul prestataire assign‚ et non annul‚
+          IF lNbProvider = 1 THEN BEGIN
+            SendSDR64;
+            UpdateFlagSDR(TRUE,'SDR64');
+          END ELSE BEGIN
+            lNbLot := CountIntervLot;
+            IF lNbLot = 0 THEN BEGIN
+              SendSDR64;
+              UpdateFlagSDR(TRUE,'SDR64');
+            END ELSE BEGIN
+              IF lNbLot < lNbProvider THEN BEGIN
+                ServiceHeader.CALCFIELDS("SDR99 Send");
+                IF ServiceHeader."SDR99 Send" THEN BEGIN
+                  IF NOT CONFIRM(Text001) THEN BEGIN
+                    EXIT;
+                  END;
+                  SendSDR99;
+                END ELSE BEGIN
+                  SendSDR99;
+                  UpdateFlagSDR(TRUE,'SDR99');
+                END;
+              END ELSE BEGIN
+                //<<IMH05.PC
+                // Nb lot travaux >= nb prestataire assign‚
+                //OpenDarva;
+                //OpenNotePad;
+                //IF CONFIRM(Text002) THEN BEGIN
+                //  UpdateFlagSDR(TRUE,'SDR64');
+                //END;
+                //<<IMH11.PC
+                IF NOT NotUseCard THEN BEGIN
+                //>>IMH11.PC
+                  lSDR64Card.SetServiceHeader(pServiceHeader."No.");
+                  lSDR64Card.RUN;
+                END;
+                //>>IMH05.PC
+              END;
+            END;
+          END;
+        END;
+        lEAISetup."AGPM Customer No.": BEGIN
+          CheckDateMeeting;
+          SendSDR64;
+          UpdateFlagSDR(TRUE,'SDR64');
+        END;
+      END;
+    END;
+
+    PROCEDURE CheckSpeciality@1100281000() rValue : Boolean;
+    VAR
+      lServiceHeaderInfoPane@1100281000 : Codeunit 50062;
+    BEGIN
+      // V‚rifie toutes sp‚cialit‚s couvertes
+      EXIT(lServiceHeaderInfoPane.CalcNoOfSpec(ServiceHeader,TRUE) = 0);
+    END;
+
+    PROCEDURE CheckDateMeeting@1100281008();
+    VAR
+      lServIntervLine@1100281000 : Record 50075;
+    BEGIN
+      //<<IMH06.PC
+      EXIT;
+      //>>IMH06.PC
+      lServIntervLine.SETRANGE("Service Header No.",ServiceHeader."No.");
+      lServIntervLine.SETFILTER("Intervention Status",'<>%1',lServIntervLine."Intervention Status"::Cancel);
+      lServIntervLine.SETFILTER("Expected Previsit Date",'<>%1',0D);
+      IF lServIntervLine.ISEMPTY THEN BEGIN
+        ERROR(Text009);
+      END;
+    END;
+
+    PROCEDURE CountProvider@1100281002() : Integer;
+    VAR
+      lServIntervLine@1100281001 : Record 50075;
+      lTempBuffer@1100281000 : TEMPORARY Record 8016755;
+    BEGIN
+      lServIntervLine.SETRANGE("Service Header No.",ServiceHeader."No.");
+      lServIntervLine.SETFILTER("Intervention Status",'<>%1',lServIntervLine."Intervention Status"::Cancel);
+      IF lServIntervLine.ISEMPTY THEN BEGIN
+        EXIT(0);
+      END;
+      lServIntervLine.FINDSET;
+      REPEAT
+        IF lServIntervLine."Provider No." <> '' THEN BEGIN
+          lTempBuffer.RESET;
+          lTempBuffer.INIT;
+          lTempBuffer."Code 1" := lServIntervLine."Provider No.";
+          IF lTempBuffer.INSERT THEN;
+        END;
+      UNTIL lServIntervLine.NEXT = 0;
+      EXIT(lTempBuffer.COUNT);
+    END;
+
+    PROCEDURE CountIntervLot@1100281010() : Integer;
+    VAR
+      lDARVALot@1100281000 : Record 50169;
+    BEGIN
+      // Nombre de lot de travaux
+      lDARVALot.SETRANGE("Service No.",ServiceHeader."Service No.");
+      lDARVALot.SETRANGE("Service Header No.",ServiceHeader."No.");
+      EXIT(lDARVALot.COUNT);
+    END;
+
+    PROCEDURE OpenDarva@1100281003();
+    VAR
+      lDARVAMgt@1100281000 : Codeunit 50150;
+    BEGIN
+      IF NOT lDARVAMgt.GetTransparentAccesDARVA(
+               ServiceHeader."Reference No.",
+               ServiceHeader."Corporate No.",
+               ServiceHeader."Corporate Region Code")
+      THEN BEGIN
+        HYPERLINK(ServiceOrderType."URL Link");
+      END;
+    END;
+
+    PROCEDURE OpenNotePad@1100281004();
+    VAR
+      lInterfaceSetup@1000000007 : Record 50139;
+      lInterv@1000000006 : Record 50075;
+      lProvider@1000000005 : Record 50000;
+      lEAISetup@1000000004 : Record 8016700;
+      lDARVAMgt@1000000000 : Codeunit 50150;
+      l3TierAutomationMgt@1100281004 : Codeunit 419;
+      lSDR64File@1100281000 : File;
+      lFileName@1100281002 : Text[1024];
+      lFileName2@1100281001 : Text[1024];
+      lLineToWrite@1100281003 : Text[1024];
+    BEGIN
+      //<<IMH04.PC
+      lInterfaceSetup.GET;
+      IF ServiceHeader."Service Order Type" = lInterfaceSetup."DARVA With Expert Product Type" THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH04.PC
+      lFileName := TEMPORARYPATH + USERID + 'SDR64.txt';
+
+      lSDR64File.WRITEMODE := TRUE;
+      lSDR64File.TEXTMODE := TRUE;
+      IF NOT lSDR64File.CREATE(lFileName) THEN BEGIN
+        EXIT;
+      END;
+      lEAISetup.GET;
+      lInterv.SETRANGE("Service Header No.",ServiceHeader."No.");
+      lInterv.SETFILTER("Intervention Status",'<>%1',lInterv."Intervention Status"::Cancel);
+      IF lInterv.FINDSET THEN BEGIN
+        REPEAT
+          lProvider.GET(lInterv."Provider No.");
+          lInterv.CALCFIELDS("Building Trade Description");
+          lLineToWrite :=
+            COPYSTR(
+              STRSUBSTNO(
+                Text003,
+                lProvider.Name,
+                lDARVAMgt.GetDarvaCorporateNo(
+                  ServiceHeader."Corporate No.",
+                  ServiceHeader."Corporate Region Code",
+                  lProvider."No.",
+                  lInterfaceSetup."DARVA EAI Partner Code",
+                  (ServiceHeader."Corporate No." = lEAISetup."MACIF Customer No.")),
+                lInterv."Building Trade Description",
+                lProvider."Post Code",
+                lProvider.City),
+              1,1024);
+          lSDR64File.WRITE(lLineToWrite);
+        UNTIL lInterv.NEXT = 0;
+      END;
+
+      lSDR64File.CLOSE;
+      IF ISSERVICETIER THEN BEGIN
+        lFileName2 := lFileName;
+        DOWNLOAD(lFileName,'',TEMPORARYPATH,'',lFileName2);
+        //l3TierAutomationMgt.DownloadTempFile(lFileName);
+      END ELSE BEGIN
+        HYPERLINK(lFileName);
+      END;
+    END;
+
+    PROCEDURE SendSDR64@1100281007();
+    VAR
+      lEAISendMQBuffer@1100281000 : TEMPORARY Record 8016720;
+      lDARVASetup@1000000000 : Record 50126;
+      lInterv@1100281002 : Record 50075;
+      lRecRef@1100281001 : RecordRef;
+      lSendSDR64@1100281003 : Codeunit 50175;
+      lXMLMgt@1100281004 : Codeunit 8016710;
+      lXmlNewDoc@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlNewChild1@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlNewChild2@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlNewChild3@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lOutStream@1100281005 : OutStream;
+      lEAISentMQBufferToCancel@1100281010 : Record 8016720;
+    BEGIN
+      lInterv.SETRANGE("Service Header No.",ServiceHeader."No.");
+      lInterv.SETFILTER("Intervention Status",'<>%1',lInterv."Intervention Status"::Cancel);
+      IF lInterv.ISEMPTY THEN
+        EXIT;
+
+      lDARVASetup.GET;
+
+      lInterv.FINDFIRST;
+
+      lRecRef.GETTABLE(lInterv);
+      DARVAMgt.CreateSendMQ_SDR(
+        lRecRef,lDARVASetup."DARVA SD64 Code",
+        ServiceHeader."Corporate No.",
+        ServiceHeader."Corporate Region Code",
+        ServiceHeader."Service Order Type");
+
+      CreateSendSDRComment(0, ServiceHeader);  //IMH09
+    END;
+
+    PROCEDURE SendSDR99@1100281005();
+    VAR
+      lEAISendMQBuffer@1100281000 : TEMPORARY Record 8016720;
+      lAdvCommentLine@1000000001 : Record 50056;
+      lAdvCommentLineBuffer@1000000000 : TEMPORARY Record 50056;
+      lInterfaceSetup@1000000003 : Record 50139;
+      lRecRef@1100281001 : RecordRef;
+      lSendSDR99@1100281003 : Codeunit 50209;
+      lTextMgt@1000000002 : Codeunit 50085;
+    BEGIN
+      lInterfaceSetup.GET;
+      lInterfaceSetup.TESTFIELD("DARVA Comment SDR99 NDT Code");
+      lAdvCommentLineBuffer.INIT;
+      lAdvCommentLineBuffer."Source Table ID" := DATABASE::"Service Header";
+      lAdvCommentLineBuffer."Source No." := ServiceHeader."Service No.";
+      lAdvCommentLineBuffer."Source No. 2" := ServiceHeader."No.";
+      lAdvCommentLineBuffer."Line No." := 1;
+      lAdvCommentLineBuffer.Code := lInterfaceSetup."DARVA Comment SDR99 NDT Code";
+      lAdvCommentLineBuffer.Comment := Text006;
+      lAdvCommentLineBuffer.Publication := lAdvCommentLineBuffer.Publication::Darva;
+      lAdvCommentLineBuffer."Creation Date" := CURRENTDATETIME;
+      lAdvCommentLineBuffer."Creation User ID" := USERID;
+      lAdvCommentLineBuffer."Last Modification Date" := CURRENTDATETIME;
+      lAdvCommentLineBuffer."Last Modification User ID" := USERID;
+      lAdvCommentLineBuffer.INSERT;
+
+      lAdvCommentLine."Source Table ID" := DATABASE::"Service Header";
+      lAdvCommentLine."Source No." := ServiceHeader."Service No.";
+      lAdvCommentLine."Source No. 2" := ServiceHeader."No.";
+      lAdvCommentLine.Code := lInterfaceSetup."DARVA Comment SDR99 NDT Code";
+      //<<IMH09
+      lTextMgt.SaveTempComment(lAdvCommentLine,lAdvCommentLineBuffer,TRUE);
+      lAdvCommentLine.Comment := Text015;
+      lAdvCommentLine.MODIFY(FALSE);
+
+      //CreateSendSDRComment(1, ServiceHeader);  //IMH09
+      //>>IMH09
+    END;
+
+    PROCEDURE UpdateFlagSDR@1100281006(pValue@1100281001 : Boolean;pFlagType@1100281002 : Code[10]);
+    VAR
+      lInterfaceReference@1100281000 : Record 50164;
+      lInsert@1100281003 : Boolean;
+    BEGIN
+      lInterfaceReference.SETRANGE("Source Table ID",DATABASE::"Service Header");
+      lInterfaceReference.SETRANGE("Source No.",ServiceHeader."No.");
+      IF lInterfaceReference.ISEMPTY THEN BEGIN
+        lInsert := TRUE;
+      END;
+      CASE pFlagType OF
+        'SDR64' : lInterfaceReference."SDR64 Send" := pValue;
+        'SDR99' : lInterfaceReference."SDR99 New DT" := pValue;
+      END;
+      IF lInsert THEN BEGIN
+        lInterfaceReference."Source Table ID" := DATABASE::"Service Header";
+        lInterfaceReference."Source No." := ServiceHeader."No.";
+        lInterfaceReference.INSERT(TRUE);
+      END ELSE BEGIN
+        lInterfaceReference.FINDFIRST;
+        lInterfaceReference.MODIFY(TRUE);
+      END;
+
+      IF pFlagType = 'SDR64' THEN BEGIN
+        MESSAGE(Text007);
+      END;
+      IF pFlagType = 'SDR99' THEN BEGIN
+        MESSAGE(Text008);
+      END;
+    END;
+
+    PROCEDURE CreateSendSDRComment@1100281011(pSDRType@1100281002 : 'SDR64,SDR99';pServiceHeader@1100281003 : Record 5900);
+    VAR
+      lAdvCommentLineBuffer@1000000000 : TEMPORARY Record 50056;
+      lAdvCommentLine@1100281001 : Record 50056;
+      lTextMgt@1100281000 : Codeunit 50085;
+    BEGIN
+      //IMH09
+      lAdvCommentLineBuffer.INIT;
+      lAdvCommentLineBuffer."Source Table ID" := DATABASE::"Service Header";
+      lAdvCommentLineBuffer."Source No." := pServiceHeader."Service No.";
+      lAdvCommentLineBuffer."Source No. 2" := pServiceHeader."No.";
+      lAdvCommentLineBuffer."Line No." := 1;
+
+      //<<IMH13.ACO
+      DARVASetup.GET;
+      //>>IMH13.ACO
+
+      CASE pSDRType OF
+        pSDRType::SDR64 :
+        //<<IMH13.ACO
+        //lAdvCommentLineBuffer.Comment := Text007;
+        BEGIN
+          lAdvCommentLineBuffer.Comment := Text007;
+          DARVASetup.TESTFIELD("SD64 Comment Code");
+          lAdvCommentLineBuffer.Code := DARVASetup."SD64 Comment Code";
+        END;
+        //>>IMH13.ACO
+        pSDRType::SDR99 :
+        //<<IMH13.ACO
+        //lAdvCommentLineBuffer.Comment := Text008;
+        BEGIN
+          lAdvCommentLineBuffer.Comment := Text008;
+          DARVASetup.TESTFIELD("SD99 Comment Code");
+          lAdvCommentLineBuffer.Code := DARVASetup."SD99 Comment Code"
+        END;
+        //>>IMH13.ACO
+      END;
+      lAdvCommentLineBuffer.Publication := lAdvCommentLineBuffer.Publication::Darva;
+      lAdvCommentLineBuffer."Creation Date" := CURRENTDATETIME;
+      lAdvCommentLineBuffer."Creation User ID" := USERID;
+      lAdvCommentLineBuffer."Last Modification Date" := CURRENTDATETIME;
+      lAdvCommentLineBuffer."Last Modification User ID" := USERID;
+      lAdvCommentLineBuffer.INSERT;
+
+      lTextMgt.SetSkipSendToDarva(TRUE);
+      lTextMgt.SaveText(lAdvCommentLineBuffer, WORKDATE, lAdvCommentLineBuffer.Comment);
+    END;
+
+    PROCEDURE CheckMultiDarvaMission@1100281009(pServiceHeader@1100281000 : Record 5900) : Boolean;
+    VAR
+      lDARVAMission@1100281001 : Record 50168;
+    BEGIN
+      //IMH10
+      lDARVAMission.SETRANGE("Service No.",pServiceHeader."Service No.");
+      lDARVAMission.SETRANGE("Service Header No.",pServiceHeader."No.");
+      EXIT(lDARVAMission.COUNT <= 1);
+    END;
+
+    PROCEDURE NewSendSDR64@1000000000(pServiceInterventionLine@1000000000 : Record 50075;pWithError@1000000017 : Boolean);
+    VAR
+      lCustomer@1000000001 : Record 18;
+      lServiceHeader@1000000002 : Record 5900;
+      lServiceInterventionLine@1000000003 : Record 50075;
+      lServiceIntervLineToCancel@1000000013 : Record 50075;
+      lEAISentMQBuffer@1000000005 : Record 8016720;
+      lEAISentMQBufferToCancel@1000000007 : Record 8016720;
+      lReportingBuffer2@1000000016 : TEMPORARY Record 50143;
+      lDarvaSetup@1000000018 : Record 50126;
+      lXMLMgt@1000000010 : Codeunit 8016710;
+      lDARVAInterventionToCancelPage@1000000015 : Page 50367;
+      lServiceHeaderInfoPane@1100281000 : Codeunit 50062;
+      lRecRef@1000000004 : RecordRef;
+      lXmlNewDoc@1000000009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlNewChild1@1000000008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlNewChild2@1000000011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXmlNewChild3@1000000012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lOutStream@1000000014 : OutStream;
+      lSDR64AlreadySent@1000000019 : Boolean;
+      lHasIntervCanceled@1000000020 : Boolean;
+      lInterfaceReference@1000000021 : Record 50164;
+      lSpecilizationOustandingNb@1100281001 : Integer;
+    BEGIN
+      //IMH11.PC
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pServiceInterventionLine."Service Header No.") THEN BEGIN
+        IF pWithError THEN BEGIN
+          ERROR(Text016);
+        END ELSE BEGIN
+          EXIT;
+        END;
+      END;
+      IF NOT lServiceHeader."DARVA Interface" THEN BEGIN
+        IF pWithError THEN BEGIN
+          ERROR(Text011);
+        END ELSE BEGIN
+          EXIT;
+        END;
+      END;
+      IF lServiceHeader."Reference No." = '' THEN BEGIN
+        IF pWithError THEN BEGIN
+          ERROR(Text012);
+        END ELSE BEGIN
+          EXIT;
+        END;
+      END;
+      //<<IMH19
+      //D‚sactiv‚
+      //NotUseCard := TRUE;
+      //>>IMH19
+
+      //<<IMH17.ACO
+      NotUseChangeMessage := FALSE;
+      //>>IMH17.ACO
+      lDarvaSetup.GET;
+      lCustomer.GET(lServiceHeader."Corporate No.");
+      CASE lCustomer."Send Type SDR64" OF
+        lCustomer."Send Type SDR64"::" " : BEGIN
+          EXIT;
+        END;
+        lCustomer."Send Type SDR64"::"By Serv. Header" : BEGIN
+          //<<IMH19
+          //<<IMH17.ACO
+          //lSpecilizationOustandingNb := lServiceHeaderInfoPane.CalcNoOfSpec(lServiceHeader,TRUE);
+          //IF lSpecilizationOustandingNb = 0 THEN
+          //>>IMH17.ACO
+          IF CheckExecuteSendSDR64ServHead(lServiceHeader) THEN
+          //>>IMH19
+            Code(lServiceHeader);
+        END;
+        lCustomer."Send Type SDR64"::"By Intervention" : BEGIN
+          ServiceHeader := lServiceHeader;
+          lSpecilizationOustandingNb := lServiceHeaderInfoPane.CalcNoOfSpec(lServiceHeader,TRUE);
+          lServiceHeader.CALCFIELDS("SDR64 Send");
+          IF NOT (lServiceHeader."SDR64 Send") AND (lSpecilizationOustandingNb = 0) THEN BEGIN
+            lServiceInterventionLine.SETRANGE("Service Header No.",lServiceHeader."No.");
+            lServiceInterventionLine.SETFILTER("Intervention Status",'<>%1',lServiceInterventionLine."Intervention Status"::Cancel);
+            IF lServiceInterventionLine.FINDSET THEN BEGIN
+              REPEAT
+                lRecRef.GETTABLE(lServiceInterventionLine);
+                DARVAMgt.CreateSendMQ_SDR(
+                  lRecRef,lDarvaSetup."DARVA SD64 Code",
+                  lServiceHeader."Corporate No.",
+                  lServiceHeader."Corporate Region Code",
+                  lServiceHeader."Service Order Type");
+                  //<<IMH15.ACO
+                  SetSendSDR64StatusIntervention(lServiceInterventionLine, TRUE,lInterfaceReference."Send Status"::Created);
+                  //>>IMH15.ACO
+              UNTIL lServiceInterventionLine.NEXT = 0;
+              UpdateFlagSDR(TRUE,'SDR64');
+              CreateSendSDRComment(0,lServiceHeader);
+            END;
+          END ELSE BEGIN
+            IF (lSpecilizationOustandingNb = 0) THEN BEGIN
+              //<<IMH13.ACO
+              //<<IMH14.ACO
+              //IF HasCanceledInterventions(lServiceHeader."No.") THEN BEGIN
+              lHasIntervCanceled := HasCanceledInterventions(lServiceHeader."No.",
+                                                          pServiceInterventionLine."Provider No.",
+                                                          lSDR64AlreadySent);
+
+              // SDR64 non d‚j… envoy‚ pour le presta
+              IF NOT lSDR64AlreadySent  THEN BEGIN
+                //Interventions annul‚es
+                IF lHasIntervCanceled THEN BEGIN
+              //>>IMH14.ACO
+              //>>IMH13.ACO
+                  //<<IMH14.ACO
+                  //lDARVAInterventionToCancelPage.LoadTable(lServiceHeader."No.");
+                  lDARVAInterventionToCancelPage.LoadTable(lServiceHeader."No.",pServiceInterventionLine."Provider No.");
+                  //>>IMH14.ACO
+                  lDARVAInterventionToCancelPage.LOOKUPMODE(TRUE);
+                  //s‚lection d'au moins 1 intervention annul‚e pour afficher commentaire
+                  IF lDARVAInterventionToCancelPage.RUNMODAL = ACTION::LookupOK THEN BEGIN
+                    lDARVAInterventionToCancelPage.GetTable(lReportingBuffer2);
+                    lReportingBuffer2.RESET;
+                    //<<IMH13.ACO
+                    //<<IMH14.ACO
+                    //IF (lReportingBuffer2.COUNT = 1) AND
+                    //   (lReportingBuffer2."Data Code 2" = pServiceInterventionLine."Provider No.") THEN
+                    //  EXIT;
+                    //>>IMH14.ACO
+                    //>>IMH13.ACO
+                    IF lReportingBuffer2.FINDSET THEN BEGIN
+                      lXMLMgt.CreateXml(lXmlNewDoc,'<FLUXML/>',lXmlNewChild1);
+                      REPEAT
+                        IF lServiceIntervLineToCancel.GET(lReportingBuffer2."Code 2",lReportingBuffer2."Integer 1") THEN BEGIN
+                          lXMLMgt.AddElement(lXmlNewChild1,'Interv','','',lXmlNewChild2);
+                          lXMLMgt.AddElement(lXmlNewChild2,'ServiceNo',lServiceIntervLineToCancel."Service No.",'',lXmlNewChild3);
+                          lXMLMgt.AddElement(
+                            lXmlNewChild2,'ServiceHeaderNo',lServiceIntervLineToCancel."Service Header No.",'',lXmlNewChild3);
+                          lXMLMgt.AddElement(lXmlNewChild2,'IntervNo',FORMAT(lServiceIntervLineToCancel."Line No."),'',lXmlNewChild3);
+                          lXmlNewChild2 := lXmlNewChild2.parentNode;
+                        END;
+                      UNTIL lReportingBuffer2.NEXT = 0;
+                    END;
+                    lEAISentMQBufferToCancel."To Generate XML Source".CREATEOUTSTREAM(lOutStream);
+                    lXmlNewDoc.save(lOutStream);
+                    CLEAR(DARVAMgt);
+                    DARVAMgt.SetSpecificXMLToDARVA(lEAISentMQBufferToCancel);
+                  END;
+              //<<IMH13.ACO
+              //<<IMH14.ACO
+                END;
+                lRecRef.GETTABLE(pServiceInterventionLine);
+                DARVAMgt.CreateSendMQ_SDR(
+                  lRecRef,lDarvaSetup."DARVA SD64 Code",
+                  lServiceHeader."Corporate No.",
+                  lServiceHeader."Corporate Region Code",
+                  lServiceHeader."Service Order Type");
+                //<<IMH15.ACO
+                SetSendSDR64StatusIntervention(pServiceInterventionLine, TRUE,lInterfaceReference."Send Status"::Created);
+                //>>IMH15.ACO
+                CreateSendSDRComment(0,lServiceHeader);
+              //>>IMH14.ACO
+              END;
+              //>>IMH13.ACO
+              //<<IMH14.ACO
+              //lRecRef.GETTABLE(pServiceInterventionLine);
+              //DARVAMgt.CreateSendMQ_SDR(
+              //  lRecRef,lDarvaSetup."DARVA SD64 Code",
+              //  lServiceHeader."Corporate No.",
+              //  lServiceHeader."Corporate Region Code",
+              //  lServiceHeader."Service Order Type");
+              //CreateSendSDRComment(0,lServiceHeader);
+              //>>IMH14.ACO
+            END;
+          END;
+        END;
+      END;
+      EXIT;
+    END;
+
+    LOCAL PROCEDURE CheckExecuteSendSDR64ServHead@1100281012(pServiceHeader@1100281002 : Record 5900) : Boolean;
+    VAR
+      lServiceHeaderInfoPane@1100281001 : Codeunit 50062;
+      lInterv@1100281003 : Record 50075;
+      lProcess@1100281005 : Code[10];
+      lStatus@1100281004 : Integer;
+      lSpecilizationOustandingNb@1100281000 : Integer;
+      lIntervCount@1100281006 : Integer;
+    BEGIN
+      //IMH19
+      lSpecilizationOustandingNb := lServiceHeaderInfoPane.CalcNoOfSpec(pServiceHeader,TRUE);
+      IF lSpecilizationOustandingNb = 0 THEN BEGIN
+        lInterv.SETRANGE("Service Header No.", pServiceHeader."No.");
+        IF lInterv.FINDSET THEN
+          REPEAT
+            lInterv.GetDefaultProcessStatusCode(lProcess, lStatus);
+            IF ((lInterv."Process Code" = lProcess) AND (lInterv."Process Status No." = lStatus))
+                OR (lInterv."Process Status No." = 0) THEN
+              lIntervCount += 1;
+            IF lIntervCount > 1 THEN
+              EXIT(FALSE);
+          UNTIL lInterv.NEXT = 0;
+      END ELSE
+        EXIT(FALSE);
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE HasCanceledInterventions@1000000001(pServiceHeaderNo@1000000001 : Code[20];pProviderNo@1000000002 : Code[20];VAR pSDR64AlreadySent@1000000003 : Boolean) : Boolean;
+    VAR
+      lServiceInterventionLine@1000000000 : Record 50075;
+      lInterfaceReference@1000000004 : Record 50164;
+    BEGIN
+      //IMH13.ACO
+      //<<IMH15.ACO
+      //<<IMH18.ACO
+      lServiceInterventionLine.SETRANGE("Service Header No.",pServiceHeaderNo);
+      //>>IMH18.ACO
+      //<<IMH14.ACO
+      //SDR64 d‚j… envoy‚ pour le mˆme presta.
+      //lServiceInterventionLine.SETRANGE("Provider No.",pProviderNo);
+      //>>IMH15.ACO
+      pSDR64AlreadySent := FALSE;
+
+      //<<IMH15.ACO
+      //IF lServiceInterventionLine.FINDSET THEN BEGIN
+        //REPEAT
+          //lInterfaceReference.SETRANGE("Source Table ID",DATABASE::"Service Intervention Line");
+          //lInterfaceReference.SETRANGE("Source No.", lServiceInterventionLine."Service No.");
+          //lInterfaceReference.SETRANGE("Source No. 2", lServiceInterventionLine."Service Header No.");
+          //lInterfaceReference.SETRANGE("Source No. 3", lServiceInterventionLine."Line No.");
+          //lInterfaceReference.SETRANGE("SDR 64 Send", '>=%1', TRUE);
+          //pSDR64AlreadySent := NOT lInterfaceReference.ISEMPTY;
+        //UNTIL pSDR64AlreadySent OR (lServiceInterventionLine.NEXT = 0)
+      //END;
+
+      lInterfaceReference.SETRANGE("Source Table ID",DATABASE::"Service Intervention Line");
+      lInterfaceReference.SETRANGE("Source No. 2", pServiceHeaderNo);
+      lInterfaceReference.SETFILTER("Send Status", '>=%1', lInterfaceReference."Send Status"::Created);
+      lInterfaceReference.SETRANGE("Provider No.", pProviderNo);
+      pSDR64AlreadySent := NOT lInterfaceReference.ISEMPTY;
+      //>>IMH15.ACO
+
+      lServiceInterventionLine.SETRANGE("Intervention Status",lServiceInterventionLine."Intervention Status"::Cancel);
+      lServiceInterventionLine.SETFILTER("Provider No.", '<>%1',pProviderNo);
+      //>>IMH14.ACO
+      EXIT(NOT lServiceInterventionLine.ISEMPTY);
+    END;
+
+    PROCEDURE SetSendSDR64StatusIntervention@1000000003(pServiceInterventionLine@1100281001 : Record 50075;pInsert@1000000000 : Boolean;pStatus@1000000001 : 'Created,Generated,Validated,Error');
+    VAR
+      lInterfaceReference@1100281000 : Record 50164;
+    BEGIN
+      //IMH15.ACO
+      lInterfaceReference.SETRANGE("Source Table ID",DATABASE::"Service Intervention Line");
+      IF pServiceInterventionLine."Service No." <> '' THEN
+        lInterfaceReference.SETRANGE("Source No.", pServiceInterventionLine."Service No.");
+      lInterfaceReference.SETRANGE("Source No. 2", pServiceInterventionLine."Service Header No.");
+      lInterfaceReference.SETRANGE("Source No. 3", pServiceInterventionLine."Line No.");
+      IF pInsert AND NOT lInterfaceReference.FINDFIRST THEN BEGIN
+        lInterfaceReference.INIT;
+        lInterfaceReference."Source Table ID" := DATABASE::"Service Intervention Line";
+        lInterfaceReference."Source No." := pServiceInterventionLine."Service No.";
+        lInterfaceReference."Source No. 2" := pServiceInterventionLine."Service Header No.";
+        lInterfaceReference."Source No. 3" := pServiceInterventionLine."Line No.";
+        lInterfaceReference."Send Status" := pStatus;
+        lInterfaceReference."Provider No." := pServiceInterventionLine."Provider No.";
+        lInterfaceReference.INSERT(TRUE);
+      END
+      ELSE BEGIN
+        IF lInterfaceReference.FINDFIRST THEN BEGIN
+          lInterfaceReference."Send Status" := pStatus;
+          lInterfaceReference.MODIFY(TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE ChangeSendStatusIntervention@1000000002(pStatus@1000000002 : 'Created,Generated,Validated,Generation Error,Validation Error';pEAISentMQBuffer@1000000004 : Record 8016720);
+    VAR
+      lServiceInterventionLine@1000000001 : Record 50075;
+      lRecId@1000000003 : RecordID;
+      lRecRef@1000000005 : RecordRef;
+    BEGIN
+      //IMH15.ACO
+      //<<IMH16.ACO
+      lRecId := pEAISentMQBuffer.RecordId;
+      lRecRef := lRecId.GETRECORD;
+      //pRecRef.SETTABLE(lServiceInterventionLine);
+      lRecRef.SETTABLE(lServiceInterventionLine);
+      //>>IMH16.ACO
+      SetSendSDR64StatusIntervention(lServiceInterventionLine,FALSE,pStatus);
+    END;
+
+    PROCEDURE SetNotUseCard@1000000004(pNotUseCard@1000000000 : Boolean);
+    BEGIN
+      //IMH17.ACO
+      NotUseCard := pNotUseCard;
+    END;
+
+    PROCEDURE SetNotUseChangeMessage@1000000007(pNotUSeChangeMessage@1000000000 : Boolean);
+    BEGIN
+      //IM17.ACO
+      NotUseChangeMessage := pNotUSeChangeMessage;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH19 @d 05/05/14 @a ISAT.ZW @v IMH6.01.5106 @d Gestion d'‚mission SDR64 @h 5107
+          @c D‚sactiver NotUseCard pour affichier la page SDR64 pour la fonction processus emission SDR64
+          @c Cr‚ation fonction CheckExecuteSendSDR64ServHead */
+      /** @r IMH18 @d 21/11/13 @a ISAT.ACO @v IMH6.01.348 @d DARVA MATMUT Lot 1 @h 4876
+          @c Modification condition d'affichage fenˆtre des interventions annul‚es*/
+      /** @r IMH17 @d 13/11/13 @a ISAT.ACO @v IMH6.01.348 @d DARVA MATMUT Lot 1
+          @c Ajout fonction setNotUseCard
+          @c Message confirmation r‚‚mission SDR64
+          @c Ouverture fenˆtre SDR64 si SDR64 d‚j… envoy‚
+          @c Message "Suite modification..." uniquement si cr‚ation auto
+          @c Ajout condition toutes sp‚cialit‚s couvertes pour envoi par ligne intervention */
+      /** @r IMH16 @d 23/10/13 @a ISAT.ACO @v IMH6.01.348 @h 4804 @s DARVA MATMUT Lot 1
+          @c Modification test sur type flux */
+      /** @r IMH15 @d 22/10/13 @a ISAT.ACO @v IMH6.01.348 @h 4804 @s DARVA MATMUT Lot 1
+          @c Cr‚ation interface r‚f‚rence pour ligne intervention … chaque envoi SDR64
+          @c V‚rification SDR64 non envoy‚ pour prestataire selon statut
+          @c Ajout m‚thode SetSendSDR64StatusIntervention
+          @c Ajout m‚thode ChangeSendStatusIntervention */
+      /** @r IMH14 @d 21/10/13 @a ISAT.ACO @v IMH6.01.348 @h 4804 @s DARVA MATMUT Lot 1
+          @c La fenˆtre des interventions annul‚es ne s'affiche pas si pas d'interventions annul‚es avec presta diff‚rent */
+      /** @r IMH13 @d 10/10/13 @a ISAT.ACO @v IMH6.01.348 @h 4787 @s DARVA MATMUT Lot 1
+          @c Affichage de la fenˆtre des interventions annul‚es uniquement si au moins une intervention annul‚e
+          @c Pas de cr‚ation de flux si mˆme prestataire remissionn‚
+          @c Code du commentaire SDR64 d‚pend des DARVA Setup */
+      /** @r IMH12 @d 26/09/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4752
+          @a Ajout du commentaire libre obligatoire du SDR64*/
+      /** @r IMH11 @d 26/08/13 @a ISAT.PC @v IMH6.01.348 @s DARVA MATMUT Lot 1
+          @c Gestion du SDR64 */
+      /** @r IMH10 @d 16/05/12 @a ISAT.ZW @v IMH6.01.339 @h 3991 @s DARVA1.3 @c message d'erreur LP multi mission darva */
+      /** @r IMH09 @d 16/05/12 @a ISAT.ZW @v IMH6.01.345 @h 3658 @s MAI @c Mentionner l'envoi auto d'un SDR 64/99 en commentaire */
+      /** @r IMH08 @d 04/07/12 @a ISAT.PC @v IMH6.01.134 @h 3638 @s DARVA @c Correction */
+      /** @r IMH07 @d 20/06/12 @a ISAT.PC @v IMH6.01.134 @h 3638 @s V‚rification avant accŠs DARVA */
+      /** @r IMH06 @d 20/06/12 @a ISAT.PC @v IMH6.01.134 @h 3639 @s V‚rification avant accŠs DARVA */
+      /** @r IMH05 @d 05/06/12 @a ISAT.PC @v IMH6.01.134 @h 3473 @s Gestion SDR64 */
+      /** @r IMH04 @d 23/04/12 @a ISAT.PC @v IMH6.01.134 @s DARVA Management @h mantis 3324 @c Evolution SDR64 */
+      /** @r IMH03 @d 23/04/12 @a ISAT.PC @v IMH6.01.134 @s DARVA Management @h mantis 3332
+          @c Modification du Text002 de "SDR64 trait‚e" par "La SDR64 a-t-elle ‚t‚ faite sous DARVA ?" */
+      /** @r IMH02 @d 23/04/12 @a ISAT.PC @v IMH6.01.134 @s DARVA Management @h mantis 3330 @c Evolution SDR64 */
+      /** @r IMH01 @d 20/03/12 @a ISAT.LLT @v IMH6.01.134 @s DARVA Management @h mantis 2834 @c Evolution SDR64 */
+    }
+    END.
+  }
+}

@@ -1,0 +1,239 @@
+OBJECT Codeunit 50204 Extranet Common Functions
+{
+  OBJECT-PROPERTIES
+  {
+    Date=16/05/14;
+    Time=17:13:48;
+    Modified=Yes;
+    Version List=IMH6.01,LogWS,P010;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1000000001 : TextConst 'ENU=Intervention Line %1 %2 not found.;FRA=La ligne d''intervention %1 %2 n''''existe pas.';
+      Text100@1000000000 : TextConst 'FRA=Extranet';
+
+    PROCEDURE Initial@1100281009(pWebServiceType@1000000000 : ' ,Provider,Intervention,Quality,SingleFrontOffice,PMU';pFunctionName@1100281000 : Text[80];pParameter@1100281001 : Text[1024];VAR pGUID@1000000001 : GUID);
+    BEGIN
+      GLOBALLANGUAGE(1036);
+      LogEvent(pWebServiceType,pFunctionName,pParameter,0,pGUID);
+    END;
+
+    PROCEDURE Finish@1100281013(pGUID@1100281000 : GUID);
+    BEGIN
+      LogEvent(0,'','',1,pGUID);
+    END;
+
+    LOCAL PROCEDURE LogEvent@1100281011(pWebServiceType@1000000002 : ' ,Provider,Intervention,Quality,SingleFrontOffice,PMU';pFunctionName@1000000001 : Text[80];pParameter@1000000000 : Text[1024];pAction@1100281002 : 'Start,End';VAR pGUID@1000000003 : GUID) : GUID;
+    VAR
+      lInterfaceSetup@1100281000 : Record 50139;
+      lWebServiceLog@1000000004 : Record 50189;
+      lPMUSetup@1100281001 : Record 50102;
+    BEGIN
+      IF NOT lWebServiceLog.WRITEPERMISSION THEN BEGIN
+        EXIT;
+      END;
+
+      lInterfaceSetup.GET;
+      CASE pWebServiceType OF
+        pWebServiceType::" " : EXIT;
+        pWebServiceType::Provider : BEGIN
+          IF NOT lInterfaceSetup."Provider WS Log Enable" THEN BEGIN
+            EXIT;
+          END;
+        END;
+        pWebServiceType::Intervention : BEGIN
+          IF NOT lInterfaceSetup."Intervention WS Log Enable" THEN BEGIN
+            EXIT;
+          END;
+        END;
+        pWebServiceType::Quality : BEGIN
+          IF NOT lInterfaceSetup."Quality WS Log Enable" THEN BEGIN
+            EXIT;
+          END;
+        END;
+        pWebServiceType::SingleFrontOffice : BEGIN
+          IF NOT lInterfaceSetup."S.F.O. WS Log Enable" THEN BEGIN
+            EXIT;
+          END;
+        END;
+        //<<IMH04
+        pWebServiceType::PMU : BEGIN
+          lPMUSetup.GET;
+          IF NOT lPMUSetup."PMU WS Log Enable" THEN BEGIN
+            EXIT;
+          END;
+        END;
+        //>>IMH04
+      END;
+
+      IF pAction = pAction::Start THEN BEGIN
+        pGUID := CREATEGUID;
+      END;
+
+      WITH lWebServiceLog DO BEGIN
+        IF NOT GET(pGUID) THEN BEGIN
+          "GUID No." := pGUID;
+          "Web Service Type" := pWebServiceType;
+          "Function Name" := pFunctionName;
+          "Start Date" := CURRENTDATETIME;
+          "End Date" := 0DT;
+          "Parameter 1" := COPYSTR(pParameter,1,250);
+          "Parameter 2" := COPYSTR(pParameter,251,250);
+          "Parameter 3" := COPYSTR(pParameter,501,250);
+          "Parameter 4" := COPYSTR(pParameter,751,250);
+          "Parameter 5" := COPYSTR(pParameter,1001,24);
+          IF INSERT THEN BEGIN
+            COMMIT;
+          END;
+        END ELSE BEGIN
+          "End Date" := CURRENTDATETIME;
+          IF MODIFY THEN BEGIN
+            COMMIT;
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE EvalDateTime@1100281015(VAR pDateTime@1100281000 : DateTime);
+    VAR
+      lTempDate@1100281001 : Date;
+    BEGIN
+      lTempDate := DT2DATE(pDateTime);
+      IF DATE2DMY(lTempDate,3) IN [1753, 1754] THEN
+        pDateTime := 0DT;
+    END;
+
+    PROCEDURE EvalDate@1000000000(pDateTime@1000000000 : DateTime) rValue : Date;
+    BEGIN
+      rValue := DT2DATE(pDateTime);
+      IF DATE2DMY(rValue, 3) IN [1753, 1754] THEN
+        rValue := 0D;
+    END;
+
+    PROCEDURE GetInterv@1100281006(pServHeader@1100281000 : Code[20];pInterNo@1100281001 : Integer;pError@1100281003 : Boolean;VAR pInterv@1100281002 : Record 50075) : Boolean;
+    BEGIN
+      WITH pInterv DO BEGIN
+        RESET;
+        IF GET(pServHeader, pInterNo) THEN
+          EXIT(TRUE);
+        SETRANGE("Service Header No.", pServHeader);
+        SETRANGE("Intervention No.", pInterNo);
+        IF FINDFIRST THEN
+          EXIT(TRUE);
+      END;
+      IF pError THEN
+        ERROR(STRSUBSTNO(Text001, pServHeader, pInterNo));
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE CreateTrayLineInterv@1100281020(pIntervLine@1100281000 : Record 50075;pTaskCode@1100281001 : Code[10]) : Boolean;
+    VAR
+      lTrayLineMgt@1000000000 : Codeunit 50050;
+    BEGIN
+      EXIT(lTrayLineMgt.CreateTLFromIntervention(pIntervLine, '', pTaskCode, FALSE));
+    END;
+
+    PROCEDURE CreateTrayLineIntervReturn@1000000003(pIntervLine@1100281000 : Record 50075;pTaskCode@1100281001 : Code[10];pComment@1000000001 : Text[250]) : Boolean;
+    VAR
+      lTrayLineMgt@1000000000 : Codeunit 50050;
+      lTrayLine@1000000002 : Record 50048;
+    BEGIN
+      IF NOT lTrayLineMgt.CreateTLFromIntervention(pIntervLine, '', pTaskCode, FALSE) THEN
+        EXIT(FALSE);
+      lTrayLineMgt.GetResultLine(lTrayLine);
+      lTrayLine."Short Comment" := pComment;
+      lTrayLine.MODIFY;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateTrayLineServHeader@1100281028(pServiceHeader@1100281001 : Record 5900;pTaskCode@1100281002 : Code[10]) : Boolean;
+    VAR
+      lTrayLineMgt@1100281000 : Codeunit 50050;
+    BEGIN
+      EXIT(lTrayLineMgt.CreateTLFromServHeader(pServiceHeader,'',pTaskCode,FALSE));
+    END;
+
+    PROCEDURE GetTempFilename@9(pExtension@1000000000 : Text[5]) rValue@1000 : Text[260];
+    VAR
+      lTempFile@1100281000 : File;
+      lText001@1100281001 : TextConst 'ENU=\Doc;FRA=\Doc';
+    BEGIN
+      rValue := '';
+      lTempFile.CREATETEMPFILE;
+      rValue := lTempFile.NAME;
+      IF pExtension <> '' THEN
+        rValue := rValue + '.' + pExtension;
+      lTempFile.CLOSE;
+    END;
+
+    PROCEDURE CreateIntervCommentText@1000000002(pIntervLine@1100281020 : Record 50075;pComment@1100281021 : Text[1024];pDateTime@1100281000 : DateTime;pUserName@1100281002 : Text[30]);
+    VAR
+      lAdvCommentLine@1100281015 : Record 50056;
+      lTextMgt@1100281016 : Codeunit 50085;
+    BEGIN
+      IF pComment = '' THEN
+        EXIT;
+      IF pUserName = '' THEN
+        pUserName := Text100;
+      WITH lAdvCommentLine DO BEGIN
+        "Source Table ID" := DATABASE::"Service Intervention Line";
+        "Source No." := pIntervLine."Service No.";
+        "Source No. 2" := pIntervLine."Service Header No.";
+        "Source No. 3" := pIntervLine."Line No.";
+        "Source No. 4" := '';
+        "Source No. 5" := 0;
+        Date := WORKDATE;
+        Code := '';
+        Publication := Publication::Extranet;
+        Reception := Reception::Extranet;
+        "Creation Date" := pDateTime;
+        "Creation User ID" := pUserName;
+        "Last Modification Date" := pDateTime;
+        "Last Modification User ID" := pUserName;
+      END;
+      lTextMgt.SaveText(lAdvCommentLine, WORKDATE, pComment);
+    END;
+
+    PROCEDURE CreateIntervCommentBigText@1000000001(pIntervLine@1000000003 : Record 50075;VAR pComment@1000000001 : BigText;pDateTime@1000000007 : DateTime;pUserName@1000000006 : Text[30]);
+    VAR
+      lAdvCommentLine@1000000005 : Record 50056;
+      lTextMgt@1000000004 : Codeunit 50085;
+    BEGIN
+      IF pUserName = '' THEN
+        pUserName := Text100;
+      WITH lAdvCommentLine DO BEGIN
+        "Source Table ID" := DATABASE::"Service Intervention Line";
+        "Source No." := pIntervLine."Service No.";
+        "Source No. 2" := pIntervLine."Service Header No.";
+        "Source No. 3" := pIntervLine."Line No.";
+        "Source No. 4" := '';
+        "Source No. 5" := 0;
+        Date := WORKDATE;
+        Code := '';
+        Publication := Publication::Extranet;
+        Reception := Reception::Extranet;
+        "Creation Date" := pDateTime;
+        "Creation User ID" := pUserName;
+        "Last Modification Date" := pDateTime;
+        "Last Modification User ID" := pUserName;
+      END;
+      lTextMgt.SaveBigText(lAdvCommentLine, DT2DATE(lAdvCommentLine."Creation Date"), pComment);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @a 16/05/14 @a ISAT.ZW @v IMH6.01.P010 @s Projet PMU @c Ajout gesiton de log */
+      /** @r IMH03 @a 09/10/12 @a ISAT.PC @v IMH6.01.P003 @s Log Web Service @c R‚‚criture */
+      /** @r IMH02 @a 30/04/12 @a ISAT.ST @v IMH6.01.105 @s Extranet qualit‚ @h 3100 @c Ajout du statut intervention */
+      /** @r IMH01 @d 20/03/12 @a ISAT.ST @v IMH6.01.105 @s Extranet qualit‚ @c Cr‚ation objet */
+    }
+    END.
+  }
+}

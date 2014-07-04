@@ -1,0 +1,664 @@
+OBJECT Report 50074 Customer Inv. (Credit Memo)
+{
+  OBJECT-PROPERTIES
+  {
+    Date=26/10/11;
+    Time=15:44:26;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Customer Invoicing;
+               FRA=Facturation client (Avoir)];
+    ProcessingOnly=Yes;
+    OnPreReport=BEGIN
+                  IF NOT GUIALLOWED THEN BEGIN
+                    IF PostingDateReq = 0D THEN
+                      PostingDateReq := WORKDATE;
+                    IF DocDateReq = 0D THEN
+                      DocDateReq := WORKDATE;
+                  END;
+                END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50137;
+        DataItemTableView=SORTING(Corporate No.,Invoicing frequency,Invoice Regroup Method);
+        DataItemVarName=InvMatrixSetup;
+        OnPreDataItem=BEGIN
+                        //IF PostingDateReq = 0D THEN
+                        //  ERROR(Text000);
+
+                        IF DocDateReq = 0D THEN
+                          ERROR(Text001);
+
+                        IF GUIALLOWED THEN BEGIN
+                          Window.OPEN(
+                            Text002 +
+                            Text003 +
+                            Text004 +
+                            Text005);
+                        END ELSE
+                          SETRANGE("Invoicing frequency", "Invoicing frequency"::Daily);
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           RefDate := PostingDateReq;
+                           RefDay := DATE2DMY(RefDate,1);
+
+                           IF (PostingDateReq <> CALCDATE('<CM>',PostingDateReq)) THEN
+                           BEGIN
+                             CASE "Invoicing frequency" OF
+                               "Invoicing frequency"::Daily :
+                                 BEGIN
+                                   PostingDateReq := RefDate;
+                                 END;
+
+                               "Invoicing frequency"::Decade :
+                                 BEGIN
+                                 //IMH04
+                                 IF RefDay < 11 THEN
+                                   //IF RefDay < 10 THEN
+                                   //IMH04
+                                     PostingDateReq := CALCDATE('<-1M+CM+10D>',RefDate)
+                                     //PostingDateReq := CALCDATE('<-1M+CM>',RefDate)
+                                 //IMH04
+                                 ELSE IF RefDay < 21 THEN
+                                   //ELSE IF RefDay < 20 THEN
+                                   //IMH04
+                                     PostingDateReq := CALCDATE('<-1M+CM+20D>',RefDate)
+                                     //PostingDateReq := CALCDATE('<D10>',RefDate)
+                                   ELSE
+                                   //IMH04
+                                     PostingDateReq := CALCDATE('<CM>',RefDate)
+                                     //PostingDateReq := CALCDATE('<D20>',RefDate)
+                                 END;
+
+                               "Invoicing frequency"::Week :
+                                 BEGIN
+                                 //IMH04
+                                   PostingDateReq := CALCDATE('<CWD>',RefDate);
+                                   //PostingDateReq := CALCDATE('<cWD-7D>',RefDate);
+                                 END;
+
+                               "Invoicing frequency"::Fortnight :
+                                 BEGIN
+                                 //IMH04
+                                   IF RefDay < 16 THEN
+                                   //IF RefDay < 15 THEN
+                                   //IMH04
+                                     PostingDateReq := CALCDATE('<-1M+CM+15D>',RefDate)
+                                     //PostingDateReq := CALCDATE('<-1M + CM>',RefDate)
+                                   ELSE
+                                     //PostingDateReq := CALCDATE('<D15>',RefDate)
+                                     PostingDateReq := CALCDATE('<CM>',RefDate)
+                                 END;
+
+                               "Invoicing frequency"::Monthly :
+                                 BEGIN
+                                 //IMH04
+                                   PostingDateReq := CALCDATE('<CM>',RefDate);
+                                   //PostingDateReq := CALCDATE('<1M+CM>',RefDate);
+                                 END;
+                             END;
+                           END;
+                         END;
+
+        OnPostDataItem=VAR
+                         lCust@1100281000 : Record 18;
+                       BEGIN
+                         CurrReport.LANGUAGE := GLOBALLANGUAGE;
+                         IF GUIALLOWED THEN
+                           Window.CLOSE;
+
+                         IF SalesHeader."No." <> '' THEN BEGIN // Not the first time
+                           FinalizeSalesCMHeader;
+                           IF GUIALLOWED THEN BEGIN
+                             IF (NoOfSalesCMErrors = 0) AND NOT HideDialog  THEN BEGIN
+                               IF NoOfskippedReturnReceipt > 0 THEN BEGIN
+                                 MESSAGE(
+                                   Text010 + Text011,
+                                   NoOfSalesCM,NoOfskippedReturnReceipt)
+                               END ELSE BEGIN
+                                 MESSAGE(
+                                   Text010,
+                                   NoOfSalesCM);
+                               END;
+                             END ELSE
+                               IF NOT HideDialog THEN
+                                 MESSAGE(
+                                   Text007,
+                                   NoOfSalesCMErrors)
+                           END;
+                         END ELSE
+                           IF (NOT HideDialog) AND GUIALLOWED THEN
+                             MESSAGE(Text008);
+
+
+                         IF GeneratePDFInv THEN BEGIN
+                           TempSalesCMHeader.RESET;
+                           IF TempSalesCMHeader.FINDSET THEN
+                             REPEAT
+                               lCust.GET(TempSalesCMHeader."Bill-to Customer No.");
+
+                               PDFMgt.ClearInstance;
+                               PDFMgt.CreatePDFCreator;
+                               //ligne mise en commentaire car impossible de compiler
+                               //PDFMgt.CheckReportID(TempSalesInvHeader,lCust."PDF Invoice Directory",TempSalesInvHeader."No.");
+                             UNTIL TempSalesCMHeader.NEXT = 0;
+                         END;
+                       END;
+
+        ReqFilterFields=Corporate No.,Service Order Type,Corporate Region Code,Invoicing frequency,Invoice Regroup Method;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table6661;
+        DataItemTableView=SORTING(Document No.,Line No.);
+        OnPreDataItem=BEGIN
+                        SETCURRENTKEY("Corporate No.","Service Order Type","Corporate Region Code");
+                        SETRANGE("Corporate No.",InvMatrixSetup."Corporate No.");
+                        IF InvMatrixSetup."Service Order Type" <> '' THEN
+                          SETRANGE("Service Order Type",InvMatrixSetup."Service Order Type");
+
+                        IF InvMatrixSetup."Corporate Region Code" <> '' THEN
+
+                          SETRANGE("Corporate Region Code",InvMatrixSetup."Corporate Region Code");
+
+                        SETFILTER("Return Qty. Rcd. Not Invd.",'<>0');
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lInvMatrixSetup@1100281000 : Record 50137;
+                         BEGIN
+                           IF (InvMatrixSetup."Service Order Type" = '') OR (InvMatrixSetup."Corporate Region Code" = '') THEN BEGIN
+                             CASE InvMatrixSetup."Invoice Regroup Method" OF
+                               InvMatrixSetup."Invoice Regroup Method"::" " :
+                                 BEGIN
+                                   lInvMatrixSetup.SETRANGE("Corporate No.","Corporate No.");
+                                   lInvMatrixSetup.SETRANGE("Service Order Type","Service Order Type");
+                                   lInvMatrixSetup.SETFILTER("Corporate Region Code",'=%1|=%2','',"Corporate Region Code");
+                                   lInvMatrixSetup.SETRANGE("Invoice Regroup Method",lInvMatrixSetup."Invoice Regroup Method"::ByServiceOrderType);
+                                   IF lInvMatrixSetup.FINDFIRST THEN
+                                     CurrReport.SKIP;
+                                 END;
+                               InvMatrixSetup."Invoice Regroup Method"::ByServiceOrderType :
+                                 BEGIN
+                                   lInvMatrixSetup.SETRANGE("Corporate No.","Corporate No.");
+                                   lInvMatrixSetup.SETRANGE("Service Order Type","Service Order Type");
+                                   lInvMatrixSetup.SETFILTER("Corporate Region Code",'=%1|=%2','',"Corporate Region Code");
+                                   lInvMatrixSetup.SETRANGE("Invoice Regroup Method",lInvMatrixSetup."Invoice Regroup Method"::" ");
+                                   IF lInvMatrixSetup.FINDFIRST THEN
+                                     CurrReport.SKIP;
+                                 END;
+                             END;
+                           END;
+
+                           IF SalesReturnHeader."No." <> "Return Order No." THEN BEGIN
+                             SalesReturnHeader.GET(SalesReturnHeader."Document Type"::"Return Order","Return Order No.");
+                             CurrReport.LANGUAGE := Language.GetLanguageID(SalesReturnHeader."Language Code");
+
+                             FromDocDim.SETRANGE("Table ID",DATABASE::"Sales Header");
+                             FromDocDim.SETRANGE("Document Type",SalesReturnHeader."Document Type");
+                             FromDocDim.SETRANGE("Document No.",SalesReturnHeader."No.");
+                           END;
+
+
+                           IF SalesRetRcptHeader."No." <> "Document No." THEN
+                             SalesRetRcptHeader.GET("Document No.");
+
+                           {
+                           IF SalesShptHeader.Canceled THEN BEGIN
+                             CurrReport.SKIP;
+                           END;
+                           }
+
+
+                           IF (SalesRetRcptHeader."Posting Date" > PostingDateReq) THEN
+                             CurrReport.SKIP;
+
+                           IF OnlyStdPmtTerms THEN BEGIN
+                             Cust.GET("Bill-to Customer No.");
+                             PmtTerms.GET(Cust."Payment Terms Code");
+                             IF PmtTerms.Code = SalesRetRcptHeader."Payment Terms Code" THEN BEGIN
+                               DueDate := CALCDATE(PmtTerms."Due Date Calculation",SalesRetRcptHeader."Document Date");
+                               PmtDiscDate := CALCDATE(PmtTerms."Discount Date Calculation",SalesRetRcptHeader."Document Date");
+                               "PmtDisc%" := PmtTerms."Discount %";
+                               IF (DueDate <> SalesRetRcptHeader."Due Date") OR
+                                 (PmtDiscDate <> SalesRetRcptHeader."Pmt. Discount Date") OR
+                                 ("PmtDisc%" <> SalesRetRcptHeader."Payment Discount %")
+                               THEN BEGIN
+                                 //NoOfskippedShiment := NoOfskippedShiment + 1;
+                                 CurrReport.SKIP;
+                               END;
+                             END ELSE BEGIN
+                               //NoOfskippedShiment := NoOfskippedShiment + 1;
+                               CurrReport.SKIP;
+                             END;
+                           END;
+
+                           IF GUIALLOWED THEN BEGIN
+                             Window.UPDATE(1,SalesReturnHeader."Bill-to Customer No.");
+                             Window.UPDATE(2,SalesReturnHeader."No.");
+                             Window.UPDATE(3,SalesRetRcptHeader."No.");
+                           END;
+
+                           SalesCMLine.RESET;
+                           //SalesCMLine.SETCURRENTKEY("Document Type","Shipment No.","Shipment Line No."); //pas de cl‚.
+                           SalesCMLine.SETRANGE("Document Type",SalesCMLine."Document Type"::"Credit Memo");
+                           SalesCMLine.SETRANGE("Return Receipt No.","Return Receipt Line"."Document No.");
+                           SalesCMLine.SETRANGE("Return Receipt Line No.","Return Receipt Line"."Line No.");
+                           SalesCMLine.SETRANGE(Quantity,"Return Receipt Line"."Return Qty. Rcd. Not Invd.");
+                           IF SalesCMLine.FIND('-') THEN
+                             CurrReport.SKIP;
+
+                           IF "Return Receipt Line".Type = 0 THEN BEGIN
+                             IF ((NOT CopyTextLines) OR ("Return Receipt Line"."Attached to Line No." <> 0)) THEN
+                               CurrReport.SKIP;
+                           END;
+                           {
+                           IF "Authorized for Credit Card" THEN
+                             CurrReport.SKIP;
+                           }
+                           IF ("Return Qty. Rcd. Not Invd." <> 0) OR ("Return Receipt Line".Type = 0) THEN BEGIN
+                             IF ("Bill-to Customer No." <> Cust."No.") AND
+                                ("Return Receipt Line"."Sell-to Customer No." <> '') THEN
+                               Cust.GET("Bill-to Customer No.");
+                             IF NOT (Cust.Blocked IN [Cust.Blocked::All,Cust.Blocked::Invoice]) THEN BEGIN
+                               IF (SalesReturnHeader."Bill-to Customer No." <> SalesHeader."Bill-to Customer No.") OR
+                                  (SalesReturnHeader."Currency Code" <> SalesHeader."Currency Code") OR
+                                  (NOT VerifyDimAnalogy) OR
+                                  ((InvMatrixSetup."Invoice Regroup Method" = InvMatrixSetup."Invoice Regroup Method"::ByServiceOrderType) AND
+                                   ("Service Order Type" <>  SalesLine."Service Order Type")) //IMH04  //OR
+                                  //(InvFrequency <> InvMatrixSetup."Invoicing frequency")
+                               THEN BEGIN
+                                 IF SalesHeader."No." <> '' THEN
+                                   FinalizeSalesCMHeader;
+                                 InsertSalesCMHeader;
+                                 SalesLine.SETRANGE("Document Type",SalesHeader."Document Type");
+                                 SalesLine.SETRANGE("Document No.",SalesHeader."No.");
+                                 SalesLine."Document Type" := SalesHeader."Document Type";
+                                 SalesLine."Document No." := SalesHeader."No.";
+                               END;
+                               SalesRetRcptLine := "Return Receipt Line";
+                               HasAmount := HasAmount OR ("Return Qty. Rcd. Not Invd." <>0);
+                               SalesRetRcptLine.InsertInvLineFromRetRcptLine(SalesLine,TempFromLineDim);
+                               DimMgt.MoveTempFromDimToTempToDim(TempFromLineDim,TempToLineDim);
+                             END ELSE
+                               NoOfSalesCMErrors := NoOfSalesCMErrors + 1;
+                           END;
+                         END;
+
+        OnPostDataItem=VAR
+                         SalesGetRetRcpt@1000 : Codeunit 6638;
+                       BEGIN
+                         SalesGetRetRcpt.GetItemChargeAssgnt("Return Receipt Line");
+
+                         InvFrequency := InvMatrixSetup."Invoicing frequency";
+                       END;
+
+      }
+      SECTIONS
+      {
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=5060;
+      Height=4510;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   IF PostingDateReq = 0D THEN
+                     PostingDateReq := WORKDATE;
+                   IF DocDateReq = 0D THEN
+                     DocDateReq := WORKDATE;
+                   SalesSetup.GET;
+                   CalcInvDisc := SalesSetup."Calc. Inv. Discount";
+                 END;
+
+      OnAfterGetCurrRecord=BEGIN
+                             RequestOptionsForm.GeneratePDFInv.EDITABLE(PostInv);
+                           END;
+
+    }
+    CONTROLS
+    {
+      { 2   ;CheckBox     ;3410 ;1100 ;440  ;440  ;InPage=-1;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Calc. Inv. Discount;
+                                                              FRA=Calcul remise facture];
+                                                   SourceExpr=CalcInvDisc;
+                                                   OnValidate=BEGIN
+                                                                SalesSetup.GET;
+                                                                SalesSetup.TESTFIELD("Calc. Inv. Discount",FALSE);
+                                                              END;
+                                                               }
+      { 22  ;Label        ;0    ;1100 ;3300 ;440  ;ParentControl=2 }
+      { 3   ;CheckBox     ;3410 ;1650 ;440  ;440  ;InPage=-1;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Post Invoices;
+                                                              FRA=Validation des factures];
+                                                   SourceExpr=PostInv;
+                                                   OnAfterValidate=BEGIN
+                                                                     IF NOT PostInv THEN
+                                                                       GeneratePDFInv := FALSE;
+                                                                   END;
+                                                                    }
+      { 23  ;Label        ;0    ;1650 ;3300 ;440  ;ParentControl=3;
+                                                   CaptionML=FRA=Validation des avoirs }
+      { 4   ;TextBox      ;3410 ;550  ;1650 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Document Date;
+                                                              FRA=Date document];
+                                                   SourceExpr=DocDateReq }
+      { 5   ;Label        ;0    ;550  ;3300 ;440  ;ParentControl=4 }
+      { 6   ;CheckBox     ;3410 ;2200 ;440  ;440  ;InPage=-1;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Only Std. Payment Terms;
+                                                              FRA=Conditions paiement standard uniquement];
+                                                   SourceExpr=OnlyStdPmtTerms }
+      { 7   ;Label        ;0    ;2200 ;3300 ;440  ;ParentControl=6 }
+      { 8   ;CheckBox     ;3410 ;2750 ;440  ;440  ;InPage=-1;
+                                                   ShowCaption=No;
+                                                   SourceExpr=CopyTextLines }
+      { 9   ;Label        ;0    ;2750 ;3300 ;440  ;ParentControl=8;
+                                                   CaptionML=[ENU=Copy Text Lines;
+                                                              FRA=Copier lignes texte] }
+      { 1100281000;CheckBox;3410;3410 ;440  ;440  ;Name=GeneratePDFInv;
+                                                   InPage=-1;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Generate PDF Invoice;
+                                                              FRA=G‚n‚rer facture PDF];
+                                                   SourceExpr=GeneratePDFInv }
+      { 1100281001;Label  ;0    ;3410 ;3300 ;440  ;ParentControl=1100281000;
+                                                   CaptionML=FRA=G‚n‚rer avoir PDF }
+      { 1100281002;Label  ;0    ;0    ;3300 ;440  ;ParentControl=1100281003;
+                                                   InPage=-1 }
+      { 1100281003;TextBox;3410 ;0    ;1650 ;440  ;CaptionML=[ENU=Posting Date;
+                                                              FRA=Date comptabilisation];
+                                                   SourceExpr=PostingDateReq }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+      SaveValues=Yes;
+      OnOpenPage=BEGIN
+                   IF PostingDateReq = 0D THEN
+                     PostingDateReq := WORKDATE;
+                   IF DocDateReq = 0D THEN
+                     DocDateReq := WORKDATE;
+                   SalesSetup.GET;
+                   CalcInvDisc := SalesSetup."Calc. Inv. Discount";
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1900000001;0;Container;
+                  ContainerType=ContentArea }
+
+      { 1900000002;1;Group  ;
+                  CaptionML=[ENU=Options;
+                             FRA=Options] }
+
+      { 1   ;2   ;Field     ;
+                  CaptionML=[ENU=Posting Date;
+                             FRA=Date comptabilisation];
+                  SourceExpr=PostingDateReq }
+
+      { 4   ;2   ;Field     ;
+                  CaptionML=[ENU=Document Date;
+                             FRA=Date document];
+                  SourceExpr=DocDateReq }
+
+      { 2   ;2   ;Field     ;
+                  CaptionML=[ENU=Calc. Inv. Discount;
+                             FRA=Calculer remise facture];
+                  SourceExpr=CalcInvDisc;
+                  OnValidate=BEGIN
+                               SalesSetup.GET;
+                               SalesSetup.TESTFIELD("Calc. Inv. Discount",FALSE);
+                             END;
+                              }
+
+      { 3   ;2   ;Field     ;
+                  CaptionML=[ENU=Post Invoices;
+                             FRA=Validation des avoirs];
+                  SourceExpr=PostInv }
+
+      { 6   ;2   ;Field     ;
+                  CaptionML=[ENU=Only Std. Payment Terms;
+                             FRA=Conditions paiement standard uniquement];
+                  SourceExpr=OnlyStdPmtTerms }
+
+      { 8   ;2   ;Field     ;
+                  CaptionML=[ENU=Copy Text Lines;
+                             FRA=Copier lignes texte];
+                  SourceExpr=CopyTextLines }
+
+    }
+  }
+  CODE
+  {
+    VAR
+      Text000@1000 : TextConst 'ENU=Please enter the posting date.;FRA=Veuillez entrer une date de comptabilisation.';
+      Text001@1001 : TextConst 'ENU=Please enter the document date.;FRA=Veuillez entrer la date du document.';
+      Text002@1002 : TextConst 'ENU=Combining shipments...\\;FRA=Regroupement des Retours..\\';
+      Text003@1003 : TextConst 'ENU=Customer No.    #1##########\;FRA=Nø client       #1##########\';
+      Text004@1004 : TextConst 'ENU=Order No.       #2##########\;FRA=Nø retour     #2##########\';
+      Text005@1005 : TextConst 'ENU=Shipment No.    #3##########;FRA=Nø r‚ception retour   #3##########';
+      Text007@1006 : TextConst 'ENU=Not all the invoices were posted. A total of %1 invoices were not posted.;FRA=Tous les avoirs n''ont pas ‚t‚ valid‚s (%1 non valid‚(s)).';
+      Text008@1007 : TextConst 'ENU=There is nothing to combine.;FRA=Il n''y a rien … regrouper.';
+      Text010@1008 : TextConst 'ENU=The shipments are now combined, and the number of invoice(s) created is %1.;FRA=Les r‚ceptions retour sont maintenant regroup‚es, et le nombre d''avoirs cr‚‚s est de %1.';
+      SalesHeader@1010 : Record 36;
+      SalesLine@1011 : Record 37;
+      SalesReturnHeader@1100281013 : Record 36;
+      SalesRetRcptHeader@1100281014 : Record 6660;
+      SalesRetRcptLine@1100281016 : Record 6661;
+      SalesCMLine@1100281015 : Record 37;
+      SalesCMHeader@1100281017 : Record 114;
+      TempSalesCMHeader@1100281010 : TEMPORARY Record 114;
+      SalesSetup@1013 : Record 311;
+      FromDocDim@1014 : Record 357;
+      ToDocDim@1016 : Record 357;
+      TempFromLineDim@1031 : TEMPORARY Record 357;
+      TempToLineDim@1032 : TEMPORARY Record 357;
+      Cust@1018 : Record 18;
+      Language@1009 : Record 8;
+      PmtTerms@1017 : Record 3;
+      SalesCalcDisc@1019 : Codeunit 60;
+      SalesPost@1020 : Codeunit 80;
+      DimMgt@1033 : Codeunit 408;
+      PDFMgt@1100281011 : Codeunit 50127;
+      Window@1021 : Dialog;
+      PostingDateReq@1022 : Date;
+      DocDateReq@1023 : Date;
+      RefDate@1100281002 : Date;
+      RefDay@1100281003 : Integer;
+      CalcInvDisc@1024 : Boolean;
+      PostInv@1025 : Boolean;
+      OnlyStdPmtTerms@1015 : Boolean;
+      HasAmount@1102601000 : Boolean;
+      HideDialog@1034 : Boolean;
+      NextLineNo@1026 : Integer;
+      NoOfSalesCMErrors@1027 : Integer;
+      NoOfSalesCM@1028 : Integer;
+      Text011@1029 : TextConst 'ENU=\%2 Shipments with non-standard Payment Terms have not been combined.;FRA=\%2 r‚ceptions retour avec des conditions de paiement non standard n''ont pas ‚t‚ combin‚es.';
+      NoOfskippedReturnReceipt@1030 : Integer;
+      CopyTextLines@1035 : Boolean;
+      DueDate@1100281007 : Date;
+      PmtDiscDate@1100281006 : Date;
+      "PmtDisc%"@1100281005 : Decimal;
+      GeneratePDFInv@1100281008 : Boolean;
+      InvFrequency@1100281012 : Option;
+
+    LOCAL PROCEDURE FinalizeSalesCMHeader@2();
+    VAR
+      lCust@1100281000 : Record 18;
+    BEGIN
+      WITH SalesHeader DO BEGIN
+        IF NOT(HasAmount) THEN BEGIN
+          SalesHeader.DELETE(TRUE);
+          TempToLineDim.DELETEALL;
+          EXIT;
+        END;
+        IF CalcInvDisc THEN
+          SalesCalcDisc.RUN(SalesLine);
+        SalesHeader.FIND;
+        DimMgt.TransferTempToDimToDocDim(TempToLineDim);
+        COMMIT;
+        CLEAR(SalesCalcDisc);
+        CLEAR(SalesPost);
+        NoOfSalesCM := NoOfSalesCM + 1;
+        IF PostInv THEN BEGIN
+          CLEAR(SalesPost);
+          IF SalesPost.RUN(SalesHeader) THEN BEGIN
+            lCust.GET(SalesHeader."Bill-to Customer No.");
+
+            IF lCust."Generate PDF Invoice" AND (lCust."PDF Invoice Directory" <> '') THEN BEGIN
+              IF SalesCMHeader.GET(SalesHeader."Last Posting No.") THEN BEGIN
+                TempSalesCMHeader := SalesCMHeader;
+                TempSalesCMHeader.INSERT;
+              END;
+            END;
+            //<<IMH02.isat.PC
+            // Suppression de la commande
+            SalesHeader.DELETE(TRUE);
+            //>>IMH02.isat.PC
+          END ELSE
+            NoOfSalesCMErrors := NoOfSalesCMErrors + 1
+
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE InsertSalesCMHeader@1();
+    BEGIN
+      WITH SalesHeader DO BEGIN
+        INIT;
+        "Document Type" := "Document Type"::"Credit Memo";
+        "No." := '';
+        INSERT(TRUE);
+        VALIDATE("Sell-to Customer No.",SalesReturnHeader."Bill-to Customer No.");
+        IF "Bill-to Customer No." <> "Sell-to Customer No." THEN
+          VALIDATE("Bill-to Customer No.",SalesReturnHeader."Bill-to Customer No.");
+        VALIDATE("Posting Date",PostingDateReq);
+        VALIDATE("Document Date",DocDateReq);
+        //<<IMH03
+          VALIDATE("Payment Method Code",SalesReturnHeader."Payment Method Code");
+        //>>IMH03
+        VALIDATE("Currency Code",SalesReturnHeader."Currency Code");
+        "Salesperson Code" := SalesReturnHeader."Salesperson Code";
+        "Shortcut Dimension 1 Code" := SalesReturnHeader."Shortcut Dimension 1 Code";
+        "Shortcut Dimension 2 Code" := SalesReturnHeader."Shortcut Dimension 2 Code";
+        "Corporate No." := SalesReturnHeader."Corporate No.";
+        "Service Order Type" := InvMatrixSetup."Service Order Type";
+        "Corporate Region Code" := SalesReturnHeader."Corporate Region Code";
+        //<<IMH05.ISAT.SB
+        IF SalesReturnHeader."Prices Including VAT" THEN
+            SalesHeader."Prices Including VAT" := TRUE
+        ELSE
+            SalesHeader."Prices Including VAT" := FALSE;
+        //>>IMH05.ISAT.SB
+        MODIFY;
+        COMMIT;
+        HasAmount := FALSE;
+
+        ToDocDim.SETRANGE("Document Type","Document Type");
+        ToDocDim.SETRANGE("Document No.","No.");
+        ToDocDim.DELETEALL;
+
+        IF FromDocDim.FIND('-') THEN BEGIN
+          REPEAT
+            ToDocDim.INIT;
+            ToDocDim."Table ID" := DATABASE::"Sales Header";
+            ToDocDim."Document Type" := "Document Type";
+            ToDocDim."Document No." := "No.";
+            ToDocDim."Line No." := 0;
+            ToDocDim."Dimension Code" := FromDocDim."Dimension Code";
+            ToDocDim."Dimension Value Code" := FromDocDim."Dimension Value Code";
+            ToDocDim.INSERT;
+          UNTIL FromDocDim.NEXT = 0;
+        END;
+
+        ToDocDim.SETRANGE("Table ID",DATABASE::"Sales Line");
+
+        NextLineNo := 10000;
+      END;
+    END;
+
+    PROCEDURE VerifyDimAnalogy@3() : Boolean;
+    BEGIN
+      IF NOT FromDocDim.FIND('-') THEN BEGIN
+        FromDocDim.INIT;
+        FromDocDim."Dimension Code" := '';
+      END;
+
+      ToDocDim.SETRANGE("Table ID",DATABASE::"Sales Header");
+      ToDocDim.SETRANGE("Document Type",SalesHeader."Document Type");
+      ToDocDim.SETRANGE("Document No.",SalesHeader."No.");
+      IF NOT ToDocDim.FIND('-') THEN BEGIN
+        ToDocDim.INIT;
+        ToDocDim."Dimension Code" := '';
+      END;
+
+      IF FromDocDim.FIND('-') THEN
+        REPEAT
+          IF (FromDocDim."Dimension Code" <> ToDocDim."Dimension Code") OR
+             (FromDocDim."Dimension Value Code" <> ToDocDim."Dimension Value Code")
+          THEN
+            EXIT(FALSE);
+        UNTIL (FromDocDim.NEXT = 0) AND (ToDocDim.NEXT = 0);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InitializeReport@5(PostingDate@1002 : Date;DocDate@1003 : Date);
+    BEGIN
+      PostingDateReq := PostingDate;
+      DocDateReq := DocDate;
+    END;
+
+    PROCEDURE SetHideDialog@7(NewHideDialog@1000 : Boolean);
+    BEGIN
+      HideDialog := NewHideDialog;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH06 @d 24/10/11 @a ISAT.SB @v IMH6.01.146 @s Copy from 50061 => Adaptation pour les avoirs */
+      /** @r IMH05 @d 30/09/11 @a ISAT.SB @v IMH6.01.146 @s Gestion des prix TTC */
+      /** @r IMH04 @d 16/09/11 @a ISAT.SB @v IMH6.01.146 @s Ajustement "Invoicing frequency" */
+      /** @r IMH03 @d 08/06/11 @a ISAT.SB @v IMH6.01.146 @s Code mode de rŠglement de la commande de vente */
+      /** @r IMH02 @d 08/06/11 @a ISAT.PC @v IMH6.01.146 @s Ajustement */
+      /** @r IMH01 @d 03/05/11 @a ISAT.EBA @v IMH6.01.146 @s Gestion de la facturation client */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

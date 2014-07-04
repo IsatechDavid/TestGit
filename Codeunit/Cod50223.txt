@@ -1,0 +1,2282 @@
+OBJECT Codeunit 50223 Single Front Office WS
+{
+  OBJECT-PROPERTIES
+  {
+    Date=12/11/13;
+    Time=15:19:30;
+    Modified=Yes;
+    Version List=IMH6.01,LogWS,FOU;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 18=rimd,
+                TableData 79=rimd,
+                TableData 225=rimd,
+                TableData 5050=rimd,
+                TableData 5051=rimd,
+                TableData 5058=rimd,
+                TableData 5068=rimd,
+                TableData 5900=rimd,
+                TableData 5903=rimd,
+                TableData 5917=rimd,
+                TableData 50032=rimd,
+                TableData 50040=rimd,
+                TableData 50058=rimd,
+                TableData 50060=rimd,
+                TableData 50065=rimd,
+                TableData 50066=rimd,
+                TableData 50075=rimd,
+                TableData 50139=rimd,
+                TableData 8016748=rimd;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      InterfaceSetup@1100281001 : Record 50139;
+      DARVAMgt@1000000036 : Codeunit 50150;
+      EAIXmlDocMgt@1000000043 : Codeunit 8016713;
+      ToolsMgt@1100281002 : Codeunit 8016602;
+      ExtrFct@1100281003 : Codeunit 50204;
+      NameSpace@1100281000 : Text[30];
+
+    PROCEDURE SimplifiedSearchBenecificiary@1000000006(pValue@1000000003 : Text[50];VAR pCompleteSearchResult@1000000002 : BigText;VAR pSearchLimited@1000000001 : Boolean;VAR pErrorDescription@1000000000 : Text[100]);
+    VAR
+      lTempContactFilter@1000000010 : TEMPORARY Record 5050;
+      lTempContact@1000000009 : TEMPORARY Record 5050;
+      lServiceFilter@1000000008 : Record 50066;
+      lServiceHeaderFilter@1000000007 : Record 5900;
+      lServiceInterventionLineFilter@1000000006 : Record 50075;
+      lContactSearchMgt@1000000005 : Codeunit 50097;
+      lTempText@1000000004 : Text[1024];
+      lGUID@1100281000 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'SimplifiedSearchBenecificiary',pValue,lGUID);
+      //>>IMH09.PC
+
+      // Nom, n¯ benef ou n¯ tel
+
+      // Tel
+      IF (STRLEN(pValue) >= 6) AND (COPYSTR(pValue,1,1) = '0') THEN BEGIN
+        IF pValue <> '' THEN BEGIN
+          IF NOT CheckPhoneNo(pValue) THEN BEGIN
+            EXIT;
+          END;
+          lTempContactFilter.SETFILTER("Phone No.",pValue);
+        END;
+        IF lContactSearchMgt.CheckSearchFields(lTempContactFilter,TRUE) THEN BEGIN
+          lContactSearchMgt.CreateContactList(lTempContactFilter,lTempContact,lTempText);
+        END;
+      END;
+
+      lTempContact.RESET;
+      IF lTempContact.ISEMPTY THEN BEGIN
+        lTempContactFilter.RESET;
+        lTempContactFilter.SETFILTER(Surname,pValue);
+        IF lContactSearchMgt.CheckSearchFields(lTempContactFilter,TRUE) THEN BEGIN
+          lContactSearchMgt.CreateContactList(lTempContactFilter,lTempContact,lTempText);
+        END;
+      END;
+
+      lTempContact.RESET;
+      IF lTempContact.ISEMPTY THEN BEGIN
+        lTempContactFilter.RESET;
+        lTempContactFilter.SETFILTER("Member No.",pValue);
+        IF lContactSearchMgt.CheckSearchFields(lTempContactFilter,TRUE) THEN BEGIN
+          lContactSearchMgt.CreateContactList(lTempContactFilter,lTempContact,lTempText);
+        END;
+      END;
+
+      CreateSearchList(
+        lTempContact,lServiceFilter,lServiceHeaderFilter,
+        lServiceInterventionLineFilter,pCompleteSearchResult,
+        pSearchLimited,pErrorDescription);
+    END;
+
+    PROCEDURE SimplifiedSearchService@1000000007(pValue@1000000003 : Text[50];VAR pCompleteSearchResult@1000000002 : BigText;VAR pSearchLimited@1000000001 : Boolean;VAR pErrorDescription@1000000000 : Text[100]);
+    VAR
+      lServiceFilter@1000000016 : Record 50066;
+      lServiceBuffer@1000000015 : TEMPORARY Record 50066;
+      lServiceHeader@1000000014 : Record 5900;
+      lServiceHeaderFilter@1000000013 : Record 5900;
+      lContactBuffer@1000000012 : TEMPORARY Record 5050;
+      lContact@1000000011 : Record 5050;
+      lServiceInterventionLineFilter@1000000010 : Record 50075;
+      lServiceSearchMgt@1000000009 : Codeunit 50060;
+      lTempText@1000000008 : Text[1024];
+      lContactLimit@1000000007 : Integer;
+      lNbContact@1000000006 : Integer;
+      lResultCount@1000000005 : Integer;
+      lToInsert@1000000004 : Boolean;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      lServiceFilter.RESET;
+      lServiceFilter.SETFILTER("Service No.",pValue);
+      IF lServiceSearchMgt.CheckSearchServiceFields(lServiceFilter,TRUE) THEN BEGIN
+        lServiceSearchMgt.CreateServiceList(lServiceFilter,lServiceBuffer,lTempText,lResultCount);
+      END;
+
+      lServiceBuffer.RESET;
+      IF lServiceBuffer.ISEMPTY THEN BEGIN
+        lServiceFilter.RESET;
+        lServiceFilter.SETFILTER("Reference No.",pValue);
+        IF lServiceSearchMgt.CheckSearchServiceFields(lServiceFilter,TRUE) THEN BEGIN
+          lServiceSearchMgt.CreateServiceList(lServiceFilter,lServiceBuffer,lTempText,lResultCount);
+        END;
+      END;
+
+      InterfaceSetup.GET;
+
+      lContactLimit := 20;
+      IF pSearchLimited THEN BEGIN
+        IF InterfaceSetup."WS Send Contact Nb Limit" <> 0 THEN BEGIN
+          lContactLimit := InterfaceSetup."WS Send Contact Nb Limit";
+        END;
+      END;
+
+      IF lServiceBuffer.FINDSET THEN BEGIN
+        REPEAT
+          IF NOT lContactBuffer.GET(lServiceBuffer."Contact No.") THEN BEGIN
+            lContact.GET(lServiceBuffer."Contact No.");
+            lContactBuffer.TRANSFERFIELDS(lContact);
+            lContactBuffer.INSERT;
+            lNbContact += 1;
+          END;
+        UNTIL (lServiceBuffer.NEXT = 0) OR (lNbContact = lContactLimit);
+      END;
+
+      lContactBuffer.RESET;
+      CreateSearchList(
+        lContactBuffer,lServiceFilter,lServiceHeader,
+        lServiceInterventionLineFilter,pCompleteSearchResult,
+        pSearchLimited,pErrorDescription);
+    END;
+
+    PROCEDURE CompleteSearchBeneficiary@1100281013(pBenneficiaryNo@1000000000 : Code[20];pLastName@1000000001 : Text[30];pCorporateNo@1000000002 : Code[20];pFirstName@1000000003 : Text[30];pPhoneNo@1000000004 : Text[30];pPostCode@1000000005 : Code[30];pCity@1000000006 : Code[30];VAR pCompleteSearchResult@1000000007 : BigText;VAR pSearchLimited@1000000008 : Boolean;VAR pErrorDescription@1000000009 : Text[100]);
+    VAR
+      lTempContactFilter@1000000013 : TEMPORARY Record 5050;
+      lTempContact@1000000012 : TEMPORARY Record 5050;
+      lServiceFilter@1000000010 : Record 50066;
+      lServiceHeaderFilter@1000000015 : Record 5900;
+      lServiceInterventionLineFilter@1000000014 : Record 50075;
+      lContactSearchMgt@1000000011 : Codeunit 50097;
+      lTempText@1100281000 : Text[1024];
+      lGUID@1100281001 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(
+        4,'CompleteSearchBeneficiary',
+        STRSUBSTNO('%1-%2-%3-%4-%5-%6-%7',pBenneficiaryNo,pLastName,pCorporateNo,pFirstName,pPhoneNo,pPostCode,pCity),
+        lGUID);
+      //>>IMH09.PC
+
+      lTempContact.RESET;
+
+      IF pBenneficiaryNo <> '' THEN
+        lTempContactFilter.SETFILTER("Member No.",pBenneficiaryNo);
+
+      IF pCorporateNo <> '' THEN
+        lTempContactFilter.SETFILTER("Corporate No.",pCorporateNo);
+
+      IF pLastName <> '' THEN
+        lTempContactFilter.SETFILTER(Surname,pLastName);
+
+      IF pFirstName <> '' THEN
+        lTempContactFilter.SETFILTER("First Name",pFirstName);
+
+      IF pPostCode <> '' THEN
+        lTempContactFilter.SETFILTER("Post Code",pPostCode);
+
+      IF pCity <> '' THEN
+        lTempContactFilter.SETFILTER(City,pCity);
+
+      IF pPhoneNo <> '' THEN BEGIN
+        IF NOT CheckPhoneNo(pPhoneNo) THEN BEGIN
+          EXIT;
+        END;
+        lTempContactFilter.SETFILTER("Phone No.",pPhoneNo);
+      END;
+
+      IF NOT lContactSearchMgt.CheckSearchFields(lTempContactFilter,TRUE) THEN BEGIN
+        EXIT;
+      END;
+
+      lContactSearchMgt.CreateContactList(lTempContactFilter,lTempContact,lTempText);
+
+      IF lTempContact.FINDSET THEN BEGIN
+        REPEAT
+          IF pCity <> '' THEN BEGIN
+            IF lTempContact.City <> pCity THEN BEGIN
+              lTempContact.DELETE;
+            END;
+          END;
+        UNTIL (lTempContact.NEXT = 0);
+      END;
+
+      CreateSearchList(
+        lTempContact,lServiceFilter,lServiceHeaderFilter,
+        lServiceInterventionLineFilter,pCompleteSearchResult,
+        pSearchLimited,pErrorDescription);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE CompleteSearchService@1100281012(pServiceNo@1000000000 : Code[20];pEventNo@1000000001 : Text[30];pCorporateNo@1000000002 : Code[20];pEventType@1000000003 : Code[10];pServiceOrderType@1000000004 : Code[20];pPostCode@1000000005 : Code[30];pCity@1000000006 : Code[30];VAR pCompleteSearchResult@1000000010 : BigText;VAR pSearchLimited@1000000009 : Boolean;VAR pErrorDescription@1000000008 : Text[100]);
+    VAR
+      lServiceFilter@1100281007 : Record 50066;
+      lServiceBuffer@1100281004 : TEMPORARY Record 50066;
+      lServiceHeader@1100281008 : Record 5900;
+      lServiceHeaderFilter@1000000012 : Record 5900;
+      lContactBuffer@1000000007 : TEMPORARY Record 5050;
+      lContact@1100281002 : Record 5050;
+      lServiceInterventionLineFilter@1000000011 : Record 50075;
+      lServiceSearchMgt@1100281003 : Codeunit 50060;
+      lTempText@1100281005 : Text[1024];
+      lContactLimit@1100281000 : Integer;
+      lNbContact@1100281001 : Integer;
+      lResultCount@1100281006 : Integer;
+      lToInsert@1100281009 : Boolean;
+      lGUID@1100281010 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(
+        4,'CompleteSearchService',
+        STRSUBSTNO('%1-%2-%3-%4-%5-%6-%7',pServiceNo,pEventNo,pCorporateNo,pEventType,pServiceOrderType,pPostCode,pCity),
+        lGUID);
+      //>>IMH09.PC
+
+      IF pCorporateNo <> '' THEN BEGIN
+        lServiceFilter.SETFILTER("Corporate No.",pCorporateNo);
+      END;
+
+      IF pServiceNo <> '' THEN BEGIN
+        lServiceFilter.SETFILTER("Service No.",pServiceNo);
+      END;
+
+      IF pEventNo <> '' THEN BEGIN
+        lServiceFilter.SETFILTER("Reference No.",pEventNo);
+      END;
+
+      IF pEventType <> '' THEN
+        lServiceFilter.SETFILTER("Event Nature",pEventType);
+
+      IF pServiceOrderType <> '' THEN
+        lServiceHeaderFilter.SETFILTER("Service Order Type",pServiceOrderType);
+
+      IF pPostCode <> '' THEN
+        lServiceFilter.SETFILTER("Post Code",pPostCode);
+
+      IF pCity <> '' THEN
+        lServiceFilter.SETFILTER(City,pCity);
+
+      IF NOT lServiceSearchMgt.CheckSearchServiceFields(lServiceFilter,TRUE) THEN BEGIN
+        EXIT;
+      END;
+      lServiceSearchMgt.CreateServiceList(lServiceFilter,lServiceBuffer,lTempText,lResultCount);
+
+      InterfaceSetup.GET;
+
+      lContactLimit := 20;
+      IF pSearchLimited THEN BEGIN
+        IF InterfaceSetup."WS Send Contact Nb Limit" <> 0 THEN BEGIN
+          lContactLimit := InterfaceSetup."WS Send Contact Nb Limit";
+        END;
+      END;
+
+      IF lServiceBuffer.FINDSET THEN BEGIN
+        REPEAT
+          lToInsert := TRUE;
+          IF pServiceOrderType <> '' THEN BEGIN
+            lServiceHeader.SETCURRENTKEY("Service No.");
+            lServiceHeader.SETRANGE("Service No.",lServiceBuffer."Service No.");
+            lServiceHeader.SETFILTER("Service Order Type",pServiceOrderType);
+            lToInsert := NOT lServiceHeader.ISEMPTY;
+          END;
+          IF lToInsert THEN BEGIN
+            IF NOT lContactBuffer.GET(lServiceBuffer."Contact No.") THEN BEGIN
+              lContact.GET(lServiceBuffer."Contact No.");
+              lContactBuffer.TRANSFERFIELDS(lContact);
+              lContactBuffer.INSERT;
+              lNbContact += 1;
+            END;
+          END;
+        UNTIL (lServiceBuffer.NEXT = 0) OR (lNbContact = lContactLimit);
+      END;
+
+      lContactBuffer.RESET;
+      CreateSearchList(
+        lContactBuffer,lServiceFilter,lServiceHeader,
+        lServiceInterventionLineFilter,pCompleteSearchResult,
+        pSearchLimited,pErrorDescription);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE CompleteSearchIntervention@1100281011(pServiceNo@1100281011 : Code[20];pBenneficiaryNo@1100281012 : Code[20];pProviderNo@1000000000 : Code[20];pProviderName@1000000001 : Text[30];pBuildingTradeNo@1000000002 : Code[20];pEventType@1000000003 : Code[10];pServiceOrderType@1000000004 : Code[20];pPostCode@1000000005 : Code[30];pCity@1000000006 : Code[30];VAR pCompleteSearchResult@1000000010 : BigText;VAR pSearchLimited@1000000009 : Boolean;VAR pErrorDescription@1000000008 : Text[100]);
+    VAR
+      lServiceInterventionLineFilter@1000000007 : Record 50075;
+      lServiceIntervLineCheckFilter@1100281013 : Record 50075;
+      lServiceInterventionLineBuffer@1100281009 : TEMPORARY Record 50075;
+      lService@1100281010 : Record 50066;
+      lServiceFilter@1000000012 : Record 50066;
+      lServiceHeaderFilter@1000000011 : Record 5900;
+      lServiceCode@1100281002 : Record 50040;
+      lContactBuffer@1100281008 : TEMPORARY Record 5050;
+      lContact@1100281007 : Record 5050;
+      lServiceSearchMgt@1100281006 : Codeunit 50060;
+      lTempText@1100281001 : Text[1024];
+      lContactLimit@1100281005 : Integer;
+      lNbContact@1100281004 : Integer;
+      lResultCount@1100281000 : Integer;
+      lToInsert@1100281003 : Boolean;
+      lGUID@1100281014 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(
+        4,'CompleteSearchIntervention',
+        STRSUBSTNO(
+          '%1-%2-%3-%4-%5-%6-%7',
+          pServiceNo,pBenneficiaryNo,pProviderNo,
+          pProviderName,pBuildingTradeNo,pEventType,
+          pPostCode,pCity),
+        lGUID);
+      //>>IMH09.PC
+
+      IF pProviderNo <> '' THEN
+        lServiceInterventionLineFilter.SETFILTER("Provider No.",pProviderNo);
+
+      IF pProviderName <> '' THEN
+        lServiceInterventionLineFilter.SETFILTER("Provider Name",pProviderName);
+
+      IF pPostCode <> '' THEN
+        lServiceInterventionLineFilter.SETFILTER("Post Code",pPostCode);
+
+      IF pServiceOrderType <> '' THEN
+        lServiceInterventionLineFilter.SETFILTER("Service Order Type",pServiceOrderType);
+
+      IF pCity <> '' THEN
+        lServiceInterventionLineFilter.SETFILTER(City,pCity);
+
+      //<<IMH02.PC
+      IF pServiceNo <> '' THEN BEGIN
+        lServiceInterventionLineFilter.SETFILTER("Service No.",pServiceNo);
+        lServiceFilter.SETFILTER("Service No.",pServiceNo);
+      END;
+      IF pBenneficiaryNo <> '' THEN BEGIN
+        lServiceInterventionLineFilter.SETFILTER("Member No.",pBenneficiaryNo);
+      END;
+      //>>IMH02.PC
+
+      IF NOT lServiceSearchMgt.CheckSearchServiceIntervFields(lServiceInterventionLineFilter,TRUE) THEN BEGIN
+        EXIT;
+      END;
+      lServiceSearchMgt.CreateServiceIntervList(lServiceInterventionLineFilter,lServiceInterventionLineBuffer,lTempText,lResultCount);
+
+      lContactLimit := 20;
+      IF pSearchLimited THEN BEGIN
+        IF InterfaceSetup."WS Send Contact Nb Limit" <> 0 THEN BEGIN
+          lContactLimit := InterfaceSetup."WS Send Contact Nb Limit";
+        END;
+      END;
+
+      IF lServiceInterventionLineBuffer.FINDSET THEN BEGIN
+        REPEAT
+          lToInsert := TRUE;
+          IF pBuildingTradeNo <> '' THEN BEGIN
+            lServiceCode.SETRANGE("Service Type",lServiceCode."Service Type"::Intervention);
+            lServiceCode.SETRANGE("Service No.", lServiceInterventionLineBuffer."Service No.");
+            lServiceCode.SETRANGE("Service Header No.",lServiceInterventionLineBuffer."Service Header No.");
+            lServiceCode.SETRANGE("Intervention Line No.",lServiceInterventionLineBuffer."Line No.");
+            lServiceCode.SETFILTER("Building Trade No.",pBuildingTradeNo);
+            lToInsert := NOT lServiceCode.ISEMPTY;
+          END;
+          IF pEventType <> '' THEN BEGIN
+            lService.SETRANGE("Service No.",lServiceInterventionLineBuffer."Service No.");
+            lService.SETFILTER("Event Nature",pEventType);
+            lToInsert := NOT lServiceCode.ISEMPTY;
+          END;
+          //<<IMH02.PC
+          IF pServiceNo <> '' THEN BEGIN
+            //<<IMH05.PC
+            //lToInsert := lServiceInterventionLineBuffer."Service No." = pServiceNo;
+            lServiceIntervLineCheckFilter.RESET;
+            lServiceIntervLineCheckFilter.SETRANGE("Service Header No.",lServiceInterventionLineFilter."Service Header No.");
+            lServiceIntervLineCheckFilter.SETRANGE("Line No.",lServiceInterventionLineFilter."Line No.");
+            lServiceIntervLineCheckFilter.SETFILTER("Service No.",'%1&%2',lServiceInterventionLineBuffer."Service No.",pServiceNo);
+            lToInsert := NOT lServiceIntervLineCheckFilter.ISEMPTY;
+            //>>IMH05.PC
+          END;
+          IF pBenneficiaryNo <> '' THEN BEGIN
+            //<<IMH05.PC
+            //lToInsert := lServiceInterventionLineBuffer."Member No." = pBenneficiaryNo;
+            lServiceIntervLineCheckFilter.RESET;
+            lServiceIntervLineCheckFilter.SETRANGE("Service Header No.",lServiceInterventionLineFilter."Service Header No.");
+            lServiceIntervLineCheckFilter.SETRANGE("Line No.",lServiceInterventionLineFilter."Line No.");
+            lServiceIntervLineCheckFilter.SETRANGE("Service No.",lServiceInterventionLineBuffer."Service No.");
+            lServiceIntervLineCheckFilter.SETFILTER("Member No.",'%1&%2',lServiceInterventionLineBuffer."Member No.",pBenneficiaryNo);
+            lToInsert := NOT lServiceIntervLineCheckFilter.ISEMPTY;
+            //>>IMH05.PC
+          END;
+          //>>IMH02.PC
+          IF lToInsert THEN BEGIN
+            IF NOT lContactBuffer.GET(lServiceInterventionLineBuffer."Contact No.") THEN BEGIN
+              lContact.GET(lServiceInterventionLineBuffer."Contact No.");
+              lContactBuffer.TRANSFERFIELDS(lContact);
+              lContactBuffer.INSERT;
+              lNbContact += 1;
+            END;
+          END;
+        UNTIL (lServiceInterventionLineBuffer.NEXT = 0) OR (lNbContact = lContactLimit);
+      END;
+
+      lContactBuffer.RESET;
+      CreateSearchList(
+        lContactBuffer,lServiceFilter,lServiceHeaderFilter,
+        lServiceInterventionLineFilter,pCompleteSearchResult,
+        pSearchLimited,pErrorDescription);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    LOCAL PROCEDURE CreateSearchList@1100281014(VAR pContact@1100281003 : Record 5050;VAR pServiceFilter@1000000000 : Record 50066;VAR pServiceHeaderFilter@1000000002 : Record 5900;VAR pServiceInterventionLineFilter@1000000001 : Record 50075;VAR pCompleteSearchResult@1100281002 : BigText;VAR pSearchLimited@1100281001 : Boolean;VAR pErrorDescription@1100281000 : Text[100]);
+    VAR
+      lContactContract@1100281025 : Record 50059;
+      lContactAltAddress@1000000003 : Record 5051;
+      lService@1100281024 : Record 50066;
+      lServiceHeader@1100281023 : Record 5900;
+      lServiceInterventionLine@1100281022 : Record 50075;
+      lCode@1100281005 : Record 50079;
+      lServiceOrderType@1100281028 : Record 5903;
+      lServiceFormMgt@1100281021 : Codeunit 50086;
+      lXMLDocument@1100281020 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281019 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode1@1100281018 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode2@1100281017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode3@1100281016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContactList@1100281015 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLServiceList@1100281014 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLServiceHeaderList@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLService@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLServiceHeader@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContactResult@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContact@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContractList@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAddressList@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContract@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIMQBufferManagement@1100281006 : Codeunit 8016708;
+      lContactLimit@1100281004 : Integer;
+      lNbContact@1100281027 : Integer;
+      lContractDescription@1100281026 : Text[100];
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      InterfaceSetup.GET;
+
+      lContactLimit := 20;
+      IF pSearchLimited THEN BEGIN
+        IF InterfaceSetup."WS Send Contact Nb Limit" <> 0 THEN BEGIN
+          lContactLimit := InterfaceSetup."WS Send Contact Nb Limit";
+        END;
+      END;
+
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument,'ContactResult',lXMLContactResult);
+      AddElement(lXMLContactResult,'ContactList','',NameSpace,lXMLContactList);
+      AddElement(lXMLContactList,'SearchLimited',FORMAT(pSearchLimited,0,9),NameSpace,lXMLContact);
+
+      lNbContact := 0;
+
+      IF pContact.FINDSET THEN BEGIN
+        REPEAT
+          lNbContact += 1;
+          AddElement(lXMLContactList,'Contact','',NameSpace,lXMLContact);
+          AddElement(lXMLContact,'No.',pContact."Member No.",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'ContactNo',pContact."No.",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'Name',FormatExportAccent(pContact.Name),NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'FirstName',FormatExportAccent(pContact."First Name"),NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'Address',FormatExportAccent(pContact.Address),NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'PostCode',pContact."Post Code",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'City',pContact.City,NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'CountryCode',pContact."Country/Region Code",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'PhoneNo',pContact."Phone No.",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'MobilePhoneNo',pContact."Mobile Phone No.",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'Email',pContact."E-Mail",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'BirthDay',FORMAT(pContact.Birthdate,0,9),NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'CorporateNo',pContact."Corporate No.",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'RegionCorporateCode',pContact."Corporate Region Code",NameSpace,lXMLNewNode);
+          AddElement(lXMLContact,'VIPCode',pContact."VIP Code",NameSpace,lXMLNewNode);
+          //<<IMH06.PC
+          AddElement(lXMLContact,'SalutationCode',pContact."Salutation Code",NameSpace,lXMLNewNode);
+          //>>IMH06.PC
+          AddElement(lXMLContact,'Deleted',FormatBoolean(pContact.Rayed),NameSpace,lXMLNewNode);
+          // CONTRACT LIST
+          lContactContract.RESET;
+          lContactContract.SETRANGE("Contact No.",pContact."No.");
+          IF lContactContract.FINDSET THEN BEGIN
+            AddElement(lXMLContact,'ContractsList','',NameSpace,lXMLContractList);
+            AddElement(lXMLContractList,'Contract','',NameSpace,lXMLNewNode1);
+            REPEAT
+              AddElement(lXMLContractList,'Contract','',NameSpace,lXMLContract);
+              AddElement(lXMLContract,'ContractCode',lContactContract."Contract Form Code",NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'Reference',lContactContract."Contract Reference",NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'ContractName',FormatExportAccent(lContactContract.Name),NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'ElectricalFailure',FormatBoolean(lContactContract."Electrical failure"),NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'StartDate',FORMAT(lContactContract."Start Date",0,9),NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'ExpirationDate',FORMAT(lContactContract."Expiration Date",0,9),NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'Deductible1',FORMAT(lContactContract."Deductible 1 (LCY)",0,9),NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'Deductible2',FORMAT(lContactContract."Deductible 2 (LCY)",0,9),NameSpace,lXMLNewNode1);
+              IF NOT lCode.GET(5051,50070,lContactContract."Occupier Nature Code") THEN BEGIN
+                CLEAR(lCode);
+              END;
+              AddElement(lXMLContract,'OccupierNature',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode1);
+              IF NOT lCode.GET(5051,50071,lContactContract."Residence Type Code") THEN BEGIN
+                CLEAR(lCode);
+              END;
+              AddElement(lXMLContract,'ResidenceType',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode1);
+              IF NOT lCode.GET(5051,50072,lContactContract."Housing Type Code") THEN BEGIN
+                CLEAR(lCode);
+              END;
+              AddElement(lXMLContract,'HousingType',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'Address',FormatExportAccent(lContactContract.Address),NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'PostCode',lContactContract."Post Code",NameSpace,lXMLNewNode1);
+              AddElement(lXMLContract,'City',lContactContract.City,NameSpace,lXMLNewNode1);
+            UNTIL lContactContract.NEXT = 0;
+          END;
+          //<<IMH07.PC
+          // Adresse secondaire
+          lContactAltAddress.RESET;
+          lContactAltAddress.SETRANGE("Contact No.",pContact."No.");
+          IF lContactAltAddress.FINDSET THEN BEGIN
+            AddElement(lXMLContact,'ConctatAddressList','',NameSpace,lXMLAddressList);
+            REPEAT
+              AddElement(lXMLAddressList,'ContactAddress',lContactAltAddress.Code,NameSpace,lXMLNewNode1);
+            UNTIL lContactAltAddress.NEXT = 0;
+          END;
+          //>>IMH07.PC
+          // SERVICE LIST
+          lService.RESET;
+          IF pServiceFilter.GETFILTERS <> '' THEN BEGIN
+            lService.COPYFILTERS(pServiceFilter);
+          END;
+          lService.SETRANGE("Contact No.",pContact."No.");
+          IF lService.FINDSET THEN BEGIN
+            AddElement(lXMLContact,'ServiceList','',NameSpace,lXMLServiceList);
+            REPEAT
+              AddElement(lXMLServiceList,'Service','',NameSpace,lXMLService);
+              AddElement(lXMLService,'ServiceNo',lService."Service No.",NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'CorporateNo',lService."Corporate No.",NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'RegionCorporateCode',lService."Corporate Region Code",NameSpace,lXMLNewNode2);
+              //<<IMH16.PC
+              AddElement(lXMLService,'ServiceCause',lService."Service Cause",NameSpace,lXMLNewNode2);
+              lService.CALCFIELDS("Service Cause Description");
+              AddElement(
+                lXMLService,'ServiceCauseDescription',
+                FormatExportAccent(lService."Service Cause Description"),NameSpace,lXMLNewNode2);
+              //>>IMH16.PC
+              AddElement(lXMLService,'VIPCode',lService."VIP Code",NameSpace,lXMLNewNode2);
+              lService.CALCFIELDS("Process Status Description");
+              AddElement(
+                lXMLService,'StatusDescription',FormatExportAccent(lService."Process Status Description"),NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'Requisitionner',lService.Requisitioner,NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'Emergency',FORMAT(lService.Urgent),NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'EventNo',lService."Reference No.",NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'EventDate',FORMAT(lService."Event Date",0,9),NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'EVCNo',lService."EAI Entry No.",NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'ContractCode',lService."Contract Form Code",NameSpace,lXMLNewNode2);
+              lContractDescription := '';
+              lServiceFormMgt.ContactContractForm_Validate(
+                lContractDescription,
+                lService."Contract Form Code",
+                lService."Contact No.",
+                lService."Corporate No.",
+                lService."Event Date");
+              AddElement(lXMLService,'ContractDescription',FormatExportAccent(lContractDescription),NameSpace,lXMLNewNode2);
+              AddElement(lXMLService,'CreationDate',FORMAT(lService."Creation Date",0,9),NameSpace,lXMLNewNode2);
+              // SERVICE HEADER LIST
+              lServiceHeader.RESET;
+              IF pServiceHeaderFilter.GETFILTERS <> '' THEN BEGIN
+                lServiceHeader.COPYFILTERS(pServiceHeaderFilter);
+              END;
+              //<<IMH05.PC
+              IF pServiceInterventionLineFilter.GETFILTER("Service Order Type") <> '' THEN BEGIN
+                lServiceHeader.SETFILTER("Service Order Type",pServiceInterventionLineFilter.GETFILTER("Service Order Type"));
+              END;
+              //>>IMH05.PC
+              lServiceHeader.SETCURRENTKEY("Service No.");
+              lServiceHeader.SETRANGE("Service No.",lService."Service No.");
+              IF lServiceHeader.FINDSET THEN BEGIN
+                AddElement(lXMLService,'ServiceHeaderList','',NameSpace,lXMLServiceHeaderList);
+                REPEAT
+                  AddElement(lXMLServiceHeaderList,'ServiceHeader','',NameSpace,lXMLServiceHeader);
+                  AddElement(lXMLServiceHeader,'ServiceHeaderNo',lServiceHeader."No.",NameSpace,lXMLNewNode3);
+                  AddElement(lXMLServiceHeader,'CreationDate',FORMAT(lServiceHeader."Creation Date",0,9),NameSpace,lXMLNewNode3);
+                  IF NOT lServiceOrderType.GET(lServiceHeader."Service Order Type") THEN BEGIN
+                    CLEAR(lServiceOrderType);
+                  END;
+                  AddElement(
+                    lXMLServiceHeader,'ServiceOrderTypeDescription',
+                    FormatExportAccent(lServiceOrderType.Description),NameSpace,lXMLNewNode3);
+                  lServiceHeader.CALCFIELDS("Process Status Description");
+                  AddElement(
+                    lXMLServiceHeader,'StatusDescription',
+                    FormatExportAccent(lServiceHeader."Process Status Description"),NameSpace,lXMLNewNode3);
+                  AddElement(
+                    lXMLServiceHeader,'MEOAddress',
+                    FormatExportAccent(lServiceHeader."Ship-to Address"),NameSpace,lXMLNewNode3);
+                  AddElement(lXMLServiceHeader,'MEOPostCode',lServiceHeader."Ship-to Post Code",NameSpace,lXMLNewNode3);
+                  AddElement(lXMLServiceHeader,'MEOCity',lServiceHeader."Ship-to City",NameSpace,lXMLNewNode3);
+                  AddElement(lXMLServiceHeader,'Emergency',FORMAT(lServiceHeader.Urgent),NameSpace,lXMLNewNode3);
+                  AddElement(lXMLServiceHeader,'ContractCode',lServiceHeader."Contract Form Code",NameSpace,lXMLNewNode3);
+                  lContractDescription := '';
+                  lServiceFormMgt.ContactContractForm_Validate(
+                    lContractDescription,
+                    lServiceHeader."Contract Form Code",
+                    lServiceHeader."Contact No.",
+                    lServiceHeader."Corporate No.",
+                    lServiceHeader."Event Date");
+                  AddElement(lXMLService,'ContractDescription',FormatExportAccent(lContractDescription),NameSpace,lXMLNewNode2);
+                  lServiceInterventionLine.RESET;
+                  IF pServiceInterventionLineFilter.GETFILTERS <> '' THEN BEGIN
+                    lServiceInterventionLine.COPYFILTERS(pServiceInterventionLineFilter);
+                  END;
+                  lServiceInterventionLine.SETCURRENTKEY("Service Header No.","Intervention No.");
+                  lServiceInterventionLine.SETRANGE("Service Header No.",lServiceHeader."No.");
+                  lServiceInterventionLine.SETRANGE(Closed,FALSE);
+                  AddElement(lXMLServiceHeader,'InterventionNb',FORMAT(lServiceInterventionLine.COUNT,0,9),NameSpace,lXMLNewNode3);
+                UNTIL lServiceHeader.NEXT = 0;
+              END;
+            UNTIL lService.NEXT = 0;
+          END;
+        UNTIL (pContact.NEXT = 0) OR (lNbContact = lContactLimit);
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument,pCompleteSearchResult);
+    END;
+
+    PROCEDURE CreateBeneficiary@1100281000(VAR pContactData@1000000000 : BigText;VAR pContactNo@1000000001 : Code[20];VAR pErrorDescription@1000000002 : Text[100]);
+    VAR
+      lTempBlob@1000000005 : TEMPORARY Record 99008535;
+      lContact@1000000024 : Record 5050;
+      lContactAltAddress@1100281002 : Record 5051;
+      lPostCode@1100281001 : Record 225;
+      lXMLDocument@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlContact@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lInstream@1100281000 : InStream;
+      lArrayContact@1100281008 : ARRAY [6] OF Text[50];
+      lArrayAddress@1100281005 : ARRAY [5] OF Text[50];
+      lArrayAddressMOE@1100281007 : ARRAY [5] OF Text[50];
+      lArrayCommunication@1100281009 : ARRAY [6] OF Text[80];
+      lText001@1000000007 : TextConst 'ENU=Transmitted file is empty;FRA=Le fichier transmis est vide';
+      lText002@1100281003 : TextConst 'ENU=Impossible to load XML;FRA=Impossible charger le fichier XML';
+      lFirstFileToDelete@1100281010 : Text[1024];
+      lSecondFileToDelete@1100281004 : Text[1024];
+      lFile@1100281011 : File;
+      lGUID@1100281012 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'CreateBeneficiary','',lGUID);
+      //>>IMH09.PC
+
+      //<<IMH07.PC
+      // Gestion de l'encoding
+      ManageReceiptXML(pContactData,lFirstFileToDelete,lSecondFileToDelete);
+      lFile.OPEN(lSecondFileToDelete);
+      lFile.CREATEINSTREAM(lInstream);
+
+      //lTempBlob.CopyFromBigText(pContactData);
+      //lTempBlob.Blob.CREATEINSTREAM(lInstream);
+      //>>IMH07.PC
+      IF ISCLEAR(lXMLDocument) THEN BEGIN
+        CREATE(lXMLDocument);
+      END;
+
+      IF NOT lXMLDocument.load(lInstream) THEN BEGIN
+        //<<IMH07.PC
+        lFile.CLOSE;
+        IF ERASE(lFirstFileToDelete) THEN;
+        IF ERASE(lSecondFileToDelete) THEN;
+        //>>IMH07.PC
+        ERROR(lText002);
+      END;
+      //<<IMH07.PC
+      lFile.CLOSE;
+      IF ERASE(lFirstFileToDelete) THEN;
+      IF ERASE(lSecondFileToDelete) THEN;
+      //>>IMH07.PC
+
+      // Partie Contact
+      lXmlContact := lXMLDocument.getElementsByTagName('Beneficiary').item(0);
+      lArrayContact[1] := DARVAMgt.GetNodeValue(lXmlContact,'SalutationCode');
+      lArrayContact[2] := DARVAMgt.GetNodeValue(lXmlContact,'FirstName');
+      lArrayContact[3] := DARVAMgt.GetNodeValue(lXmlContact,'LastName');
+      lArrayContact[4] := DARVAMgt.GetNodeValue(lXmlContact,'BeneficiaryNo');
+      lArrayContact[5] := DARVAMgt.GetNodeValue(lXmlContact,'CorporateNo');
+      lArrayContact[6] := DARVAMgt.GetNodeValue(lXmlContact,'CorporateRegionCode');
+
+      // Partie Adresse
+      lXmlContact := lXMLDocument.getElementsByTagName('Address').item(0);
+      lArrayAddress[1] := FormatImportAccent(DARVAMgt.GetNodeValue(lXmlContact,'Address1'));
+      //error(lArrayAddress[1]);
+      lArrayAddress[2] := FormatImportAccent(DARVAMgt.GetNodeValue(lXmlContact,'Address2'));
+      lArrayAddress[3] := FormatImportAccent(DARVAMgt.GetNodeValue(lXmlContact,'Address3'));
+      lArrayAddress[4] := DARVAMgt.GetNodeValue(lXmlContact,'PostCode');
+      lArrayAddress[5] := DARVAMgt.GetNodeValue(lXmlContact,'City');
+
+      //VÇrification de l'existence du contact
+      IF CheckContactExists(
+          lArrayContact[4],lArrayContact[5],
+          lArrayContact[2],lArrayContact[3],
+          lArrayAddress[4],lArrayAddress[5])
+      THEN BEGIN
+        EXIT
+      END;
+      // VÇrification du salutation code
+      IF NOT CheckSalutationCode(lArrayContact[1]) THEN BEGIN
+        EXIT;
+      END;
+      // VÇrification du code postal ville
+      IF NOT CheckPostCodeCity(lArrayAddress[4],lArrayAddress[5],pErrorDescription) THEN BEGIN
+        EXIT;
+      END;
+
+      lXmlContact := lXMLDocument.getElementsByTagName('AddressMOE').item(0);
+      lArrayAddressMOE[1] := FormatImportAccent(DARVAMgt.GetNodeValue(lXmlContact,'Address1'));
+      lArrayAddressMOE[2] := FormatImportAccent(DARVAMgt.GetNodeValue(lXmlContact,'Address2'));
+      lArrayAddressMOE[3] := FormatImportAccent(DARVAMgt.GetNodeValue(lXmlContact,'Address3'));
+      lArrayAddressMOE[4] := DARVAMgt.GetNodeValue(lXmlContact,'PostCode');
+      lArrayAddressMOE[5] := DARVAMgt.GetNodeValue(lXmlContact,'City');
+      // VÇrification du code postal ville
+      IF NOT CheckPostCodeCity(lArrayAddressMOE[4],lArrayAddressMOE[5],pErrorDescription) THEN BEGIN
+        EXIT;
+      END;
+
+      lXmlContact := lXMLDocument.getElementsByTagName('Communication').item(0);
+      lArrayCommunication[1] := DARVAMgt.GetNodeValue(lXmlContact,'PhoneNo');
+      lArrayCommunication[2] := DARVAMgt.GetNodeValue(lXmlContact,'FaxNo');
+      lArrayCommunication[3] := DARVAMgt.GetNodeValue(lXmlContact,'MobilePhoneNo');
+      lArrayCommunication[4] := DARVAMgt.GetNodeValue(lXmlContact,'MobilePhoneNo2');
+      lArrayCommunication[5] := DARVAMgt.GetNodeValue(lXmlContact,'Email');
+      lArrayCommunication[6] := DARVAMgt.GetNodeValue(lXmlContact,'Email2');
+
+      // VÇrification des n¯ de tÇlÇphone
+      IF NOT CheckPhoneNo(lArrayCommunication[1]) THEN BEGIN
+        EXIT
+      END;
+      IF NOT CheckPhoneNo(lArrayCommunication[2]) THEN BEGIN
+        EXIT
+      END;
+      IF NOT CheckPhoneNo(lArrayCommunication[3]) THEN BEGIN
+        EXIT
+      END;
+      IF NOT CheckPhoneNo(lArrayCommunication[4]) THEN BEGIN
+        EXIT
+      END;
+      // VÇrification des emails
+      IF NOT CheckEmail(lArrayCommunication[5]) THEN BEGIN
+        EXIT
+      END;
+      IF NOT CheckEmail(lArrayCommunication[6]) THEN BEGIN
+        EXIT
+      END;
+
+      // Create BÇnÇficiary
+      WITH lContact DO BEGIN
+        INIT;
+        "No." := '';
+        Type := lContact.Type::Company;
+        INSERT(TRUE);
+        VALIDATE("Service Contact","Service Contact"::Beneficiary);
+        VALIDATE("Corporate No.",lArrayContact[5]);
+        VALIDATE("Corporate Region Code",lArrayContact[6]);
+        VALIDATE("Member No.",lArrayContact[4]);
+        VALIDATE("Salutation Code",lArrayContact[1]);
+        VALIDATE("First Name",lArrayContact[2]);
+        VALIDATE(Surname,lArrayContact[3]);
+        VALIDATE(Address,lArrayAddress[1]);
+        VALIDATE("Address 2",lArrayAddress[2]);
+        VALIDATE("Address 3",lArrayAddress[3]);
+        VALIDATE("Post Code",lArrayAddress[4]);
+        VALIDATE(City,lArrayAddress[5]);
+        "Geo. Reference Code" := lPostCode.GetReferenceGeoCode("Post Code",City);
+        IF lArrayCommunication[1] <> '' THEN BEGIN
+          VALIDATE("Phone No.",lArrayCommunication[1]);
+        END;
+        IF lArrayCommunication[2] <> '' THEN BEGIN
+          VALIDATE("Fax No.",lArrayCommunication[2]);
+        END;
+        IF lArrayCommunication[3] <> '' THEN BEGIN
+          VALIDATE("Mobile Phone No.",lArrayCommunication[3]);
+        END;
+        IF lArrayCommunication[4] <> '' THEN BEGIN
+          VALIDATE("Mobile Phone No. 2",lArrayCommunication[4]);
+        END;
+        IF lArrayCommunication[5] <> '' THEN BEGIN
+          VALIDATE("E-Mail",lArrayCommunication[5]);
+        END;
+        IF lArrayCommunication[6] <> '' THEN BEGIN
+          VALIDATE("E-Mail 2",lArrayCommunication[6]);
+        END;
+        "Front Office" := TRUE;
+        MODIFY(TRUE);
+
+        pContactNo := "No.";
+      END;
+      // Adresse secondaire
+      WITH lContactAltAddress DO BEGIN
+        IF (lArrayAddress[1] <> lArrayAddressMOE[1]) OR
+           (lArrayAddress[2] <> lArrayAddressMOE[2]) OR
+           (lArrayAddress[3] <> lArrayAddressMOE[3]) OR
+           (lArrayAddress[4] <> lArrayAddressMOE[4]) OR
+           (lArrayAddress[5] <> lArrayAddressMOE[5])
+        THEN BEGIN
+          INIT;
+          VALIDATE("Contact No.",lContact."No.");
+          Code := '';
+          GetNextCode;
+          UpdateSearchFields;
+          INSERT(TRUE);
+          Address := lArrayAddressMOE[1];
+          "Address 2" := lArrayAddressMOE[2];
+          "Address 3" := lArrayAddressMOE[3];
+          VALIDATE("Post Code",lArrayAddressMOE[4]);
+          VALIDATE(City,lArrayAddressMOE[5]);
+          IF lArrayCommunication[1] <> '' THEN BEGIN
+            VALIDATE("Phone No.",lArrayCommunication[1]);
+          END;
+          IF lArrayCommunication[2] <> '' THEN BEGIN
+            VALIDATE("Fax No.",lArrayCommunication[2]);
+          END;
+          IF lArrayCommunication[3] <> '' THEN BEGIN
+            VALIDATE("Mobile Phone No.",lArrayCommunication[3]);
+          END;
+          IF lArrayCommunication[4] <> '' THEN BEGIN
+            VALIDATE("Mobile Phone No. 2",lArrayCommunication[4]);
+          END;
+          IF lArrayCommunication[5] <> '' THEN BEGIN
+            VALIDATE("E-mail",lArrayCommunication[5]);
+          END;
+          MODIFY(TRUE);
+        END;
+      END;
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetServiceOrderType@1000000008(VAR pServiceOrderTypeList@1000000000 : BigText);
+    VAR
+      lServiceOrderType@1000000001 : Record 5903;
+      lXMLDocument@1000000009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLServicesOrderTypeList@1000000007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLServiceOrderType@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIMQBufferManagement@1000000004 : Codeunit 8016708;
+      lGUID@1100281000 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetServiceOrderType','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'ServiceOrderTypeList', lXMLServicesOrderTypeList);
+
+      lServiceOrderType.RESET;
+      IF lServiceOrderType.FINDSET THEN BEGIN
+        REPEAT
+          //<<IMH10.PC
+          IF lServiceOrderType."S.F.O. Enable" THEN BEGIN
+          //>>IMH10.PC
+            //nom de liste
+            AddElement(lXMLServicesOrderTypeList,'ServiceOrderType','',NameSpace,lXMLServiceOrderType);
+            //Code
+            AddElement(lXMLServiceOrderType,'Code',lServiceOrderType.Code,NameSpace,lXMLNewNode);
+            //Description
+            AddElement(lXMLServiceOrderType,'Description',FormatExportAccent(lServiceOrderType.Description),NameSpace,lXMLNewNode);
+          END;
+        UNTIL lServiceOrderType.NEXT = 0;
+      END;
+      LoadXMLDocToBigText(lXMLDocument, pServiceOrderTypeList);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetProduct@1000000009(VAR pProductList@1000000000 : BigText);
+    VAR
+      lProductCatalog@1000000001 : Record 50060;
+      lServiceOrderType@1100281000 : Record 5903;
+      lXMLDocument@1000000006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLProductList@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLProduct@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIMQBufferManagement@1000000002 : Codeunit 8016708;
+      lGUID@1100281001 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetProduct','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'ProductList', lXMLProductList);
+
+      lProductCatalog.RESET;
+      IF lProductCatalog.FINDSET THEN BEGIN
+        REPEAT
+          //<<IMH10.PC
+          IF NOT lServiceOrderType.GET(lProductCatalog."Service Order Type") THEN BEGIN
+            CLEAR(lServiceOrderType);
+          END;
+          IF lServiceOrderType."S.F.O. Enable" THEN BEGIN
+          //>>IMH10.PC
+            //nom de liste
+            AddElement(lXMLProductList,'Product','',NameSpace,lXMLProduct);
+            //Code
+            AddElement(lXMLProduct,'CorporateNo',lProductCatalog."Corporate No.",NameSpace,lXMLNewNode);
+            //Description
+            AddElement(lXMLProduct,'ServiceOrderType',lProductCatalog."Service Order Type",NameSpace,lXMLNewNode);
+            //Description
+            AddElement(lXMLProduct,'Description',FormatExportAccent(lServiceOrderType.Description),NameSpace,lXMLNewNode);
+          END;
+        UNTIL lProductCatalog.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pProductList);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetCorporate@1000000011(VAR pCorporateList@1000000000 : BigText);
+    VAR
+      lCorporate@1000000001 : Record 18;
+      lRegionCorporate@1000000002 : Record 50058;
+      lEAIPartnerCrossReference@1100281000 : Record 8016748;
+      lEAIMQBufferManagement@1000000003 : Codeunit 8016708;
+      lXMLDocument@1000000007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLCorporateList@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLCorporate@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLCorporateRegionList@1000000008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLCorporateRegion@1000000009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281001 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetCorporate','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'CorporatList', lXMLCorporateList);
+
+      //nom de liste
+      lCorporate.RESET;
+      //<<IMH12.PC
+      lCorporate.SETRANGE("Service Corporate",TRUE);
+      lCorporate.SETRANGE("Show For DPS",TRUE);
+      //>>IMH12.PC
+      lCorporate.SETRANGE("Parent Customer No.",'');
+      lCorporate.SETRANGE("Service Contact",lCorporate."Service Contact"::"Corporate Customer");
+      IF lCorporate.FINDSET THEN BEGIN
+        REPEAT
+          //nom de liste
+          AddElement(lXMLCorporateList,'Corporate','',NameSpace,lXMLCorporate);
+          //Code
+          AddElement(lXMLCorporate,'CorporateNo',lCorporate."No.",NameSpace,lXMLNewNode);
+          //<<IMH03.PC
+          // DARVA GTA Code
+          AddElement(lXMLCorporate,'GTA',GetGTACode(lCorporate."No.",''),NameSpace,lXMLNewNode);
+          //>>IMH03.PC
+          //Description
+          AddElement(lXMLCorporate,'CorporateDescription',FormatExportAccent(lCorporate.Name),NameSpace,lXMLNewNode);
+          //Region Corporate
+          lRegionCorporate.RESET;
+          lRegionCorporate.SETRANGE("Corporate No.",lCorporate."No.");
+          IF lRegionCorporate.FINDSET THEN BEGIN
+            REPEAT
+              //nom de liste
+              AddElement(lXMLCorporate,'RegionCorporate','',NameSpace,lXMLCorporateRegion);
+              //Code
+              AddElement(lXMLCorporateRegion,'RegionCorporateCode',lRegionCorporate."Region Code",NameSpace,lXMLNewNode);
+              //<<IMH03.PC
+              // DARVA GTA Code
+              AddElement(lXMLCorporateRegion,'GTA',GetGTACode(lCorporate."No.",lRegionCorporate."Region Code"),NameSpace,lXMLNewNode);
+              //>>IMH03.PC
+              //Description
+              AddElement(
+                lXMLCorporateRegion,'RegionCorporateDescription',FormatExportAccent(lRegionCorporate.Name),NameSpace,lXMLNewNode);
+            UNTIL lRegionCorporate.NEXT = 0;
+          END;
+        UNTIL lCorporate.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pCorporateList);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE CheckPostCode@1000000012(pPostCode@1000000000 : Code[20]) rValue : Boolean;
+    VAR
+      lPostCode@1000000002 : Record 225;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      rValue := FALSE;
+
+      lPostCode.SETRANGE(Code,pPostCode);
+      rValue := NOT lPostCode.ISEMPTY;
+    END;
+
+    PROCEDURE GetPostCodeCity@1000000003(pPostCode@1000000001 : Code[20];pCity@1000000002 : Text[30];VAR pPostCodeCityList@1000000000 : BigText);
+    VAR
+      lPostCode@1000000003 : Record 225;
+      lEAIMQBufferManagement@1000000010 : Codeunit 8016708;
+      lXMLDocument@1000000009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLPostCodeList@1000000007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLPostCode@1000000006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281000 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetPostCodeCity',STRSUBSTNO('%1-%2',pPostCode,pCity),lGUID);
+      //>>IMH09.PC
+
+      IF pCity <> '' THEN BEGIN
+        lPostCode.SETCURRENTKEY(City,Code);
+      END;
+      IF pPostCode <> '' THEN BEGIN
+        lPostCode.SETCURRENTKEY(Code,City);
+      END;
+      lPostCode.SETFILTER(Code,pPostCode);
+      lPostCode.SETFILTER(City,pCity);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'PostCodeList', lXMLPostCodeList);
+
+      IF lPostCode.FINDSET THEN BEGIN
+        REPEAT
+          AddElement(lXMLPostCodeList,'PostCode','',NameSpace,lXMLPostCode);
+          AddElement(lXMLPostCode,'PostCode',lPostCode.Code,NameSpace,lXMLNewNode);
+          AddElement(lXMLPostCode,'City',FormatExportAccent(lPostCode.City),NameSpace,lXMLNewNode);
+        UNTIL lPostCode.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pPostCodeCityList);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetSalutationCode@1100281004(VAR pSalutationList@1100281006 : BigText);
+    VAR
+      lSalutation@1100281005 : Record 5068;
+      lEAIMQBufferManagement@1100281004 : Codeunit 8016708;
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode2@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281007 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetSealutationCode','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'SalutationList', lXMLNode);
+
+      IF lSalutation.FINDSET THEN BEGIN
+        REPEAT
+          AddElement(lXMLNode,'Salutation','',NameSpace,lXMLNode2);
+          AddElement(lXMLNode2,'No.',lSalutation.Code,NameSpace,lXMLNewNode);
+          AddElement(lXMLNode2,'Description',FormatExportAccent(lSalutation.Description),NameSpace,lXMLNewNode);
+        UNTIL lSalutation.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pSalutationList);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetBuildingTrade@1000000004(VAR pBuildingTradeList@1000000009 : BigText);
+    VAR
+      lBuildingTrade@1000000008 : Record 50032;
+      lEAIMQBufferManagement@1000000006 : Codeunit 8016708;
+      lXMLDocument@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLBuildingTradeList@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLBuildingTrade@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281000 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetBuildingTrade','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'BuildingTradeList', lXMLBuildingTradeList);
+
+      IF lBuildingTrade.FINDSET THEN BEGIN
+        REPEAT
+          AddElement(lXMLBuildingTradeList,'BuildingTrade','',NameSpace,lXMLBuildingTrade);
+          AddElement(lXMLBuildingTrade,'No.',lBuildingTrade."No.",NameSpace,lXMLNewNode);
+          AddElement(lXMLBuildingTrade,'Description',FormatExportAccent(lBuildingTrade.Description),NameSpace,lXMLNewNode);
+        UNTIL lBuildingTrade.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pBuildingTradeList);
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetFaultReasonCode@1000000005(VAR pFaultReasonCodeList@1000000009 : BigText);
+    VAR
+      lFaultReasonCode@1000000008 : Record 5917;
+      lEAIMQBufferManagement@1000000006 : Codeunit 8016708;
+      lXMLDocument@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLFaultReasonCodeList@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLFaultReasonCode@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281000 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetFaultReasonCode','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'FaultReasonCodeList', lXMLFaultReasonCodeList);
+
+      IF lFaultReasonCode.FINDSET THEN BEGIN
+        REPEAT
+          AddElement(lXMLFaultReasonCodeList,'FaultReasonCode','',NameSpace,lXMLFaultReasonCode);
+          AddElement(lXMLFaultReasonCode,'No.',lFaultReasonCode.Code,NameSpace,lXMLNewNode);
+          AddElement(lXMLFaultReasonCode,'Description',FormatExportAccent(lFaultReasonCode.Description),NameSpace,lXMLNewNode);
+        UNTIL lFaultReasonCode.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pFaultReasonCodeList);
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetOccupierNature@1000000010(VAR pOccupierNatureList@1000000000 : BigText);
+    VAR
+      lCode@1000000006 : Record 50079;
+      lEAIMQBufferManagement@1000000005 : Codeunit 8016708;
+      lXMLDocument@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLOccupierNatureList@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLOccupierNature@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281000 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetOccupierNature','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'OccupierNatureList', lXMLOccupierNatureList);
+
+      lCode.SETRANGE("Table ID",5051);
+      lCode.SETRANGE("Field ID",50070);
+      IF lCode.FINDSET THEN BEGIN
+        REPEAT
+          AddElement(lXMLOccupierNatureList,'OccupierNature','',NameSpace,lXMLOccupierNature);
+          AddElement(lXMLOccupierNature,'Code',lCode.Code,NameSpace,lXMLNewNode);
+          AddElement(lXMLOccupierNature,'Description',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode);
+        UNTIL lCode.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pOccupierNatureList);
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetResidenceType@1000000015(VAR pResidenceTypeList@1000000000 : BigText);
+    VAR
+      lCode@1000000006 : Record 50079;
+      lEAIMQBufferManagement@1000000005 : Codeunit 8016708;
+      lXMLDocument@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLResidenceTypeList@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLResidenceType@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281000 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetResidenceType','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'ResidenceTypeList', lXMLResidenceTypeList);
+
+      lCode.SETRANGE("Table ID",5051);
+      lCode.SETRANGE("Field ID",50071);
+      IF lCode.FINDSET THEN BEGIN
+        REPEAT
+          AddElement(lXMLResidenceTypeList,'ResidenceType','',NameSpace,lXMLResidenceType);
+          AddElement(lXMLResidenceType,'Code',lCode.Code,NameSpace,lXMLNewNode);
+          AddElement(lXMLResidenceType,'Description',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode);
+        UNTIL lCode.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pResidenceTypeList);
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetHousingType@1000000018(VAR pHousingTypeList@1000000000 : BigText);
+    VAR
+      lCode@1000000006 : Record 50079;
+      lEAIMQBufferManagement@1000000005 : Codeunit 8016708;
+      lXMLDocument@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLHousingTypeList@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLHousingType@1000000001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281000 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetHousingType','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'HousingTypeList', lXMLHousingTypeList);
+
+      lCode.SETRANGE("Table ID",5051);
+      lCode.SETRANGE("Field ID",50072);
+      IF lCode.FINDSET THEN BEGIN
+        REPEAT
+          AddElement(lXMLHousingTypeList,'HousingType','',NameSpace,lXMLHousingType);
+          AddElement(lXMLHousingType,'Code',lCode.Code,NameSpace,lXMLNewNode);
+          AddElement(lXMLHousingType,'Description',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode);
+        UNTIL lCode.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument, pHousingTypeList);
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetProductReason@1000000016(VAR pProductReasonList@1000000001 : BigText);
+    VAR
+      lProductReason@1000000000 : Record 50065;
+      lServiceOrderType@1100281001 : Record 5903;
+      lEAIMQBufferManagement@1000000006 : Codeunit 8016708;
+      lXMLDocument@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLProductReasonList@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLProductReason@1000000002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lGUID@1100281000 : GUID;
+    BEGIN
+      // IMH07.PC
+
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetProductReason','',lGUID);
+      //>>IMH09.PC
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument,'ProductReasonList',lXMLProductReasonList);
+
+      lProductReason.SETCURRENTKEY("Corporate No.","Code Type",Code,"Service Order Type");
+      lProductReason.SETRANGE("Code Type",lProductReason."Code Type"::FaultReason);
+      IF lProductReason.FINDSET THEN BEGIN
+        REPEAT
+          //<<IMH18.PC
+          IF NOT lServiceOrderType.GET(lProductReason."Service Order Type") THEN BEGIN
+            CLEAR(lServiceOrderType);
+          END;
+          IF lServiceOrderType."S.F.O. Enable" THEN BEGIN
+          //>>IMH18.PC
+            AddElement(lXMLProductReasonList,'ProductReason','',NameSpace,lXMLProductReason);
+            AddElement(lXMLProductReason,'CorporateNo',lProductReason."Corporate No.",NameSpace,lXMLNewNode);
+            AddElement(lXMLProductReason,'FaultReasonCode',lProductReason.Code,NameSpace,lXMLNewNode);
+            AddElement(lXMLProductReason,'ServiceOrderType',lProductReason."Service Order Type",NameSpace,lXMLNewNode);
+          END;
+        UNTIL lProductReason.NEXT = 0;
+      END;
+
+      LoadXMLDocToBigText(lXMLDocument,pProductReasonList);
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE GetContactAddress@1000000019(pContactNo@1100281003 : Code[20];pContactAddressCode@1000000000 : Code[20];VAR pContactAddressList@1100281002 : BigText);
+    VAR
+      lContactAltAddress@1000000003 : Record 5051;
+      lCode@1100281005 : Record 50079;
+      lXMLDocument@1100281020 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281019 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContactAddress@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIMQBufferManagement@1100281006 : Codeunit 8016708;
+      lGUID@1100281000 : GUID;
+    BEGIN
+      // IMH07.PC
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'GetContactAddress',STRSUBSTNO('%1-%2',pContactNo,pContactAddressCode),lGUID);
+      //>>IMH09.PC
+
+      lContactAltAddress.GET(pContactNo,pContactAddressCode);
+
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument,'ContactAddress',lXMLContactAddress);
+      AddElement(lXMLContactAddress,'ContactNo',lContactAltAddress."Contact No.",NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'AddressCode',lContactAltAddress.Code,NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'Address',FormatImportAccent(lContactAltAddress.Address),NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'Address2',FormatImportAccent(lContactAltAddress."Address 2"),NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'City',lContactAltAddress.City,NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'PostCode',lContactAltAddress."Post Code",NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'PhoneNo',lContactAltAddress."Phone No.",NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'MobilePhoneNo',lContactAltAddress."Mobile Phone No.",NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'Email',lContactAltAddress."E-mail",NameSpace,lXMLNewNode);
+      //<<IMH13.PC
+      {
+      IF NOT lCode.GET(5051,50070,lContactAltAddress."Occupier Nature") THEN BEGIN
+        CLEAR(lCode);
+      END;
+      AddElement(lXMLContactAddress,'OccupierNature',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode);
+
+      IF NOT lCode.GET(5051,50071,lContactAltAddress."Residence Type") THEN BEGIN
+        CLEAR(lCode);
+      END;
+      AddElement(lXMLContactAddress,'ResidenceType',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode);
+
+      IF NOT lCode.GET(5051,50072,lContactAltAddress."Housing Type") THEN BEGIN
+        CLEAR(lCode);
+      END;
+      AddElement(lXMLContactAddress,'HousingType',FormatExportAccent(lCode.Description),NameSpace,lXMLNewNode);
+      }
+      AddElement(lXMLContactAddress,'OccupierNature',lContactAltAddress."Occupier Nature",NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'ResidenceType',lContactAltAddress."Residence Type",NameSpace,lXMLNewNode);
+      AddElement(lXMLContactAddress,'HousingType',lContactAltAddress."Housing Type",NameSpace,lXMLNewNode);
+      //>>IMH13.PC
+
+      LoadXMLDocToBigText(lXMLDocument,pContactAddressList);
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    PROCEDURE CreateFolder@1000000014(VAR pXMLFolder@1000000001 : BigText;VAR pServiceNo@1000000014 : Code[20];VAR pServiceHeaderNo@1000000015 : Code[20];VAR pErrorDescription@1100281003 : Text[100]) rValue : Boolean;
+    VAR
+      lContactNo@1100281001 : Code[20];
+      lCorporateNo@1100281000 : Code[20];
+      lCorporateRegionCode@1100281002 : Code[20];
+      lFirstFileToDelete@1100281006 : Text[1024];
+      lSecondFileToDelete@1100281005 : Text[1024];
+      lFile@1100281004 : File;
+      lGUID@1100281007 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'CreateFolder','',lGUID);
+      //>>IMH09.PC
+
+      rValue := FALSE;
+      pServiceNo := '';
+      pServiceHeaderNo := '';
+      pErrorDescription := '';
+
+      // Gestion de l'encoding
+      //<<IMH07.PC
+      //IF NOT CreateService(
+      //         pXMLFolder,pServiceNo,lContactNo,
+      //         lCorporateNo,lCorporateRegionCode,pErrorDescription)
+      //THEN BEGIN
+      //  EXIT;
+      //END;
+      //CreateServiceHeader(pXMLFolder,lContactNo,pServiceNo,lCorporateNo,pServiceHeaderNo,pErrorDescription,lSecondFileToDelete);
+      ManageReceiptXML(pXMLFolder,lFirstFileToDelete,lSecondFileToDelete);
+      IF ERASE(lFirstFileToDelete) THEN;
+
+      IF NOT CreateService(
+               pXMLFolder,pServiceNo,lContactNo,
+               lCorporateNo,lCorporateRegionCode,pErrorDescription,
+               lSecondFileToDelete)
+      THEN BEGIN
+        EXIT;
+      END;
+
+      CreateServiceHeader(pXMLFolder,lContactNo,pServiceNo,lCorporateNo,pServiceHeaderNo,pErrorDescription,lSecondFileToDelete);
+      IF ERASE(lSecondFileToDelete) THEN;
+      //>>IMH07.PC
+
+      CLEAR(pXMLFolder);
+      rValue := TRUE;
+
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    LOCAL PROCEDURE CreateService@1000000002(VAR pXMLFolder@1100281007 : BigText;VAR pServiceNo@1100281000 : Code[20];VAR pContactNo@1100281018 : Code[20];VAR pCorporateNo@1100281019 : Code[20];VAR pCorporateRegionCode@1100281020 : Code[20];VAR pErrorDescription@1000000000 : Text[100];pSecondFileToDelete@1100281026 : Text[1024]) rValue : Boolean;
+    VAR
+      lTempBlob@1100281005 : TEMPORARY Record 99008535;
+      lService@1100281013 : Record 50066;
+      lServiceMgtSetup@1100281017 : Record 5911;
+      lXmlDoc@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDoc2@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDoc3@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lOutStream@1100281006 : OutStream;
+      lText001@1100281010 : TextConst 'ENU=Member principal address is mandatory;FRA=L''adresse principale du bÇnÇficiaire est obligatoire';
+      lText002@1100281011 : TextConst 'ENU=One phone no. must be filled;FRA=Au moins un n¯ tÇlÇphone doit àtre renseignÇ';
+      lInstream@1100281021 : InStream;
+      lEventDate@1100281012 : Date;
+      lContactArray@1100281002 : ARRAY [9] OF Text[60];
+      lContactAddressArray@1100281001 : ARRAY [10] OF Text[100];
+      lReferenceNo@1100281014 : Text[30];
+      lText003@1100281015 : TextConst 'ENU=Event date is mandatory;FRA=La date d''ÇvÇnement du sinistre est obligatoire';
+      lServiceCause@1100281009 : Code[20];
+      lText004@1100281016 : TextConst 'ENU=Corporate no. is mandatory;FRA=Le n¯ de grand compte est obligatoire';
+      lFirstFileToDelete@1100281024 : Text[1024];
+      lSecondFileToDelete@1100281023 : Text[1024];
+      lFile@1100281022 : File;
+      lText005@1100281025 : TextConst 'ENU=Impossible to load XML;FRA=Impossible charger le fichier XML';
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      rValue := FALSE;
+      pServiceNo := '';
+      pContactNo := '';
+      pCorporateNo := '';
+      pCorporateRegionCode := '';
+      pErrorDescription := '';
+
+      //<<IMH07.PC
+      // Gestion de l'encoding
+      lFile.OPEN(pSecondFileToDelete);
+      lFile.CREATEINSTREAM(lInstream);
+      {
+      lTempBlob.Blob.CREATEOUTSTREAM(lOutStream);
+      pXMLFolder.WRITE(lOutStream);
+      lTempBlob.CALCFIELDS(Blob);
+      lTempBlob.Blob.CREATEINSTREAM(lInstream);
+      }
+      //>>IMH07.PC
+      IF ISCLEAR(lXmlDoc) THEN BEGIN
+        CREATE(lXmlDoc);
+      END;
+      IF NOT lXmlDoc.load(lInstream) THEN BEGIN
+        //<<IMH07.PC
+        lFile.CLOSE;
+        IF ERASE(pSecondFileToDelete) THEN;
+        //>>IMH07.PC
+        ERROR(lText005);
+      END;
+      //<<IMH07.PC
+      lFile.CLOSE;
+      //>>IMH07.PC
+
+      lXmlDoc2 := lXmlDoc.getElementsByTagName('contact').item(0);
+
+      // RÇcupÇration des informations du contact
+      // MEMBER NO
+      lContactArray[1] := DARVAMgt.GetNodeValue(lXmlDoc2,'numeroPolice');
+      // CORPORATE NO
+      lContactArray[2] := DARVAMgt.GetNodeValue(lXmlDoc2,'grandCompte');
+      IF lContactArray[2] = '' THEN BEGIN
+        pErrorDescription := lText004;
+        EXIT;
+      END;
+      // CORPORATE REGION CODE
+      lContactArray[3] := DARVAMgt.GetNodeValue(lXmlDoc2,'regionGrandCompte');
+      pCorporateNo := lContactArray[2];
+      pCorporateRegionCode := lContactArray[3];
+
+      pContactNo := CheckMemberNo(lContactArray[1],lContactArray[2],lContactArray[3],pErrorDescription);
+      IF pContactNo = '' THEN BEGIN
+        EXIT;
+      END;
+
+      // PHONE NO
+      lContactArray[4] := DARVAMgt.GetNodeValue(lXmlDoc2,'numeroTelFixe');
+      // MOBILE PHONE NO
+      lContactArray[5] := DARVAMgt.GetNodeValue(lXmlDoc2,'numeroTelMobile');
+      // VÇrification Existance NumÇros de tÇlÇphone
+      IF (lContactArray[4] = '') AND (lContactArray[5] = '') THEN BEGIN
+        pErrorDescription := lText002;
+        EXIT;
+      END;
+      // E-MAIL
+      lContactArray[6] := DARVAMgt.GetNodeValue(lXmlDoc2,'email');
+      // NAME
+      lContactArray[7] := DARVAMgt.GetNodeValue(lXmlDoc2,'nom');
+      // FIRSTNAME
+      lContactArray[8] := DARVAMgt.GetNodeValue(lXmlDoc2,'prenom');
+      //<<IMH08.PC
+      // CONFIANCE PREALABLE
+      lContactArray[9] := DARVAMgt.GetNodeValue(lXmlDoc2,'confiancePrealable');
+      //>>IMH08.PC
+
+      // RÇcupÇration infos Adresse Principale
+      lXmlDoc3 := lXmlDoc2.getElementsByTagName('address').item(0);
+      // POST CODE
+      lContactAddressArray[1] := DARVAMgt.GetNodeValue(lXmlDoc3,'codePostal');
+      // CITY
+      lContactAddressArray[2] := DARVAMgt.GetNodeValue(lXmlDoc3,'ville');
+      IF NOT CheckPostCodeCity(
+               lContactAddressArray[1],lContactAddressArray[2],pErrorDescription)
+      THEN BEGIN
+        EXIT;
+      END;
+      // ADDRESS
+      lContactAddressArray[3] := DARVAMgt.GetNodeValue(lXmlDoc3,'voie');
+      IF lContactAddressArray[3] = '' THEN BEGIN
+        pErrorDescription := lText001;
+        EXIT;
+      END;
+      // ADDRESS 2
+      lContactAddressArray[4] := DARVAMgt.GetNodeValue(lXmlDoc3,'complement1');
+      // ADDRESS 3
+      lContactAddressArray[5] := DARVAMgt.GetNodeValue(lXmlDoc3,'complement2');
+      // COUNTRY CODE
+      lContactAddressArray[6] := DARVAMgt.GetNodeValue(lXmlDoc3,'codePays');
+      // RESIDENCE TYPE
+      lContactAddressArray[7] :=  DARVAMgt.GetNodeValue(lXmlDoc3,'typeResidence');
+      // OCCUPIER NATURE
+      lContactAddressArray[8] :=  DARVAMgt.GetNodeValue(lXmlDoc3,'natureOccupant');
+      // ACCES CONDITION
+      lContactAddressArray[9] := DARVAMgt.GetNodeValue(lXmlDoc3,'conditionsAcces');
+      // HABITATION TYPE
+      lContactAddressArray[10] :=  DARVAMgt.GetNodeValue(lXmlDoc3,'typeHabitation');
+
+      lXmlDoc2 := lXmlDoc.getElementsByTagName('sinistre').item(0);
+      lEventDate := GetWSDate(DARVAMgt.GetNodeValue(lXmlDoc2,'dateEvenement'));
+      IF lEventDate = 0D THEN BEGIN
+        pErrorDescription := lText003;
+        EXIT;
+      END;
+      lReferenceNo := DARVAMgt.GetNodeValue(lXmlDoc2,'numeroSinistre');
+      lServiceCause := DARVAMgt.GetNodeValue(lXmlDoc2,'causeIntervention');
+
+      WITH lService DO BEGIN
+        SetHideMessage(TRUE);
+        INIT;
+        VALIDATE("Contact No.",pContactNo);
+        VALIDATE("Event Date",lEventDate);
+        VALIDATE("Reference No.",lReferenceNo);
+        VALIDATE("Contact Phone No.",lContactArray[4]);
+        VALIDATE("Contact Mobile Phone No.",lContactArray[5]);
+        //<<IMH14.PC
+        //VALIDATE(Address,lContactAddressArray[3]);
+        //VALIDATE("Address 2",lContactAddressArray[4]);
+        //VALIDATE("Address 3",lContactAddressArray[5]);
+        VALIDATE(Address,FormatImportAccent(lContactAddressArray[3]));
+        VALIDATE("Address 2",FormatImportAccent(lContactAddressArray[4]));
+        VALIDATE("Address 3",FormatImportAccent(lContactAddressArray[5]));
+        //>>IMH14.PC
+        VALIDATE("Post Code",lContactAddressArray[1]);
+        VALIDATE(City,lContactAddressArray[2]);
+        VALIDATE("Member No.",lContactArray[1]);
+        VALIDATE("Contact E-mail",lContactArray[6]);
+        VALIDATE("Service Cause",lServiceCause);
+        //<<IMH08.PC
+        CASE UPPERCASE(lContactArray[9]) OF
+          'TRUE' : VALIDATE("Confidence Prior",TRUE);
+          //<<IMH11.PC
+          //'FALSE' : VALIDATE("Confidence Prior",TRUE);
+          'FALSE' : VALIDATE("Confidence Prior",FALSE);
+          //>>IMH11.PC
+        END;
+        //>>IMH08.PC
+        INSERT(TRUE);
+        pServiceNo := "Service No.";
+        lServiceMgtSetup.GET;
+        VALIDATE("Process Code",lServiceMgtSetup."Service Process Code");
+        VALIDATE("Process Status No.",lServiceMgtSetup."Service Start Status");
+        //<<IMH06.PC
+        VALIDATE("Residence Type",lContactAddressArray[7]);
+        VALIDATE("Occupier Nature",lContactAddressArray[8]);
+        VALIDATE("Housing Type",lContactAddressArray[10]);
+        //>>IMH06.PC
+        MODIFY(TRUE);
+        COMMIT;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE CreateServiceHeader@1000000001(VAR pXMLFolder@1000000002 : BigText;pContactNo@1100281000 : Code[20];pServiceNo@1100281001 : Code[20];pCorporateNo@1100281003 : Code[20];VAR pServiceHeaderNo@1100281002 : Code[20];VAR pErrorDescription@1000000000 : Text[100];pSecondFileToDelete@1100281021 : Text[1024]) rvalue : Boolean;
+    VAR
+      lText001@1000000004 : TextConst 'ENU=Empty Service order type;FRA=Type produit vide';
+      lText002@1000000005 : TextConst 'ENU=Service order type is forbidden to corporate no. (%1 - %2);FRA=Ce type produit n''est pas autorisÇ pour ce grand compte (%1 - %2)';
+      lText003@1000000009 : TextConst 'ENU=Error during service header creation;FRA=Erreur sur la crÇation de la ligne produit';
+      lTempBlob@1100281011 : TEMPORARY Record 99008535;
+      lServiceHeader@1100281010 : Record 5900;
+      lServiceOrderType@1100281005 : Record 5903;
+      lProductCatalog@1100281014 : Record 50060;
+      lService@1100281015 : Record 50066;
+      lXmlDoc@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDoc2@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlDoc3@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lOutStream@1100281006 : OutStream;
+      linstream@1100281013 : InStream;
+      lEventAddressArray@1100281012 : ARRAY [10] OF Text[60];
+      lAccesCondition@1100281016 : Text[80];
+      lServiceOrderTypeCode@1100281004 : Code[20];
+      lFirstFileToDelete@1100281019 : Text[1024];
+      lSecondFileToDelete@1100281018 : Text[1024];
+      lFile@1100281017 : File;
+      lText005@1100281020 : TextConst 'ENU=Impossible to load XML;FRA=Impossible charger le fichier XML';
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      rvalue := FALSE;
+      pServiceHeaderNo := '';
+      pErrorDescription := '';
+
+      //<<IMH07.PC
+      // Gestion de l'encoding
+      lFile.OPEN(pSecondFileToDelete);
+      lFile.CREATEINSTREAM(linstream);
+      {
+      lTempBlob.Blob.CREATEOUTSTREAM(lOutStream);
+      pXMLFolder.WRITE(lOutStream);
+      IF ISCLEAR(lXmlDoc) THEN BEGIN
+        CREATE(lXmlDoc);
+      END;
+      lTempBlob.CALCFIELDS(Blob);
+      lTempBlob.Blob.CREATEINSTREAM(linstream);
+      lXmlDoc.load(linstream);
+      }
+      IF ISCLEAR(lXmlDoc) THEN BEGIN
+        CREATE(lXmlDoc);
+      END;
+      //>>IMH07.PC
+      IF NOT lXmlDoc.load(linstream) THEN BEGIN
+        //<<IMH07.PC
+        lFile.CLOSE;
+        IF ERASE(pSecondFileToDelete) THEN;
+        //>>IMH07.PC
+        ERROR(lText005);
+      END;
+      //<<IMH07.PC
+      lFile.CLOSE;
+      //>>IMH07.PC
+
+      lXmlDoc2 := lXmlDoc.getElementsByTagName('sinistre').item(0);
+      // SERVICE ORDER TYPE
+      lServiceOrderTypeCode := DARVAMgt.GetNodeValue(lXmlDoc2,'codeTypeProduit');
+      IF lServiceOrderTypeCode = '' THEN BEGIN
+        EXIT;
+      END;
+      // VÇrification Existance Type Produit
+      IF NOT lServiceOrderType.GET(lServiceOrderTypeCode) THEN BEGIN
+        pErrorDescription := lText001;
+        EXIT;
+      END;
+
+      // VÇrification Autorisation Type Produit/Grand Compte
+      lProductCatalog.SETRANGE("Corporate No.",pCorporateNo);
+      lProductCatalog.SETRANGE("Service Order Type",lServiceOrderTypeCode);
+      lProductCatalog.SETRANGE(Active,TRUE);
+      lService.GET(pServiceNo);
+      IF lService."Confidence Prior" THEN BEGIN
+        lProductCatalog.SETRANGE("Confidence Prior Forbidden",FALSE);
+      END;
+      IF lProductCatalog.ISEMPTY THEN BEGIN
+        pErrorDescription := STRSUBSTNO(lText002,lServiceOrderTypeCode,pCorporateNo);
+        EXIT;
+      END;
+
+      // RÇcupÇration Infos Adresse Sinistre
+      lXmlDoc3 := lXmlDoc2.getElementsByTagName('address').item(0);
+      lEventAddressArray[1] := DARVAMgt.GetNodeValue(lXmlDoc3,'codePostal');
+      lEventAddressArray[2] := DARVAMgt.GetNodeValue(lXmlDoc3,'ville');
+      lEventAddressArray[3] := DARVAMgt.GetNodeValue(lXmlDoc3,'voie');
+      lEventAddressArray[4] := DARVAMgt.GetNodeValue(lXmlDoc3,'complement1');
+      lEventAddressArray[5] := DARVAMgt.GetNodeValue(lXmlDoc3,'complement2');
+      lEventAddressArray[6] := DARVAMgt.GetNodeValue(lXmlDoc3,'codePays');
+      lEventAddressArray[7] := DARVAMgt.GetNodeValue(lXmlDoc3,'typeResidence');
+      lEventAddressArray[8] := DARVAMgt.GetNodeValue(lXmlDoc3,'natureOccupant');
+      lEventAddressArray[9] := DARVAMgt.GetNodeValue(lXmlDoc3,'typeHabitation');
+      lEventAddressArray[10] := DARVAMgt.GetNodeValue(lXmlDoc3,'code');
+      lAccesCondition := DARVAMgt.GetNodeValue(lXmlDoc3,'conditionsAcces');
+
+      // CrÇation de la Ligne Produit
+      lService.CreateServiceHeader(lServiceHeader,lServiceOrderTypeCode);
+      pServiceHeaderNo := lServiceHeader."No.";
+
+      //<<IMH15.PC
+      lServiceHeader.SETRECFILTER;
+      lServiceHeader.LOCKTABLE;
+      lServiceHeader.FINDFIRST;
+      //>>IMH15.PC
+
+      IF pServiceHeaderNo = '' THEN BEGIN
+        pErrorDescription := lText003;
+        EXIT;
+      END;
+
+      WITH lServiceHeader DO BEGIN
+        VALIDATE("Ship-to Address Code",lEventAddressArray[10]);
+        //<<IMH17.PC
+        lService.VALIDATE("Residence Type",lEventAddressArray[7]);
+        lService.VALIDATE("Occupier Nature",lEventAddressArray[8]);
+        lService.VALIDATE("Housing Type",lEventAddressArray[9]);
+        lService.MODIFY(FALSE);
+        //>>IMH17.PC
+        //<<IMH14.PC
+        //VALIDATE("Ship-to Address",lEventAddressArray[3]);
+        //VALIDATE("Ship-to Address 2",lEventAddressArray[4]);
+        //VALIDATE("Ship-to Address 3",lEventAddressArray[5]);
+        VALIDATE("Ship-to Address",FormatImportAccent(lEventAddressArray[3]));
+        VALIDATE("Ship-to Address 2",FormatImportAccent(lEventAddressArray[4]));
+        VALIDATE("Ship-to Address 3",FormatImportAccent(lEventAddressArray[5]));
+        //>>IMH14.PC
+        //<<IMH06.PC
+        //VALIDATE("Ship-to Post Code",lEventAddressArray[2]);
+        //VALIDATE("Ship-to City",lEventAddressArray[1]);
+        VALIDATE("Ship-to Post Code",lEventAddressArray[1]);
+        VALIDATE("Ship-to City",lEventAddressArray[2]);
+        //>>IMH06.PC
+        VALIDATE("Ship-to Country/Region Code",lEventAddressArray[6]);
+        //<<IMH06.PC
+        VALIDATE("Residence Type",lEventAddressArray[7]);
+        VALIDATE("Occupier Nature",lEventAddressArray[8]);
+        VALIDATE("Housing Type",lEventAddressArray[9]);
+        //>>IMH06.PC
+        //<<IMH14.PC
+        //"Access Condition" := lAccesCondition;
+        "Access Condition" := FormatImportAccent(lAccesCondition);
+        //>>IMH14.PC
+        MODIFY;
+        COMMIT;
+      END;
+
+      rvalue := TRUE;
+    END;
+
+    PROCEDURE OpenNavisionCard@1000000000(pCardType@1000000000 : Integer;pServiceNo@1000000001 : Code[20];pServiceHeaderNo@1000000002 : Code[20];pContactNo@1000000003 : Code[20];VAR pURLPage@1100281000 : Text[1024];VAR pURLNo@1100281001 : Text[1024];VAR pErrorDescription@1000000005 : Text[100]);
+    VAR
+      lService@1000000011 : Record 50066;
+      lServiceHeader@1000000010 : Record 5900;
+      lContact@1000000009 : Record 5050;
+      lFormId@1000000006 : Text[30];
+      lBookMark@1000000007 : Text[250];
+      lRecRef@1000000008 : RecordRef;
+      lIsa001@1000000012 : TextConst 'FRA=Le service %1 n''existe pas';
+      lIsa002@1000000013 : TextConst 'FRA=la ligne de produit %1 n''existe pas';
+      lIsa003@1000000014 : TextConst 'FRA=Le contact %1 n''existe pas';
+      lIsa004@1000000015 : TextConst 'FRA="DynamicsNAV:////runpage?page=%1"';
+      lCardType@1000000016 : 'Service,Service Header,Contact';
+      lIsa005@1100281002 : TextConst 'FRA="bookmark=%1"';
+      lGUID@1100281003 : GUID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //<<IMH09.PC
+      ExtrFct.Initial(4,'OpenNavisionCard',STRSUBSTNO('%1-%2-%3-%4',pCardType,pServiceNo,pServiceHeaderNo,pContactNo),lGUID);
+      //>>IMH09.PC
+
+      // IMH01.MBY
+      pURLPage := '';
+      pURLNo := '';
+
+      CASE pCardType OF
+        1 : BEGIN
+          lCardType := lCardType :: Service;
+          IF lService.GET(pServiceNo) THEN BEGIN
+            BookMarkId(DATABASE :: Service,lService,lServiceHeader,lContact,lBookMark,lFormId);
+          END ELSE BEGIN
+            pErrorDescription := STRSUBSTNO(lIsa001,pServiceNo);
+            EXIT;
+          END;
+        END;
+        2 : BEGIN
+          lCardType := lCardType :: "Service Header";
+          lServiceHeader.SETRANGE("No.",pServiceHeaderNo);
+          IF lServiceHeader.FINDFIRST THEN BEGIN
+            BookMarkId(DATABASE :: "Service Header",lService,lServiceHeader,lContact,lBookMark,lFormId);
+          END ELSE BEGIN
+            pErrorDescription := STRSUBSTNO(lIsa002,lServiceHeader);
+            EXIT;
+          END;
+        END;
+        3 : BEGIN
+          lCardType := lCardType :: Contact;
+          IF lContact.GET(pContactNo) THEN BEGIN
+            BookMarkId(DATABASE :: Contact,lService,lServiceHeader,lContact,lBookMark,lFormId);
+          END ELSE BEGIN
+            pErrorDescription := STRSUBSTNO(lIsa003,pServiceNo);
+            EXIT;
+          END;
+        END;
+      END;
+      pURLPage := STRSUBSTNO(lIsa004,lFormId);
+      pURLNo := STRSUBSTNO(lIsa005,lBookMark);
+      //<<IMH09.PC
+      ExtrFct.Finish(lGUID);
+      //>>IMH09.PC
+    END;
+
+    LOCAL PROCEDURE BookMarkId@1000000013(pRecord@1000000000 : Integer;pService@1000000004 : Record 50066;pServiceHeader@1000000003 : Record 5900;pContact@1000000002 : Record 5050;VAR pBookMark@1000000007 : Text[250];VAR pPageID@1000000008 : Text[30]);
+    VAR
+      lRecRef@1000000001 : RecordRef;
+      lFieldRef@1000000005 : FieldRef;
+      lRecordId@1000000011 : RecordID;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      // IMH01.MBY
+      CASE pRecord OF
+        DATABASE :: Service : BEGIN
+          lRecRef.GETTABLE(pService);
+          lRecordId := lRecRef.RECORDID;
+          pBookMark := FORMAT(lRecRef.RECORDID,0,10);
+          //<<IMH04.PC
+          //pPageID := '50076';
+          pPageID := '50351';
+          //>>IMH04.PC
+          EXIT
+        END;
+        DATABASE :: "Service Header"  : BEGIN
+          lRecRef.GETTABLE(pServiceHeader);
+          lRecordId := lRecRef.RECORDID;
+          pBookMark := FORMAT(lRecRef.RECORDID,0,10);
+          //<<IMH04.PC
+          {
+          lServiceOrderType.RESET;
+          lFieldRef := lRecRef.FIELD(pServiceHeader.FIELDNO("Service Order Type"));
+          EVALUATE(lServiceOrderTypeCode,lChangeLogManagement.FormatValue(lFieldRef,5900));
+          IF lServiceOrderType.GET(lServiceOrderTypeCode) THEN
+            pPageID := FORMAT(lServiceOrderType."Service Hdr Card Form ID");
+          }
+          //>>IMH04.PC
+          pPageID := '50352';
+        END;
+        DATABASE :: Contact  : BEGIN
+          lRecRef.GETTABLE(pContact);
+          lRecordId := lRecRef.RECORDID;
+          pBookMark := FORMAT(lRecRef.RECORDID,0,10);
+          pPageID := '50353';
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE AddElement@1100281002(VAR pParXMLNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pParNodeName@1100281003 : Text[250];pParNodeText@1100281002 : Text[1024];pParNameSpace@1100281001 : Text[250];VAR pParXMLNewNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      EAIXmlDocMgt.AddElement(pParXMLNode, pParNodeName, pParNodeText, pParNameSpace, pParXMLNewNode);
+    END;
+
+    LOCAL PROCEDURE LoadXMLDocToBigText@1100281019(VAR pXMLDocument@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v3.0'.DOMDocument60";VAR pXML@1100281000 : BigText);
+    VAR
+      lSentMQBuffer@1100281004 : Record 8016720;
+      lInStream@1100281003 : InStream;
+      lOutStream@1100281002 : OutStream;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      //pXML.ADDTEXT(pXMLDocument.xml);
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+      pXMLDocument.save(lOutStream);
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      pXML.READ(lInStream);
+    END;
+
+    LOCAL PROCEDURE TestCharValue@1000000017(pValue@1000000000 : Text[50];pIndex@1000000001 : Integer) rValue : Boolean;
+    BEGIN
+      rValue :=
+        COPYSTR(UPPERCASE(pValue),pIndex,1) IN
+        ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
+    END;
+
+    LOCAL PROCEDURE FormatBoolean@1100281020(pBoolean@1100281000 : Boolean) : Text[30];
+    BEGIN
+      IF pBoolean THEN BEGIN
+        EXIT('true');
+      END ELSE BEGIN
+        EXIT('false');
+      END;
+    END;
+
+    LOCAL PROCEDURE CheckMemberNo@1100281005(pMemberNo@1100281000 : Text[50];pCorporateNo@1100281005 : Code[20];pCorporateRegionCode@1100281006 : Code[20];VAR pErrorDescription@1100281002 : Text[100]) rValue : Code[20];
+    VAR
+      lContact@1100281001 : Record 5050;
+      lText000@1100281004 : TextConst 'ENU=Member no. is mandatory.;FRA=Le n¯ de bÇnÇficiaire est obligatorie';
+      lText001@1100281003 : TextConst 'ENU="This beneficiary unknown from Navision referential (no. %1) ";FRA="Ce sociÇtaire inconnu du rÇfÇrentiel Navision (n¯ %1) "';
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      // VÇrification si un contact possäde ce n¯ de bÇnÇficiaire
+      rValue := '';
+      pErrorDescription := '';
+
+      IF pMemberNo = '' THEN BEGIN
+        pErrorDescription := lText000;
+        EXIT;
+      END;
+
+      lContact.SETCURRENTKEY("Member No.","Corporate No.");
+      lContact.SETRANGE("Member No.",pMemberNo);
+      lContact.SETRANGE("Corporate No.",pCorporateNo);
+      IF pCorporateRegionCode <> '' THEN BEGIN
+        lContact.SETRANGE("Corporate Region Code",pCorporateRegionCode);
+      END;
+      //<<IMH20.PC
+      IF lContact.ISEMPTY THEN BEGIN
+        lContact.SETRANGE("Corporate Region Code");
+      END;
+      //>>IMH20.PC
+      IF NOT lContact.FINDFIRST THEN BEGIN
+        pErrorDescription := STRSUBSTNO(lText001,pMemberNo);
+        EXIT;
+      END;
+      rValue := lContact."No.";
+    END;
+
+    LOCAL PROCEDURE CheckPostCodeCity@1100281006(pPostCode@1100281001 : Code[30];pCity@1100281002 : Text[30];VAR pErrorDescription@1100281003 : Text[100]) rValue : Boolean;
+    VAR
+      lPostCode@1100281000 : Record 225;
+      lText001@1100281004 : TextConst 'ENU=Post code and city are mandatory;FRA=Le code postal ou la ville ne peut pas àtre vide';
+      lText002@1100281005 : TextConst 'ENU=Post code and city unknown in Navision;FRA=Le code postal ou la ville n''existe pas dans Navision';
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      // VÇrification d'un code postal et ville
+      rValue := FALSE;
+      pErrorDescription := '';
+
+      IF (pPostCode = '') OR (pCity = '') THEN BEGIN
+        pErrorDescription := lText001;
+      END;
+      IF NOT lPostCode.GET(pPostCode,pCity) THEN BEGIN
+        pErrorDescription := lText002;
+        EXIT;
+      END;
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE CheckContactExists@1100281001(pBeneficiaryNo@1100281008 : Text[50];pCorporateNo@1100281009 : Code[20];pFirstName@1100281000 : Text[50];pLastName@1100281001 : Text[50];pPostCode@1100281002 : Code[20];pCity@1100281003 : Text[50]) rValue : Boolean;
+    VAR
+      lContact@1100281004 : Record 5050;
+      lText001@1100281007 : TextConst 'ENU=This contact already exists %1%2;FRA=Ce contact existe %1%2';
+      lText002@1100281006 : TextConst 'ENU=This contact already exits (Member No. %1, Corporate no. %2);FRA=Ce contact existe (n¯ bÇnÇficiaire %1, n¯ grand compte %2)';
+      lText003@1100281010 : TextConst 'ENU=lastname %1;FRA="nom %1 "';
+      lText004@1100281011 : TextConst 'ENU=and firstname %1;FRA=et prÇnom %1';
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      // VÇrification de l'existence d'un contact
+      rValue := TRUE;
+
+      IF pBeneficiaryNo <> '' THEN BEGIN
+        lContact.RESET;
+        lContact.SETCURRENTKEY("Member No.","Corporate No.");
+        lContact.SETRANGE("Member No.",pBeneficiaryNo);
+        lContact.SETRANGE("Corporate No.",pCorporateNo);
+        IF NOT lContact.ISEMPTY THEN BEGIN
+          ERROR(STRSUBSTNO(lText002,pBeneficiaryNo,pCorporateNo));
+        END;
+      END;
+
+      lContact.RESET;
+      lContact.SETCURRENTKEY("Search Name");
+      lContact.SETRANGE("Search Name",pFirstName);
+      lContact.SETRANGE("Post Code",pPostCode);
+      lContact.SETRANGE(City,pCity);
+      IF lContact.FINDFIRST THEN BEGIN
+        ERROR(STRSUBSTNO(lText001,STRSUBSTNO(lText003,pFirstName)));
+      END;
+
+      lContact.RESET;
+      lContact.SETCURRENTKEY("Search Name");
+      lContact.SETRANGE("Search Name",pFirstName + ' ' + pLastName);
+      lContact.SETRANGE("Post Code",pPostCode);
+      lContact.SETRANGE(City,pCity);
+      IF lContact.FINDFIRST THEN BEGIN
+        ERROR(STRSUBSTNO(lText001,STRSUBSTNO(lText003,pLastName),STRSUBSTNO(lText004,pFirstName)));
+      END;
+
+      lContact.RESET;
+      lContact.SETCURRENTKEY("Search Name");
+      lContact.SETRANGE("Search Name",pLastName + ' ' + pFirstName);
+      lContact.SETRANGE("Post Code",pPostCode);
+      lContact.SETRANGE(City,pCity);
+      IF lContact.FINDFIRST THEN BEGIN
+        ERROR(STRSUBSTNO(lText001,STRSUBSTNO(lText003,pLastName),STRSUBSTNO(lText004,pFirstName)));
+      END;
+
+      rValue := FALSE;
+    END;
+
+    LOCAL PROCEDURE CheckSalutationCode@1100281007(pSalutationCode@1100281008 : Text[50]) rValue : Boolean;
+    VAR
+      lSalutation@1100281004 : Record 5068;
+      lText001@1100281000 : TextConst 'ENU=Salutation code do not exists;FRA=Code CivilitÇ inexistant dans la base';
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      // VÇrification si pSalutationCode existe
+      rValue := FALSE;
+
+      IF NOT lSalutation.GET(pSalutationCode) THEN BEGIN
+        ERROR(lText001);
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE CheckPhoneNo@1100281008(VAR pPhoneNo@1100281008 : Text[50]) rValue : Boolean;
+    VAR
+      lCompanyInformation@1100281004 : Record 79;
+      lText001@1100281002 : TextConst 'ENU=Phone no. not correct;FRA=Le n¯ de tÇlÇphone n''est pas valide';
+      lPhoneStandardization@1100281000 : Codeunit 50099;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      // VÇrification du n¯ de tÇlÇphone
+      rValue := FALSE;
+
+      IF pPhoneNo <> '' THEN BEGIN
+        lCompanyInformation.GET;
+        IF NOT lPhoneStandardization.ValidatePhoneNo(DATABASE::Contact,9,lCompanyInformation."Country/Region Code",pPhoneNo) THEN BEGIN
+          ERROR(lText001);
+        END;
+      END;
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE CheckEmail@1100281009(VAR pEmail@1100281008 : Text[80]) rValue : Boolean;
+    VAR
+      lEmailStandardization@1100281000 : Codeunit 50096;
+      lText001@1100281001 : TextConst 'ENU=Email not correct;FRA=L''email n''est pas valide';
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      // VÇrification de l'email
+      rValue := FALSE;
+
+      IF pEmail <> '' THEN BEGIN
+        IF NOT lEmailStandardization.ValidateEmail(pEmail) THEN BEGIN
+          ERROR(lText001);
+        END;
+      END;
+
+      rValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetWSDate@1100281003(pWSDate@1100281000 : Text[30]) rValue : Date;
+    VAR
+      lYear@1100281001 : Integer;
+      lMonth@1100281002 : Integer;
+      lDay@1100281003 : Integer;
+    BEGIN
+      GLOBALLANGUAGE(SetGlobalLanguage);
+
+      EVALUATE(lYear,COPYSTR(pWSDate,1,4));
+      EVALUATE(lMonth,COPYSTR(pWSDate,6,2));
+      EVALUATE(lDay,COPYSTR(pWSDate,9,2));
+
+      rValue := DMY2DATE(lDay,lMonth,lYear);
+    END;
+
+    LOCAL PROCEDURE SetGlobalLanguage@1100281010() : Integer;
+    VAR
+      lCompanyInformation@1100281000 : Record 79;
+    BEGIN
+      lCompanyInformation.GET;
+
+      CASE lCompanyInformation."Country/Region Code" OF
+        'FRA' : EXIT(1036);
+      END;
+    END;
+
+    LOCAL PROCEDURE FormatExportAccent@8016602(pText@8016600 : Text[1024]) rValue : Text[1024];
+    VAR
+      lWithAccent@1100281001 : Text[30];
+      lWithoutAccent@1100281000 : Text[30];
+    BEGIN
+      lWithAccent := 'ÖÉÇäàåìñóéÿôöá';
+      lWithoutAccent := 'aaeeeiouuAIOUc';
+
+      rValue := CONVERTSTR(pText,lWithAccent,lWithoutAccent);
+    END;
+
+    LOCAL PROCEDURE FormatImportAccent@1100281021(pText@8016600 : Text[1024]) rValue : Text[1024];
+    VAR
+      lFromChar@1100281001 : Text[30];
+      lToChar@1100281000 : Text[30];
+    BEGIN
+      // IMH14.PC
+      lFromChar := '¥˙≥√ü√≤øª„º‡¡û¿ù ÉŒâÕà±⁄∫¯';
+      lToChar := 'Ö∑ÑéÉéÇäà“â”å◊ãÿì‚óÎñÍÅöá∞';
+
+      rValue := CONVERTSTR(pText,lFromChar,lToChar);
+    END;
+
+    LOCAL PROCEDURE GetGTACode@1100281015(pCorporateNo@1100281001 : Code[20];pCorporateRegionCode@1100281002 : Code[20]) rValue : Code[20];
+    VAR
+      lEAIPartnerCrossReference@1100281000 : Record 8016748;
+      lCorporateRegion@1100281003 : Record 50058;
+    BEGIN
+      // IMH03.PC
+
+      rValue := '';
+
+      //<<IMH19.PC
+      IF pCorporateRegionCode = '' THEN BEGIN
+        lEAIPartnerCrossReference.SETRANGE("Table ID",DATABASE::Customer);
+      //>>IMH19.PC
+      END ELSE BEGIN
+        lEAIPartnerCrossReference.SETRANGE("Table ID",DATABASE::"Corporate Region");
+      END;
+      lEAIPartnerCrossReference.SETRANGE("Source No.",pCorporateNo);
+      lEAIPartnerCrossReference.SETRANGE("Source No. 2",pCorporateRegionCode);
+      lEAIPartnerCrossReference.SETFILTER("Partner Code",'%1|%2','','DARVA');
+      IF NOT lEAIPartnerCrossReference.FINDFIRST THEN BEGIN
+        EXIT;
+      END;
+      rValue := lEAIPartnerCrossReference."Partner Reference";
+    END;
+
+    LOCAL PROCEDURE ManageReceiptXML@1100281016(VAR pOriginXML@1000000000 : BigText;VAR pFirstFileToDelete@1100281005 : Text[1024];VAR pSecondFileToDelete@1100281006 : Text[1024]);
+    VAR
+      lInstream@1100281000 : InStream;
+      lText001@1000000007 : TextConst 'ENU=Transmitted file is empty;FRA=Le fichier transmis est vide';
+      lText002@1100281003 : TextConst 'ENU=Impossible to load XML;FRA=Impossible charger le fichier XML';
+      lOutStream@1100281002 : OutStream;
+      lFile@1100281004 : File;
+      lFile2@1000000001 : File;
+      lCount@1000000006 : Integer;
+      lPos@1000000008 : Integer;
+      lTextBuffer@1000000010 : Text[1024];
+    BEGIN
+      // IMH07.PC
+      // Gestion des caractäres spÇciaux dans les XMLs reáus
+
+      lFile.CREATETEMPFILE;
+      lTextBuffer := lFile.NAME;
+      pFirstFileToDelete := lTextBuffer + '_Fou.xml';
+      pSecondFileToDelete := lTextBuffer + '_Fou2.xml';
+      lFile.CLOSE;
+      lTextBuffer := '';
+
+      lFile.WRITEMODE := TRUE;
+      lFile.TEXTMODE := TRUE;
+      lFile.CREATE(pFirstFileToDelete);
+      lFile.CREATEOUTSTREAM(lOutStream);
+      pOriginXML.WRITE(lOutStream);
+      lFile.CLOSE;
+
+      lFile.OPEN(pFirstFileToDelete);
+
+      lFile2.WRITEMODE := TRUE;
+      lFile2.TEXTMODE := TRUE;
+      lFile2.CREATE(pSecondFileToDelete);
+      lCount := 1;
+      WHILE lFile.READ(lTextBuffer) <> 0 DO BEGIN
+        IF (lCount = 1) AND (COPYSTR(lTextBuffer,1,1) = '?') THEN BEGIN
+          lTextBuffer := COPYSTR(lTextBuffer,2);
+        END;
+        lPos := STRPOS(lTextBuffer,'UTF-8');
+        IF lPos = 0 THEN BEGIN
+          lPos := STRPOS(lTextBuffer,'utf-8');
+        END;
+        IF lPos <> 0 THEN BEGIN
+          //<<IMH14.PC
+          lTextBuffer := COPYSTR(lTextBuffer,1,lPos - 1) + 'windows-1252' + COPYSTR(lTextBuffer,lPos + 5);
+          //lTextBuffer := COPYSTR(lTextBuffer,1,lPos - 1) + 'ISO-8859-1' + COPYSTR(lTextBuffer,lPos + 5);
+          //>>IMH14.PC
+        END;
+
+        lFile2.WRITE(lTextBuffer);
+        lCount += 1;
+      END;
+      lFile.CLOSE;
+      lFile2.CLOSE;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH20 @a 27/05/13 @a ISAT.PC @v IMH6.01.210 @s FOU @h 4556 @c Gestion de la rÇgion sur la recherche benef */
+      /** @r IMH19 @a 23/05/13 @a ISAT.PC @v IMH6.01.210 @s FOU @h 4530 @c Gestion des GTAs sur les codes rÇgion */
+      /** @r IMH18 @a 23/05/13 @a ISAT.PC @v IMH6.01.210 @s FOU @h 4500
+          @c ajout du tests sur l'activation du type produit dans la fonction GetProductReason */
+      /** @r IMH17 @a 21/05/13 @a ISAT.PC @v IMH6.01.210 @s FOU @h 4510
+          @c Correction sur les types hab */
+      /** @r IMH16 @a 21/05/13 @a ISAT.PC @v IMH6.01.210 @s FOU @h 4502
+          @c Ajout balise ServiceOrderTypeDescription dans la liste des services */
+      /** @r IMH15 @a 14/05/13 @a ISAT.PC @v IMH6.01.210 @s FOU @h 4066 @c Modification */
+      /** @r IMH14 @a 15/10/12 @a ISAT.PC @v IMH6.01.210 @s FOU @h 4030 @c Modification */
+      /** @r IMH13 @a 15/10/12 @a ISAT.PC @v IMH6.01.210 @s FOU @h 4000 @c Modification */
+      /** @r IMH12 @a 15/10/12 @a ISAT.PC @v IMH6.01.210 @s FOU @h 3944 @c Correction */
+      /** @r IMH11 @a 10/10/12 @a ISAT.PC @v IMH6.01.210 @s FOU @h 3989 @c Correction */
+      /** @r IMH10 @a 10/10/12 @a ISAT.PC @v IMH6.01.210 @s FOU @h 3992 @c Gestion du champ "S.F.O. Enable" */
+      /** @r IMH09 @a 09/10/12 @a ISAT.PC @v IMH6.01.P003 @s Log Web Service @c Ajout de la fonctionnalitÇ */
+      /** @r IMH08 @d 05/10/12 @a ISAT.PC @v IMH6.01.210 @s Interface F.O.U @h 3989
+          @c ajout balise confiancePrealable dans CreateService */
+      /** @r IMH07 @d 04/10/12 @a ISAT.PC @v IMH6.01.210 @s Interface F.O.U @h 3971
+          @c Ajout fonction GetProductReason et GetContactAddress
+          @c Ajout balise ConctatAddressList et ConctatAddress dans la fonction CreateSearchList */
+      /** @r IMH06 @d 02/10/12 @a ISAT.PC @v IMH6.01.210 @s Interface F.O.U @h 3971
+          @c champ incorrectement renseignÇ */
+      /** @r IMH05 @d 02/10/12 @a ISAT.PC @v IMH6.01.210 @s Interface F.O.U @h 3949 @h 3950
+          @c pour la gestion des filtres entre les diffÇrentes tables */
+      /** @r IMH04 @d 27/09/12 @a ISAT.PC @v IMH6.01.210 @s Interface F.O.U @h 3914
+          @c pour la gestion des verrrous sur les formulaires */
+      /** @r IMH03 @d 26/09/12 @a ISAT.PC @v IMH6.01.210 @s Interface F.O.U @h 3944 @h 3932
+          @c gestion du code GTA dans la fonction GetCorporate */
+      /** @r IMH02 @d 26/09/12 @a ISAT.PC @v IMH6.01.210 @s Interface F.O.U @h 3957
+          @c ajout paramätre pServiceNo et pBeneficiaryNo dans la fonction CompleteSearchIntervention */
+      /** @r IMH01 @d 31/08/12 @a ISAT.MBY @v IMH6.01.210 @s Interface F.O.U
+          @c Creation Fonctions : OpenNavisionCard,BookMarkId */
+      /** @r IMH00 @d 31/07/12 @a ISAT.MBY @v IMH6.01.210 @s Interface F.O.U @c crÇation*/
+    }
+    END.
+  }
+}

@@ -1,0 +1,237 @@
+OBJECT Codeunit 50112 EXT In. FLE SUIVI
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/01/11;
+    Time=11:28:09;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100281001 : TextConst 'ENU=XML Stream is not well formated.;FRA=Le flux XML n''est pas bien format‚.';
+      Error002@1100281000 : TextConst 'ENU=XML Node %1 unfound.;FRA=Noeud XML %1 non trouv‚.';
+      Error003@1100281002 : TextConst 'ENU=The field should not be empty.;FRA=Le champ %1 ne doit pas ˆtre vide.';
+      EXTInFunctions@1100281003 : Codeunit 50102;
+
+    LOCAL PROCEDURE Code@1008844003(VAR pEAIRcvdMQBuffer@1008844001 : Record 8016721);
+    VAR
+      lEAIXMLDocMgt@1108844004 : Codeunit 8016713;
+      lEAIDocumentEntryMgt@1100281001 : Codeunit 8016707;
+      lXMLDocument@1008844005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLDocumentNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lOutStream@1008844004 : OutStream;
+      lRecRef@1008844000 : RecordRef;
+      lEAIAct@1108844005 : Record 8016706;
+      lTempIntervLine@1108844001 : TEMPORARY Record 50075;
+      lIntervLine@1100281005 : Record 50075;
+      lTempTrayLine@1100281003 : TEMPORARY Record 50048;
+      lNewTrayLine@1100281006 : Record 50048;
+      lTempDocAttach@1100281004 : TEMPORARY Record 50021;
+      lNewDocAttach@1100281002 : Record 50021;
+      lTempBlob@1100281007 : TEMPORARY Record 99008535;
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+      pEAIRcvdMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+      lXMLDocument.load(lOutStream);
+
+      lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Code");
+
+      //Lecture du document XML
+      lEAIXMLDocMgt.ReadXMLDocuments(lXMLDocument,lXMLDocumentNode);
+
+
+      //lecture intervention line
+      ReadXMLIntervention(lXMLDocumentNode,lTempIntervLine);
+
+      //lecture service
+      ReadXMLService(lXMLDocumentNode,lTempIntervLine);
+
+      //lecture suivi
+      ReadXMLTrayLine(lXMLDocumentNode,lTempTrayLine);
+
+      //Mettre … jour suivi
+      ProcessTrayLine(lTempTrayLine, lNewTrayLine);
+
+      //Lecture Document joint
+      EXTInFunctions.ReadXMLDocAttach(lXMLDocumentNode, lTempDocAttach, lTempBlob);
+      //traitement document joint
+      EXTInFunctions.ProcessDocAttach(lTempDocAttach, lNewDocAttach, lTempBlob);
+
+      //cr‚ation suivi de document
+      lEAIDocumentEntryMgt.AddEntryFromRcvdBuffer(
+         DATABASE::"Service Intervention Line",0,lTempIntervLine."Service Header No.",'',
+         lTempIntervLine."Line No.", pEAIRcvdMQBuffer);
+
+      //Identifiant de la commande (ou derniŠre commande si allotie)
+      lIntervLine.GET(lTempIntervLine."Service Header No.", lTempIntervLine."Line No.");
+      lRecRef.GETTABLE(lIntervLine);
+      pEAIRcvdMQBuffer.RecordId := lRecRef.RECORDID;
+    END;
+
+    PROCEDURE ReadXMLIntervention@1100281000(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewInterventionLine@1100281000 : Record 50075);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLDocIntervNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Intervention',lXMLDocIntervNode) THEN
+          ERROR(Error002,'Intervention');
+
+        //---TODO----  Identifiant unique de l'intervention
+        IF FindFirstNode(lXMLDocIntervNode,'InterventionId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'InterventionId');
+        END ELSE
+          ERROR(Error002,'InterventionId');
+
+
+        //Code intervention dans GSH
+        IF FindFirstNode(lXMLDocIntervNode,'GSH_NumeroIntervention',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'GSH_NumeroIntervention');
+          pNewInterventionLine."Line No." := lToolsMgt.TextToInteger(lXMLNodeFound.text)
+        END ELSE
+          ERROR(Error002,'GSH_NumeroIntervention');
+       END;
+    END;
+
+    PROCEDURE ReadXMLService@1100281015(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewInterventionLine@1100281000 : Record 50075);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLDocServNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Service',lXMLDocServNode) THEN
+          ERROR(Error002,'Service');
+
+        //---TODO----  Identifiant unique de l'intervention
+        IF FindFirstNode(lXMLDocServNode,'ServiceId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'ServiceId');
+        END ELSE
+          ERROR(Error002,'GSH_NumeroIntervention');
+
+        //Code intervention dans GSH
+        IF FindFirstNode(lXMLDocServNode,'GSH_ReferenceService',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'GSH_ReferenceService');
+          pNewInterventionLine."Service Header No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine."Service Header No."))
+        END ELSE
+          ERROR(Error002,'GSH_ReferenceService');
+       END;
+    END;
+
+    PROCEDURE ReadXMLTrayLine@1100281001(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewTrayLine@1100281000 : Record 50048);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lText001@1100281001 : TextConst 'ENU=Address should not be empty.;FRA=Au moins une des trois adresses doit ˆtre renseign‚e.';
+      lXMLTrayLineNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lHasAddress@1100281003 : Boolean;
+    BEGIN
+      //--------TODO---------
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Suivi',lXMLTrayLineNode) THEN
+          ERROR(Error002,'Suivi');
+
+        //TODO ---- Identifiant unique de l'entr‚e du suivi dans l'extranetO
+        IF FindFirstNode(lXMLTrayLineNode,'SuiviId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'SuiviId');
+        END ELSE
+          ERROR(Error002,'SuiviId');
+      //TODO ---- Identifiant du suivi dans GSHN
+        IF FindFirstNode(lXMLTrayLineNode,'GSH_ReferenceSuivi',lXMLNodeFound) THEN
+        BEGIN
+        END;
+      //Identifiant du type de suivi envoy‚O
+        IF FindFirstNode(lXMLTrayLineNode,'TypeSuiviId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'TypeSuiviId');
+          pNewTrayLine."Task Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewTrayLine."Task Code"));
+        END ELSE
+          ERROR(Error002,'TypeSuiviId');
+      //TODO ---- Nom de la soci‚t‚ et de l'auteur du suiviO
+        IF FindFirstNode(lXMLTrayLineNode,'RaisonSocialeAuteur',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'RaisonSocialeAuteur');
+        END ELSE
+          ERROR(Error002,'RaisonSocialeAuteur');
+      //TODO ---- Description du type de suiviO
+        IF FindFirstNode(lXMLTrayLineNode,'LibelleTypeSuivi',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'LibelleTypeSuivi');
+        END ELSE
+          ERROR(Error002,'LibelleTypeSuivi');
+      //TODO ---- R‚f‚rence fonctionnelle de niveau 0N
+        IF FindFirstNode(lXMLTrayLineNode,'GSH_ReferenceNiveau0',lXMLNodeFound) THEN
+        BEGIN
+        END;
+      //TODO ---- Type d'unit‚ d'Üuvre fonctionnelleN
+        IF FindFirstNode(lXMLTrayLineNode,'GSH_TypeUniteOF',lXMLNodeFound) THEN
+        BEGIN
+        END;
+      //TODO ---- R‚f‚rence de l'unit‚ d'Üuvre fonctionnelleN
+        IF FindFirstNode(lXMLTrayLineNode,'GSH_ReferenceUOF',lXMLNodeFound) THEN
+        BEGIN
+        END;
+      //D‚tail du suiviO
+        IF FindFirstNode(lXMLTrayLineNode,'MessageSuivi',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = 'MessageSuivi' THEN
+            ERROR(Error003,'');
+          pNewTrayLine.Description := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewTrayLine.Description))
+        END ELSE
+          ERROR(Error002,'MessageSuivi');
+      //TODO ---- Date de cr‚ation du suiviO
+        IF FindFirstNode(lXMLTrayLineNode,'DateCreationSuivi',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'DateCreationSuivi');
+        END ELSE
+          ERROR(Error002,'DateCreationSuivi');
+       END;
+    END;
+
+    PROCEDURE ProcessTrayLine@1100281003(VAR pTrayLine@1100281000 : Record 50048;VAR pNewTrayLine@1100281002 : Record 50048);
+    BEGIN
+      //TODO -----
+      IF pNewTrayLine.GET(pTrayLine."Team Code", pTrayLine."Entry No.") THEN BEGIN
+        pNewTrayLine.MODIFY(TRUE);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IHM01 @d 18/01/11 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Creation */
+    }
+    END.
+  }
+}

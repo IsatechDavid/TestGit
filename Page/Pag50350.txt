@@ -1,0 +1,318 @@
+OBJECT Page 50350 SendTextSMS
+{
+  OBJECT-PROPERTIES
+  {
+    Date=29/11/12;
+    Time=09:40:08;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Send Text SMS;
+               FRA=Envoi Texte SMS];
+    InsertAllowed=No;
+    LinksAllowed=No;
+    SourceTable=Table50186;
+    PageType=Card;
+    SourceTableTemporary=Yes;
+    ShowFilter=No;
+    OnInit=BEGIN
+             InterventionVisible  := TRUE;
+             ServiceHeaderVisible := TRUE;
+             SMSBodyEditable := TRUE;
+           END;
+
+    OnOpenPage=VAR
+                 lUserSetup@1000000000 : Record 91;
+               BEGIN
+                 lUserSetup.GET(USERID);
+                 SMSBodyEditable := lUserSetup."Allowed To Change SMS";
+                 IF NOT InterventionLine.GET(ServiceHeaderNo, InterventionNo) THEN
+                   CLEAR(InterventionLine);
+                 IF NOT SMSTemplate.GET(SMSTemplateCode) THEN
+                   CLEAR(SMSTemplate);
+
+                 //<<IMH03
+                 IF NOT Service.GET(ServiceNo) THEN
+                   CLEAR(Service);
+                 //<<IMH03
+               END;
+
+    OnQueryClosePage=BEGIN
+                       IF NOT SkipClosureTest THEN
+                         EXIT(CONFIRM(Text003, TRUE))
+                       ELSE
+                         EXIT(TRUE);
+                     END;
+
+    ActionList=ACTIONS
+    {
+      { 1000000003;  ;ActionContainer;
+                      Name=<Action1000000001>;
+                      ActionContainerType=ActionItems }
+      { 1000000004;1 ;Action    ;
+                      Name=<Action1000000003>;
+                      ShortCutKey=Ctrl+E;
+                      CaptionML=[ENU=Send SMS;
+                                 FRA=Envoyer SMS];
+                      Promoted=Yes;
+                      PromotedIsBig=Yes;
+                      Image=SendTo;
+                      PromotedCategory=Process;
+                      OnAction=BEGIN
+                                 SendSMS;
+                                 CurrPage.CLOSE;
+                               END;
+                                }
+    }
+  }
+  CONTROLS
+  {
+    { 1900000001;0;Container;
+                ContainerType=ContentArea }
+
+    { 1100281000;1;Group  ;
+                Name=CreateSMSGpr;
+                CaptionML=[ENU=Create SMS;
+                           FRA=Cr‚er SMS];
+                GroupType=Group }
+
+    { 1100281001;2;Field  ;
+                CaptionML=[ENU=Template SMS Code;
+                           FRA=Code modŠle SMS];
+                SourceExpr=SMSTemplateCode;
+                TableRelation="SMS Template";
+                OnValidate=BEGIN
+                             //<<IMH06
+                             GetSMSTemplateFilter(SMSType, SMSTemplate);
+                             SMSTemplate.SETRANGE(Code, SMSTemplateCode);
+                             SMSTemplate.FINDFIRST;
+                             //IF NOT SMSTemplate.GET(SMSTemplateCode) THEN
+                             //  CLEAR(SMSTemplate);
+                             //>>IMH06
+                             LoadSMSBody;
+                           END;
+
+                OnLookup=BEGIN
+                           //IMH03
+                           GetSMSTemplateFilter(SMSType, SMSTemplate);  //IMH06
+                           //<<IMH05
+                           //lSMSTemplate.SETFILTER("Corporate No.", '%1|%2', '', Service."Corporate No.");
+                           SMSTemplate.SETRANGE("Corporate No.", Service."Corporate No.");
+                           //>>IMH05
+                           IF PAGE.RUNMODAL(0, SMSTemplate) = ACTION::LookupOK THEN BEGIN
+                             SMSTemplateCode := SMSTemplate.Code;
+                             LoadSMSBody;
+                           END;
+                         END;
+                          }
+
+    { 1100281002;2;Field  ;
+                CaptionML=FRA=Description modŠle SMS;
+                SourceExpr=SMSTemplate.Description;
+                Editable=false }
+
+    { 1000000000;2;Field  ;
+                Name=Service No.;
+                CaptionML=[ENU=Service No;
+                           FRA=Nø service];
+                SourceExpr=ServiceNo;
+                Editable=FALSE }
+
+    { 1000000002;2;Field  ;
+                Name=Service Header No.;
+                CaptionML=[ENU=Service Header No.;
+                           FRA=Nø ligne produit];
+                SourceExpr=ServiceHeaderNo;
+                Visible=ServiceHeaderVisible;
+                Enabled=TRUE;
+                Editable=FALSE }
+
+    { 1000000007;2;Field  ;
+                Name=Intervention No.;
+                CaptionML=[ENU=Intervention No.;
+                           FRA=Nø intervention];
+                SourceExpr=InterventionLine."Intervention No.";
+                Visible=InterventionVisible;
+                Editable=FALSE }
+
+    { 1000000001;2;Field  ;
+                Name=CorporateNo;
+                CaptionML=[ENU=Corporate No.;
+                           FRA=Nø grand compte];
+                SourceExpr=Service."Corporate No.";
+                Editable=false }
+
+    { 1000000011;2;Field  ;
+                Name=Contact No.;
+                CaptionML=[ENU=Contact No.;
+                           FRA=Nø contact destinataire];
+                SourceExpr=ContactNo;
+                Editable=FALSE }
+
+    { 1000000015;2;Field  ;
+                Name=Contact Name;
+                CaptionML=[ENU=Contact Name;
+                           FRA=Nom contact destinataire];
+                SourceExpr=ContactName;
+                Editable=FALSE }
+
+    { 1000000013;2;Field  ;
+                Name=Phone No.;
+                CaptionML=[ENU=Phone No.;
+                           FRA=Nø t‚l‚phone destinataire];
+                SourceExpr=PhoneNo;
+                Editable=FALSE }
+
+    { 1000000016;1;Field  ;
+                Name=SMSBody;
+                CaptionML=[ENU=Message;
+                           FRA=Message];
+                SourceExpr=SMSBody;
+                Editable=SMSBodyEditable;
+                MultiLine=Yes;
+                ControlAddIn=[Isatech.DynamicsNav.NotepadAddIn;PublicKeyToken=f9c11cee8793cd65] }
+
+  }
+  CODE
+  {
+    VAR
+      SMSMngt@1100281008 : Codeunit 50225;
+      SMSTemplateCode@1100281000 : Code[10];
+      ServiceNo@1100281001 : Code[20];
+      ServiceHeaderNo@1100281002 : Code[20];
+      InterventionNo@1100281003 : Integer;
+      ContactNo@1100281004 : Code[20];
+      ContactName@1100281005 : Text[50];
+      PhoneNo@1100281006 : Text[30];
+      SMSBody@1100281007 : BigText;
+      ServiceHeaderVisible@19007524 : Boolean INDATASET;
+      InterventionVisible@19035609 : Boolean INDATASET;
+      SMSBodyEditable@1000000000 : Boolean INDATASET;
+      SkipClosureTest@1100281010 : Boolean;
+      SMSType@1100281009 : 'Service,ServiceHeader,Intervention,Contact';
+      Text001@1000000002 : TextConst 'ENU=You must choose the Template Code SMS;FRA="Vous devez choisir le Code ModŠle SMS  "';
+      Text002@1000000001 : TextConst 'ENU=Empty Message !;FRA=Le message ne doit pas ˆtre vide.';
+      Text003@1000000003 : TextConst 'ENU=Message has not been sent. Do you really want to quit ?;FRA=Le message n''est pas envoy‚. Etes-vous s–r de vouloir quitter ?';
+      InterventionLine@1100281011 : Record 50075;
+      SMSTemplate@1100281012 : Record 50185;
+      Service@1000000004 : Record 50066;
+
+    PROCEDURE SetValue@1000000000(pType@1000000000 : 'Service,ServiceHeader,Intervention';pServiceNo@1000000001 : Code[20];pServiceHeaderNo@1000000002 : Code[20];pInterventionNo@1000000003 : Integer;pContactNo@1000000004 : Code[20];pPhoneNo@1000000005 : Text[30]);
+    VAR
+      lContact@1000000006 : Record 5050;
+    BEGIN
+      SMSType := pType; //IMH06
+      ServiceNo := pServiceNo;
+      ServiceHeaderNo := pServiceHeaderNo;
+      InterventionNo := pInterventionNo;
+      ContactNo := pContactNo;
+      IF lContact.GET(pContactNo) THEN;
+      ContactName := lContact.Name;
+      PhoneNo := pPhoneNo;
+
+      CASE pType OF
+        pType::Service:
+        BEGIN
+          ServiceHeaderVisible := FALSE;
+          InterventionVisible  := FALSE;
+        END;
+        pType::ServiceHeader:
+        BEGIN
+          InterventionVisible  := FALSE;
+        END;
+      END
+    END;
+
+    PROCEDURE LoadSMSBody@1000000006();
+    VAR
+      lSMSTemplate@1100281000 : Record 50185;
+      lOutStream@1100281005 : OutStream;
+      lInStream@1100281004 : InStream;
+      lSMSSendEntryTmp@1100281001 : TEMPORARY Record 50186;
+    BEGIN
+
+      IF lSMSTemplate.GET(SMSTemplateCode) THEN BEGIN
+        lSMSTemplate.CALCFIELDS("SMS Body");
+        IF lSMSTemplate."SMS Body".HASVALUE THEN BEGIN
+          lSMSTemplate."SMS Body".CREATEINSTREAM(lInStream);
+          lSMSTemplate."SMS Body".CREATEOUTSTREAM(lOutStream);
+          lSMSSendEntryTmp."Contact No." := ContactNo;
+          lSMSSendEntryTmp."Service No." := ServiceNo;
+          lSMSSendEntryTmp."Service Header No." := ServiceHeaderNo;
+          lSMSSendEntryTmp."Intervention Line No." := InterventionNo;
+
+          SMSMngt.LoadSMSBody(lOutStream,lInStream,lSMSSendEntryTmp);
+          SMSBody.READ(lInStream);
+        END ELSE
+          CLEAR(SMSBody); //IMH02
+      END
+    END;
+
+    PROCEDURE SendSMS@1000000007();
+    VAR
+      lSMSTemplate@1100281000 : Record 50185;
+      lSMSSendEntryTmp@1100281001 : TEMPORARY Record 50186;
+    BEGIN
+      IF SMSTemplateCode = '' THEN
+        ERROR(Text001);
+      IF STRLEN(FORMAT(SMSBody)) = 0 THEN
+        ERROR(Text002);
+
+      lSMSTemplate.GET(SMSTemplateCode);
+      lSMSSendEntryTmp."Contact No." := ContactNo;
+      lSMSSendEntryTmp."Service No." := ServiceNo;
+      lSMSSendEntryTmp."Service Header No." := ServiceHeaderNo;
+      lSMSSendEntryTmp."Intervention Line No." := InterventionNo;
+      lSMSSendEntryTmp."Phone No." := PhoneNo;
+
+      SMSMngt.SendTextSMS(0, lSMSTemplate."Interaction Template Code",SMSTemplateCode, lSMSSendEntryTmp, SMSBody);
+
+      SkipClosureTest := TRUE;
+      CurrPage.CLOSE;
+    END;
+
+    PROCEDURE GetSMSTemplateFilter@1000000012(pSMSType@1000000001 : 'Service,ServiceHeader,Intervention,Contact';VAR pSMSTemplate@1000000000 : Record 50185);
+    BEGIN
+      //IMH06
+      CASE pSMSType OF
+        pSMSType::Service : BEGIN
+          pSMSTemplate.SETRANGE("Show To Contact");
+          pSMSTemplate.SETRANGE("Show To Service", TRUE);
+          pSMSTemplate.SETRANGE("Show To Service Header");
+          pSMSTemplate.SETRANGE("Show To Intervention");
+        END;
+        pSMSType::ServiceHeader : BEGIN
+          pSMSTemplate.SETRANGE("Show To Contact");
+          pSMSTemplate.SETRANGE("Show To Service");
+          pSMSTemplate.SETRANGE("Show To Service Header", TRUE);
+          pSMSTemplate.SETRANGE("Show To Intervention");
+        END;
+        pSMSType::Intervention : BEGIN
+          pSMSTemplate.SETRANGE("Show To Contact");
+          pSMSTemplate.SETRANGE("Show To Service");
+          pSMSTemplate.SETRANGE("Show To Service Header");
+          pSMSTemplate.SETRANGE("Show To Intervention", TRUE);
+        END;
+        pSMSType::Contact : BEGIN
+          pSMSTemplate.SETRANGE("Show To Contact", TRUE);
+          pSMSTemplate.SETRANGE("Show To Service");
+          pSMSTemplate.SETRANGE("Show To Service Header");
+          pSMSTemplate.SETRANGE("Show To Intervention");
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH06 @d 29/11/12 @a ISAT.ZW @v IMH6.01.213 @s Projet SMS @h 4138 @c Ajout fontion GetSMSTemplateFilter */
+      /** @r IMH05 @d 28/11/12 @a ISAT.ZW @v IMH6.01.330 @s Projet SMS V1.1 @h 4146 @c Modification */
+      /** @r IMH04 @d 28/11/12 @a ISAT.ZW @v IMH6.01.330 @s Projet SMS V1.1 @h 4150 @c Modification */
+      /** @r IMH03 @d 15/11/12 @a ISAT.ZW @v IMH6.01.330 @s Projet SMS V1.1 @c Modification */
+      /** @r IMH02 @d 18/10/12 @a ISAT.ZW @v IMH6.01.213 @s Projet SMS @h 4058 @c Modification */
+      /** @r IMH01 @d 20/09/12 @a ISAT.ML @v IMH6.01.213 @s Projet SMS @c Cr‚ation  */
+    }
+    END.
+  }
+}

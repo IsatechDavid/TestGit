@@ -1,0 +1,204 @@
+OBJECT Dataport 50015 Import Geoconcept File
+{
+  OBJECT-PROPERTIES
+  {
+    Date=10/08/11;
+    Time=20:26:02;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Import Geoconcept File;
+               FRA=Import fichier G‚oconcept];
+    FieldStartDelimiter=<None>;
+    FieldEndDelimiter=<None>;
+    FieldSeparator=<TAB>;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table225;
+        AutoSave=No;
+        AutoUpdate=No;
+        AutoReplace=No;
+        DataItemTableView=SORTING(Code,City);
+        ReqFilterFields=Code;
+        OnPreDataItem=BEGIN
+                        // Suppression de la premier ligne
+                        CurrFile.TEXTMODE(TRUE);
+                        CurrFile.READ(TempText);
+                        LocalDecSep := COPYSTR(FORMAT(0.1),2,1);
+                      END;
+
+        OnBeforeImportRecord=BEGIN
+                               LongWGS84 := 0;
+                               LatWGS84 := 0;
+                               LongLambert2Et := 0;
+                               LatLambert2Et := 0;
+                             END;
+
+        OnAfterImportRecord=BEGIN
+                              UpdatePostCode;
+                            END;
+
+        OnPostDataItem=BEGIN
+                         IF CONFIRM('Test') THEN
+                           ERROR('');
+                       END;
+
+      }
+      FIELDS
+      {
+        { 1    ;30   ;"City (Without Accent)";
+                                           CallFieldValidate=No;
+                                           OnBeforeEvaluateField=BEGIN
+                                                                   Text := COPYSTR(Text,1,MAXSTRLEN("City (Without Accent)"));
+                                                                   Text := ToolsMgt.FormatImport(Text);
+                                                                 END;
+                                                                  }
+        { 32   ;30   ;City                ;CallFieldValidate=No;
+                                           OnBeforeEvaluateField=BEGIN
+                                                                   Text := COPYSTR(Text,1,MAXSTRLEN(City));
+                                                                   Text := ToolsMgt.FormatImport(Text);
+                                                                 END;
+                                                                  }
+        { 63   ;10   ;"Geo. Reference Code";
+                                           CallFieldValidate=No }
+        { 74   ;20   ;Code                ;CallFieldValidate=No }
+        {      ;     ;LongWGS84           ;CallFieldValidate=No;
+                                           Format=<Integer>.<Decimals>;
+                                           OnBeforeEvaluateField=BEGIN
+                                                                   Text := FormatDec(Text);
+                                                                 END;
+                                                                  }
+        {      ;     ;LatWGS84            ;CallFieldValidate=No;
+                                           Format=<Integer>.<Decimals>;
+                                           OnBeforeEvaluateField=BEGIN
+                                                                   Text := FormatDec(Text);
+                                                                 END;
+                                                                  }
+        {      ;     ;LongLambert2Et      ;CallFieldValidate=No;
+                                           Format=<Integer>.<Decimals>;
+                                           OnBeforeEvaluateField=BEGIN
+                                                                   Text := FormatDec(Text);
+                                                                 END;
+                                                                  }
+        {      ;     ;LatLambert2Et       ;CallFieldValidate=No;
+                                           Format=<Integer>.<Decimals>;
+                                           OnBeforeEvaluateField=BEGIN
+                                                                   Text := FormatDec(Text);
+                                                                 END;
+                                                                  }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      PostCode@1100281000 : Record 225;
+      PostCode2@1100281006 : Record 225;
+      GeoRef@1100281005 : Record 50013;
+      LongWGS84@1100281001 : Decimal;
+      LatWGS84@1100281002 : Decimal;
+      LongLambert2Et@1100281003 : Decimal;
+      LatLambert2Et@1100281004 : Decimal;
+      ToolsMgt@1100281007 : Codeunit 8016602;
+      TempText@1100281008 : Text[1024];
+      LocalDecSep@1100281009 : Text[1];
+
+    PROCEDURE UpdatePostCode@1100281000();
+    VAR
+      lInsert@1100281000 : Boolean;
+    BEGIN
+      "Post Code"."Latitude Lambert 2E" := ROUND(LatLambert2Et,1);
+      "Post Code"."Longitude Lambert 2E" := ROUND(LongLambert2Et,1);
+      "Post Code".City := UPPERCASE("Post Code".City);
+
+      // Mise … jour de la r‚f‚rence g‚ographique
+      lInsert := NOT GeoRef.GET("Post Code"."Geo. Reference Code");
+      IF lInsert THEN BEGIN
+        GeoRef.INIT;
+        GeoRef.Code := "Post Code"."Geo. Reference Code";
+        IF STRLEN(GeoRef.Code) = 5 THEN BEGIN
+          GeoRef.VALIDATE("Area Code", COPYSTR(GeoRef.Code, 1, 2));
+          GeoRef."Town Code" := COPYSTR(GeoRef.Code, 3, 3);
+          GeoRef."Country/Region Code" := 'FRA';
+        END;
+      END;
+      IF (GeoRef.Description <> "Post Code".City) OR
+         (GeoRef."Town Name" <> "Post Code".City) OR
+         (GeoRef."Latitude WGS64" <> LatWGS84) OR
+         (GeoRef."Longitude WGS64" <> LongWGS84)
+      THEN BEGIN
+        GeoRef.Description := "Post Code".City;
+        GeoRef."Town Name" := "Post Code".City;
+        GeoRef."Latitude WGS64" := LatWGS84;
+        GeoRef."Longitude WGS64" := LongWGS84;
+        IF lInsert THEN
+          GeoRef.INSERT(TRUE)
+        ELSE
+          GeoRef.MODIFY(TRUE);
+      END;
+
+      IF PostCode.GET("Post Code".Code, "Post Code".City) THEN BEGIN
+        // Mise … jour du code postal
+        IF (PostCode."Geo. Reference Code" <> "Post Code"."Geo. Reference Code") OR
+           (PostCode."Latitude Lambert 2E" <> "Post Code"."Latitude Lambert 2E") OR
+           (PostCode."Longitude Lambert 2E" <> "Post Code"."Longitude Lambert 2E") THEN BEGIN
+          PostCode."Geo. Reference Code" := "Post Code"."Geo. Reference Code";
+          PostCode."Latitude Lambert 2E" := "Post Code"."Latitude Lambert 2E";
+          PostCode."Longitude Lambert 2E" := "Post Code"."Longitude Lambert 2E";
+          PostCode.MODIFY(TRUE);
+        END;
+        EXIT;
+      END;
+      PostCode.SETCURRENTKEY("Geo. Reference Code");
+      PostCode.SETRANGE("Geo. Reference Code", GeoRef.Code);
+      PostCode.SETRANGE(Linked, FALSE);
+      PostCode.SETRANGE("Link Post Code", '');
+      IF PostCode.FINDFIRST THEN BEGIN
+        PostCode2 := PostCode;
+        PostCode.Code := "Post Code".Code;
+        PostCode.SetSkipSearchCity(TRUE);
+        PostCode.VALIDATE(City, "Post Code".City);
+        PostCode."Geo. Reference Code" := "Post Code"."Geo. Reference Code";
+        PostCode."Latitude Lambert 2E" := "Post Code"."Latitude Lambert 2E";
+        PostCode."Longitude Lambert 2E" := "Post Code"."Longitude Lambert 2E";
+        PostCode.INSERT(TRUE);
+        PostCode2.DELETE;
+        EXIT;
+      END;
+      PostCode.RESET;
+      PostCode := "Post Code";
+      PostCode.SetSkipSearchCity(TRUE);
+      PostCode.VALIDATE(City);
+      PostCode.VALIDATE("Area Code", GeoRef."Area Code");
+      PostCode."Country/Region Code" := 'FRA';
+      PostCode.INSERT(TRUE);
+    END;
+
+    PROCEDURE FormatDec@1100281001(pText@1100281000 : Text[1024]) : Text[1024];
+    BEGIN
+      IF LocalDecSep = '.' THEN
+        EXIT(pText)
+      ELSE
+        EXIT(CONVERTSTR(pText,'.',LocalDecSep));
+    END;
+
+    BEGIN
+    END.
+  }
+}

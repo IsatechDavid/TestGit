@@ -1,0 +1,610 @@
+OBJECT Codeunit 50001 Attachment Treeview Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=02/08/11;
+    Time=09:42:31;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1000000000 : TextConst 'ENU=Some attachment exits on this attachment treeview.\Do you want to modify them ?;FRA=Des documents joints existent sur cette structure d''arborescence.\Souhaitez-vous la modifier ?';
+      Text002@1000000001 : TextConst 'ENU=Please, delete attachment before delete attachment treeview.;FRA=Veuillez supprimer les fichiers avant de supprimer la structure d''arborescence';
+      Text003@1000000002 : TextConst 'ENU=Treeview entry mustn''t active;FRA=L''arborescence ne doit pas ˆtre active.';
+      Text004@1100481000 : TextConst 'ENU=Do you want to move existed attachment ?;FRA=Souhaitez-vous d‚placer les documents joints existant ?';
+      Text005@1100481001 : TextConst 'ENU=You must move its handly.;FRA=Vous devrez dans ce cas les d‚placer manuellement.';
+      AttachmentMgt@1100281000 : Codeunit 50002;
+      TotalCounter@1100481005 : Integer;
+      CurrentCounter@1100481004 : Integer;
+      ModuloCounter@1100481003 : Integer;
+      WDialog@1100481002 : Dialog;
+      Text006@1100481006 : TextConst 'ENU=Move files...\@1@@@@@@@@@@@@@@@@@@@@@;FRA=D‚placemet des fichiers...\@1@@@@@@@@@@@@@@@@@@@@@';
+      Text007@1100481007 : TextConst 'ENU=There is any active attachment treeview to this table (%1);FRA=Il n''existe pas de structure d''arborescence active pour la table %1.';
+      Text008@1100481008 : TextConst 'ENU=Treeview active condition''s table %1 can''t treat this record.\%2;FRA=Les conditions d''activation des arborescences li‚es … la table %1 ne permettent pas de traiter l''enregistrement.\%2';
+      Text009@1100481009 : TextConst 'ENU=Treview''s ending dateis expired.\Do you want to continue ?;FRA=La date de validit‚ de l''arborescence %1 est expir‚e.\Souhaitez-vous continuer ?';
+      Text010@1100481010 : TextConst 'ENU=Treview''s ending date was expired.;FRA=La date de validit‚ de l''arborescence %1 est expir‚e.';
+      Text011@1100481011 : TextConst 'ENU=Are you sure to delete this treeview ?;FRA=Etes-vous s–r de vouloir supprmier cette arborescence ?';
+
+    PROCEDURE DeleteAttachTreeview@1000000001(pAttachmentTreeview@1000000000 : Record 50017;pWithCheck@1100481000 : Boolean);
+    VAR
+      lAttachmentTreeview@1100481001 : Record 50017;
+    BEGIN
+      // Gestion de la suppression d'une arborescence
+
+      IF pWithCheck THEN BEGIN
+        IF pAttachmentTreeview.Active THEN BEGIN
+          ERROR(Text003);
+        END;
+
+        pAttachmentTreeview.TESTFIELD(Status, pAttachmentTreeview.Status::New);
+        pAttachmentTreeview.CALCFIELDS("Attachments Exist");
+        IF pAttachmentTreeview."Attachments Exist" THEN BEGIN
+          ERROR(Text002);
+        END;
+      END;
+
+      IF NOT CONFIRM(Text011) THEN BEGIN
+        EXIT;
+      END;
+      lAttachmentTreeview := pAttachmentTreeview;
+      lAttachmentTreeview.DELETE(TRUE);
+    END;
+
+    PROCEDURE ActiveAttachTreeview@1000000002(VAR pAttachmentTreeview@1000000000 : Record 50017);
+    VAR
+      lAttachTreeview@1000000001 : Record 50017;
+      lAttachTreeview2@1000000002 : Record 50017;
+    BEGIN
+      // Permet d'activer/d‚sactiver une arborescence
+
+      IF pAttachmentTreeview.Active THEN BEGIN
+        lAttachTreeview2 := pAttachmentTreeview;
+        lAttachTreeview2.VALIDATE(Active, FALSE);
+        lAttachTreeview2.MODIFY(TRUE);
+        pAttachmentTreeview := lAttachTreeview2;
+      END ELSE BEGIN
+        lAttachTreeview2 := pAttachmentTreeview;
+        lAttachTreeview2.VALIDATE(Active, TRUE);
+        lAttachTreeview2.MODIFY(TRUE);
+        pAttachmentTreeview := lAttachTreeview2;
+      END;
+    END;
+
+    PROCEDURE SetConditionValue@1100281006(VAR pAttachmentTreeviewStructure@1100281000 : Record 50018);
+    VAR
+      lAttachmentTreeviewStructure@1100281001 : Record 50018;
+      lAttachmentTreeviewCondition@1100281002 : Record 50019;
+    BEGIN
+      //Ajouter ou modifier lignes condition
+      IF NOT (pAttachmentTreeviewStructure.Type = pAttachmentTreeviewStructure.Type::Field) THEN
+        EXIT;
+
+      lAttachmentTreeviewCondition.SETRANGE("Attachment Treeview Code", pAttachmentTreeviewStructure."Attachment Treeview Code");
+      lAttachmentTreeviewCondition.SETRANGE(Level, pAttachmentTreeviewStructure.Level);
+      FORM.RUN(FORM::"Attach. Tree. Conditions List", lAttachmentTreeviewCondition);
+    END;
+
+    PROCEDURE ModifyTemplateMandatory@1100481000(VAR pAttachmentTreeview@1100481000 : Record 50017);
+    VAR
+      lAttachTreeview@1100481001 : Record 50017;
+    BEGIN
+      // inverse la coche modŠle obligatoire
+
+      lAttachTreeview := pAttachmentTreeview;
+      lAttachTreeview."Template Mandatory" := NOT lAttachTreeview."Template Mandatory";
+      lAttachTreeview.MODIFY;
+      pAttachmentTreeview := lAttachTreeview;
+    END;
+
+    LOCAL PROCEDURE MoveFileToDiskFolder@1100481006(VAR pOldAttachTreeview@1100481000 : Record 50017;VAR pNewAttachTreeview@1100481001 : Record 50017;VAR pNewAttachTreeviewStructure@1100481010 : Record 50018;VAR pNewAttachTreeviewCondition@1100481011 : Record 50019);
+    VAR
+      lAttachment@1100481007 : Record 50021;
+      lAttachMgt@1100481006 : Codeunit 50002;
+      lFolderMgt@1100481012 : Codeunit 50004;
+      lRecRef@1100481004 : RecordRef;
+      lFileName@1100481013 : Text[500];
+      lFromFileName@1100481009 : Text[500];
+      lFromPath@1100481008 : Text[500];
+      lToFileName@1100481003 : Text[500];
+      lToPath@1100481002 : Text[500];
+    BEGIN
+      // D‚place des fichiers d'une arbo … une autre arbo
+
+      WITH lAttachment DO BEGIN
+        lAttachment.SETCURRENTKEY("Attachment Treeview Code","Attachment Exist");
+        lAttachment.SETRANGE("Attachment Treeview Code", pOldAttachTreeview.Code);
+        lAttachment.SETRANGE("Attachment Exist",TRUE);
+        TotalCounter := lAttachment.COUNT;
+        CurrentCounter := 0;
+        ModuloCounter := ROUND(TotalCounter * 0.05,1,'>');
+        WDialog.OPEN(Text006);
+        IF lAttachment.FINDSET(FALSE,FALSE) THEN BEGIN
+          REPEAT
+            CurrentCounter += 1;
+            IF CurrentCounter MOD ModuloCounter = 1 THEN BEGIN
+              WDialog.UPDATE(1,ROUND(CurrentCounter / TotalCounter * 9999,1));
+            END;
+
+            IF NOT Deleted THEN BEGIN
+              lAttachMgt.GetOriginalRecRef(
+                lAttachment."Referent Table No.",
+                lAttachment."Key Integer 1",
+                lAttachment."Key Integer 2",
+                lAttachment."Key Code 1",
+                lAttachment."Key Code 2",
+                lRecRef);
+              lFileName := GetFileName(lAttachment);
+              lFromPath := GetPath(lAttachment,lRecRef);
+              lToPath :=
+                GetNewPath(
+                  lAttachment,
+                  pNewAttachTreeview,
+                  pNewAttachTreeviewStructure,
+                  pNewAttachTreeviewCondition,
+                  lRecRef);
+              // Cr‚ation ‚ventuelle du r‚pertoire
+              lFolderMgt.CreateCompletePath(lToPath,TRUE);
+              IF FILE.COPY(lFromPath + lFileName,lToPath + lFileName) THEN BEGIN
+                ERASE(lFromPath + lFileName);
+              END;
+            END;
+          UNTIL lAttachment.NEXT = 0;
+        END;
+        WDialog.CLOSE;
+      END;
+    END;
+
+    PROCEDURE GetAttachTreeviewActive@1100481001(pRecRef@1000000000 : RecordRef;VAR pAttachTreeviewCode@1100481000 : Code[10]) rValue : Boolean;
+    VAR
+      lAttachTreeview@1000000001 : Record 50017;
+      lAttachTreeviewOK@1100481009 : Record 50017;
+      lAttachActiveCondition@1100481002 : Record 50022;
+      lTreeviewOK@1100481003 : Boolean;
+      lConditionNotOK@1100481006 : Boolean;
+      lEndingDate@1100481007 : Date;
+      lFieldRef@1100481004 : FieldRef;
+      lFieldValue@1100481005 : Text[250];
+      lAttachTreeviewNo@1100481008 : Text[50];
+      lRecRef@1100281000 : RecordRef;
+    BEGIN
+      // Permet de r‚cup‚rer la structure d'arbo active pour cette table
+
+      rValue := FALSE;
+
+      lAttachTreeview.SETCURRENTKEY("Referent Table No.");
+      lAttachTreeview.SETRANGE("Referent Table No.",pRecRef.NUMBER);
+      lAttachTreeview.SETRANGE(Active,TRUE);
+      IF lAttachTreeview.ISEMPTY THEN BEGIN
+        ERROR(Text007,pRecRef.CAPTION);
+      END;
+
+      lTreeviewOK := FALSE;
+      lEndingDate := 0D;
+      lAttachTreeviewNo := '';
+      CLEAR(lAttachTreeviewOK);
+      lAttachTreeview.FINDSET;
+      REPEAT
+        lEndingDate := lAttachTreeview."Ending Date";
+        lAttachTreeviewNo := lAttachTreeview.Code;
+
+        // Parcours des conditions activation
+        lAttachActiveCondition.SETRANGE("Attachment Treeview Code", lAttachTreeview.Code);
+        IF lAttachActiveCondition.ISEMPTY THEN BEGIN
+          lTreeviewOK := TRUE;
+        END ELSE BEGIN
+          lConditionNotOK := FALSE;
+          lAttachActiveCondition.FINDSET;
+          REPEAT
+            //<<IMH05.PC
+            CASE lAttachActiveCondition."Condition Type" OF
+              lAttachActiveCondition."Condition Type"::Filter : BEGIN
+                lRecRef := pRecRef.DUPLICATE;
+                lFieldRef := lRecRef.FIELD(lAttachActiveCondition."Field No.");
+                lFieldRef.SETFILTER(lAttachActiveCondition."Reference Value");
+                lConditionNotOK := lRecRef.ISEMPTY;
+              END;
+              lAttachActiveCondition."Condition Type"::Value : BEGIN
+            //>>IMH05.PC
+                lFieldRef := pRecRef.FIELD(lAttachActiveCondition."Field No.");
+                lFieldValue := FORMAT(lFieldRef.VALUE,0,1);
+                IF UPPERCASE(FORMAT(lFieldRef.TYPE)) = 'OPTION' THEN BEGIN
+                  lFieldValue := GetOptionText(lFieldRef);
+                END;
+                lConditionNotOK := (lFieldValue <> lAttachActiveCondition."Reference Value")
+              END;
+            END;
+          UNTIL lConditionNotOK OR (lAttachActiveCondition.NEXT = 0);
+          lTreeviewOK := NOT lConditionNotOK;
+        END;
+        IF lTreeviewOK THEN BEGIN
+          lAttachTreeviewOK := lAttachTreeview;
+        END;
+      UNTIL lTreeviewOK OR (lAttachTreeview.NEXT = 0);
+
+      IF NOT lTreeviewOK THEN BEGIN
+        ERROR(Text008,pRecRef.CAPTION); //,pRecRef.RECORDID);
+      END;
+
+      IF (lEndingDate <> 0D) AND (lEndingDate < WORKDATE) THEN BEGIN
+        IF GUIALLOWED THEN BEGIN
+          IF NOT CONFIRM(STRSUBSTNO(Text009,lAttachTreeviewNo)) THEN BEGIN
+            EXIT;
+          END;
+        END ELSE BEGIN
+          MESSAGE(Text010);
+        END;
+      END;
+
+      pAttachTreeviewCode := lAttachTreeviewOK.Code;
+      //pEntryNo := lAttachTreeviewOK."Treeview Entry No.";
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetOptionText@1100481007(VAR pFieldRef@1100481000 : FieldRef) : Text[1024];
+    VAR
+      lText@1100481001 : Text[1024];
+      lInt@1100481002 : Integer;
+      lInt2@1100481003 : Integer;
+      i@1100481004 : Integer;
+    BEGIN
+      // permet de r‚cup‚rer la valeur issue d'une option
+
+      IF UPPERCASE(FORMAT(pFieldRef.TYPE)) <> 'OPTION' THEN BEGIN
+        EXIT;
+      END;
+
+      lText := pFieldRef.OPTIONCAPTION;
+      lInt := pFieldRef.VALUE;
+
+      // Controle de la valeur de caption pour ‚viter l'erreur (sinon renvoi la valeur)
+      FOR i := 1 TO STRLEN(lText) DO BEGIN
+        IF lText[i] = ',' THEN BEGIN
+          lInt2 += 1;
+        END;
+      END;
+
+      IF lInt2 < lInt THEN BEGIN
+        EXIT(FORMAT(pFieldRef.VALUE));
+      END ELSE BEGIN
+        IF (lInt = 0) AND (lText[1] = ',') THEN BEGIN
+          EXIT('')
+        END ELSE BEGIN
+          EXIT(SELECTSTR(lInt + 1,lText));
+        END;
+      END;
+    END;
+
+    PROCEDURE CheckTreeviewIsActive@1100281004();
+    BEGIN
+      // Permet de d‚terminer l'arbo active pour le recordref
+    END;
+
+    PROCEDURE GetPathAndFileName@1100481046(pAttachment@1100481001 : Record 50021;pRecRef@1000000000 : RecordRef) : Text[500];
+    BEGIN
+      // Retourne le chemin d'accŠs + nom du document
+
+      EXIT(GetPath(pAttachment,pRecRef) + GetFileName(pAttachment));
+    END;
+
+    PROCEDURE GetPath@1100281003(pAttachment@1100481000 : Record 50021;pRecRef@1000000003 : RecordRef) rValue : Text[500];
+    VAR
+      lAttachTreeview@1000000000 : Record 50017;
+      lAttachTreeviewStructure@1000000001 : Record 50018;
+      lAttachTreeviewCondition@1000000002 : Record 50019;
+      lFieldRef@1000000004 : FieldRef;
+      lReferenceFieldRef@1000000007 : FieldRef;
+      lDate@1000000005 : Date;
+      lDateTime@1000000006 : DateTime;
+    BEGIN
+      // Permet de (re)constituter le chemin d'accŠs au document
+
+      rValue := '';
+
+      IF pAttachment."Referent Table No." <> pRecRef.NUMBER THEN BEGIN
+        ERROR(Text001);
+      END;
+
+      // Pour le pointeur du chemin racine
+      lAttachTreeview.GET(pAttachment."Attachment Treeview Code");
+      rValue := lAttachTreeview."Root Path";
+      IF COPYSTR(rValue,STRLEN(rValue)) <> '\' THEN BEGIN
+        rValue += '\';
+      END;
+
+      // Pour les niveaux d'arborescence
+      WITH lAttachTreeviewStructure DO BEGIN
+        SETRANGE("Attachment Treeview Code", pAttachment."Attachment Treeview Code");
+        IF NOT FINDSET(FALSE) THEN
+          EXIT;
+
+        REPEAT
+          CASE Type OF
+            Type::Field : BEGIN
+              lFieldRef := pRecRef.FIELD("Field No.");
+              // Gestion des conditions
+              CALCFIELDS(Conditions);
+              IF Conditions THEN BEGIN
+                lAttachTreeviewCondition.SETRANGE("Attachment Treeview Code", "Attachment Treeview Code");
+                lAttachTreeviewCondition.SETRANGE(Level,Level);
+                IF lAttachTreeviewCondition.FINDSET(FALSE) THEN BEGIN
+                  REPEAT
+                    lReferenceFieldRef := pRecRef.FIELD(lAttachTreeviewCondition."Reference Field No.");
+                    IF UPPERCASE(FORMAT(lReferenceFieldRef)) = UPPERCASE(lAttachTreeviewCondition."Reference Value") THEN BEGIN
+                      CASE lAttachTreeviewCondition."Replace Value Type" OF
+                        lAttachTreeviewCondition."Replace Value Type"::" " : BEGIN
+                          rValue += FormatFieldRefValue(lAttachTreeviewStructure,lFieldRef);
+                        END;
+                        lAttachTreeviewCondition."Replace Value Type"::Constante : BEGIN
+                          rValue += lAttachTreeviewCondition."Replace Value" + '\';
+                        END;
+                      END;
+                    END;
+                  UNTIL lAttachTreeviewCondition.NEXT = 0;
+                END;
+              END ELSE BEGIN
+                rValue += FormatFieldRefValue(lAttachTreeviewStructure,lFieldRef);
+              END;
+            END;
+            Type::Constant : BEGIN
+              IF "Constante Value" <> '' THEN BEGIN
+                rValue += "Constante Value" + '\';
+              END;
+            END;
+          END;
+        UNTIL NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE GetFileName@1100481009(pAttachment@1100481000 : Record 50021) rValue : Text[500];
+    VAR
+      lAttachmentTemplate@1100481001 : Record 50020;
+      lPrefixe@1000000001 : Code[10];
+      lExtension@1000000002 : Text[30];
+    BEGIN
+      // Permet de (re)constituter le nom du document avec prefixe et extension
+
+      IF NOT lAttachmentTemplate.GET(pAttachment."Attach. Template Code") THEN BEGIN
+        CLEAR(lAttachmentTemplate);
+      END;
+
+      rValue := lAttachmentTemplate.Prefix + pAttachment."Key Code 1" + pAttachment."Key Code 2";
+      IF pAttachment."Key Integer 1" <> 0 THEN
+        rValue += '_' + FORMAT(pAttachment."Key Integer 1");
+      IF pAttachment."Key Integer 2" <> 0 THEN
+        rValue += '_' + FORMAT(pAttachment."Key Integer 2");
+      IF rValue <> '' THEN
+        rValue += '_' + FORMAT(pAttachment."Entry No.")
+      ELSE
+        rValue += FORMAT(pAttachment."Entry No.");
+
+      IF NOT lAttachmentTemplate."Hide File Extension" AND (pAttachment."File Extension" <> '') THEN BEGIN
+        rValue += '.' + pAttachment."File Extension";
+      END;
+    END;
+
+    PROCEDURE GetNewPath@1100281002(pAttachment@1100481000 : Record 50021;pAttachTreeview@1100481004 : Record 50017;VAR pAttachTreeviewStructure@1100481003 : Record 50018;VAR pAttachTreeviewCondition@1100481002 : Record 50019;pRecRef@1000000003 : RecordRef) rValue : Text[500];
+    VAR
+      lFieldRef@1000000004 : FieldRef;
+      lReferenceFieldRef@1000000007 : FieldRef;
+      lDate@1000000005 : Date;
+      lDateTime@1000000006 : DateTime;
+    BEGIN
+      // Permet de constituter le nouveau chemin d'accŠs au document lors d'une modificationd d'arborescence
+
+      rValue := '';
+
+      IF pAttachment."Referent Table No." <> pRecRef.NUMBER THEN BEGIN
+        ERROR(Text001);
+      END;
+
+      // Pour le pointeur du chemin racine
+      rValue := pAttachTreeview."Root Path";
+      IF COPYSTR(rValue,STRLEN(rValue)) <> '\' THEN BEGIN
+        rValue += '\';
+      END;
+
+      // Pour les niveaux d'arborescence
+      WITH pAttachTreeviewStructure DO BEGIN
+        SETRANGE("Attachment Treeview Code", pAttachTreeview.Code);
+        IF FINDSET(FALSE,FALSE) THEN BEGIN
+          REPEAT
+            CASE Type OF
+              Type::Field : BEGIN
+                lFieldRef := pRecRef.FIELD("Field No.");
+
+                // Gestion des conditions
+                pAttachTreeviewCondition.SETRANGE("Attachment Treeview Code", "Attachment Treeview Code");
+                pAttachTreeviewCondition.SETRANGE(Level,Level);
+                IF pAttachTreeviewCondition.FINDSET THEN BEGIN
+                  REPEAT
+                    lReferenceFieldRef := pRecRef.FIELD(pAttachTreeviewCondition."Reference Field No.");
+                    IF UPPERCASE(FORMAT(lReferenceFieldRef)) = UPPERCASE(pAttachTreeviewCondition."Reference Value") THEN BEGIN
+                      CASE pAttachTreeviewCondition."Replace Value Type" OF
+                        pAttachTreeviewCondition."Replace Value Type"::" " : BEGIN
+                          rValue += FormatFieldRefValue(pAttachTreeviewStructure,lFieldRef);
+                        END;
+                        pAttachTreeviewCondition."Replace Value Type"::Constante : BEGIN
+                          rValue += pAttachTreeviewCondition."Replace Value" + '\';
+                        END;
+                      END;
+                    END;
+                  UNTIL pAttachTreeviewCondition.NEXT = 0;
+                END ELSE BEGIN
+                  rValue += FormatFieldRefValue(pAttachTreeviewStructure,lFieldRef);
+                END;
+              END;
+              Type::Constant : BEGIN
+                IF "Constante Value" <> '' THEN BEGIN
+                  rValue += "Constante Value" + '\';
+                END;
+              END;
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetCompletFileName@1100281005(pAttachment@1100281000 : Record 50021) : Text[500];
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      //r‚cup‚rer le chemin complet d'un document joint
+      // On r‚cupŠre le recordref issue de la table doc. joint
+      AttachmentMgt.GetOriginalRecRef(
+        pAttachment."Referent Table No.",pAttachment."Key Integer 1",
+        pAttachment."Key Integer 2",pAttachment."Key Code 1",
+        pAttachment."Key Code 2",lRecRef);
+
+      // R‚cup‚ration du chemin du document joint issue de la structure d'arborescence
+      EXIT(GetPath(pAttachment,lRecRef) + GetFileName(pAttachment));
+    END;
+
+    PROCEDURE FormatFieldRefValue@1100281001(pAttachTreeviewStructure@1000000001 : Record 50018;pFieldRef@1000000000 : FieldRef) rValue : Text[500];
+    VAR
+      lReferenceFieldRef@1000000004 : FieldRef;
+      lDate@1000000003 : Date;
+      lDateTime@1000000002 : DateTime;
+    BEGIN
+      // Formate la valeur du fieldref
+      rValue := '';
+      //<<IMH02
+      IF (FORMAT(pFieldRef.CLASS) = 'FlowField') THEN BEGIN
+        pFieldRef.CALCFIELD;
+      END;
+      //>>IMH02
+
+      CASE UPPERCASE(FORMAT(pFieldRef.TYPE)) OF
+        'DATE','DATETIME' : BEGIN
+          IF UPPERCASE(FORMAT(pFieldRef.TYPE)) = 'DATETIME' THEN BEGIN
+            EVALUATE(lDateTime,FORMAT(pFieldRef.VALUE));
+            lDate := DT2DATE(lDateTime);
+          END ELSE BEGIN
+            lDate := pFieldRef.VALUE;
+          END;
+      //<<IMH04.ST
+          IF lDate = 0D THEN
+            lDate := DMY2DATE(1,1,1900);
+      //>>IMH04.ST
+
+          IF pAttachTreeviewStructure."Folder For Year" OR
+             pAttachTreeviewStructure."Folder For Quarter" OR
+             pAttachTreeviewStructure."Folder For Month" OR
+             pAttachTreeviewStructure."Folder For Week" OR
+             pAttachTreeviewStructure."Folder For Day" OR
+             pAttachTreeviewStructure."Folder For Year and Month" //IMH02
+          THEN BEGIN
+            IF pAttachTreeviewStructure."Folder For Year" THEN BEGIN
+              rValue += FORMAT(DATE2DMY(lDate,3)) + '\';
+            END;
+            IF pAttachTreeviewStructure."Folder For Quarter" THEN BEGIN
+              rValue += FORMAT(Date2Quarter(lDate)) + 'Q' + '\';
+            END;
+            IF pAttachTreeviewStructure."Folder For Month" THEN BEGIN
+              rValue += FORMAT(DATE2DMY(lDate,2)) + '_' + FORMAT(lDate,0,'<Month Text,3>') + '\';
+            END;
+            IF pAttachTreeviewStructure."Folder For Week" THEN BEGIN
+              rValue += FORMAT(DATE2DWY(lDate,2)) + 'W' + '\';
+            END;
+            IF pAttachTreeviewStructure."Folder For Day" THEN BEGIN
+              rValue += FORMAT(DATE2DMY(lDate,1)) + 'D' + '\';
+            END;
+            //<<IMH02
+            IF pAttachTreeviewStructure."Folder For Year and Month" THEN BEGIN
+              rValue := FORMAT(lDate,0,'<Year4><Month,2>') + '\';
+            END;
+            //>>IMH02
+          END ELSE BEGIN
+            rValue := FORMAT(lDate,0,'<Year4>_<Month,2>_<Day,2>') + '\';
+          END;
+        END;
+        'OPTION' : rValue := FORMAT(pFieldRef,0,1) + '\';
+        'TEXT','CODE' : BEGIN
+          IF (FORMAT(pFieldRef.VALUE) <> '') THEN BEGIN
+            rValue := FORMAT(pFieldRef.VALUE) + '\';
+          END;
+        END;
+        ELSE rValue := FORMAT(pFieldRef.VALUE) + '\';
+      END;
+    END;
+
+    LOCAL PROCEDURE Date2Quarter@1100281000(pDate@1000000000 : Date) rValue : Integer;
+    BEGIN
+      // retourne le trimestre de la date
+
+      rValue := DATE2DMY(pDate,2);
+      CASE rValue OF
+        1,2,3 : rValue := 1;
+        4,5,6 : rValue := 2;
+        7,8,9 : rValue := 3;
+        10,11,12 : rValue := 4;
+      END;
+    END;
+
+    PROCEDURE MoveFile@1100281007(pFromAttachment@1100281000 : Record 50021;pToAttachment@1100281001 : Record 50021;pCopy@1100281007 : Boolean) : Boolean;
+    VAR
+      lAttachMgt@1100281009 : Codeunit 50002;
+      lFolderMgt@1100281010 : Codeunit 50004;
+      lFromRecRef@1100281002 : RecordRef;
+      lToRecRef@1100281008 : RecordRef;
+      lFromFileName@1100281003 : Text[1024];
+      lFromPath@1100281004 : Text[1024];
+      lToPath@1100281005 : Text[1024];
+      lToFileName@1100281006 : Text[1024];
+    BEGIN
+      //IMH06.ST
+      WITH pFromAttachment DO BEGIN
+        IF Deleted THEN
+          EXIT(FALSE);
+        lAttachMgt.GetOriginalRecRef(
+           "Referent Table No.",
+           "Key Integer 1",
+           "Key Integer 2",
+           "Key Code 1",
+           "Key Code 2",
+           lFromRecRef);
+        lFromFileName := GetFileName(pFromAttachment);
+        lFromPath := GetPath(pFromAttachment,lFromRecRef);
+      END;
+      WITH pToAttachment DO BEGIN
+        lAttachMgt.GetOriginalRecRef(
+           "Referent Table No.",
+           "Key Integer 1",
+           "Key Integer 2",
+           "Key Code 1",
+           "Key Code 2",
+           lToRecRef);
+        lToFileName := GetFileName(pToAttachment);
+        lToPath := GetPath(pToAttachment,lToRecRef);
+      END;
+
+      // Cr‚ation ‚ventuelle du r‚pertoire
+      lFolderMgt.CreateCompletePath(lToPath,TRUE);
+      IF FILE.COPY(lFromPath + lFromFileName, lToPath + lToFileName) THEN BEGIN
+        IF NOT pCopy THEN
+          ERASE(lFromPath + lFromFileName);
+        EXIT(TRUE);
+      END;
+      EXIT(FALSE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH06 @d 02/08/11 @a ISAT.ST @v IMH6.01.003 @s Attach. Management @c Ajout fonction MoveFile */
+      /** @r IMH05 @d 21/07/11 @a ISAT.PC @v IMH6.01.003 @s Attach. Management @c Ajout gestion filtre */
+      /** @r IMH04 @d 18/07/11 @a ISAT.ST @v IMH6.01.003 @s Attach. Management @c Correction date … vide */
+      /** @r IMH03 @d 01/07/11 @a ISAT.ST @v IMH6.01.003 @s Attach. Management @c Optimisation du codeunit findfirst->findset corrig‚s */
+      /** @r IMH02 @d 14/02/11 @a ISAT.LLT @v IMH6.01.003 @s Attach. Management @c Gestion de flowfield */
+      /** @r IMH01 @d 23/09/10 @a ISAT.ZW @v IMH6.01.003 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

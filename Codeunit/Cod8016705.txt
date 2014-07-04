@@ -1,0 +1,189 @@
+OBJECT Codeunit 8016705 EAI Synchro Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/12/10;
+    Time=09:33:33;
+    Version List=ISAEAI1.00;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE IsActionOnTableInSyncGrpActive@1100481009(pSynchroGroup@1100481006 : Record 8016709;pRecRef@1100481000 : RecordRef;pxRecRef@1100481005 : RecordRef;pActionType@1100481001 : 'Insert,Modify,Delete,Rename') : Boolean;
+    VAR
+      lSynchroGroup@1100481008 : Record 8016709;
+      lSynchroGroupTable@1100481007 : Record 8016710;
+      lActTypeCodeToExecute@1100481002 : Code[20];
+      lActCodeToExecute@1100481003 : Code[20];
+      lIsActive@1100481004 : Boolean;
+    BEGIN
+      // renvoie vrai si une action sur une table existe
+
+      WITH lSynchroGroupTable DO
+      BEGIN
+        SETCURRENTKEY("To Synchronize Table No.");
+        SETRANGE("To Synchronize Table No.",pRecRef.NUMBER);
+        SETRANGE("Synchro Group Code",pSynchroGroup.Code);
+        IF FINDFIRST THEN
+          REPEAT
+            IF IsActionOnFilterActive(lSynchroGroupTable,pRecRef) THEN BEGIN
+              lSynchroGroup.GET("Synchro Group Code");
+              lIsActive := FALSE;
+              CASE pActionType OF
+                pActionType::Insert:
+                    lIsActive := ("On Insert" = "On Insert"::Yes);
+                pActionType::Modify:
+                  IF ("On Modify" = "On Modify"::"Selected Fields") AND
+                    (lSynchroGroup."Partner Format" = lSynchroGroup."Partner Format"::XML) THEN
+                      lIsActive := IsExistActionOnFieldActive(lSynchroGroupTable,pRecRef)
+                  ELSE
+                    lIsActive := ("On Modify" = "On Modify"::"All Fields");
+                pActionType::Delete:
+                  lIsActive := ("On Delete" = "On Delete"::Yes);
+                pActionType::Rename:
+                  lIsActive := ("On Rename" <> "On Rename"::No);
+              END;
+              IF lIsActive THEN EXIT(TRUE);
+          END;
+        UNTIL lSynchroGroupTable.NEXT = 0;
+
+      END;
+    END;
+
+    PROCEDURE IsExistActionOnFieldActive@1100481005(pSynchroGroupTable@1100481002 : Record 8016710;pRecRef@1100481000 : RecordRef) IsFieldActive : Boolean;
+    VAR
+      i@1100481003 : Integer;
+      lFieldref@1100481004 : FieldRef;
+      EAITools@1100481006 : Codeunit 8016700;
+    BEGIN
+      // renvoi vrai si au moins un champ de la table pass‚e en paramŠtres est … synchroniser
+
+      IsFieldActive := FALSE;
+      FOR i := 1 TO pRecRef.FIELDCOUNT DO BEGIN
+        lFieldref := pRecRef.FIELDINDEX(i);
+        IF EAITools.IsNormalField(pRecRef.NUMBER,lFieldref.NUMBER) THEN
+          IF IsActionOnFieldActive(pSynchroGroupTable,pRecRef.NUMBER,lFieldref.NUMBER) THEN
+          BEGIN
+            IsFieldActive := TRUE;
+            EXIT;
+          END;
+      END;
+    END;
+
+    PROCEDURE IsActionOnFieldActive@1100481015(pSynchroGroupTable@1100481003 : Record 8016710;pTableNumber@1100481000 : Integer;pFieldNumber@1100481001 : Integer) : Boolean;
+    VAR
+      lSynchroGroupTableField@1100481002 : Record 8016711;
+    BEGIN
+      // renvoi vrai si le champ pass‚ en paramŠtres est un champ … synchroniser
+
+      //IF pFieldNumber = 0 THEN
+      //  EXIT(TRUE);
+
+      WITH lSynchroGroupTableField DO BEGIN
+        SETRANGE("Synchro Group Code",pSynchroGroupTable."Synchro Group Code");
+        SETRANGE("To Synchronize Table No.",pSynchroGroupTable."To Synchronize Table No.");
+        SETRANGE("Synchro Group Table Alias",pSynchroGroupTable."Synchro Group Table Alias");
+        SETRANGE("Field No.",pFieldNumber);
+        EXIT(FINDFIRST);
+      END;
+    END;
+
+    PROCEDURE IsActionOnFilterActive@1100481006(pSynchroGroupTable@1100481000 : Record 8016710;pRecref@1100481002 : RecordRef) IsFilterActive : Boolean;
+    VAR
+      lSynchroGroupTableFilter@1100481001 : Record 8016712;
+      lRecRef@1100481003 : RecordRef;
+      lFieldRef@1100481004 : FieldRef;
+      lTableId@1100481005 : Integer;
+    BEGIN
+      // Pose les filtres d‚finis sur la table … synchroniser sur le recordref pass‚ en paramŠtre
+      // retourne vrai si une fois filtr‚ le recordref contient des donn‚es
+
+      //<< EAI01 Nouveau code
+
+      IsFilterActive := FALSE;
+
+      WITH lSynchroGroupTableFilter DO BEGIN
+        SETRANGE("Synchro Group Code",pSynchroGroupTable."Synchro Group Code");
+        SETRANGE("To Synchronize Table No.",pSynchroGroupTable."To Synchronize Table No.");
+        SETRANGE("Synchro Group Table Alias",pSynchroGroupTable."Synchro Group Table Alias");
+        IF ISEMPTY THEN BEGIN
+          IsFilterActive := TRUE;
+          EXIT;
+        END;
+
+        lTableId := pRecref.NUMBER;
+        lRecRef.OPEN(lTableId,TRUE);
+        CopyRecref(pRecref, lRecRef);
+        lRecRef.INSERT;
+        FINDFIRST;
+        REPEAT
+          IF lRecRef.FIELDEXIST("Field No.") THEN BEGIN
+            CLEAR(lFieldRef);
+            lFieldRef := lRecRef.FIELD("Field No.");
+            lFieldRef.SETFILTER("Field Filter");
+          END;
+        UNTIL NEXT = 0;
+      END;
+
+      IsFilterActive := lRecRef.FINDFIRST;
+
+      { Ancien code
+
+      IsFilterActive := FALSE;
+      lRecRef := pRecref.DUPLICATE;
+      lRecRef.RESET;
+      lRecRef.SETRECFILTER;
+      lTableId := lRecRef.NUMBER;
+
+      WITH lSynchroGroupTableFilter DO BEGIN
+        SETRANGE("Synchro Group Code",pSynchroGroupTable."Synchro Group Code");
+        SETRANGE("To Synchronize Table No.",pSynchroGroupTable."To Synchronize Table No.");
+        SETRANGE("Synchro Group Table Alias",pSynchroGroupTable."Synchro Group Table Alias");
+        IF ISEMPTY THEN BEGIN
+          IsFilterActive := lRecRef.FINDFIRST;
+          EXIT;
+        END;
+        IF FINDFIRST THEN
+          REPEAT
+            IF lRecRef.FIELDEXIST("Field No.") THEN BEGIN
+              CLEAR(lFieldRef);
+              lFieldRef := lRecRef.FIELD("Field No.");
+              lFieldRef.SETFILTER("Field Filter");
+            END;
+          UNTIL NEXT = 0;
+      END;
+
+      IsFilterActive := lRecRef.FINDFIRST;
+      }
+      //>> SK01
+    END;
+
+    PROCEDURE CopyRecref@1100281000(VAR pFromRecref@1100281000 : RecordRef;VAR pToRecref@1100281001 : RecordRef);
+    VAR
+      lFromFieldref@1100281002 : FieldRef;
+      lToFieldref@1100281003 : FieldRef;
+      i@1100281004 : Integer;
+      lEAITools@1100281005 : Codeunit 8016700;
+    BEGIN
+      FOR i := 1 TO pFromRecref.FIELDCOUNT DO BEGIN
+        lFromFieldref := pFromRecref.FIELDINDEX(i);
+        IF lEAITools.IsNormalField(pFromRecref.NUMBER,lFromFieldref.NUMBER) THEN BEGIN
+          lToFieldref := pToRecref.FIELDINDEX(i);
+          lToFieldref.VALUE := lFromFieldref.VALUE;
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r EAI01 @d 08/12/10 @a ISAT.MGI @v ISAEAI5.01.01.00 @s correction sur apllication des filtres */
+    }
+    END.
+  }
+}

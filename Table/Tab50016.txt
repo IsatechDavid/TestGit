@@ -1,0 +1,157 @@
+OBJECT Table 50016 Ability Geo. Provider
+{
+  OBJECT-PROPERTIES
+  {
+    Date=15/09/11;
+    Time=10:20:28;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnInsert=BEGIN
+               IF NOT SkipUserPerm THEN
+                 TestUserPerm("Provider No."); //IMH03;
+               TESTFIELD("Start Reference Code");//IMH02
+             END;
+
+    OnModify=BEGIN
+               IF NOT SkipUserPerm THEN
+                 TestUserPerm("Provider No."); //IMH03;
+             END;
+
+    OnDelete=BEGIN
+               IF NOT SkipUserPerm THEN
+                 TestUserPerm("Provider No."); //IMH03;
+             END;
+
+    CaptionML=[ENU=Ability Geo. Provider;
+               FRA=Comp‚tence g‚ographique prestataire];
+    LookupFormID=Form50017;
+    DrillDownFormID=Form50017;
+  }
+  FIELDS
+  {
+    { 2   ;   ;Provider No.        ;Code20        ;TableRelation=Provider;
+                                                   CaptionML=FRA=Nø prestataire }
+    { 3   ;   ;Start Reference Code;Code10        ;TableRelation=IF (Setup Type=CONST("Ville (Distance)")) "Geographical Reference"
+                                                                 ELSE IF (Setup Type=CONST(Area)) Area
+                                                                 ELSE IF (Setup Type=CONST(Territory)) Territory;
+                                                   CaptionML=[ENU=Start Reference Code;
+                                                              FRA=Code r‚f‚rence d‚part];
+                                                   NotBlank=Yes }
+    { 4   ;   ;End Ref. Geo. Code  ;Code10        ;TableRelation="Geographical Reference";
+                                                   CaptionML=[ENU=End Ref. Geo. Code;
+                                                              FRA=Code r‚f. g‚o. arriv‚e];
+                                                   NotBlank=Yes }
+    { 5   ;   ;Specialization Code ;Code10        ;TableRelation="Provider Specialization"."Specialization Code" WHERE (Provider No.=FIELD(Provider No.));
+                                                   CaptionML=[ENU=Specialization Code;
+                                                              FRA=Code sp‚cialit‚] }
+    { 10  ;   ;Standard            ;Boolean       ;InitValue=Yes;
+                                                   CaptionML=[ENU=Standard;
+                                                              FRA=Standard] }
+    { 11  ;   ;Emergency           ;Boolean       ;OnValidate=VAR
+                                                                lProvSpecialization@1100281000 : Record 50006;
+                                                              BEGIN
+                                                              END;
+
+                                                   CaptionML=[ENU=Emergency;
+                                                              FRA=Urgence] }
+    { 29  ;   ;Setup Type          ;Option        ;CaptionML=[ENU=Setup Type;
+                                                              FRA=Type paramŠtrage];
+                                                   OptionCaptionML=[ENU=City (Distance),Area,Territory,Manual,Country;
+                                                                    FRA=Ville (distance),D‚partement,R‚gion,Manuel,Pays];
+                                                   OptionString=Ville (Distance),Area,Territory,Manual,Country }
+    { 30  ;   ;Main Specialization ;Boolean       ;CaptionML=[ENU=Main Specialization;
+                                                              FRA=Sp‚cialit‚ principale] }
+    { 40  ;   ;Standard Exclusion  ;Boolean       ;CaptionML=[ENU=Standard Exclusion;
+                                                              FRA=Exclusion standard] }
+    { 41  ;   ;Emergency Exclusion ;Boolean       ;CaptionML=[ENU=Emergency Exclusion;
+                                                              FRA=Exclusion urgence] }
+    { 100 ;   ;Distance (km)       ;Integer       ;CaptionML=[ENU=Distance (km);
+                                                              FRA=Distance (km)] }
+  }
+  KEYS
+  {
+    {    ;Provider No.,Start Reference Code,End Ref. Geo. Code,Specialization Code;
+                                                   Clustered=Yes }
+    {    ;End Ref. Geo. Code,Specialization Code   }
+    { No ;Start Reference Code,Specialization Code,Emergency }
+    {    ;Provider No.,Specialization Code        ;MaintainSQLIndex=No }
+    {    ;Specialization Code                     ;MaintainSQLIndex=No }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      Provider@1100281000 : Record 50000;
+      SkipUserPerm@1100281001 : Boolean;
+      Text001@1100281002 : TextConst 'FRA=La sp‚cialit‚ n''existe pas en urgence';
+
+    PROCEDURE GetAreaDescription@1100281004(pCode@1100281003 : Code[10];pStartCode@1100281004 : Boolean) rValue : Text[50];
+    VAR
+      lGeographicalReference@1100281000 : Record 50013;
+      lArea@1100281001 : Record 284;
+      lTerritory@1100281002 : Record 286;
+    BEGIN
+      rValue := '';
+
+      IF NOT pStartCode THEN BEGIN
+        IF lGeographicalReference.GET(pCode) THEN BEGIN
+          rValue := lGeographicalReference."Town Name";
+        END;
+      END ELSE BEGIN
+        CASE "Setup Type" OF
+          "Setup Type"::"Ville (Distance)","Setup Type"::Manual : BEGIN
+            IF lGeographicalReference.GET(pCode) THEN BEGIN
+              rValue := lGeographicalReference."Town Name";
+            END;
+          END;
+          "Setup Type"::Area : BEGIN
+            IF lArea.GET(pCode) THEN BEGIN
+              rValue := lArea.Text;
+            END;
+          END;
+          "Setup Type"::Territory : BEGIN
+            IF lTerritory.GET(pCode) THEN BEGIN
+              rValue := lTerritory.Name;
+            END;
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetSpecializationDescription@1100281003(pCode@1100281001 : Code[10]) rValue : Text[80];
+    VAR
+      lSpecialization@1100281000 : Record 50005;
+    BEGIN
+      rValue := '';
+
+      IF lSpecialization.GET(pCode) THEN BEGIN
+        rValue := lSpecialization.Description;
+      END;
+    END;
+
+    PROCEDURE SetSkipUserPerm@1100281000(pSkipUserPerm@1100281000 : Boolean);
+    BEGIN
+      SkipUserPerm := pSkipUserPerm;
+    END;
+
+    PROCEDURE TestUserPerm@1100281001(pProviderNo@1100281000 : Code[20]);
+    BEGIN
+      Provider.GET(pProviderNo);
+      IF Provider.CheckUserPermission(Provider,TRUE) THEN;
+    END;
+
+    BEGIN
+    {
+      /** @r IHM04 @d 16/07/11 @a ISAT.PC @v IMH6.01.022 @s Comp‚tence g‚o @c ajout champ 41,Emergency Exclusion */
+      /** @r IHM03 @d 08/06/11 @a ISAT.VA @v IMH6.01.177 @s S‚curit‚ des prestataires */
+      /** @r IHM02 @d 03/12/10 @a ISAT.LLT @v IMH6.01.022 @s Comp‚tence g‚o @c Code ref geo obligatoire */
+      /** @r IHM01 @d 23/09/10 @a ISAT.PC @v IMH6.01.022 @s Comp‚tence g‚o @c Creation */
+    }
+    END.
+  }
+}

@@ -1,0 +1,155 @@
+OBJECT Codeunit 50196 FUSION Sent Quote Val. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/09/12;
+    Time=15:30:45;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=BEGIN
+            EAISentMQBuffer := Rec;
+            CALCFIELDS("XML Source");
+            EAISentMQBuffer."XML Source" := Rec."XML Source";
+            Code;
+            Rec := EAISentMQBuffer;
+            EAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := EAISentMQBuffer."XML Source";
+            "Response XML Source" := EAISentMQBuffer."Response XML Source";
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAISentMQBuffer@1100281000 : Record 8016720;
+      ErrorText001@1100281001 : TextConst 'ENU=Error acquittal cancel quote.;FRA=Erreur acquittement annulation devis.';
+
+    PROCEDURE Code@1100281000();
+    VAR
+      lInterfaceSetup@1100281000 : Record 50139;
+      lEAIMQBufferMgt@1100281011 : Codeunit 8016708;
+      lwinHTTPService@1100281006 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDoc@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDom@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lIXMLDOMProcessingInstruction@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF89-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMProcessingInstruction";
+      lInStream@1100281002 : InStream;
+      lOutStream@1100281004 : OutStream;
+      lXMLNewNode@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lRecRef@1100281007 : RecordRef;
+      lRecID@1100281001 : RecordID;
+      lServIntervQuote@1100281008 : Record 50076;
+    BEGIN
+      lInterfaceSetup.GET;
+      lInterfaceSetup.TESTFIELD(lInterfaceSetup."Fusion Quote sent WS Url");
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lRecID := EAISentMQBuffer.RecordId;
+      lRecRef := lRecID.GETRECORD;
+      lRecRef.LOCKTABLE;
+      IF lRecRef.FIND('=') THEN;
+      lRecRef.SETTABLE(lServIntervQuote);
+
+      lwinHTTPService.Open('POST',lInterfaceSetup."Fusion Quote sent WS Url",0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      CASE lServIntervQuote."Expert Quote Check" OF
+        lServIntervQuote."Expert Quote Check"::" " :
+          lwinHTTPService.SetRequestHeader('SOAPAction','"http://tempuri.org/IEdiService/AnnuleDevisPourContr“leDTC"');
+        lServIntervQuote."Expert Quote Check"::"Expert Check" :
+          lwinHTTPService.SetRequestHeader('SOAPAction','"http://tempuri.org/IEdiService/AddDevisPourContr“leDTC"');
+      END;
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      CREATE(lXmlDoc);
+      EAISentMQBuffer.CALCFIELDS("XML Source");
+      EAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lwinHTTPService.Send(lInStream);
+      CLEAR(lInStream);
+      CLEAR(lXmlDoc);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CLEAR(lXmlDom);
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      CLEAR(EAISentMQBuffer."Response XML Source");
+      EAISentMQBuffer."Response XML Source".CREATEOUTSTREAM(lOutStream);
+      lXmlDom.save(lOutStream);
+      EAISentMQBuffer."Response XML Source".EXPORT('C:\Temp\Test_fusion\testFusion_Emmision_Quote_Result.xml');
+      IF lwinHTTPService.Status = 200 THEN BEGIN
+        TreateAcquittal(lXmlDom, lServIntervQuote);
+      END ELSE BEGIN
+        lEAIMQBufferMgt.TransferSendMQBufferToSendMQ(EAISentMQBuffer);
+        COMMIT;
+        ERROR(lwinHTTPService.StatusText);
+      END;
+    END;
+
+    PROCEDURE TreateAcquittal@1100281001(VAR pXmlDomResponse@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pServIntervQuote@1100281009 : Record 50076);
+    VAR
+      lXmlNodeList@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lAttributeNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lFUSIONInterfaceMgt@1100281006 : Codeunit 50181;
+      lErrorText009@1100281007 : TextConst 'ENU="The comment %1 is not a beneficiary. ";FRA=L''identifiant suivi SiTiers %1 n''est pas valide.';
+      lRecRef@1100281008 : RecordRef;
+      lRecID@1100281004 : RecordID;
+      lFusionReference@1100281005 : Record 50164;
+    BEGIN
+      {
+      <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+        <s:Body>
+          <AddDevisPourContr“leDTCResponse xmlns="http://tempuri.org/">
+           <AddDevisPourContr“leDTCResult xmlns:a="http://schemas.datacontract.org/2004/07/Fusion.EDI"
+               xmlns:i="http://www.w3.org/2001/XMLSch
+              <a:CodeErreurFusion i:nil="true" />
+              <a:IdentifiantElementSiTiersOrigineErreur i:nil="true" />
+              <a:IdentifiantSystŠmeFusion>633cb8ab-c6a3-42b8-9cfe-b72c41f99944</a:IdentifiantSystŠmeFusion>
+              <a:Int‚grationSuccŠs>true</a:Int‚grationSuccŠs>
+              <a:MessageErreurInt‚gration />
+            </AddDevisPourContr“leDTCResult>
+          </AddDevisPourContr“leDTCResponse>
+        </s:Body>
+      </s:Envelope>
+      }
+
+      CASE pServIntervQuote."Expert Quote Check" OF
+        pServIntervQuote."Expert Quote Check"::" " : BEGIN
+        END;
+        pServIntervQuote."Expert Quote Check"::"Expert Check" : BEGIN
+          lXmlNodeList := pXmlDomResponse.getElementsByTagName('AddDevisPourContr“leDTCResult');
+          IF ISCLEAR(lXmlNodeList) THEN
+            ERROR(ErrorText001);
+          lXmlDomElement := lXmlNodeList.item(0);
+
+          lAttributeNode := lXmlDomElement.selectSingleNode('a:Int‚grationSuccŠs');
+          IF lAttributeNode.text = 'false' THEN BEGIN
+            lAttributeNode := lXmlDomElement.selectSingleNode('a:MessageErreurInt‚gration');
+            ERROR(lAttributeNode.text);
+          END;
+          IF lAttributeNode.text = 'true' THEN BEGIN
+            lAttributeNode := lXmlDomElement.selectSingleNode('a:IdentifiantSystŠmeFusion');
+            lFusionReference.CreateByIntervQuoteLine(pServIntervQuote, lAttributeNode.text);
+            //pServIntervQuote."Fusion GUID Code" := lAttributeNode.text;
+            //pServIntervQuote."Fusion Expert Quote Check" := pServIntervQuote."Fusion Expert Quote Check"::"Expert Check";
+            //pServIntervQuote.MODIFY(FALSE);
+            //END;
+          END;
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 13/10/11 @a ISAT.ZW @v IMH6.01.136 @s Interface Fusion @c cr‚ation */
+    }
+    END.
+  }
+}

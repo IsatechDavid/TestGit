@@ -1,0 +1,340 @@
+OBJECT Codeunit 50120 ANSAAP Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=17/03/11;
+    Time=15:42:08;
+    Modified=Yes;
+    Version List=A supprimer;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lANSAAP@1100281000 : Record 50118;
+            lANSRAP@1100281001 : Record 50119;
+            lContact@1100281002 : Record 5050;
+            lContactContract@1100281004 : Record 50059;
+            lContactContractAddr@1100281003 : Record 50039;
+            lError@1100281005 : Boolean;
+            lOutStream@1100281006 : OutStream;
+            lFile@1100281007 : File;
+            lOEF@1100281008 : Boolean;
+            lCurRecRef@1100281009 : RecordRef;
+            lNewRecRef@1100281010 : RecordRef;
+            lCurANSAAP@1100281011 : Record 50118;
+          BEGIN
+            IF ERASE('c:\support\contact2.xml') THEN;
+            lFile.TEXTMODE(TRUE);
+            lFile.CREATE('c:\support\contact2.xml');
+            lFile.CREATEOUTSTREAM(lOutStream);
+            lANSAAP.RESET();
+            lANSAAP.SETCURRENTKEY("Contact No.");
+            //lANSAAP.SETRANGE("Treatment Status",lANSAAP."Treatment Status"::Pending);
+
+            lANSRAP.RESET();
+            lANSRAP.SETCURRENTKEY("Contact No.");
+            lANSRAP.SETRANGE("Treatment Status",lANSRAP."Treatment Status"::Pending);
+            lOEF := FALSE;
+            IF lANSAAP.FINDSET(TRUE) THEN BEGIN
+              lOutStream.WRITETEXT('<MemberContacts>');
+              lOutStream.WRITETEXT();
+              REPEAT
+                lCurANSAAP := lANSAAP;
+                lOEF := (lANSAAP.NEXT() = 0);
+                IF (NOT lOEF) AND (lANSAAP."Contact No." = lCurANSAAP."Contact No.") THEN BEGIN
+                  lCurRecRef.GETTABLE(lCurANSAAP);
+                  lNewRecRef.GETTABLE(lANSAAP);
+                  concatenateRecords(lCurRecRef,lNewRecRef);
+                END ELSE BEGIN
+                  WriteMemberContactNode(lOutStream,lCurANSAAP);
+                  IF lANSRAP."Contact No." < lCurANSAAP."Contact No." THEN;
+                  GetContract(lCurANSAAP,lANSRAP,lOutStream);
+                END;
+                lCurANSAAP."Treatment Status" := lCurANSAAP."Treatment Status"::Processed;
+                lCurANSAAP.MODIFY();
+              UNTIL lOEF;
+              lOutStream.WRITETEXT('</MemberContacts>');
+              lOutStream.WRITETEXT();
+            END;
+            lFile.CLOSE();
+              EXIT;
+              {
+              lFIle.CREATEOUTSTREAM(lOutStream);
+              lBreak := FALSE;
+              REPEAT
+                WriteMemberContactNode(lOutStream,lANSAAP);
+                {
+                //Recherche du contact
+                lContact.RESET();
+                lError := FALSE;
+                IF NOT lContact.GET(lANSAAP."Contact No.") THEN BEGIN
+                  lContact.INIT();
+                  lContact."No." := lANSAAP."Contact No.";
+                  lContact.Type := lContact.Type::Person;
+                  lContact."Corporate No." := lANSAAP."Customer No.";
+
+                  lContact.INSERT(TRUE);
+                END ELSE BEGIN
+
+                END;
+                IF lANSRAP.GET(lANSAAP.Site,lANSAAP."Customer No.",lANSAAP."Contact No.",lANSAAP."Warranty No.") THEN BEGIN
+                  lContactContract.INIT();
+                  lContactContract."Contact No." := lANSRAP."Contact No.";
+                  lContactContract."Corporate No." := lANSRAP."Customer No.";
+                  lContactContract.INSERT(TRUE);
+                END;
+
+                IF lError THEN
+                  lANSAAP."Treatment Status" := lANSAAP."Treatment Status"::Error
+                ELSE
+                  lANSAAP."Treatment Status" := lANSAAP."Treatment Status"::Processed;
+                lANSAAP.MODIFY();
+                COMMIT();
+                }
+                lBreak := TRUE;
+              UNTIL (lANSAAP.NEXT() = 0) OR (NOT lBreak);
+              lFIle.CLOSE();
+               }
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE GetContract@1100281005(pCurANSAAP@1100281001 : Record 50118;VAR pANSRAP@1100281000 : Record 50119;pOutStream@1100281006 : OutStream);
+    VAR
+      lOEF@1100281002 : Boolean;
+      lCurANSRAP@1100281003 : Record 50119;
+      lCurRecRef@1100281004 : RecordRef;
+      lNewRecRef@1100281005 : RecordRef;
+    BEGIN
+      lOEF := FALSE;
+      WHILE (pANSRAP."Contact No." < pCurANSAAP."Contact No.") AND (lOEF = FALSE) DO BEGIN
+        lOEF := (pANSRAP.NEXT() = 0);
+      END;
+      WHILE (pANSRAP."Contact No." = pCurANSAAP."Contact No.") AND (lOEF = FALSE) DO BEGIN
+        lCurANSRAP := pANSRAP;
+        lOEF := (pANSRAP.NEXT() = 0);
+        IF NOT lOEF THEN BEGIN
+          lCurRecRef.GETTABLE(lCurANSRAP);
+          lNewRecRef.GETTABLE(pANSRAP);
+          concatenateRecords(lCurRecRef,lNewRecRef);
+        END;
+      END;
+      IF lCurANSRAP."Contact No." = pCurANSAAP."Contact No." THEN
+          WriteMemberContractNode(pOutStream,lCurANSRAP);
+    END;
+
+    PROCEDURE UpdateContact@1100281006(pANSAAP@1100281001 : Record 50118;pContact@1100281000 : Record 5050) : Boolean;
+    VAR
+      lUpdated@1100281002 : Boolean;
+    BEGIN
+      lUpdated := FALSE;
+      //IF pContact.Birthdate <> DMY2DATE(pANSAAP."Birth Date",pANSAAP."Birth Date",
+      //  pANSAAP."Birth Year"+pANSAAP."Birth Date"*100) THEN BEGIN
+      //   pContact.Birthdate := DMY2DATE(pANSAAP."Birth Day",pANSAAP."Birth Month",pANSAAP."Birth Year"+pANSAAP."Birth Date"*100);
+      //   lUpdated := TRUE;
+      //END;
+      //IF
+      IF pContact.Name <> pANSAAP.Name THEN BEGIN
+         pContact.Name := pANSAAP.Name;
+         lUpdated := TRUE;
+      END;
+
+      {IF pContact.NAme <> (pANSAAP.Name + '' + THEN
+         pContact.NAme := pANSAAP.Name;
+         lUpdated := TRUE;
+      END;
+      }
+
+      EXIT(lUpdated);
+    END;
+
+    PROCEDURE UpdateContactContract@1100281007() : Boolean;
+    BEGIN
+    END;
+
+    PROCEDURE GetDate@1100281008(pCentury@1100281000 : Integer;pYear@1100281001 : Integer;pMonth@1100281002 : Integer;pDay@1100281003 : Integer) : Text[30];
+    VAR
+      lDate@1100281004 : Date;
+      lCentury@1100281008 : Integer;
+      lYear@1100281007 : Integer;
+      lMonth@1100281006 : Integer;
+      lDay@1100281005 : Integer;
+    BEGIN
+      IF pDay <> 0 THEN BEGIN
+        EXIT(FORMAT(pCentury*100+pYear,0,'<integer,4><Filler,0>')+
+          FORMAT(pMonth,0,'<integer,2><filler,0>') +
+          FORMAT(pDay,0,'<integer,2><filler,0>'));
+      END ELSE
+        EXIT('');
+    END;
+
+    PROCEDURE WriteMemberContactNode@1100281000(pOutStream@1100281000 : OutStream;pANSSAP@1100281001 : Record 50118);
+    BEGIN
+      pOutStream.WRITETEXT('<MemberContact>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Corporate_No>' + pANSSAP."Customer No." + '</Corporate_No>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Member_No>' + pANSSAP."Contact No." + '</Member_No>');
+      pOutStream.WRITETEXT();
+      //<Salutation>code appelation</Salutation>
+      IF pANSSAP."Person Code" = 'P' THEN BEGIN
+        pOutStream.WRITETEXT('<Surname>'+ pANSSAP.Name + '</Surname>');
+        pOutStream.WRITETEXT();
+        pOutStream.WRITETEXT('<First_Name>'+ pANSSAP.FullName + '</First_Name>');
+      END ELSE BEGIN
+        pOutStream.WRITETEXT('<Name>'+ pANSSAP.Name + '</Name>');
+        pOutStream.WRITETEXT();
+        pOutStream.WRITETEXT('<Name2>'+ pANSSAP.FullName + '</Name2>');
+      END;
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Address>'+ pANSSAP."Address 1"+ '</Address>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Address2>'+ pANSSAP."Address 2"+ '</Address2>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Address3>'+ pANSSAP."Address 3"+ '</Address3>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<PostCode>' + pANSSAP."Post Code" + '</PostCode>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<City>' + pANSSAP.City + '</City>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Country>' + pANSSAP.Country + '</Country>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<CorporateRegion>' + pANSSAP."Customer County" + '</CorporateRegion>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<PhoneNo>' + pANSSAP."Phone No. 1" + '</PhoneNo>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<FaxNo>' + pANSSAP."Fax No." + '</FaxNo>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Email>' + pANSSAP."E-Mail 1" + '</Email>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Email2>' + pANSSAP."E-Mail 2" + '</Email2>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<BirthDate>' + FORMAT(pANSSAP."Birth Date") + '</BirthDate>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<RayedDate>' + FORMAT(pANSSAP."Radiation Date") + '</RayedDate>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<ChangeDate>' + FORMAT(pANSSAP."Movement Date") + '</ChangeDate>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('</MemberContact>');
+      pOutStream.WRITETEXT();
+    END;
+
+    PROCEDURE WriteMemberContractNode@1100281002(pOutStream@1100281000 : OutStream;pANSRAP@1100281001 : Record 50119);
+    BEGIN
+      pOutStream.WRITETEXT('<MemberContract>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<CorporateNo>' + pANSRAP."Customer No." + '</CorporateNo>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<MemberNo>' + pANSRAP."Contact No." + '</MemberNo>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<ContractReference>' + pANSRAP."Contact No." + '</ContractReference>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<ResidenceType>' + pANSRAP."Contact No." + '</ResidenceType>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Address>'+ pANSRAP."Address 1" + '</Address>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Address2>'+ pANSRAP."Address 2" + '</Address2>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Address3>'+ pANSRAP."Address 3" + '</Address3>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<PostCode>' + pANSRAP."Post Code" + '</PostCode>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<City>' + pANSRAP.City + '</City>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<Country>' + pANSRAP.Country + '</Country>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<StartDate>' + FORMAT(pANSRAP."Contract Start Date") + '</StartDate>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<EndDate>' + FORMAT(pANSRAP."Contract End Date") + '</EndDate>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<OccupierNature>' + COPYSTR(pANSRAP.Filler,1,1) + '</OccupierNature>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<PropertyType>' + COPYSTR(pANSRAP.Filler,2,1) + '</PropertyType>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<DeductibleAmount1 Currency="EUR">' + COPYSTR(pANSRAP.Filler,3,13) + '</DeductibleAmount1>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<DeductibleAmount2 Currency="EUR">' + COPYSTR(pANSRAP.Filler,21,13) + '</DeductibleAmount2>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('<ChangeDate>' + FORMAT(pANSRAP."Movement Date") + '</ChangeDate>');
+      pOutStream.WRITETEXT();
+      pOutStream.WRITETEXT('</MemberContract>');
+      pOutStream.WRITETEXT();
+    END;
+
+    PROCEDURE IIF@1100281003(pProposition@1100281000 : Boolean;pTrue@1100281001 : Text[250];pFalse@1100281002 : Text[250]) : Text[250];
+    BEGIN
+      IF pProposition THEN
+        EXIT(pTrue)
+      ELSE
+        EXIT(pFalse);
+    END;
+
+    PROCEDURE concatenateRecords@1100281001(CurRec@1100281000 : RecordRef;NewRec@1100281001 : RecordRef);
+    VAR
+      i@1100281002 : Integer;
+      CurField@1100281003 : FieldRef;
+      NewField@1100281004 : FieldRef;
+    BEGIN
+      FOR i := 1 TO CurRec.FIELDCOUNT() DO BEGIN
+        CurField := CurRec.FIELDINDEX(i);
+        NewField := NewRec.FIELDINDEX(i);
+        IF NOT HasValue(NewField) THEN
+          NewField := CurField;
+          //  MESSAGE('%1 %2',NewField.NAME,NewField.TYPE);
+      END;
+    END;
+
+    LOCAL PROCEDURE HasValue@10(FldRef@1000 : FieldRef) : Boolean;
+    VAR
+      Field@1102601000 : Record 2000000041;
+      HasValue@1001 : Boolean;
+      Int@1002 : Integer;
+      Dec@1003 : Decimal;
+      D@1007 : Date;
+      T@1008 : Time;
+    BEGIN
+      EVALUATE(Field.Type,FORMAT(FldRef.TYPE));
+
+      CASE Field.Type OF
+        Field.Type::Boolean:
+          HasValue := FldRef.VALUE;
+        Field.Type::Option:
+          HasValue := TRUE;
+        Field.Type::Integer:
+          BEGIN
+            Int := FldRef.VALUE;
+            HasValue := Int <> 0;
+          END;
+        Field.Type::Decimal:
+          BEGIN
+            Dec := FldRef.VALUE;
+            HasValue := Dec <> 0;
+          END;
+        Field.Type::Date:
+          BEGIN
+            D := FldRef.VALUE;
+            HasValue := D <> 0D;
+          END;
+        Field.Type::Time:
+          BEGIN
+            T := FldRef.VALUE;
+            HasValue := T <> 0T;
+          END;
+        Field.Type::BLOB:
+          HasValue := FALSE;
+        ELSE
+          HasValue := FORMAT(FldRef.VALUE) <> '';
+      END;
+
+      EXIT(HasValue);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 10/03/11 @a ISAT.NFO @v IMH6.01.133 @s ANSAAP  @c Cr‚ation  */
+    }
+    END.
+  }
+}

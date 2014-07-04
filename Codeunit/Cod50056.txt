@@ -1,0 +1,320 @@
+OBJECT Codeunit 50056 Tray Line Action Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=27/03/12;
+    Time=08:55:13;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE CreateInteraction@1100281000(VAR pTrayLine@1100281000 : Record 50048);
+    VAR
+      lContact@1100281007 : Record 5050;
+      lService@1100281006 : Record 50066;
+      lServHeader@1100281005 : Record 5900;
+      lIntervention@1100281004 : Record 50075;
+      lComplTask@1100281002 : Record 50004;
+      lIntervQuote@1100281001 : Record 50076;
+    BEGIN
+      WITH pTrayLine DO BEGIN
+        CASE "Linked To Table" OF
+          "Linked To Table"::Contact : BEGIN
+            IF "Contact No." = '' THEN
+              EXIT;
+            IF lContact.GET("Contact No.") THEN
+              lContact.CreateInteraction;
+          END;
+          "Linked To Table"::Service: BEGIN
+            IF "Service No." = '' THEN
+              EXIT;
+            IF lService.GET("Service No.") THEN
+              lService.CreateInteraction;
+          END;
+          "Linked To Table"::ServiceHeader: BEGIN
+            IF "Service Header No." = '' THEN
+              EXIT;
+            IF lServHeader.GET(lServHeader."Document Type"::Invoice,"Service Header No.") THEN
+              lServHeader.CreateInteraction;
+          END;
+          "Linked To Table"::Intervention: BEGIN
+            IF ("Service Header No." = '') OR ("Intervention Line No." = 0) THEN
+              EXIT;
+            IF lIntervention.GET("Service Header No.", "Intervention Line No.") THEN
+              lIntervention.CreateInteraction;
+          END;
+          "Linked To Table"::CompletnessTask : BEGIN
+            IF ("Intervention Provider No." = '') OR ("Linked Document No." = '') THEN
+              EXIT;
+            IF lComplTask.GET("Intervention Provider No.", "Linked Document No.") THEN
+              lComplTask.CreateInteraction;
+          END;
+          "Linked To Table"::InterventionQuote : BEGIN
+            IF ("Service Header No." = '') OR ("Intervention Line No." = 0) OR ("Intervention Quote Line No." = 0) THEN
+              EXIT;
+
+            IF lIntervQuote.GET("Service Header No.", "Intervention Line No.", "Intervention Quote Line No.") THEN
+              lIntervQuote.CreateInteraction;
+          END;
+          ELSE
+            FIELDERROR("Linked To Table");
+        END; // CASE
+      END; // WITH
+    END;
+
+    PROCEDURE CreateIntervention@1100281001(VAR pTrayLine@1100281000 : Record 50048;pShowCard@1100281002 : Boolean);
+    VAR
+      lServiceHeader@1100281003 : Record 5900;
+      lInterventioManagement@1100281004 : Codeunit 50014;
+      lInterventionLine@1000000000 : Record 50075;
+    BEGIN
+      pTrayLine.TESTFIELD("Intervention No.", 0);
+      pTrayLine.TESTFIELD("Service Header No.");
+      pTrayLine.TESTFIELD("Contact No.");
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pTrayLine."Service Header No.");
+      lInterventioManagement.CreateIntervWithProvider(lServiceHeader, lInterventionLine, pTrayLine."Contact No.", pShowCard);
+    END;
+
+    PROCEDURE FindProvider@1100281002(VAR pTrayLine@1100281000 : Record 50048) : Boolean;
+    VAR
+      lServiceHeader@1100281001 : Record 5900;
+      lProviderSearchCard@1100281002 : Page 50120;
+      lProviderSearchCardForm@1100281008 : Form 50120;
+      lTrayLineProvSearchEntry@1100281003 : Record 50144;
+      lProviderSearchBasket@1100281004 : TEMPORARY Record 51002;
+      lInterventionLine@1100281005 : Record 50075;
+      lInterventionMgt@1100281006 : Codeunit 50014;
+      lInterventionLineTmp@1100281007 : TEMPORARY Record 50075;
+      lServOrderType@1000000000 : Record 5903;
+    BEGIN
+      IF pTrayLine.Closed THEN
+        EXIT;
+
+      lTrayLineProvSearchEntry.SETRANGE("Team Code", pTrayLine."Team Code");
+      lTrayLineProvSearchEntry.SETRANGE("Tray Line Entry No.", pTrayLine."Entry No.");
+      IF lTrayLineProvSearchEntry.FINDSET THEN BEGIN
+        REPEAT
+          lProviderSearchBasket.TRANSFERFIELDS(lTrayLineProvSearchEntry);
+          lProviderSearchBasket.INSERT;
+        UNTIL lTrayLineProvSearchEntry.NEXT = 0;
+      END
+      //<<IMH04.ST
+      ELSE BEGIN
+        pTrayLine.TESTFIELD("Service Header No.");
+        pTrayLine.CALCFIELDS("Service Order Type");
+        IF NOT lServOrderType.GET(pTrayLine."Service Order Type") THEN
+          lServOrderType.INIT;
+        lInterventionMgt.LoadSpec(pTrayLine."Service Header No.", lProviderSearchBasket,
+                                  lServOrderType, TRUE, TRUE);
+      END;
+      //>>IMH04.ST
+
+      IF ISSERVICETIER THEN
+      BEGIN
+        lProviderSearchCard.SetProviderSearchBasket(lProviderSearchBasket);
+        lProviderSearchCard.SetServiceHeaderNo(pTrayLine."Service Header No.");
+        lProviderSearchCard.SetTrayLineNo(pTrayLine."Team Code", pTrayLine."Entry No.");
+        lProviderSearchCard.ProductNoValidate();
+        lProviderSearchCard.RUNMODAL();
+        IF NOT  lProviderSearchCard.GetIsOk THEN
+          EXIT(FALSE);
+      END ELSE BEGIN
+      //  lProviderSearchCardform.SetProviderSearchBasket(lProviderSearchBasket);
+      //  lProviderSearchCardform.SetServiceHeaderNo(pTrayLine."Service Header No.");
+      //  lProviderSearchCardform.SetTrayLineNo(pTrayLine."Team Code", pTrayLine."Entry No.");
+        lProviderSearchCardForm.ProductNoValidate();
+        lProviderSearchCardForm.RUNMODAL();
+      //  IF NOT  lProviderSearchCardform.GetIsOk THEN
+      //    EXIT(FALSE);
+      END;
+
+      lProviderSearchBasket.DELETEALL;
+      IF ISSERVICETIER THEN
+        lProviderSearchCard.GetResultProvSearBasket(lProviderSearchBasket);
+        //ELSE
+      //  lProviderSearchCardform.GetResultProvSearBasket(lProviderSearchBasket);
+      lProviderSearchBasket.SETFILTER("Provider No.", '<>%1', '');
+      IF lProviderSearchBasket.ISEMPTY THEN
+        EXIT(FALSE);
+      lProviderSearchBasket.RESET;
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pTrayLine."Service Header No.");
+      lInterventionMgt.SetLaunchProcessStatus(TRUE);
+      IF lInterventionMgt.CreateInterventionByBasket(lInterventionLine,
+            lServiceHeader, lProviderSearchBasket, lInterventionLineTmp, TRUE) > 0 THEN BEGIN
+        IF lServiceHeader.AutoStep THEN
+          lServiceHeader.MODIFY;
+        pTrayLine.VALIDATE(Closed,TRUE);
+        pTrayLine.MODIFY(TRUE);
+        EXIT(TRUE);
+      END;
+    END;
+
+    PROCEDURE ShowCard@1100281003(pTrayLine@1100281000 : Record 50048);
+    VAR
+      lContact@1100281007 : Record 5050;
+      lService@1100281006 : Record 50066;
+      lServHeader@1100281005 : Record 5900;
+      lIntervention@1100281004 : Record 50075;
+      lDocQueue@1100281003 : Record 50054;
+      lComplTask@1100281002 : Record 50004;
+      lIntervQuote@1100281001 : Record 50076;
+      lProvider@1100281008 : Record 50000;
+    BEGIN
+      WITH pTrayLine DO BEGIN
+        IF "Linked To Table" = "Linked To Table"::DocumentQueue THEN BEGIN
+          IF pTrayLine."Service No." <> '' THEN
+            "Linked To Table" := "Linked To Table"::Service;
+          IF pTrayLine."Service Header No." <> '' THEN
+            "Linked To Table" := "Linked To Table"::ServiceHeader;
+          IF pTrayLine."Intervention Line No." <> 0 THEN
+            "Linked To Table" := "Linked To Table"::Intervention;
+          IF (pTrayLine."Service No." = '') AND (pTrayLine."Service Header No." = '')
+             AND (pTrayLine."Intervention Line No." = 0) THEN
+            "Linked To Table" := "Linked To Table"::Contact;
+        END;
+
+        CASE "Linked To Table" OF
+          "Linked To Table"::Contact : BEGIN
+            IF "Contact No." = '' THEN
+              EXIT;
+            IF lContact.GET("Contact No.") THEN BEGIN
+              //<<IMH02.isat.PC
+              CASE lContact."Service Contact" OF
+                lContact."Service Contact"::Provider : BEGIN
+                  lProvider.GET(lContact."No.");
+                  lProvider.FILTERGROUP(2);
+                  lProvider.SETRECFILTER;
+                  lProvider.FILTERGROUP(0);
+                  FORM.RUN(FORM::"Provider Card", lProvider);
+                END;
+                ELSE BEGIN
+              //>>IMH02.isat.PC
+                  lContact.FILTERGROUP(2);
+                  lContact.SETRECFILTER;
+                  lContact.FILTERGROUP(0);
+                  FORM.RUN(0, lContact);
+                END;
+              END;
+            END;
+          END;
+          "Linked To Table"::Service : BEGIN
+            IF "Service No." = '' THEN
+              EXIT;
+            IF lService.GET("Service No.") THEN BEGIN
+              lService.FILTERGROUP(2);
+              lService.SETRECFILTER;
+              lService.FILTERGROUP(0);
+              FORM.RUN(FORM::"Service Card", lService);
+            END;
+          END;
+          "Linked To Table"::ServiceHeader : BEGIN
+            IF "Service Header No." = '' THEN
+              EXIT;
+
+            IF lServHeader.GET(lServHeader."Document Type"::Invoice, "Service Header No.") THEN BEGIN
+              lServHeader.FILTERGROUP(2);
+              lServHeader.SETRECFILTER;
+              lServHeader.FILTERGROUP(0);
+              lServHeader.ShowCard(FALSE);
+            END;
+          END;
+          "Linked To Table"::Intervention, "Linked To Table"::InterventionQuote : BEGIN
+            IF ("Service Header No." = '') OR ("Intervention Line No." = 0) THEN
+              EXIT;
+            IF lIntervention.GET("Service Header No.", "Intervention Line No.") THEN BEGIN
+              lIntervention.FILTERGROUP(2);
+              lIntervention.SETRECFILTER;
+              lIntervention.FILTERGROUP(0);
+              FORM.RUN(FORM::"Intervention Line Card", lIntervention);
+            END;
+          END;
+          "Linked To Table"::DocumentQueue : BEGIN
+            {
+            IF "Doc. Queue Entry No." = 0 THEN
+              EXIT;
+            IF lDocQueue.GET("Document Flow Code", "Document Queue Type", "Doc. Queue Entry No.") THEN BEGIN
+              lDocQueue.FILTERGROUP(2);
+              lDocQueue.SETRECFILTER;
+              lDocQueue.FILTERGROUP(0);
+              FORM.RUN(FORM::"Document Queue Card", lDocQueue);
+            END;
+            }
+          END;
+
+          "Linked To Table"::CompletnessTask : BEGIN
+            IF ("Intervention Provider No." = '') OR ("Linked Document No." = '') THEN
+              EXIT;
+
+            IF lComplTask.GET("Intervention Provider No.", "Linked Document No.") THEN BEGIN
+              lComplTask.FILTERGROUP(2);
+              lComplTask.SETRECFILTER;
+              lComplTask.FILTERGROUP(0);
+              FORM.RUN(0, lComplTask);
+            END;
+          END;
+          {
+          "Linked To Table"::InterventionQuote : BEGIN
+            IF ("Service Header No." = '') OR ("Intervention Line No." = 0) THEN
+              EXIT;
+
+            IF lIntervQuote.GET("Service Header No.", "Intervention Line No.", "Intervention Quote Line No.") THEN BEGIN
+              lIntervQuote.FILTERGROUP(2);
+              lIntervQuote.SETRECFILTER;
+              lIntervQuote.FILTERGROUP(0);
+              FORM.RUN(FORM::"Serv. Intervention Quote Card", lIntervQuote);
+           END;
+          END;
+          }
+          ELSE
+            FIELDERROR("Linked To Table");
+        END; // CASE
+        {
+      // Cas de donnÇes enregistrÇs
+        IF lIntervention.GET("Service Header No.", "Intervention Line No.") THEN BEGIN
+          lIntervention.FILTERGROUP(2);
+          lIntervention.SETRECFILTER;
+          lIntervention.FILTERGROUP(0);
+          FORM.RUN(FORM::"Intervention Line Card", lIntervention);
+          EXIT;
+        END;
+        }
+      END; // WITH
+    END;
+
+    PROCEDURE ShowQueueAttachment@1100281004(pTrayLine@1100281001 : Record 50048);
+    VAR
+      lDocQueue@1100281000 : Record 50054;
+    BEGIN
+      IF lDocQueue.GET(pTrayLine."Document Flow Code", pTrayLine."Document Queue Type", pTrayLine."Doc. Queue Entry No.") THEN
+        lDocQueue.ShowAttachment;
+    END;
+
+    PROCEDURE TransferFunctionEnabled@1100281005() : Boolean;
+    VAR
+      UserSpecialPermission@1100281000 : Codeunit 50093;
+    BEGIN
+      EXIT(UserSpecialPermission.IsTransferTrayLineManager);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 07/03/12 @a ISAT.ZW @v IMH6.01.120 @s Gestion des corbeilles @c fonction CreateIntervention */
+      /** @r IMH04 @d 18/01/12 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Chargement des spÇcialitÇs produit sur une recherche vide */
+      /** @r IMH03 @d 17/12/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles @c RUNMODAL -> RUN en accäs fiche */
+      /** @r IMH02 @d 16/05/11 @a ISAT.PC @v IMH6.01.120 @s Gestion des corbeilles
+          @c Accäs Ö la fiche prestataie directement */
+      /** @r IMH01 @d 08/02/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c CrÇation objet pour cumuler les actions accessibles sur les corbeilles */
+    }
+    END.
+  }
+}

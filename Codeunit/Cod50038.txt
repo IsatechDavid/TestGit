@@ -1,0 +1,264 @@
+OBJECT Codeunit 50038 Proc. Provider Act. Funct.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=15/01/14;
+    Time=11:01:51;
+    Modified=Yes;
+    Version List=IMH6.01.08;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProcCommFct@1100281000 : Codeunit 50049;
+      AssistMode@1100281003 : Boolean;
+      CurrRec@1100281004 : Record 50000;
+      Funct001_Name@1100281001 : TextConst 'ENU=Send mail to manager;FRA=Envoi mail au responsable';
+      Funct002_Name@1100281002 : TextConst 'ENU=Send mail to area responsible;FRA=Envoi mail au responsable de zone';
+      Funct003_Name@1100281005 : TextConst 'ENU=Send mail to assistant;FRA=Envoi mail … l''assistante';
+      Funct004_Name@1100281006 : TextConst 'ENU=Send mail to facilitator;FRA=Envoi mail … au charg‚ de pilotage r‚seau';
+      ProviderSetup@1100281007 : Record 50011;
+      ProviderSetupOK@1100281008 : Boolean;
+      Funct005_Name@1100281010 : TextConst 'ENU=User Message;FRA=Message utilisateur';
+      Funct005_Assist@1100281009 : TextConst 'ENU=Message to show;FRA=Message … afficher … l''utilisateur';
+      Funct006_Name@1100281011 : TextConst 'ENU=Send mail to DGS manager;FRA=Envoi mail au manager DGS';
+      CurrentAct@1100281012 : Record 50044;
+      Funct007_Name@1100281013 : TextConst 'ENU=Send mail to claim service;FRA=Envoi mail au service r‚clamation';
+      FromProcessCode@1000000002 : Code[10];
+      FromProcessNo@1000000001 : Integer;
+      ProcessSetted@1000000000 : Boolean;
+
+    LOCAL PROCEDURE GetTableNo@1100281000() : Integer;
+    BEGIN
+      EXIT(DATABASE::Provider);
+    END;
+
+    PROCEDURE LoadFunctionList@1100281001();
+    VAR
+      lProcFunction@1100281000 : Record 50085;
+    BEGIN
+      // Source Table, Type, nø de la fonction, Description, ParamŠtre o/n
+      WITH lProcFunction DO BEGIN
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 1, Funct001_Name , TRUE);
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 2, Funct002_Name , TRUE);
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 3, Funct003_Name , TRUE);
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 4, Funct004_Name , TRUE);
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 5, Funct005_Name , TRUE);        //IMH03
+        //<<IMH05.ISAT.EBA
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 6, Funct006_Name , TRUE);
+        //>>IMH05.ISAT.EBA
+        //<<IMH06.PC
+        InitFunction(GetTableNo, "Function Type"::ActionFunction, 7, Funct007_Name , TRUE);
+        //>>IMH06.PC
+      END;
+      // Plage 200 : fonction communes
+      ProcCommFct.LoadActFunctionList(GetTableNo); //IMH04.ST
+    END;
+
+    PROCEDURE AssistFunction@1100281009(pFunctionNo@1100281000 : Integer);
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      AssistMode := TRUE;
+      RunFunction(pFunctionNo, '', lRecRef);
+      AssistMode := FALSE;
+    END;
+
+    PROCEDURE RunFunction@1100281003(pFunctionNo@1100281000 : Integer;pParameters@1100281001 : Text[1024];VAR pCurrRecRef@1100281002 : RecordRef) rValue : Boolean;
+    BEGIN
+      IF NOT AssistMode THEN
+        pCurrRecRef.SETTABLE(CurrRec);
+      CASE pFunctionNo OF
+        1 : rValue := SendMailToManager(pParameters);
+        2 : rValue := SendMailToCoordinator(pParameters);
+        3 : rValue := SendMailToAssistant(pParameters);
+        4 : rValue := SendMailToFacilitator(pParameters);
+        5 : rValue := ShowMessage(pParameters);
+        //<<IMH05.ISAT.EBA
+        6 : rValue := SendMailToDGSManager(pParameters);
+        //>>IMH05.ISAT.EBA
+        //<<IMH06.PC
+        7 : rValue := SendMailToClaimService(pParameters);
+        //>>IMH06.PC
+        ELSE BEGIN
+          rValue := ProcCommFct.RunFunction(GetTableNo, pFunctionNo, pParameters); //IMH04.ST
+        END;
+      END;
+      IF NOT AssistMode THEN
+        pCurrRecRef.GETTABLE(CurrRec);
+    END;
+
+    PROCEDURE CheckParameters@1100281008(pFunctionNo@1100281000 : Integer;pParameter@1100281002 : Text[1024];VAR pErrorText@1100281001 : Text[250]) : Boolean;
+    BEGIN
+      //IMH04.zw
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetCurrentAct@1100281013(pCurrentAction@1100281000 : Record 50044);
+    BEGIN
+      CurrentAct := pCurrentAction;
+    END;
+
+    LOCAL PROCEDURE "------------------------------"@1100281004();
+    BEGIN
+    END;
+
+    PROCEDURE SendMailToManager@1100281002(pParameters@1100281000 : Text[1024]) rValue : Boolean;
+    VAR
+      lSegLine@1100281001 : TEMPORARY Record 5077;
+    BEGIN
+      // Envoi de mail au responsable plateau
+      rValue := FALSE;
+      IF NOT AssistMode THEN BEGIN
+        GetProviderSetup;
+        ProviderSetup.TESTFIELD("Manager User Code");
+      END;
+      lSegLine."Provider No." := CurrRec."No.";
+      EXIT(ProcCommFct.SendMailToUser(ProviderSetup."Manager User Code",pParameters,lSegLine,AssistMode, CurrentAct.GetInteractParam));
+    END;
+
+    PROCEDURE SendMailToCoordinator@1100281005(pParameters@1100281000 : Text[1024]) rValue : Boolean;
+    VAR
+      lSegLine@1100281001 : TEMPORARY Record 5077;
+    BEGIN
+      // Envoi de mail au coordonnateur
+      rValue := FALSE;
+      IF NOT AssistMode THEN
+        CurrRec.TESTFIELD("Regional Coordinator");
+      lSegLine."Provider No." := CurrRec."No.";
+      EXIT(ProcCommFct.SendMailToUser(CurrRec."Regional Coordinator",pParameters,lSegLine,AssistMode, CurrentAct.GetInteractParam));
+    END;
+
+    PROCEDURE SendMailToAssistant@1100281006(pParameters@1100281000 : Text[1024]) rValue : Boolean;
+    VAR
+      lSegLine@1100281001 : TEMPORARY Record 5077;
+    BEGIN
+      // Envoi de mail … l'assistant
+      rValue := FALSE;
+      IF NOT AssistMode THEN
+        CurrRec.TESTFIELD("Network Assistant");
+      lSegLine."Provider No." := CurrRec."No.";
+      EXIT(ProcCommFct.SendMailToUser(CurrRec."Network Assistant",pParameters,lSegLine,AssistMode, CurrentAct.GetInteractParam));
+    END;
+
+    PROCEDURE SendMailToFacilitator@1100281007(pParameters@1100281000 : Text[1024]) rValue : Boolean;
+    VAR
+      lSegLine@1100281001 : TEMPORARY Record 5077;
+    BEGIN
+      // Envoi de mail … l'animateur
+      rValue := FALSE;
+      IF NOT AssistMode THEN
+        CurrRec.TESTFIELD("Network Facilitator");
+      lSegLine."Provider No." := CurrRec."No.";
+      EXIT(ProcCommFct.SendMailToUser(CurrRec."Network Facilitator",pParameters,lSegLine,AssistMode, CurrentAct.GetInteractParam));
+    END;
+
+    PROCEDURE SendMailToDGSManager@1100281011(pParameters@1100281000 : Text[1024]) rValue : Boolean;
+    VAR
+      lSegLine@1100281001 : TEMPORARY Record 5077;
+      lUserSetup@1100281002 : Record 91;
+    BEGIN
+      //<<IMH05.ISAT.EBA
+      // Envoi de mail au Manager DGS
+      rValue := FALSE;
+      //IF AssistMode THEN
+      //  EXIT(FALSE);
+
+      lUserSetup.SETCURRENTKEY("User Type");
+      lUserSetup.SETRANGE("User Type",lUserSetup."User Type"::"DGS Manager");
+      IF lUserSetup.FINDSET THEN BEGIN
+        rValue := TRUE;
+        REPEAT
+          lSegLine.INIT;
+          lSegLine."Provider No." := CurrRec."No.";
+          IF NOT ProcCommFct.SendMailToUser(lUserSetup."User ID",pParameters,lSegLine,AssistMode, CurrentAct.GetInteractParam) THEN
+            rValue := FALSE;
+        UNTIL lUserSetup.NEXT = 0;
+      END;
+
+      EXIT(rValue);
+      //>>IMH05.ISAT.EBA
+    END;
+
+    PROCEDURE SendMailToClaimService@1100281014(pParameters@1100281000 : Text[1024]) rValue : Boolean;
+    VAR
+      lSegLine@1100281001 : TEMPORARY Record 5077;
+      lUserSetup@1100281002 : Record 91;
+    BEGIN
+      // IMH06.PC
+      // Envoi de mail au responsable du service r‚clamation
+
+      rValue := FALSE;
+
+      lUserSetup.SETCURRENTKEY("User Type");
+      lUserSetup.SETRANGE("User Type",lUserSetup."User Type"::Claim);
+      IF lUserSetup.FINDSET THEN BEGIN
+        rValue := TRUE;
+        REPEAT
+          lSegLine.INIT;
+          lSegLine."Provider No." := CurrRec."No.";
+          IF NOT ProcCommFct.SendMailToUser(lUserSetup."User ID",pParameters,lSegLine,AssistMode, CurrentAct.GetInteractParam) THEN
+            rValue := FALSE;
+        UNTIL lUserSetup.NEXT = 0;
+      END;
+
+      EXIT(rValue);
+    END;
+
+    PROCEDURE GetProviderSetup@1100281010();
+    BEGIN
+      IF ProviderSetupOK THEN
+        EXIT;
+
+      ProviderSetup.GET;
+      ProviderSetupOK := TRUE;
+    END;
+
+    PROCEDURE ShowMessage@1100281016(pText@1100281000 : Text[1024]) : Boolean;
+    VAR
+      lUserSpecPerm@1100281002 : Record 50099;
+    BEGIN
+      //IMH03
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct005_Assist);
+        EXIT;
+      END;
+      MESSAGE(pText);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetFromProcess@1100281015(pFromProcessCode@1100281000 : Code[10];pFromProcessNo@1100281001 : Integer);
+    BEGIN
+      //IMH07
+      ProcessSetted := TRUE;
+      FromProcessCode := pFromProcessCode;
+      FromProcessNo := pFromProcessNo;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH08 @d 14/10/13 @a ISAT.ST @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR */
+      /** @r IMH07 @d 11/06/13 @a ISAT.ZW @v IMH6.01.4484 @s Juin @h 4484 @c Gestion processus prestataire*/
+      /** @r IMH06 @d 25/07/12 @a ISAT.PC @v IMH6.01.226 @s version 1.4 @h 3477
+          @c Ajout fonction SendMailToDGSManager - Mantis 1709 */
+      /** @r IMH05 @d 20/10/11 @a ISAT.EBA @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction SendMailToDGSManager @h 1709 */
+      /** @r IMH04 @d 04/07/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Appel fonctions communes */
+      /** @r IMH03 @d 16/06/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction ShowMessage */
+      /** @r IMH02 @d 05/05/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction CheckParameters */
+      /** @r IMH01 @d 12/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Cr‚ation objet
+          @c Pr‚voir la gestion de la s‚curit‚ TableData */
+    }
+    END.
+  }
+}

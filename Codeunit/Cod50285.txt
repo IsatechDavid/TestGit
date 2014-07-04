@@ -1,0 +1,749 @@
+OBJECT Codeunit 50285 Second Provider Search
+{
+  OBJECT-PROPERTIES
+  {
+    Date=28/05/14;
+    Time=14:18:51;
+    Modified=Yes;
+    Version List=IMH6.01.P011;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProviderSearchMgt@1100281002 : Codeunit 50284;
+      TrackProvSearchMgt@1100281007 : Codeunit 50286;
+      IntervSearchLine@1000000000 : Record 50075;
+      ProviderSearchBasket@1000000002 : TEMPORARY Record 51002;
+      ContactAltAddress@1000000001 : Record 5051;
+      ProvSecSearchSetup@1100281004 : Record 50133;
+      ServiceHeaderSearch@1100281005 : Record 5900;
+      RefusedProviderBuffer@1000000005 : TEMPORARY Record 50000;
+      ServiceSearchLedgerEntryTemp@1100281006 : TEMPORARY Record 50027;
+      ServiceHeaderNoSearch@1000000008 : Code[20];
+      ReferenceGeoCode@1100281000 : Code[10];
+      SpecialityFilter@1000000004 : Text[1024];
+      UrgentSearch@1000000003 : 'All,Yes,No';
+      Text001@1100281001 : TextConst 'FRA=La vlle %1 %2 du service %3 n''existe pas dans la table des codes postaux, veuillez corriger l''adresse de MEO';
+      NbSpecialityToSearch@1100281008 : Integer;
+      ProvSecSearchSetupOK@1100281003 : Boolean;
+
+    PROCEDURE Search@1100281008(VAR pServiceInterventionLine@1100281000 : Record 50075;VAR pProviderSearchBasket@1100281007 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281010 : Record 5051) rValue : Boolean;
+    VAR
+      lProvSecondSearchBuffer@1100281001 : TEMPORARY Record 51006;
+    BEGIN
+      //Recherche prestataire avec la fˆnetre d'appel
+      IF pProviderSearchBasket.ISEMPTY THEN
+        EXIT;
+
+      //Inisialiser les variables globals
+      ClearGlobalValue;
+      SetGlobalParameter(pServiceInterventionLine, pProviderSearchBasket, pContactAltAddress);
+
+      //Charger la liste des prestataire
+      LoadSelectedProvider(lProvSecondSearchBuffer);
+      //DownloadDebugFile;
+      lProvSecondSearchBuffer.RESET;
+      IF lProvSecondSearchBuffer.ISEMPTY THEN
+        EXIT(FALSE);
+
+      //Afficher la fenetre d'appel
+      IF ViewSearch(lProvSecondSearchBuffer) THEN BEGIN
+        lProvSecondSearchBuffer.SETRANGE(Accepted, TRUE);
+        IF lProvSecondSearchBuffer.FINDFIRST THEN BEGIN
+          pProviderSearchBasket.SETFILTER("Speciality Code",
+              ProviderSearchMgt.GetProviderSpecialization(lProvSecondSearchBuffer."Provider No.",
+                lProvSecondSearchBuffer."Specialization Filter"));
+          pProviderSearchBasket.MODIFYALL("Provider No.",lProvSecondSearchBuffer."Provider No.");
+        END;
+        //Prestataire trouv‚ assign‚
+        rValue := TRUE;
+      END;
+      SaveRefusedProvider(lProvSecondSearchBuffer);
+
+      //si prestataire non assign‚
+      IF NOT rValue THEN BEGIN
+        lProvSecondSearchBuffer.RESET;
+        lProvSecondSearchBuffer.SETRANGE("Non-Accept. Reason Code", '');
+        //si tous les prestataires sont r‚fus‚ : Valeur de retour = false - prestataire non trouv‚
+        EXIT(NOT lProvSecondSearchBuffer.ISEMPTY);
+      END;
+
+      //Prestataire assign‚ ou Annulation de recherche
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SearchResult@1100281041(VAR pServiceInterventionLine@1100281000 : Record 50075;VAR pProviderSearchBasket@1100281007 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281010 : Record 5051;VAR pProvSecondSearchBuffer@1100281004 : TEMPORARY Record 51006) : Boolean;
+    BEGIN
+      // obtenir une liste des prestataires de recherche sans fenetre d'appel
+      IF pProviderSearchBasket.ISEMPTY THEN
+        EXIT;
+
+      //Inisialiser les variables globales
+      ClearGlobalValue;
+      SetGlobalParameter(pServiceInterventionLine, pProviderSearchBasket, pContactAltAddress);
+
+      //Charger la liste des prestataires
+      LoadSelectedProvider(pProvSecondSearchBuffer);
+
+      pProvSecondSearchBuffer.RESET;
+
+      //<<IMH06.ST
+      //EXIT(pProvSecondSearchBuffer.ISEMPTY);
+      EXIT(pProvSecondSearchBuffer.FINDFIRST);
+      //>>IMH06.ST
+    END;
+
+    PROCEDURE SearchProvPressent@1100281009(VAR pProvider@1100281004 : Record 50000;VAR pServiceInterventionLine@1100281002 : Record 50075;VAR pProviderSearchBasket@1100281001 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281000 : Record 5051;pSpecialityFilter@1100281005 : Text[1024]) rValue : Boolean;
+    VAR
+      lProvSecondSearchBuffer@1100281006 : TEMPORARY Record 51006;
+    BEGIN
+      //Initialiser le fichier de trace
+      TrackProvSearchMgt.InitializeTrack;
+      TrackProvSearchMgt.AddPressentTitle;
+      //<<IMH06.ST
+      //IF SearchResult(
+      IF NOT SearchResult(
+      //>>IMH06.ST
+           pServiceInterventionLine, pProviderSearchBasket,
+           pContactAltAddress, lProvSecondSearchBuffer)
+      THEN BEGIN
+        EXIT;
+      END;
+
+      lProvSecondSearchBuffer.SETRANGE("Provider No.",pProvider."No.");
+      IF lProvSecondSearchBuffer.FINDFIRST THEN BEGIN
+        IF CallProvider(lProvSecondSearchBuffer, pSpecialityFilter) THEN BEGIN
+          rValue := TRUE;
+        END ELSE BEGIN
+          SaveRefusedProvider(lProvSecondSearchBuffer);
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE LoadSelectedProvider@1000000006(VAR pProvSecondSearchBuffer@1100281001 : TEMPORARY Record 51006);
+    VAR
+      lPSRBuffer@1100281000 : TEMPORARY Record 51000;
+      lAbilityGeoProvider@1000000005 : Record 50016;
+      lServiceHeader@1000000003 : Record 5900;
+      lProvider@1000000002 : Record 50000;
+      lProviderContactAltAddr@1000000001 : Record 5051;
+      lProviderSpec@1000000000 : Record 50006;
+      lProviderToCheckBuffer@1100281002 : TEMPORARY Record 50000;
+      lWDialog@1100281003 : Dialog;
+      lText001@1100281004 : TextConst 'ENU=Research processing...\Please wait;FRA=Recherche en cours...\Veuillez patienter';
+    BEGIN
+      GetProvSecSearchSetup;
+      //Initialiser le fichier de trace
+      TrackProvSearchMgt.InitializeTrack;
+
+      IF GUIALLOWED THEN BEGIN
+        lWDialog.OPEN(lText001);
+      END;
+
+      WITH lPSRBuffer DO BEGIN
+        IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,IntervSearchLine."Service Header No.") THEN
+          lPSRBuffer."Campaign No." := lServiceHeader."Campaign No.";
+
+        IF lPSRBuffer."Campaign No." = '' THEN BEGIN
+          lAbilityGeoProvider.RESET;
+          lAbilityGeoProvider.SETCURRENTKEY("End Ref. Geo. Code","Specialization Code");
+          lAbilityGeoProvider.SETRANGE("End Ref. Geo. Code",ReferenceGeoCode);
+          lAbilityGeoProvider.SETFILTER("Specialization Code",SpecialityFilter);
+          IF UrgentSearch = UrgentSearch::Yes THEN BEGIN
+            lAbilityGeoProvider.SETRANGE(Emergency,TRUE);
+            lAbilityGeoProvider.SETRANGE("Emergency Exclusion",FALSE);
+          END ELSE BEGIN
+            lAbilityGeoProvider.SETRANGE(Standard,TRUE);
+            lAbilityGeoProvider.SETRANGE("Standard Exclusion",FALSE);
+          END;
+          IF lAbilityGeoProvider.FINDSET(FALSE,FALSE) THEN BEGIN
+            REPEAT
+              IF NOT GET(lAbilityGeoProvider."Provider No.",lAbilityGeoProvider."Specialization Code") THEN BEGIN
+                INIT;
+                "Provider No." := lAbilityGeoProvider."Provider No.";
+                "Specialization Code" := lAbilityGeoProvider."Specialization Code";
+                //Distance := ProviderSearchMgt.GetDistance("Provider No.", ReferenceGeoCode);
+                "Contact No." := ContactAltAddress."Contact No.";
+                "Alt. Address Code" := ContactAltAddress.Code;
+                "Service Header No." := ServiceHeaderNoSearch;
+                lProviderContactAltAddr.SETRANGE("Contact No.","Provider No.");
+                lProviderContactAltAddr.SETRANGE("Geo. Reference Address",TRUE);
+                IF lProviderContactAltAddr.FINDFIRST THEN BEGIN
+                  City := lProviderContactAltAddr.City;
+                  "Post Code" := lProviderContactAltAddr."Post Code";
+                END;
+                INSERT;
+                IF NOT lProviderToCheckBuffer.GET("Provider No.") THEN BEGIN
+                  lProviderToCheckBuffer."No." := "Provider No.";
+                  lProviderToCheckBuffer.INSERT;
+                END;
+              END;
+            UNTIL lAbilityGeoProvider.NEXT = 0;
+          END;
+        END ELSE BEGIN
+          // ************ A Prevoir *********
+        END;
+      END;
+
+      IF lPSRBuffer.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      // Indique le nombre de prestataire
+      TrackProvSearchMgt.AddProviderNb(lPSRBuffer.COUNT);
+
+      // Liste des prestataires avant application des filtres
+      lPSRBuffer.RESET;
+      IF lPSRBuffer.FINDSET THEN BEGIN
+        REPEAT
+          TrackProvSearchMgt.AddSelectedProvider(lPSRBuffer."Provider No.",FALSE);
+        UNTIL lPSRBuffer.NEXT = 0;
+      END;
+
+      TrackProvSearchMgt.AddSelectCriterion;
+
+      //Supprimer les prestataires trouv‚s selon les critŠres
+      DeleteProvider(lPSRBuffer, lProviderToCheckBuffer);
+
+      //Supprimer les sp‚cialit‚s prestataires trouv‚es selon les critŠres
+      DeleteProviderSpec(lPSRBuffer);
+
+      // Indication des prestataires selectionnes
+      lPSRBuffer.RESET;
+      IF lPSRBuffer.FINDSET THEN BEGIN
+        TrackProvSearchMgt.AddTitleSelectedProvider;
+        REPEAT
+          TrackProvSearchMgt.AddSelectedProvider(lPSRBuffer."Provider No.",TRUE);
+        UNTIL lPSRBuffer.NEXT = 0;
+      END;
+
+      // Fermeture du fichier de trace
+      TrackProvSearchMgt.CloseTrack;
+
+      IF GUIALLOWED THEN BEGIN
+        lWDialog.CLOSE;
+      END;
+
+      //Charger le r‚sultat trouv‚ dans le buffer
+      LoadProvSecondSearchBuffer(pProvSecondSearchBuffer, lPSRBuffer);
+    END;
+
+    PROCEDURE DeleteProvider@1100281018(VAR pPSRBuffer@1100281001 : TEMPORARY Record 51000;VAR pProviderToCheckBuffer@1100281000 : TEMPORARY Record 50000);
+    VAR
+      lProvider@1100281002 : Record 50000;
+      lToDelete@1100281003 : Boolean;
+    BEGIN
+      //controler les prestataires et supprimer ceux ne respectant pas les critŠres
+      pPSRBuffer.RESET;
+      pProviderToCheckBuffer.RESET;
+
+      IF pProviderToCheckBuffer.FINDSET THEN
+        REPEAT
+          lToDelete := FALSE;
+
+          IF NOT lProvider.GET(pProviderToCheckBuffer."No.") THEN
+            lToDelete := TRUE;
+
+          //RŠgle de gestion , statut prestataire
+          IF NOT lToDelete THEN BEGIN
+            CASE lProvider.Status OF
+              lProvider.Status::Prospect : lToDelete := TRUE;
+              lProvider.Status::Casual : BEGIN
+                IF NOT ProvSecSearchSetup."Inclusion Casual Status" THEN
+                  lToDelete := TRUE;
+              END;
+              lProvider.Status::Integration : BEGIN
+                IF NOT ProvSecSearchSetup."Inclusion Integration Status" THEN
+                  lToDelete := TRUE;
+              END;
+              lProvider.Status::"Trial Period" : BEGIN
+                IF NOT ProvSecSearchSetup."Inclusion Trial Period Status" THEN
+                  lToDelete := TRUE;
+              END;
+              lProvider.Status::Approval : BEGIN
+                IF NOT ProvSecSearchSetup."Inclusion Approval Status" THEN
+                  lToDelete := TRUE;
+              END;
+              lProvider.Status::Operational : BEGIN
+                IF NOT ProvSecSearchSetup."Inclusion Operational Status" THEN
+                  lToDelete := TRUE;
+              END;
+            END;
+
+            IF lToDelete THEN BEGIN
+              TrackProvSearchMgt.AddStatusTrack(lProvider."No.");
+            END;
+          END;
+
+          //RŠgle de gestion S0, Actif
+          IF NOT lToDelete THEN
+            IF NOT lProvider.Enable THEN BEGIN
+              lToDelete := TRUE;
+              TrackProvSearchMgt.AddEnableTrack(lProvider."No.");
+            END;
+      {IMH03.ST  D‚sactiv‚
+          //RŠgle de gestion S1, Visible plateau
+          IF NOT lToDelete THEN
+            IF lProvider."Invisible Open Space" THEN BEGIN
+              lToDelete := TRUE;
+              TrackProvSearchMgt.AddInvisibleOpenSpaceTrack(lProvider."No.");
+            END;
+      } //>>IMH03.ST d‚sactiv‚
+          //RŠgle de gestion S2 - Exclusion
+          IF NOT lToDelete THEN
+            IF NOT CheckExclusion(lProvider) THEN BEGIN
+              lToDelete := TRUE;
+              TrackProvSearchMgt.AddExclusionTrack(lProvider."No.");
+            END;
+
+          //Suppresion des lignes de r‚sultat
+          IF lToDelete THEN BEGIN
+            pPSRBuffer.SETRANGE("Provider No.", pProviderToCheckBuffer."No.");
+            pPSRBuffer.DELETEALL;
+          END;
+        UNTIL pProviderToCheckBuffer.NEXT = 0;
+      pPSRBuffer.RESET;
+    END;
+
+    PROCEDURE DeleteProviderSpec@1100281017(VAR pPSRBuffer@1100281000 : TEMPORARY Record 51000);
+    VAR
+      lProvider@1100281002 : Record 50000;
+      lToDelete@1100281001 : Boolean;
+      lErrorType@1100281003 : 'Total,Specialization,ServiceOrderType';
+      lIsConstrainte@1100281004 : Boolean;
+    BEGIN
+      GetProvSecSearchSetup;
+      pPSRBuffer.RESET;
+
+      IF pPSRBuffer.FINDSET THEN
+        REPEAT
+          lToDelete := FALSE;
+
+          //RŠgle de gestion S3 - Agr‚ment
+          IF ProvSecSearchSetup."Inclusion Agreement" THEN
+            IF NOT ProviderSearchMgt.CheckAgreement(lErrorType, ServiceHeaderNoSearch,
+                pPSRBuffer."Provider No.", ServiceHeaderSearch."Corporate No.",
+                pPSRBuffer."Specialization Code", ServiceHeaderSearch."Service Order Type") THEN BEGIN
+              lToDelete := TRUE;
+              TrackProvSearchMgt.AddAgreementTrack(lErrorType, pPSRBuffer."Provider No.", ServiceHeaderSearch."Corporate No.",
+                pPSRBuffer."Specialization Code", ServiceHeaderSearch."Service Order Type");
+            END;
+
+          //RŠgle de gestion S5 - Disponibilit‚ calendaire
+          IF NOT lToDelete THEN
+            IF ProvSecSearchSetup."Inclusion Calendar" THEN
+              IF NOT ProviderSearchMgt.CheckCalendar(pPSRBuffer,lIsConstrainte, lProvider, UrgentSearch,
+                    WORKDATE, ProvSecSearchSetup."Authorised Unavailable Day") THEN BEGIN
+                lToDelete := TRUE;
+                TrackProvSearchMgt.AddCalendarTrack(pPSRBuffer."Provider No.", pPSRBuffer."Specialization Code",
+                  WORKDATE,WORKDATE + ProvSecSearchSetup."Authorised Unavailable Day",
+                  pPSRBuffer."First Available Date",lIsConstrainte);
+              END;
+
+          //RŠgle de gestion S6 - Disponibilit‚ horaire
+          IF NOT lToDelete THEN
+            IF ProvSecSearchSetup."Inclusion Business Hours" THEN
+              IF NOT ProviderSearchMgt.ProviderCheckBusinessHours(pPSRBuffer."Provider No.",WORKDATE,TIME,UrgentSearch) THEN BEGIN
+                lToDelete := TRUE;
+                TrackProvSearchMgt.AddBusinessHoursTrack(pPSRBuffer."Provider No.");
+              END;
+
+          IF lToDelete THEN
+            pPSRBuffer.DELETE;
+        UNTIL pPSRBuffer.NEXT = 0;
+      pPSRBuffer.RESET;
+    END;
+
+    PROCEDURE LoadProvSecondSearchBuffer@1100281019(VAR pProvSecSearchBuffer@1100281001 : TEMPORARY Record 51006;VAR pPSRBuffer@1100281000 : TEMPORARY Record 51000);
+    BEGIN
+      pProvSecSearchBuffer.RESET;
+      pPSRBuffer.RESET;
+
+      WITH pProvSecSearchBuffer DO BEGIN
+        IF pPSRBuffer.FINDSET THEN BEGIN
+          REPEAT
+            IF GET(pPSRBuffer."Provider No.") THEN BEGIN
+              "Specialization Nb" += 1;
+              "Specialization Filter" :=
+                "Specialization Filter" + '|' + pPSRBuffer."Specialization Code";
+              MODIFY;
+            END ELSE BEGIN
+              INIT;
+              "Provider No." := pPSRBuffer."Provider No.";
+              "Specialization Nb" := 1;
+              "Specialization Filter" := pPSRBuffer."Specialization Code";
+              Distance := ROUND(ProviderSearchMgt.GetDistance("Provider No.", ReferenceGeoCode),1);
+              Emergency := (UrgentSearch = UrgentSearch::Yes);
+              "Service Header No." := ServiceHeaderSearch."No.";
+              "Specialization Search Nb" := NbSpecialityToSearch;
+              INSERT;
+            END;
+          UNTIL pPSRBuffer.NEXT = 0;
+        END;
+      //<<IMH04.ST
+      //  Mise … jour des distance km
+        UpdateRealKm(pProvSecSearchBuffer);
+      //>>IMH04.ST
+        IF FINDSET THEN BEGIN
+          REPEAT
+            "Code 1" := GetOrderValue(ProvSecSearchSetup."First Order", pProvSecSearchBuffer);
+            "Code 2" := GetOrderValue(ProvSecSearchSetup."Second Order", pProvSecSearchBuffer);
+            "Code 3" := GetOrderValue(ProvSecSearchSetup."Third Order", pProvSecSearchBuffer);
+            "Code 4" := GetOrderValue(ProvSecSearchSetup."Fourth Order", pProvSecSearchBuffer);
+            GetReasonCode(pProvSecSearchBuffer,"Non-Accept. Reason Code","Non-Accept. Comments");
+            MODIFY;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetOrderValue@1100281020(pOrderType@1100281000 : ' ,Status,Specialization,Distance,Last Interv. Date';pProvSecSearchBuffer@1100281002 : TEMPORARY Record 51006) rCode : Code[20];
+    VAR
+      lDate@1100281003 : Date;
+      lInt@1100281004 : Integer;
+    BEGIN
+      CASE pOrderType OF
+        pOrderType::Status : rCode := GetStatusOrderValue(pProvSecSearchBuffer);
+        pOrderType::Specialization : rCode := FillChar(FORMAT(100 - pProvSecSearchBuffer."Specialization Nb"), 20, '0');
+        pOrderType::Distance : rCode := FillChar(FORMAT(pProvSecSearchBuffer.Distance), 20, '0');
+        pOrderType::"Last Interv. Date" : BEGIN
+          lDate := GetLastIntervDate(pProvSecSearchBuffer."Provider No.");
+      //<<IMH05.ST
+          IF lDate = 0D THEN
+            EXIT('');
+      //>>IMH05.ST
+          EVALUATE(lInt, FORMAT(lDate, 0, '<Year4><Month,2><Day,2>'));
+          rCode := FORMAT(lInt);
+        END;
+      END;
+    END;
+
+    PROCEDURE GetStatusOrderValue@1100281021(pProviderSecondSearchBuffer@1100281000 : TEMPORARY Record 51006) : Code[20];
+    VAR
+      lProvider@1100281001 : Record 50000;
+    BEGIN
+      lProvider.GET(pProviderSecondSearchBuffer."Provider No.");
+
+      CASE lProvider.Status OF
+        ProvSecSearchSetup."First Status Order" : EXIT('1');
+        ProvSecSearchSetup."Second Status Order" : EXIT('2');
+        ProvSecSearchSetup."Third Status Order" : EXIT('3');
+        ProvSecSearchSetup."Fourth Status Order" : EXIT('4');
+        ProvSecSearchSetup."Fifth Status Order" : EXIT('5');
+      END;
+
+      EXIT('6');
+    END;
+
+    PROCEDURE GetLastIntervDate@1100281029(pProviderNo@1100281000 : Code[20]) : Date;
+    VAR
+      lInterv@1100281001 : Record 50075;
+    BEGIN
+      lInterv.SETCURRENTKEY("Provider No.",Claim,"Assigned Date","Service Header Claims No.");
+      lInterv.SETRANGE("Provider No.", pProviderNo);
+      lInterv.SETRANGE(Claim, FALSE);
+      IF lInterv.FINDLAST THEN
+        EXIT(lInterv."Assigned Date");
+    END;
+
+    LOCAL PROCEDURE ViewSearch@1000000010(VAR pProvSecondSearchBuffer@1100281001 : TEMPORARY Record 51006) rValue : Boolean;
+    VAR
+      lProvSecSearchResultPage@1100281000 : Form 50379;
+    BEGIN
+      pProvSecondSearchBuffer.RESET;
+      lProvSecSearchResultPage.SetParameter(ServiceHeaderSearch, SpecialityFilter);
+      lProvSecSearchResultPage.SetProviderResultList(pProvSecondSearchBuffer);
+      COMMIT;
+      lProvSecSearchResultPage.RUNMODAL;
+      pProvSecondSearchBuffer.RESET;
+      pProvSecondSearchBuffer.DELETEALL;
+      lProvSecSearchResultPage.GetProviderResultList(pProvSecondSearchBuffer);
+      pProvSecondSearchBuffer.RESET;
+      pProvSecondSearchBuffer.SETRANGE(Accepted, TRUE);
+      rValue := NOT pProvSecondSearchBuffer.ISEMPTY;
+      pProvSecondSearchBuffer.RESET;
+    END;
+
+    PROCEDURE CallProvider@1100281002(VAR pProvSecSearchBuffer@1100281001 : TEMPORARY Record 51006;pSpecialityFilter@1100281002 : Text[1024]) : Boolean;
+    VAR
+      lProviderSecCall@1100281000 : Form 50381;
+    BEGIN
+      IF pSpecialityFilter = '' THEN BEGIN
+        pSpecialityFilter := SpecialityFilter;
+      END;
+      lProviderSecCall.SetValues(pProvSecSearchBuffer, pSpecialityFilter);
+      COMMIT;
+      lProviderSecCall.RUNMODAL;
+      IF lProviderSecCall.GetAccept THEN BEGIN
+        pProvSecSearchBuffer.Accepted := TRUE;
+        pProvSecSearchBuffer.MODIFY;
+        EXIT(TRUE);
+      END;
+
+      IF lProviderSecCall.GetRefuse THEN BEGIN
+        pProvSecSearchBuffer.Refused := TRUE;
+        lProviderSecCall.GetValues(pProvSecSearchBuffer."Non-Accept. Reason Code",pProvSecSearchBuffer."Non-Accept. Comments");
+        pProvSecSearchBuffer.MODIFY;
+      END;
+
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE CheckExclusion@1100281004(pProvider@1100281000 : Record 50000) : Boolean;
+    BEGIN
+      GetProvSecSearchSetup;
+
+      //Exclustion
+      IF ProvSecSearchSetup."Inclusion Exclusion" THEN
+        IF pProvider.Exclusion AND (WORKDATE >= pProvider."Exclusion Date") THEN
+          EXIT(FALSE);
+
+      //Exclustion temporaire
+      IF ProvSecSearchSetup."Inclusion Exclusion Temp." THEN
+        IF pProvider.Exclusion AND (WORKDATE >= pProvider."Exclusion Date") THEN
+        IF pProvider."Temp. Exclusion" AND
+            ((pProvider."Temp. Exclusion Start Date" <= WORKDATE) AND
+             (pProvider."Temp. Exclusion End Date" >= WORKDATE)) THEN
+          EXIT(FALSE);
+
+      //BlackList
+      IF ProvSecSearchSetup."Inclusion Black List" THEN
+        IF pProvider."Black List" AND (WORKDATE >= pProvider."Black List Date") THEN
+          EXIT(FALSE);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SaveRefusedProvider@1100281011(VAR pProvSecSearchBuffer@1100281000 : Record 51006);
+    VAR
+      lServiceSearchLedgerEntry@1100281001 : Record 50027;
+    BEGIN
+      // Sauvegarde les prestataires refus‚s
+      GetProvSecSearchSetup;
+
+      pProvSecSearchBuffer.RESET;
+      pProvSecSearchBuffer.SETCURRENTKEY("Code 1","Code 2","Code 3","Code 4","Code 5","Code 6");
+      pProvSecSearchBuffer.SETRANGE(Refused, TRUE);
+      IF pProvSecSearchBuffer.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+      pProvSecSearchBuffer.FINDSET;
+      REPEAT
+        lServiceSearchLedgerEntry.INIT;
+        lServiceSearchLedgerEntry."Service No." := IntervSearchLine."Service No.";
+        lServiceSearchLedgerEntry."Service Header No." := IntervSearchLine."Service Header No.";
+        lServiceSearchLedgerEntry."Intervention Line No." := IntervSearchLine."Intervention No.";
+
+        lServiceSearchLedgerEntry."Entry No." := 0;
+        lServiceSearchLedgerEntry."Provider No." := pProvSecSearchBuffer."Provider No.";
+        lServiceSearchLedgerEntry."Non-acceptance Reason Code" := pProvSecSearchBuffer."Non-Accept. Reason Code";
+        lServiceSearchLedgerEntry."Non-Accept. Comments" := pProvSecSearchBuffer."Non-Accept. Comments";
+        lServiceSearchLedgerEntry."Search Engine" := lServiceSearchLedgerEntry."Search Engine"::Second;
+        lServiceSearchLedgerEntry.INSERT(TRUE);
+        ServiceSearchLedgerEntryTemp := lServiceSearchLedgerEntry;
+        ServiceSearchLedgerEntryTemp.INSERT;
+        //Cr‚er l'activiti‚ refus
+        IF ProvSecSearchSetup."Refuse Reason Code" <> '' THEN BEGIN
+          IF pProvSecSearchBuffer."Non-Accept. Reason Code" = ProvSecSearchSetup."Refuse Reason Code" THEN BEGIN
+            ProviderSearchMgt.CreateRefuseTrayLine(pProvSecSearchBuffer."Provider No.", pProvSecSearchBuffer."Non-Accept. Comments");
+          END;
+        END;
+      UNTIL pProvSecSearchBuffer.NEXT = 0;
+
+      pProvSecSearchBuffer.RESET;
+    END;
+
+    PROCEDURE GetRefusedProvider@1100281022(VAR pServiceSearchLedgerEntryTemp@1100281000 : Record 50027);
+    BEGIN
+      IF ServiceSearchLedgerEntryTemp.FINDFIRST THEN
+        REPEAT
+          pServiceSearchLedgerEntryTemp := ServiceSearchLedgerEntryTemp;
+          IF pServiceSearchLedgerEntryTemp.INSERT THEN;
+        UNTIL ServiceSearchLedgerEntryTemp.NEXT = 0;
+    END;
+
+    PROCEDURE DownloadDebugFile@1100281000();
+    BEGIN
+      TrackProvSearchMgt.DownloadTrack;
+    END;
+
+    PROCEDURE SetGlobalParameter@1000000015(VAR pServiceInterventionLine@1000000002 : Record 50075;VAR pProviderSearchBasket@1000000001 : TEMPORARY Record 51002;VAR pContactAltAddress@1000000000 : Record 5051);
+    VAR
+      lPostCode@1100281000 : Record 225;
+      lServiceHeader@1100281001 : Record 5900;
+    BEGIN
+      IntervSearchLine.COPY(pServiceInterventionLine);
+      IntervSearchLine := pServiceInterventionLine;
+      ContactAltAddress.COPY(ContactAltAddress);
+      ContactAltAddress := pContactAltAddress;
+
+      IF pProviderSearchBasket.FINDSET THEN BEGIN
+        REPEAT
+          IF SpecialityFilter <> '' THEN BEGIN
+            SpecialityFilter += '|';
+          END;
+          SpecialityFilter += pProviderSearchBasket."Speciality Code";
+          ProviderSearchBasket := pProviderSearchBasket;
+          ProviderSearchBasket.INSERT;
+        UNTIL pProviderSearchBasket.NEXT = 0;
+      END;
+
+      NbSpecialityToSearch := pProviderSearchBasket.COUNT;
+
+      UrgentSearch := UrgentSearch::No;
+      IF pServiceInterventionLine.Urgent THEN BEGIN
+        UrgentSearch := UrgentSearch::Yes;
+      END;
+
+      ServiceHeaderNoSearch := pServiceInterventionLine."Service Header No.";
+      IF NOT ServiceHeaderSearch.GET(ServiceHeaderSearch."Document Type"::Invoice, ServiceHeaderNoSearch) THEN
+        CLEAR(ServiceHeaderSearch);
+
+      IF ServiceHeaderNoSearch = '' THEN BEGIN
+        IF pContactAltAddress."Geo. Reference Code" = '' THEN BEGIN
+          ReferenceGeoCode := lPostCode.GetGeoCode(ContactAltAddress."Post Code",ContactAltAddress.City);
+        END ELSE BEGIN
+          ReferenceGeoCode := ContactAltAddress."Geo. Reference Code";
+        END;
+      END ELSE BEGIN
+        IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,ServiceHeaderNoSearch) THEN
+          ReferenceGeoCode := lPostCode.GetGeoCode(lServiceHeader."Ship-to Post Code",lServiceHeader."Ship-to City");
+        IF ReferenceGeoCode = '' THEN
+          ERROR(Text001,lServiceHeader."Ship-to Post Code",lServiceHeader."Ship-to City",ServiceHeaderNoSearch);
+      END;
+    END;
+
+    LOCAL PROCEDURE ClearGlobalValue@1000000001();
+    BEGIN
+      //R‚inisialiser les valeurs globals pour la recherche
+      CLEAR(ProviderSearchBasket);
+      ProviderSearchBasket.DELETEALL;
+      CLEAR(RefusedProviderBuffer);
+      RefusedProviderBuffer.DELETEALL;
+      ServiceSearchLedgerEntryTemp.DELETEALL;
+      CLEAR(ServiceSearchLedgerEntryTemp);
+
+      CLEAR(IntervSearchLine);
+      CLEAR(ContactAltAddress);
+      CLEAR(SpecialityFilter);
+      CLEAR(UrgentSearch);
+      CLEAR(ServiceHeaderNoSearch);
+      CLEAR(ServiceHeaderSearch);
+      CLEAR(ReferenceGeoCode);
+      NbSpecialityToSearch := 0;
+    END;
+
+    PROCEDURE GetReasonCode@1100281001(pProviderSecondSearchBuffer@1100281003 : Record 51006;VAR pReasonCode@1100281000 : Code[10];VAR pReasonComment@1100281001 : Text[100]);
+    VAR
+      lServiceSearchLedgerEntry@1100281002 : Record 50027;
+      lServiceHeader@1100281004 : Record 5900;
+    BEGIN
+      IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pProviderSecondSearchBuffer."Service Header No.") THEN;
+
+      lServiceSearchLedgerEntry.SETCURRENTKEY("Provider No.");
+      lServiceSearchLedgerEntry.SETRANGE("Provider No.",pProviderSecondSearchBuffer."Provider No.");
+      lServiceSearchLedgerEntry.SETRANGE("Service No.",lServiceHeader."Service No.");
+      lServiceSearchLedgerEntry.SETRANGE("Service Header No.",lServiceHeader."No.");
+      IF lServiceSearchLedgerEntry.FINDLAST THEN BEGIN
+        pReasonCode := lServiceSearchLedgerEntry."Non-acceptance Reason Code";
+        pReasonComment := lServiceSearchLedgerEntry."Non-Accept. Comments";
+      END;
+    END;
+
+    PROCEDURE GetProvSecSearchSetup@1100281010();
+    BEGIN
+      IF ProvSecSearchSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      ProvSecSearchSetup.GET;
+      ProvSecSearchSetupOK := TRUE;
+    END;
+
+    LOCAL PROCEDURE FillChar@1100281014(pCode@1100281000 : Code[20];pLength@1100281001 : Integer;pCharToFill@1100281002 : Code[1]) rCode : Code[20];
+    VAR
+      i@1100281003 : Integer;
+    BEGIN
+      rCode := pCode;
+      IF (STRLEN(pCode) = 20) OR (pLength > 20) THEN
+        EXIT;
+
+      FOR i := STRLEN(pCode) TO pLength - 1 DO BEGIN
+        rCode := pCharToFill + rCode;
+      END;
+    END;
+
+    LOCAL PROCEDURE UpdateRealKm@1000000004(VAR pProvSecSearchBuffer@1000000000 : TEMPORARY Record 51006);
+    VAR
+      lAbiGeoMgt@1000000001 : Codeunit 50011;
+      lTempAltAddr@1000000005 : TEMPORARY Record 5051;
+      lGeoRef@1000000002 : Record 50013;
+      lPSRBuffer@1000000006 : TEMPORARY Record 51000;
+      lProviderSetup@1000000007 : Record 50011;
+      lX@1000000003 : Integer;
+      lY@1000000004 : Integer;
+    BEGIN
+      //IMH04.ST
+      lProviderSetup.GET;
+      IF NOT lProviderSetup."Geoconcept Activate Search" THEN
+        EXIT;
+      pProvSecSearchBuffer.RESET;
+      IF NOT pProvSecSearchBuffer.FINDSET THEN
+        EXIT;
+      IF NOT lGeoRef.GET(ReferenceGeoCode) THEN BEGIN
+        GetAltAddr(lTempAltAddr);
+        lAbiGeoMgt.GetProviderGeoCodeWithAddress(lTempAltAddr."Contact No.", lTempAltAddr,
+                                                 lGeoRef."Latitude Lambert 2E", lGeoRef."Longitude Lambert 2E");
+      END;
+
+      ProviderSearchMgt.LoadPSRBuffer(lPSRBuffer, pProvSecSearchBuffer);
+      //lDialog.OPEN(Text001);
+      lAbiGeoMgt.SearchAround(lGeoRef."Latitude Lambert 2E",lGeoRef."Longitude Lambert 2E",lPSRBuffer);
+      //lDialog.CLOSE;
+      // Mise … jour du buffer 2
+      lPSRBuffer.RESET;
+      IF lPSRBuffer.FINDSET THEN
+        REPEAT
+          pProvSecSearchBuffer.SETRANGE("Provider No.", lPSRBuffer."Provider No.");
+          pProvSecSearchBuffer.MODIFYALL(Distance, lPSRBuffer.Distance);
+      //    lPSRBuffer."Travel Time (min)"
+        UNTIL lPSRBuffer.NEXT = 0;
+      pProvSecSearchBuffer.RESET;
+    END;
+
+    LOCAL PROCEDURE GetAltAddr@1000000009(VAR pAltAddr@1000000000 : Record 5051);
+    BEGIN
+      //IMH04.ST
+      pAltAddr."Contact No." := ServiceHeaderSearch."Contact No.";
+      pAltAddr.Code := ServiceHeaderSearch."Ship-to Address Code";
+      pAltAddr.Address := ServiceHeaderSearch."Ship-to Address";
+      pAltAddr."Address 2" := ServiceHeaderSearch."Ship-to Address 2";
+      pAltAddr."Address 3" := ServiceHeaderSearch."Ship-to Address 3";
+      pAltAddr.City := ServiceHeaderSearch."Ship-to City";
+      pAltAddr."Post Code" := ServiceHeaderSearch."Ship-to Post Code";
+      pAltAddr.County := ServiceHeaderSearch."Ship-to County";
+      pAltAddr."Country/Region Code" := ServiceHeaderSearch."Ship-to Country/Region Code";
+      pAltAddr."Geo. Reference Code" := ServiceHeaderSearch."Ship-to Geo. Reference Code";
+    END;
+
+    BEGIN
+    {
+      /** @r IMH07 @d 28/05/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search @h 5140 @c Afficage fichier de trace */
+      /** @r IMH06 @d 26/05/14 @a ISAT.ST @v IMH6.01.P011 @s New Provider Search @h 5140 @c Correction valeur de retour SearchResult */
+      /** @r IMH05 @d 26/05/14 @a ISAT.ST @v IMH6.01.P011 @s New Provider Search @h 5127 @c Erreur tri si pas d'intervention */
+      /** @r IMH04 @d 20/05/14 @a ISAT.ST @v IMH6.01.P011 @s New Provider Search @h 5128 @c Calcul Km r‚‚l */
+      /** @r IMH03 @d 20/05/14 @a ISAT.ST @v IMH6.01.P011 @s New Provider Search @h 5127
+          @c Ne prend plus en compte l'invisible open space. Les prospects sont d‚j… exclus
+          @c + mantis 5129 (doublon) */
+      /** @r IMH02 @d 09/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search @c Finalisation */
+      /** @r IMH01 @d 18/02/14 @a ISAT.PC @v IMH6.01.P011 @s New Provider Search @c Creation */
+    }
+    END.
+  }
+}

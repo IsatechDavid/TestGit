@@ -1,0 +1,294 @@
+OBJECT Codeunit 8016603 Draft management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/09;
+    Time=12:00:00;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 21=rimd,
+                TableData 112=rimd,
+                TableData 10865=rimd,
+                TableData 10866=rimd;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      text001@8016600 : TextConst 'FRA=Vous avez sp‚cifier un code paiement inconnu : %1';
+      ind@8016605 : Integer;
+      PaymentTerm@8016604 : Record 3;
+      Customer@8016626 : Record 18;
+      CustLedgEntry@8016634 : Record 21;
+      PaymentMethod@8016603 : Record 289;
+      SalesInvHeader@8016613 : Record 112;
+      PaymentClass@8016616 : Record 10860;
+      PaymentStatus@8016617 : Record 10861;
+      Steps@8016631 : Record 10862;
+      PaymentHeader@8016621 : Record 10865;
+      PaymentLine@8016624 : Record 10866;
+      CompanyInformation@8016623 : Record 79;
+      DateOrder@8016606 : Date;
+      DateShip@8016607 : Date;
+      DateInvoice@8016608 : Date;
+      DateReleve@8016609 : Date;
+      TypeDocument@8016612 : Text[1];
+      text003@8016615 : TextConst 'FRA=Document %1 %2 inconnu';
+      text004@8016618 : TextConst 'FRA=Le code type de reglement inconnu %1 en T10860';
+      text005@8016619 : TextConst 'FRA=Le code status initial inconnu %1 %2';
+      NoBordereau@8016620 : Code[20];
+      text006@8016622 : TextConst 'FRA=Le Bordereau automatique %1 est dej… cr‚‚.';
+      memoligne@8016625 : Integer;
+      text007@8016627 : TextConst 'FRA=Le client %1 est inconnu';
+      text008@8016628 : TextConst 'FRA=Erreur d''‚criture dans la table ligne de bordereau';
+      text009@8016629 : TextConst 'FRA=Erreur d''‚criture dans la table entete de bordereau';
+      NoSeriesMgt@8016630 : Codeunit 396;
+      text010@8016632 : TextConst 'FRA=Il ne doit pas y avoir plusieurs Etapes possibles pour %1 status %2';
+      PostingStatement@8016633 : Codeunit 10860;
+      CustEntryApplyPostedEntries@8016635 : Codeunit 226;
+      CustInvStat@8016602 : Record 8016602;
+
+    PROCEDURE "Eclatement par ‚ch‚ance"@8016600("montant total"@8016600 : Decimal;"Condition de paiement"@8016601 : Code[10];"Condition de reglement"@8016602 : Code[10];"type de document"@8016609 : Code[1];"No document"@8016610 : Code[20];"date echeance"@8016603 : Date;VAR "Table date echeance"@8016607 : ARRAY [10] OF Date;VAR "Table montant"@8016608 : ARRAY [10] OF Decimal);
+    BEGIN
+      //Fonction de base
+      //       parametres entrees
+      //             montant a ventiler
+      //             code condition de paiement
+      //             code mode de reglement
+      //             type de document ('F' facture ou 'R' releve ou 'L' livraison)
+      //             Numero de document
+      //             date ‚ch‚ance
+      //       parametres sorties
+      //             table des echeances
+      //             table des montant par echeances
+      //
+
+      FOR ind := 1 TO 10 DO
+        "Table date echeance"[ind] := 0D;
+      FOR ind := 1 TO 10 DO
+        "Table montant"[ind] := 0;
+
+      TypeDocument := "type de document";
+
+      IF NOT PaymentTerm.GET("Condition de paiement") THEN
+        ERROR (text001,"Condition de paiement");
+
+      IF NOT PaymentMethod.GET("Condition de reglement") THEN
+        PaymentMethod.INIT;
+
+      IF SalesInvHeader.GET("No document") THEN BEGIN
+        DateOrder := SalesInvHeader."Order Date";
+        DateShip := SalesInvHeader."Order Date";
+        DateInvoice := SalesInvHeader."Posting Date";
+        DateReleve := SalesInvHeader."Posting Date";
+      END;
+
+      IF NOT Customer.GET(SalesInvHeader."Bill-to Customer No.") THEN
+        IF NOT Customer.GET(SalesInvHeader."Sell-to Customer No.") THEN;
+
+      //CalculEch("Table date echeance"[1] , paymentTerm."Due Date Calculation");
+      "Table date echeance"[1] := "date echeance";
+      "Table montant"[1] := "montant total";
+
+      IF (TypeDocument = 'F') AND (NOT SalesInvHeader."Draft generate") THEN
+        GenEch("Table date echeance","Table montant");
+    END;
+
+    PROCEDURE CalculEch@8016601(VAR loc_Echeance@8016600 : Date;VAR loc_Formule@8016601 : DateFormula);
+    BEGIN
+      // Calcul du delai d'echeance par rapport a la date d'origine
+
+      loc_Echeance := 0D;
+      loc_Echeance := CALCDATE(loc_Formule,DateInvoice);
+    END;
+
+    PROCEDURE GenEchRel@8016603(VAR "Table date echeance"@8016601 : ARRAY [10] OF Date;VAR "Table montant"@8016600 : ARRAY [10] OF Decimal;"Condition de paiement"@8016604 : Code[10];"Condition de reglement"@8016603 : Code[10];"No document"@8016602 : Code[20]);
+    BEGIN
+
+      TypeDocument := 'R';
+
+      IF NOT PaymentTerm.GET("Condition de paiement") THEN
+        ERROR (text001,"Condition de paiement");
+
+      IF NOT PaymentMethod.GET("Condition de reglement") THEN
+        PaymentMethod.INIT;
+
+      IF NOT CustInvStat.GET("No document") THEN
+        ERROR (text003,'R',"No document");
+
+      DateOrder := CustInvStat."Statement Date";
+      DateShip := CustInvStat."Statement Date";
+      DateInvoice := CustInvStat."Statement Date";
+      DateReleve := CustInvStat."Statement Date";
+
+      IF NOT Customer.GET(CustInvStat."Customer No.") THEN
+        ERROR(text007,CustInvStat."Customer No.");
+
+      "Table date echeance"[1] := CustInvStat."Due Date";
+      CustInvStat.CALCFIELDS(Amount);
+      "Table montant"[1] := CustInvStat.Amount;
+
+      GenEch("Table date echeance","Table montant");
+    END;
+
+    PROCEDURE GenEch@8016602(VAR "Table date echeance"@8016601 : ARRAY [10] OF Date;VAR "Table montant"@8016600 : ARRAY [10] OF Decimal);
+    VAR
+      i@8016602 : Integer;
+    BEGIN
+      //test et generation de l'effet dans le portefeuille
+
+      //test si ce document doit g‚n‚rer des effets
+      IF NOT PaymentMethod."Draft Create" THEN
+        EXIT;
+      IF PaymentMethod."Payment Class Code" = '' THEN
+        EXIT;
+
+      IF NOT PaymentClass.GET(PaymentMethod."Payment Class Code") THEN
+        ERROR(text004,PaymentMethod."Payment Class Code");
+
+      PaymentStatus.SETRANGE("Payment Class",PaymentMethod."Payment Class Code");
+      PaymentStatus.SETRANGE(Line,PaymentMethod."Initial Status");
+      IF NOT PaymentStatus.FIND('-') THEN
+        ERROR(text005,PaymentMethod."Payment Class Code",PaymentMethod."Initial Status");
+
+      //boucle de g‚n‚ration des echeances
+      FOR ind := 1 TO 1 DO BEGIN
+        IF ("Table montant"[ind] >= PaymentMethod."Amount minimum Draft") AND
+          ("Table montant"[ind] > 0)
+        THEN BEGIN
+
+          //creation de l'entete
+          PaymentClass.TESTFIELD("Header No. Series");
+          NoBordereau := '';
+          NoSeriesMgt.InitSeries(
+            PaymentClass."Header No. Series",PaymentClass."Header No. Series",
+            TODAY,NoBordereau,PaymentClass."Header No. Series");
+
+          IF PaymentHeader.GET( NoBordereau) THEN BEGIN
+            ERROR(text006, NoBordereau,PaymentHeader."Status No.");
+          END ELSE BEGIN
+            PaymentHeader.INIT;
+            PaymentHeader."No." := NoBordereau ;
+            IF NOT PaymentHeader.INSERT(TRUE) THEN
+              ERROR (text009);
+
+            PaymentHeader.VALIDATE("Payment Class",PaymentStatus."Payment Class");
+            PaymentHeader.VALIDATE("Status No.",PaymentStatus.Line);
+            CompanyInformation.GET;
+            PaymentHeader.VALIDATE("Account No.", CompanyInformation."Default Bank Account No.");
+            PaymentHeader."Sales Document Type" := TypeDocument;
+            PaymentHeader."Sales Document No.":= SalesInvHeader."No.";
+
+            IF TypeDocument='F' THEN
+              PaymentHeader."Sales Document No.":= SalesInvHeader."No."
+            ELSE
+              PaymentHeader."Sales Document No.":= CustInvStat."Invoice Statement No.";
+            IF NOT PaymentHeader.MODIFY THEN
+              ERROR (text009);
+          END;
+
+          //generation du mouvement de bordereau
+          PaymentLine.SETCURRENTKEY("No.","Line No.");
+          PaymentLine.SETRANGE("No.",NoBordereau);
+
+          IF NOT  PaymentLine.FIND('+') THEN
+            PaymentLine.INIT;
+          memoligne:=PaymentLine."Line No." + 10000 ;
+
+          PaymentLine.INIT;
+          PaymentLine."No.":=NoBordereau;
+          PaymentLine."Line No.":=memoligne;
+          PaymentLine.VALIDATE(Amount,0 - "Table montant"[ind]);
+
+          PaymentLine."Account Type":=PaymentLine."Account Type"::Customer;
+          PaymentLine.VALIDATE("Account No.",Customer."No.");
+          PaymentLine."Posting Group":='' ;
+          PaymentLine."Due Date":="Table date echeance"[ind];
+          PaymentLine."Payment Class":=PaymentStatus."Payment Class";
+          PaymentLine."Status No.":=PaymentStatus.Line;
+          PaymentLine."Currency Code":=Customer."Currency Code";
+          PaymentLine."Document Type":= TypeDocument;
+          PaymentLine."Acceptation Code":=PaymentMethod."Default Acceptation Code";
+
+          IF TypeDocument = 'F' THEN BEGIN
+            PaymentLine."Document Type" := 'F';
+            PaymentLine."Document No" := SalesInvHeader."No.";
+            PaymentLine."Applies-to Doc. Type" := PaymentLine."Applies-to Doc. Type"::Invoice;
+            PaymentLine."Applies-to Doc. No." := SalesInvHeader."No.";
+          END ELSE BEGIN
+            PaymentLine."Document Type" := 'R';
+            PaymentLine."Document No" := CustInvStat."Invoice Statement No.";
+          END;
+
+          PaymentLine."Document No.":='';
+          IF  PaymentClass."Line No. Series"<>'' THEN
+            PaymentLine."Document No." :=
+              NoSeriesMgt.GetNextNo(PaymentClass."Line No. Series",TODAY,FALSE);
+
+          IF NOT PaymentLine.INSERT THEN
+            ERROR (text008);
+
+          PaymentLine.DimensionDelete;
+          PaymentLine.DimensionSetup;
+
+          //validation automatique du bordereau courant
+          PaymentHeader.TestNbOfLines;
+          Steps.SETRANGE("Payment Class",PaymentHeader."Payment Class");
+          Steps.SETRANGE("Previous Status",PaymentHeader."Status No.");
+          i := Steps.COUNT;
+          IF i = 1 THEN
+             Steps.FIND('-')
+          ELSE
+             ERROR(text010,PaymentHeader."Payment Class", PaymentHeader."Status No.");
+
+          CLEAR(PostingStatement);
+          PostingStatement.Valbord(PaymentHeader,Steps);
+
+        END; //"Table montant"[ind]>0
+      END; //for do begin
+
+      //Mise a jour des ‚critures comptable  pour lettrage des releves
+      IF TypeDocument <> 'F' THEN BEGIN
+        IF NOT Customer.GET(CustInvStat."Customer No.") THEN
+          Customer.INIT;
+
+        CustLedgEntry.LOCKTABLE;
+        CustLedgEntry.RESET;
+        CustLedgEntry.INIT;
+        CustLedgEntry.SETCURRENTKEY("Customer No.","Invoice Statement No.","Posting Date");
+        CustLedgEntry.SETFILTER(
+          "Customer No.",'%1|%2',
+          CustInvStat."Customer No.",
+          Customer."Bill-to Customer No.");
+        CustLedgEntry.SETRANGE("Invoice Statement No.",CustInvStat."Invoice Statement No.");
+
+        IF CustLedgEntry.FIND('-') THEN
+          REPEAT
+            CustLedgEntry."Applies-to ID" := CustInvStat."Invoice Statement No.";
+            CustLedgEntry.MODIFY;
+            IF CustLedgEntry."Document Type" = CustLedgEntry."Document Type"::Invoice THEN
+              IF SalesInvHeader.GET(CustLedgEntry."Document No.") THEN BEGIN
+                SalesInvHeader."Draft generate":=TRUE;
+                SalesInvHeader.MODIFY;
+              END;
+          UNTIL CustLedgEntry.NEXT=0;
+          CustEntryApplyPostedEntries.ValiderSurReleve(CustLedgEntry);
+      END ELSE BEGIN
+        SalesInvHeader."Draft generate":=TRUE;
+        SalesInvHeader.MODIFY;
+      END;
+
+      COMMIT;
+    END;
+
+    BEGIN
+    {
+      /** @r ISA01 @d 07/07/09 @a ISAT.MA @v ISA6.00.00.01 @s Migration v6 **/
+    }
+    END.
+  }
+}

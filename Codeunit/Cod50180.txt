@@ -1,0 +1,350 @@
+OBJECT Codeunit 50180 FUSION Invoice Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=12/12/12;
+    Time=11:50:14;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      SalesInvoicingManagment@1100281000 : Codeunit 50079;
+      Text001@1100281001 : TextConst 'ENU=Fusion service order type %1 is not defined.;FRA=Le type produit Fusion %1 n''est pas d‚finit.';
+      Text002@1100281002 : TextConst 'ENU=Fusion document No. missing;FRA=Le nø dossier IMH est manquant.';
+      Text003@1100281003 : TextConst 'ENU=Fusion status %1-%2 unknown;FRA=Statut Fusion %1 - %2 inconnu.';
+      Text004@1100281004 : TextConst 'ENU=Corporate No. %1 missing.;FRA=Le nø grand compte %1 n''est pas valide.';
+      Text005@1100281005 : TextConst 'ENU=Region corporate %1 missing.;FRA=La r‚gion grand compte %1 n''est pas valide.';
+      Text006@1100281006 : TextConst 'ENU=Last status change date missing.;FRA=La date dernier changement de statut est manquante.';
+      Text010@1100281007 : TextConst 'ENU=Import file;FRA=Importer fichier';
+      Text011@1100281008 : TextConst 'ENU=All Files (*.*)|*.*;FRA=Fichier csv (*.csv)|*.csv';
+
+    PROCEDURE ChangeStatusFusionService@1100281000(VAR pOriginalServHeader@1100281000 : Record 5900;pFusionServiceStatus@1100281001 : Text[50];pExpertInvoiceAmout@1100281007 : Decimal;pExpInvoiceAmountIncludingVAT@1100281006 : Decimal;pExpertInvoiceVATAmount@1100281005 : Decimal);
+    VAR
+      lSalesItemSetup@1100281002 : Record 50138;
+      lServiceHeader@1100281003 : Record 5900;
+      lService@1100281004 : Record 50066;
+    BEGIN
+      {
+      lService.GET(pOriginalServHeader."Service No.");
+      lServiceHeader.SETCURRENTKEY("Service No.");
+      lServiceHeader.SETRANGE("Service No.", pOriginalServHeader."Service No.");
+      lServiceHeader.SETRANGE("Fusion Service Status Created", TRUE);
+      IF NOT lServiceHeader.FINDFIRST THEN
+        EXIT;
+
+      IF pOriginalServHeader."Fusion Service Status" = pFusionServiceStatus THEN
+        EXIT;
+
+      lSalesItemSetup.SETRANGE("Service Order Type", lServiceHeader."Service Order Type");
+      lSalesItemSetup.SETRANGE("Corporate No.", lServiceHeader."Corporate No.");
+      lSalesItemSetup.SETRANGE("Corporate Region Code", lServiceHeader."Corporate Region Code");
+      lSalesItemSetup.SETRANGE("Fusion Service Status", pFusionServiceStatus);
+
+      IF NOT lSalesItemSetup.FINDFIRST THEN
+        EXIT;
+
+      IF lSalesItemSetup."Create Sales Order" THEN BEGIN
+        CreateSalesOrder(lServiceHeader);
+      END;
+
+      IF lSalesItemSetup."Create Sales Credit Memo" THEN
+        CreateSalesCreditMemo(lServiceHeader);
+
+      IF lSalesItemSetup."Create Purchase invoice" THEN
+        CreateExpertPurchInvoice(lServiceHeader,
+          pExpertInvoiceAmout, pExpInvoiceAmountIncludingVAT, pExpertInvoiceVATAmount);
+
+      pOriginalServHeader."Fusion Service Status" := pFusionServiceStatus;
+      pOriginalServHeader.MODIFY(TRUE);
+      }
+    END;
+
+    LOCAL PROCEDURE CreateSalesOrder@1100281005(VAR pFusionInvoicingJournalLine@1100281002 : Record 50187);
+    VAR
+      lSalesHeader@1100281000 : Record 36;
+      lSalesInvoiceHeader@1100281001 : Record 112;
+    BEGIN
+      //IMH04
+      //creation commande vente, si pas de facture cr‚‚e
+      SalesInvoicingManagment.CreateSalesOrderFromFusion(pFusionInvoicingJournalLine);
+    END;
+
+    LOCAL PROCEDURE CreateSalesCreditMemo@1100281012(VAR pFusionInvoicingJournalLine@1100281002 : Record 50187);
+    VAR
+      lSalesHeader@1100281000 : Record 36;
+      lSalesInvoiceHeader@1100281001 : Record 112;
+    BEGIN
+      //IMH04
+      //Cr‚ation d'avoir vente + facture carence
+      SalesInvoicingManagment.CancelSalesDocFusion(pFusionInvoicingJournalLine);
+    END;
+
+    PROCEDURE CreateExpertPurchInvoice@1100281006(pServiceHeader@1100281001 : Record 5900;pAmout@1100281000 : Decimal;pAmountIncludingVAT@1100281002 : Decimal;pVATAmount@1100281003 : Decimal);
+    BEGIN
+      //Cr‚ation/MAJ montants facture expert
+      //si facture non enregistr‚e --> MAJ montants
+      //si facture enregistr‚e --> cr‚ation facture achat ou avoir en fonction des montants
+    END;
+
+    PROCEDURE OnChangeServType@1100281002(VAR pServHeader@1100281000 : Record 5900;pCancel@1100281001 : Boolean);
+    BEGIN
+      {
+      //IMH03 ZW : d‚sactivier, CU … revoir.
+      IF pCancel THEN BEGIN
+        // Annulation des commandes / factures s'il en existe
+        CreateSalesCreditMemo(pServHeader);
+      END ELSE BEGIN
+        // G‚n‚ration des nouveaux documents
+        CreateSalesOrder(pServHeader);
+      END;
+      }
+    END;
+
+    PROCEDURE PostLine@1100281036(VAR pFusionInvoicingJournalLine@1100281000 : Record 50187) : Boolean;
+    BEGIN
+      //IMH04
+      IF pFusionInvoicingJournalLine."In Error" THEN
+        EXIT(FALSE);
+
+      IF pFusionInvoicingJournalLine."New Service Order Type" = pFusionInvoicingJournalLine."Old Service Order Type" THEN
+        EXIT(TRUE);
+
+      IF SalesOrderExist(pFusionInvoicingJournalLine."Fusion Document No.") THEN BEGIN
+        // Annulation des commandes / factures s'il en existe
+        CreateSalesCreditMemo(pFusionInvoicingJournalLine);
+      END;
+
+      // G‚n‚ration des nouveaux documents
+      CreateSalesOrder(pFusionInvoicingJournalLine);
+      CreateFusionInvoicingHistory(pFusionInvoicingJournalLine);
+    END;
+
+    PROCEDURE SalesOrderExist@1100281014(pFusionDocNo@1100281000 : Code[30]) : Boolean;
+    BEGIN
+      //IMH04
+      EXIT(GetSalesOrderNo(pFusionDocNo) <> '');
+    END;
+
+    PROCEDURE CreateFusionInvoicingHistory@1100281017(pFusionInvoicingJournalLine@1100281000 : Record 50187);
+    BEGIN
+      //IMH04
+      IF pFusionInvoicingJournalLine."New Service Order Type" = pFusionInvoicingJournalLine."Old Service Order Type" THEN
+        EXIT;
+
+      CreateFusionInvoicingDocHeader(pFusionInvoicingJournalLine);
+      CreateFusionInvStatusEntry(pFusionInvoicingJournalLine);
+    END;
+
+    PROCEDURE CreateFusionInvoicingDocHeader@1100281018(pFusionInvoicingJournalLine@1100281000 : Record 50187);
+    VAR
+      lFusionInvoicingDocHead@1100281001 : Record 50188;
+      lFusionInvoicingDocHead2@1100281002 : Record 50188;
+    BEGIN
+      //IMH04
+      lFusionInvoicingDocHead.TRANSFERFIELDS(pFusionInvoicingJournalLine);
+      lFusionInvoicingDocHead.VALIDATE("Fusion Document No.", pFusionInvoicingJournalLine."Fusion Document No.");
+
+      IF NOT lFusionInvoicingDocHead2.GET(lFusionInvoicingDocHead."Fusion Document No.") THEN
+        lFusionInvoicingDocHead.INSERT(TRUE)
+      ELSE BEGIN
+        lFusionInvoicingDocHead."RDD Document" := lFusionInvoicingDocHead2."RDD Document";
+        lFusionInvoicingDocHead.MODIFY(TRUE);
+      END;
+    END;
+
+    PROCEDURE CreateFusionInvStatusEntry@1100281019(pFusionInvoicingJournalLine@1100281000 : Record 50187);
+    VAR
+      lFusionInvoicingStatusEntry@1100281001 : Record 50121;
+    BEGIN
+      //IMH04
+      lFusionInvoicingStatusEntry.INIT;
+      lFusionInvoicingStatusEntry.TRANSFERFIELDS(pFusionInvoicingJournalLine);
+      lFusionInvoicingStatusEntry.VALIDATE("Fusion Document No.", pFusionInvoicingJournalLine."Fusion Document No.");
+      lFusionInvoicingStatusEntry."Entry No." := 0;
+      lFusionInvoicingStatusEntry.INSERT(TRUE);
+    END;
+
+    PROCEDURE ImportJrnlLineByXMLPort@1100281008();
+    VAR
+      lFileToImport@1100281002 : Text[500];
+      lFileInStream@1100281001 : InStream;
+      lFolderMgt@1100281000 : Codeunit 50004;
+      lFile@1100281003 : File;
+      lFusionInvoicingImportXML@1100281004 : XMLport 50008;
+    BEGIN
+      //IMH04
+      IF ISSERVICETIER THEN BEGIN
+        IF NOT UPLOADINTOSTREAM(Text010,'',Text011,lFileToImport,lFileInStream) THEN
+          EXIT;
+      END ELSE BEGIN
+        lFileToImport := lFolderMgt.GetFileName(FALSE,'','');
+        IF lFileToImport = '' THEN
+          EXIT;
+        lFile.OPEN(lFileToImport);
+        lFile.CREATEINSTREAM(lFileInStream);
+      END;
+
+      lFusionInvoicingImportXML.SETSOURCE(lFileInStream);
+      lFusionInvoicingImportXML.IMPORT;
+    END;
+
+    PROCEDURE CheckLine@1100281011(VAR pFusionInvoicingJrnlLine@1100281000 : Record 50187;VAR pErrorMessage@1100281001 : Text[80]) : Boolean;
+    BEGIN
+      //IMH04
+      pErrorMessage := '';
+      pFusionInvoicingJrnlLine.VALIDATE("Fusion Status");
+      pFusionInvoicingJrnlLine.VALIDATE("Fusion Corporate No.");
+
+      IF pFusionInvoicingJrnlLine."Fusion Document No." = '' THEN BEGIN
+        pErrorMessage := Text002;
+        EXIT(FALSE);
+      END;
+
+      IF pFusionInvoicingJrnlLine."New Service Order Type" = '' THEN BEGIN
+        pErrorMessage := STRSUBSTNO(Text003,
+          pFusionInvoicingJrnlLine."Fusion Service Type", pFusionInvoicingJrnlLine."Fusion Status");
+        EXIT(FALSE);
+      END;
+
+      IF pFusionInvoicingJrnlLine."Corporate No." = '' THEN BEGIN
+        pErrorMessage := STRSUBSTNO(Text004, pFusionInvoicingJrnlLine."Fusion Corporate No.");
+        EXIT(FALSE);
+      END;
+
+      IF pFusionInvoicingJrnlLine."Fusion Last Doc. Change Date" = 0D THEN BEGIN
+        pErrorMessage := Text006;
+        EXIT(FALSE);
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CheckLines@1100281013(VAR pFusionInvoicingJrnlLine@1100281000 : Record 50187);
+    BEGIN
+      //IMH04
+      IF pFusionInvoicingJrnlLine.ISEMPTY THEN
+        EXIT;
+
+      pFusionInvoicingJrnlLine.FINDSET;
+      REPEAT
+        pFusionInvoicingJrnlLine."In Error" := NOT CheckLine(pFusionInvoicingJrnlLine, pFusionInvoicingJrnlLine."Error Message");
+        pFusionInvoicingJrnlLine.MODIFY(TRUE);
+      UNTIL pFusionInvoicingJrnlLine.NEXT = 0;
+    END;
+
+    PROCEDURE CreateFusionInvoicingJrnlLine@1100281004(VAR pFusionInvoicingJrnlLine@1100281000 : Record 50187);
+    VAR
+      lFusionInvoicingJrnlLine@1100281001 : Record 50187;
+      lFusionInvoicingJrnlLine2@1100281002 : Record 50187;
+    BEGIN
+      //IMH04
+      lFusionInvoicingJrnlLine := pFusionInvoicingJrnlLine;
+      lFusionInvoicingJrnlLine.VALIDATE("Fusion Document No.");
+
+      lFusionInvoicingJrnlLine.VALIDATE("Old Service Order Type", GetOldServiceOrderType(lFusionInvoicingJrnlLine));
+      lFusionInvoicingJrnlLine."In Error" := NOT CheckLine(lFusionInvoicingJrnlLine, lFusionInvoicingJrnlLine."Error Message");
+      IF NOT lFusionInvoicingJrnlLine2.GET(lFusionInvoicingJrnlLine."Fusion Document No.") THEN
+        lFusionInvoicingJrnlLine.INSERT(TRUE)
+      ELSE
+        lFusionInvoicingJrnlLine.MODIFY(TRUE);
+    END;
+
+    PROCEDURE GetOldServiceOrderType@1100281016(VAR pFusionInvoicingJrnlLine@1100281000 : Record 50187) : Code[10];
+    VAR
+      lFusionInvoicingStatusEntry@1100281001 : Record 50121;
+    BEGIN
+      //IMH04
+      lFusionInvoicingStatusEntry.SETRANGE("Fusion Document No.", pFusionInvoicingJrnlLine."Fusion Document No.");
+      IF lFusionInvoicingStatusEntry.FINDLAST THEN
+        EXIT(lFusionInvoicingStatusEntry."Service Order Type");
+    END;
+
+    PROCEDURE GetSalesOrderNo@1100281001(pFusionDocNo@1100281000 : Code[30]) rSalesOrderNo : Code[20];
+    VAR
+      lSalesHeader@1100281001 : Record 36;
+    BEGIN
+      //IMH04
+      IF pFusionDocNo = '' THEN
+        EXIT;
+      lSalesHeader.SETCURRENTKEY("Fusion Document No.");
+      lSalesHeader.SETRANGE("Fusion Document No.", pFusionDocNo);
+      lSalesHeader.SETRANGE("Document Type", lSalesHeader."Document Type"::Order);
+      lSalesHeader.SETRANGE(Canceled, FALSE);
+
+      IF lSalesHeader.FINDLAST THEN
+        rSalesOrderNo := lSalesHeader."No.";
+    END;
+
+    PROCEDURE GetSalesInvoiceNo@1100281010(pFusionDocNo@1100281000 : Code[30]) rSalesInvoiceNo : Code[20];
+    VAR
+      lSalesLine@1100281001 : Record 37;
+      lSalesInvoiceLine@1100281002 : Record 113;
+    BEGIN
+      //IMH04
+      IF pFusionDocNo = '' THEN
+        EXIT;
+      lSalesLine.SETCURRENTKEY("Fusion Document No.");
+      lSalesLine.SETRANGE("Fusion Document No.", pFusionDocNo);
+      lSalesLine.SETRANGE("Document Type", lSalesLine."Document Type"::Invoice);
+
+      IF lSalesLine.FINDLAST THEN
+        EXIT(lSalesLine."Document No.");
+
+
+      lSalesInvoiceLine.SETCURRENTKEY("Fusion Document No.");
+      lSalesInvoiceLine.SETRANGE("Fusion Document No.", pFusionDocNo);
+
+      IF lSalesInvoiceLine.FINDLAST THEN
+        EXIT(lSalesInvoiceLine."Document No.");
+    END;
+
+    PROCEDURE ShowSalesOrderCard@1100281003(pSalesHeaderNo@1100281000 : Code[20]);
+    VAR
+      lSalesHeader@1100281001 : Record 36;
+    BEGIN
+      //IMH04
+      IF lSalesHeader.GET(lSalesHeader."Document Type"::Order, pSalesHeaderNo) THEN
+        FORM.RUN(FORM::"Sales Order", lSalesHeader);
+    END;
+
+    PROCEDURE ShowSalesInvoiceCard@1100281007(pSalesInvoiceNo@1100281000 : Code[20]);
+    VAR
+      lSalesHeader@1100281001 : Record 36;
+      lSalesInvoiceHeader@1100281002 : Record 112;
+    BEGIN
+      //IMH04
+      IF lSalesHeader.GET(lSalesHeader."Document Type"::Invoice, pSalesInvoiceNo) THEN BEGIN
+        FORM.RUN(FORM::"Sales Invoice", lSalesHeader);
+      END;
+      IF lSalesInvoiceHeader.GET(pSalesInvoiceNo) THEN BEGIN
+        FORM.RUN(FORM::"Posted Sales Invoice", lSalesInvoiceHeader);
+      END;
+    END;
+
+    LOCAL PROCEDURE GetFileName@1100281009(pWindowTitle@1100281004 : Text[50];pDefaultFileName@1100281003 : Text[1024];pDefaultFileType@1100281002 : ' ,Text,Excel,Word,Custom,Xml,Htm,Xsd,Xslt';pFilterString@1100281001 : Text[250];pAction@1100281000 : 'Open,Save') : Text[1024];
+    VAR
+      lCmDlg@1100281005 : Codeunit 412;
+    BEGIN
+      // IMH04
+      // Pour g‚rer le message de s‚curit‚
+      EXIT(lCmDlg.OpenFile(pWindowTitle,pDefaultFileName,pDefaultFileType,pFilterString,pAction));
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 30/11/12 @a ISAT.ZW @v IMH6.01.220 @s Interface Facturation fusion @c Finalisation projet */
+      /** @r IMH03 @d 17/04/12 @a ISAT.ZW @v IMH6.01.165 @s Interface fusion @c CU … revoir */
+      /** @r IMH02 @d 24/08/11 @a ISAT.ST @v IMH6.01.165 @s Interface fusion @c R‚vision du codeunit */
+      /** @r IMH01 @d 16/03/11 @a ISAT.ZW @v IMH6.01.165 @s Interface Extranet @c cr‚ation */
+    }
+    END.
+  }
+}

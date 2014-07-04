@@ -1,0 +1,688 @@
+OBJECT Codeunit 50152 ANSAAP Rcvd final
+{
+  OBJECT-PROPERTIES
+  {
+    Date=02/05/12;
+    Time=10:05:04;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+          BEGIN
+            ReceiveDataBaseRecord;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100281000 : TextConst 'FRA=Aucun CodeUnit de g‚n‚ration pour l''act %1, de type %2.';
+      Error002@1100481001 : TextConst 'FRA=Le fichier "%1" est mal format‚.';
+      EAISetup@1100281001 : Record 8016700;
+      EAIAct@1100281008 : Record 8016706;
+      ToolsMgt@1100281003 : Codeunit 8016602;
+      Text000@1100281004 : TextConst 'ENU=Trouble during adding node %1.;FRA=ProblŠme lors de l''ajout de la balise %1.';
+      ROOT@1100281005 : TextConst 'FRA=MESSAGE';
+      Text001@1100281002 : TextConst 'ENU=Start XML proc. ben. (%1) - Cont. %2 - Cust. %3;FRA=Deb. g‚n. xml soc. (%1) - Cont. %2 - Clt. %3';
+      Text002@1100281006 : TextConst 'ENU=End XML proc. ben. (%1) - Cont. %2 - Cust. %3;FRA=Fin. g‚n. xml soc. (%1) - Cont. %2 - Clt. %3';
+      EAISetupOK@1100281007 : Boolean;
+
+    LOCAL PROCEDURE ReceiveDataBaseRecord@1100281012();
+    VAR
+      lANSAAP@1100281002 : Record 50118;
+      lANSAAP2@1100281011 : Record 50118;
+      lANSRAP@1100281003 : Record 50119;
+      lANSRAP2@1100281014 : Record 50119;
+      lTempANSAAP@1100281005 : TEMPORARY Record 50118;
+      lTempANSRAP@1100281006 : TEMPORARY Record 50119;
+      lRecRef@1100281001 : RecordRef;
+      lFirstRecRef@1100281012 : RecordRef;
+      lCurrRecRef@1100281013 : RecordRef;
+      lNbCont@1100281007 : Integer;
+      lMaxNbCont@1100281008 : Integer;
+      lMaxContactToTreat@1100281015 : Integer;
+      lCurrentContactTreated@1100281016 : Integer;
+      lLastRec@1100281009 : Boolean;
+      lWindow@1100281000 : Dialog;
+    BEGIN
+      EAISetup.GET;
+      EAISetup.TESTFIELD("ANSAAP EAI Partner Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Act Type Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Act Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Message Queue Code");
+      EAIAct.GET(EAISetup."ANSAAP EAI Act Type Code",EAISetup."ANSAAP EAI Act Code");
+
+      IF EAISetup."ANSAAP Contact Allotment" <= 0 THEN BEGIN
+        lMaxNbCont := 1;
+      END ELSE BEGIN
+        lMaxNbCont := EAISetup."ANSAAP Contact Allotment";
+      END;
+
+      lMaxContactToTreat := 15000;
+      IF GUIALLOWED THEN BEGIN
+        lWindow.OPEN('Dataset #1#######');
+        lWindow.INPUT(1, lMaxContactToTreat);
+      END;
+      lCurrentContactTreated := 0;
+
+      lANSAAP.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.");
+      lANSAAP.SETRANGE("Treatment Status",lANSAAP."Treatment Status"::Pending);
+      IF lANSAAP.FINDSET THEN BEGIN
+        REPEAT
+          lCurrentContactTreated += 1;
+          lANSAAP2.RESET;
+          lANSAAP2.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.");
+          lANSAAP2.SETRANGE("Treatment Status",lANSAAP."Treatment Status"::Pending);
+          lANSAAP2.SETRANGE("Contact No.",lANSAAP."Contact No.");
+          lANSAAP2.SETRANGE("Customer No.",lANSAAP."Customer No.");
+          IF lANSAAP2.FINDLAST THEN BEGIN
+            lTempANSAAP := lANSAAP2;
+            lANSAAP2.MODIFYALL("Treatment Status",lANSAAP2."Treatment Status"::Processed);
+            lTempANSAAP.INSERT;
+          END;
+
+          lNbCont += 1;
+
+          lANSRAP.RESET;
+          lANSRAP.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.","Warranty No.");
+          lANSRAP.SETRANGE("Treatment Status",lANSRAP."Treatment Status"::Pending);
+          lANSRAP.SETRANGE("Contact No.",lTempANSAAP."Contact No.");
+          lANSRAP.SETRANGE("Customer No.",lTempANSAAP."Customer No.");
+          IF lANSRAP.FINDSET THEN BEGIN
+            REPEAT
+              lANSRAP2.RESET;
+              lANSRAP2.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.","Warranty No.");
+              lANSRAP2.SETRANGE("Treatment Status",lANSRAP2."Treatment Status"::Pending);
+              lANSRAP2.SETRANGE("Contact No.",lTempANSAAP."Contact No.");
+              lANSRAP2.SETRANGE("Customer No.",lTempANSAAP."Customer No.");
+              lANSRAP2.SETRANGE("Warranty No.",lANSRAP."Warranty No.");
+              lANSRAP2.SETRANGE("Contract Code", lANSRAP."Contract Code"); //IMH02.ST
+              IF lANSRAP2.FINDLAST THEN BEGIN
+                lTempANSRAP := lANSRAP2;
+                lANSRAP2.MODIFYALL("Treatment Status",lANSRAP2."Treatment Status"::Processed);
+                lTempANSRAP.INSERT;
+              END;
+            UNTIL lANSRAP.NEXT = 0;
+          END;
+
+          IF (lNbCont = lMaxNbCont) THEN BEGIN
+            CreateXMLdoc(lTempANSAAP,lTempANSRAP);
+            lNbCont := 0;
+            lTempANSAAP.RESET;
+            lTempANSAAP.DELETEALL;
+            lTempANSRAP.RESET;
+            lTempANSRAP.DELETEALL;
+            COMMIT;
+          END;
+        UNTIL (lANSAAP.NEXT = 0) OR (lCurrentContactTreated = lMaxContactToTreat);
+      END;
+      //<<IMH02.ST
+      IF lNbCont > 0 THEN BEGIN
+        CreateXMLdoc(lTempANSAAP,lTempANSRAP);
+        COMMIT;
+      END;
+      //>>IMH02.ST
+    END;
+
+    LOCAL PROCEDURE CreateXMLdoc@1100281001(VAR pANSAAP@1100281010 : Record 50118;VAR pANSRAP@1100281011 : Record 50119);
+    VAR
+      lEAIRcvdMQBuffer@1100281005 : TEMPORARY Record 8016721;
+      lEAIMQBufferMgt@1100281003 : Codeunit 8016708;
+      lXMLDocument@1100481006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLRootNode@1100481009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLDocumentNode@1100481007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lInStr@1100481005 : InStream;
+      lNameSpace@1100481011 : Text[30];
+    BEGIN
+      IF NOT pANSAAP.FINDSET THEN
+        EXIT;
+
+      IF ISCLEAR(lXMLDocument) THEN BEGIN
+        CREATE(lXMLDocument);
+      END;
+
+      lNameSpace := '';
+
+      IF NOT lXMLDocument.loadXML('<?xml version="1.0" encoding="ISO-8859-1" ?><' + ROOT + '/>') THEN BEGIN
+        ERROR(Error001);
+      END;
+
+      lXMLRootNode := lXMLDocument.documentElement;
+
+      REPEAT
+        WriteMemberContact(lXMLRootNode,pANSAAP,lNameSpace,lXMLDocumentNode);
+
+        pANSRAP.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.","Warranty No.");
+        pANSRAP.SETRANGE("Treatment Status",pANSRAP."Treatment Status"::Pending);
+        pANSRAP.SETRANGE("Contact No.",pANSAAP."Contact No.");
+        pANSRAP.SETRANGE("Customer No.",pANSAAP."Customer No.");
+        IF pANSRAP.FINDSET THEN BEGIN
+          REPEAT
+            WriteMemberContract(lXMLDocumentNode,pANSRAP,lNameSpace,lXMLNewNode);
+          UNTIL pANSRAP.NEXT = 0;
+        END;
+      UNTIL pANSAAP.NEXT = 0;
+
+      CLEAR(lEAIRcvdMQBuffer);
+      lEAIRcvdMQBuffer.INIT;
+      lEAIRcvdMQBuffer."XML Source".CREATEINSTREAM(lInStr);
+      lXMLDocument.save(lInStr);
+      lEAIRcvdMQBuffer."Entry No." := '';
+      lEAIRcvdMQBuffer."EAI Partner Code" := EAISetup."ANSAAP EAI Partner Code";
+      lEAIRcvdMQBuffer."EAI Act Type Code" := EAIAct."EAI Act Type Code";
+      lEAIRcvdMQBuffer."EAI Act Code" := EAIAct.Code;
+      lEAIRcvdMQBuffer."Act Priority" := EAIAct."Act Priority";
+      lEAIRcvdMQBuffer."Date Creation" := WORKDATE;
+      lEAIRcvdMQBuffer."Time Creation" := DT2TIME(CURRENTDATETIME);
+      lEAIRcvdMQBuffer."User Creation" := USERID;
+      lEAIRcvdMQBuffer."EAI MQ Code" := EAISetup."ANSAAP EAI Message Queue Code";
+      lEAIRcvdMQBuffer.Step := lEAIRcvdMQBuffer.Step::Validation;
+      lEAIRcvdMQBuffer.Status := lEAIRcvdMQBuffer.Status::Unprocessed;
+      lEAIRcvdMQBuffer.INSERT;
+      lEAIMQBufferMgt.CreateRcvdMQBufferToRcvdMQ(lEAIRcvdMQBuffer);
+
+      CLEAR(lInStr);
+      CLEAR(lXMLDocument);
+    END;
+
+    PROCEDURE WriteMemberContact@1100481003(VAR pXMLDocumentNode@1100481005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pANSAAP@1100481000 : Record 50118;pNameSpace@1100481006 : Text[30];VAR pXMLNode@1100481022 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481015 : Codeunit 8016710;
+      lXMLDocHeaderNode@1100481017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100481016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lTest@1100281001 : Integer;
+    BEGIN
+      CLEAR(lEAIXMLMgt);
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT IsAddElement(pXMLDocumentNode,'MembCont','',pNameSpace,lXMLNode) THEN
+          ERROR(Text000,'MembCont');
+
+        pXMLNode := lXMLNode;
+
+        IF NOT IsAddElement(lXMLNode,'CorpNo',pANSAAP."Customer No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'CorpNo');
+
+        IF NOT IsAddElement(lXMLNode,'MembNo',pANSAAP."Contact No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'MembNo');
+
+        IF pANSAAP."Person Code" = 'P' THEN BEGIN
+          IF NOT IsAddElement(lXMLNode,'Salut',pANSAAP."Person ID",pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Salut');
+
+          IF NOT IsAddElement(lXMLNode,'Surname',pANSAAP.Name,pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Surname');
+
+          IF NOT IsAddElement(lXMLNode,'FirstName',pANSAAP.FullName,pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'FirstName');
+
+        END ELSE BEGIN
+          IF NOT IsAddElement(lXMLNode,'Salut',pANSAAP."Corporation ID",pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Salut');
+
+          IF NOT IsAddElement(lXMLNode,'Name',pANSAAP.Name,pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Name');
+
+          IF NOT IsAddElement(lXMLNode,'Name2',pANSAAP.FullName,pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Name2');
+        END;
+
+        IF NOT IsAddElement(lXMLNode,'Addr',pANSAAP."Address 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Addr');
+
+        IF NOT IsAddElement(lXMLNode,'Addr2',pANSAAP."Address 2",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Addr2');
+
+        IF NOT IsAddElement(lXMLNode,'Addr3',pANSAAP."Address 3",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Addr3');
+
+        IF NOT IsAddElement(lXMLNode,'PostCode',pANSAAP."Post Code",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PostCode');
+
+        IF NOT IsAddElement(lXMLNode,'City',pANSAAP.City,pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'City');
+
+        IF NOT IsAddElement(lXMLNode,'Country',pANSAAP.Country,pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Country');
+
+        IF NOT IsAddElement(lXMLNode,'CorpReg',pANSAAP."Customer County",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'CorpReg');
+
+        IF NOT IsAddElement(lXMLNode,'PhoneNo',pANSAAP."Phone No. 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PhoneNo');
+
+        IF NOT IsAddElement(lXMLNode,'PhoneNo2',pANSAAP."Phone No. 2",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PhoneNo2');
+
+        IF NOT IsAddElement(lXMLNode,'FaxNo',pANSAAP."Fax No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'FaxNo');
+
+        IF NOT IsAddElement(lXMLNode,'Email',pANSAAP."E-Mail 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Email');
+
+        IF NOT IsAddElement(lXMLNode,'Email2',pANSAAP."E-Mail 2",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Email2');
+
+        IF NOT IsAddElement(lXMLNode,'BirthDate',ToolsMgt.IntegerToText(pANSAAP."Birth Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'BirthDate');
+
+        IF NOT IsAddElement(lXMLNode,'RayedDate',ToolsMgt.IntegerToText(pANSAAP."Radiation Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'RayedDate');
+
+        IF NOT IsAddElement(lXMLNode,'ChangeDate',ToolsMgt.IntegerToText(pANSAAP."Movement Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ChangeDate');
+
+      END;
+    END;
+
+    PROCEDURE WriteMemberContract@1100281006(VAR pXMLDocumentNode@1100481005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pANSRAP@1100281001 : Record 50119;pNameSpace@1100481006 : Text[30];VAR pXMLNode@1100481022 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481015 : Codeunit 8016710;
+      lXMLDocHeaderNode@1100481017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100481016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lTest@1100281002 : Integer;
+      lChar@1100281003 : Char;
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT IsAddElement(pXMLDocumentNode,'MembContract','',pNameSpace,lXMLNode) THEN
+          ERROR(Text000,'MembContract');
+
+        IF NOT IsAddElement(lXMLNode,'CorpNo',pANSRAP."Customer No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'CorpNo');
+
+        IF NOT IsAddElement(lXMLNode,'MembNo',pANSRAP."Contact No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'MembNo');
+
+        IF NOT IsAddElement(lXMLNode,'ContractRef',pANSRAP."Warranty No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ContractRef');
+
+        IF NOT IsAddElement(lXMLNode,'ContractForm',pANSRAP."Contract Code",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ContractForm');
+
+        IF NOT IsAddElement(lXMLNode,'ResType',pANSRAP."Residence Type",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ResType');
+
+        IF NOT IsAddElement(lXMLNode,'Addr',pANSRAP."Address 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Addr');
+
+        IF NOT IsAddElement(lXMLNode,'Addr2',pANSRAP."Address 2",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Addr2');
+
+        IF NOT IsAddElement(lXMLNode,'Addr3',pANSRAP."Address 3",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Addr3');
+
+        IF NOT IsAddElement(lXMLNode,'PostCode',pANSRAP."Post Code",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PostCode');
+
+        pANSRAP.City := ToolsMgt.ReplaceControlCaracter(pANSRAP.City);
+        IF NOT IsAddElement(lXMLNode,'City',pANSRAP.City,pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'City');
+
+        IF NOT IsAddElement(lXMLNode,'Country',pANSRAP.Country,pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Country');
+
+        IF NOT IsAddElement(lXMLNode,'PhoneNo',pANSRAP."Phone No. 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PhoneNo');
+
+        IF NOT IsAddElement(lXMLNode,'StartDate',ToolsMgt.IntegerToText(pANSRAP."Contract Start Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'StartDate');
+
+        IF NOT IsAddElement(lXMLNode,'EndDate',ToolsMgt.IntegerToText(pANSRAP."Contract End Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'EndDate');
+
+        IF (pANSRAP.Filler = '00001') AND (pANSRAP."Customer No." = 'MB') THEN BEGIN
+          IF NOT IsAddElement(lXMLNode,'OccNat',COPYSTR(pANSRAP.Filler,1,1),pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'OccNat');
+
+          IF NOT IsAddElement(lXMLNode,'PropType',COPYSTR(pANSRAP.Filler,2,1),pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'PropType');
+
+          IF NOT IsAddElement(lXMLNode,'DeductAmt1',COPYSTR(pANSRAP.Filler,3,13),pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'DeductAmt1');
+
+          IF NOT IsAddElement(lXMLNode,'DeductAmt2',COPYSTR(pANSRAP.Filler,21,13),pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'DeductAmt2');
+        END;
+
+        IF NOT IsAddElement(lXMLNode,'ChangeDate',ToolsMgt.IntegerToText(pANSRAP."Movement Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ChangeDate');
+
+      END;
+    END;
+
+    PROCEDURE UpdateRec@1100281005(VAR pRecRef@1100281000 : RecordRef;VAR pNewRecRef@1100281001 : RecordRef);
+    VAR
+      lFieldRef@1100281003 : FieldRef;
+      lNewFieldRef@1100281004 : FieldRef;
+      i@1100281002 : Integer;
+    BEGIN
+      FOR i := 1 TO pRecRef.FIELDCOUNT DO BEGIN
+        lFieldRef := pRecRef.FIELDINDEX(i);
+        lNewFieldRef := pNewRecRef.FIELDINDEX(i);
+        IF ToolsMgt.HasValue(lNewFieldRef) THEN BEGIN
+          lFieldRef.VALUE :=  lNewFieldRef.VALUE;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetEAISetup@1100281004();
+    BEGIN
+      IF EAISetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      EAISetupOK := TRUE;
+      EAISetup.GET;
+      EAISetup.TESTFIELD("ANSAAP EAI Partner Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Act Type Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Act Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Message Queue Code");
+    END;
+
+    LOCAL PROCEDURE _ReceiveDataBaseRecord@1100281000();
+    VAR
+      lANSAAP@1100281002 : Record 50118;
+      lANSAAP2@1100281011 : Record 50118;
+      lANSRAP@1100281003 : Record 50119;
+      lANSRAP2@1100281014 : Record 50119;
+      lTempANSAAP@1100281005 : TEMPORARY Record 50118;
+      lTempANSRAP@1100281006 : TEMPORARY Record 50119;
+      lEAIRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+      lEAIAct@1100281004 : Record 8016706;
+      lEAIMQBufferMgt@1100281010 : Codeunit 8016708;
+      lRecRef@1100281001 : RecordRef;
+      lFirstRecRef@1100281012 : RecordRef;
+      lCurrRecRef@1100281013 : RecordRef;
+      lNbCont@1100281007 : Integer;
+      lMaxNbCont@1100281008 : Integer;
+      lMaxContactToTreat@1100281015 : Integer;
+      lCurrentContactTreated@1100281016 : Integer;
+      lLastRec@1100281009 : Boolean;
+    BEGIN
+      EAISetup.GET;
+      EAISetup.TESTFIELD("ANSAAP EAI Partner Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Act Type Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Act Code");
+      EAISetup.TESTFIELD("ANSAAP EAI Message Queue Code");
+      SELECTLATESTVERSION;
+      IF EAISetup."ANSAAP Contact Allotment" <= 0 THEN BEGIN
+        lMaxNbCont := 1;
+      END ELSE BEGIN
+        lMaxNbCont := EAISetup."ANSAAP Contact Allotment";
+      END;
+      lMaxContactToTreat := 10000;
+      lCurrentContactTreated := 0;
+
+      lANSAAP.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.");
+      lANSAAP.SETRANGE("Treatment Status",lANSAAP."Treatment Status"::Pending);
+      lANSAAP.SETFILTER("Contact No.",'<>%1','');
+      lANSAAP.LOCKTABLE;
+      IF lANSAAP.FINDSET THEN BEGIN
+        REPEAT
+          lCurrentContactTreated += 1;
+          lTempANSAAP := lANSAAP;
+          lFirstRecRef.GETTABLE(lTempANSAAP);
+
+          lANSAAP2.RESET;
+          lANSAAP2.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.");
+          lANSAAP2.SETRANGE("Treatment Status",lANSAAP."Treatment Status"::Pending);
+          lANSAAP2.SETRANGE("Contact No.",lANSAAP."Contact No.");
+          lANSAAP2.SETRANGE("Customer No.",lANSAAP."Customer No.");
+          IF lANSAAP2.FINDSET THEN BEGIN
+            REPEAT
+              lCurrRecRef.GETTABLE(lANSAAP2);
+              UpdateRec(lFirstRecRef,lCurrRecRef);
+              lFirstRecRef.SETTABLE(lTempANSAAP);
+            UNTIL lANSAAP2.NEXT = 0;
+            CLEAR(lCurrRecRef);
+            CLEAR(lFirstRecRef);
+            lANSAAP2.MODIFYALL("Treatment Status",lANSAAP2."Treatment Status"::Processed);
+            CLEAR(lANSAAP2);
+          END;
+
+          lTempANSAAP.INSERT;
+          lNbCont += 1;
+
+          lANSRAP.RESET;
+          lANSRAP.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.","Warranty No.");
+          lANSRAP.SETRANGE("Treatment Status",lANSRAP."Treatment Status"::Pending);
+          lANSRAP.SETRANGE("Contact No.",lTempANSAAP."Contact No.");
+          lANSRAP.SETRANGE("Customer No.",lTempANSAAP."Customer No.");
+          lANSRAP.LOCKTABLE;
+          IF lANSRAP.FINDSET THEN BEGIN
+            REPEAT
+              lTempANSRAP := lANSRAP;
+              lFirstRecRef.GETTABLE(lTempANSRAP);
+
+              lANSRAP2.RESET;
+              lANSRAP2.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.","Warranty No.");
+              lANSRAP2.SETRANGE("Treatment Status",lANSRAP2."Treatment Status"::Pending);
+              lANSRAP2.SETRANGE("Contact No.",lTempANSAAP."Contact No.");
+              lANSRAP2.SETRANGE("Customer No.",lTempANSAAP."Customer No.");
+              lANSRAP2.SETRANGE("Warranty No.",lANSRAP."Warranty No.");
+              lANSRAP2.SETRANGE("Contract Code", lANSRAP."Contract Code"); //IMH02.ST
+              IF lANSAAP2.FINDSET THEN BEGIN
+                REPEAT
+                  lCurrRecRef.GETTABLE(lANSRAP2);
+                  UpdateRec(lFirstRecRef,lCurrRecRef);
+                  lFirstRecRef.SETTABLE(lTempANSRAP);
+                UNTIL lANSAAP2.NEXT = 0;
+                CLEAR(lCurrRecRef);
+                CLEAR(lFirstRecRef);
+                lANSRAP2.MODIFYALL("Treatment Status",lANSAAP2."Treatment Status"::Processed);
+                CLEAR(lANSRAP2);
+              END;
+
+              lTempANSRAP.INSERT;
+            UNTIL lANSRAP.NEXT = 0;
+          END;
+
+          IF (lNbCont = lMaxNbCont) THEN BEGIN
+            CLEAR(lEAIRcvdMQBuffer);
+            lEAIRcvdMQBuffer.INIT;
+            //CreateXMLdoc(lEAIRcvdMQBuffer,lTempANSAAP,lTempANSRAP);
+            lEAIAct.GET(EAISetup."ANSAAP EAI Act Type Code",EAISetup."ANSAAP EAI Act Code");
+            lEAIRcvdMQBuffer."Entry No." := '';
+            lEAIRcvdMQBuffer."EAI Partner Code" := EAISetup."ANSAAP EAI Partner Code";
+            lEAIRcvdMQBuffer."EAI Act Type Code" := lEAIAct."EAI Act Type Code";
+            lEAIRcvdMQBuffer."EAI Act Code" := lEAIAct.Code;
+            lEAIRcvdMQBuffer."Act Priority" := lEAIAct."Act Priority";
+            lEAIRcvdMQBuffer."Date Creation" := WORKDATE;
+            lEAIRcvdMQBuffer."Time Creation" := DT2TIME(CURRENTDATETIME);
+            lEAIRcvdMQBuffer."User Creation" := USERID;
+            lEAIRcvdMQBuffer."EAI MQ Code" := EAISetup."ANSAAP EAI Message Queue Code";
+            lEAIRcvdMQBuffer.Step := lEAIRcvdMQBuffer.Step::Validation;
+            lEAIRcvdMQBuffer.Status := lEAIRcvdMQBuffer.Status::Unprocessed;
+            lEAIRcvdMQBuffer.INSERT;
+            lEAIMQBufferMgt.CreateRcvdMQBufferToRcvdMQ(lEAIRcvdMQBuffer);
+
+            lNbCont := 0;
+            lTempANSAAP.RESET;
+            lTempANSAAP.DELETEALL;
+            CLEAR(lTempANSAAP);
+            lTempANSRAP.RESET;
+            lTempANSRAP.DELETEALL;
+            CLEAR(lTempANSRAP);
+            COMMIT;
+          END;
+        UNTIL (lANSAAP.NEXT = 0) OR (lCurrentContactTreated = lMaxContactToTreat);
+      END;
+    END;
+
+    PROCEDURE _WriteMemberContact@1100281003(VAR pXMLDocumentNode@1100481005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pANSAAP@1100481000 : Record 50118;pNameSpace@1100481006 : Text[30];VAR pXMLNode@1100481022 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481015 : Codeunit 8016710;
+      lXMLDocHeaderNode@1100481017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100481016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lTest@1100281001 : Integer;
+    BEGIN
+      CLEAR(lEAIXMLMgt);
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT IsAddElement(pXMLDocumentNode,'MemberContact','',pNameSpace,lXMLNode) THEN
+          ERROR(Text000,'MemberContact');
+
+        pXMLNode := lXMLNode;
+
+        IF NOT IsAddElement(lXMLNode,'Corporate_No',pANSAAP."Customer No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Corporate_No');
+
+        IF NOT IsAddElement(lXMLNode,'Member_No',pANSAAP."Contact No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Member_No');
+
+        IF pANSAAP."Person Code" = 'P' THEN BEGIN
+          IF NOT IsAddElement(lXMLNode,'Salutation',pANSAAP."Person ID",pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Salutation');
+
+          IF NOT IsAddElement(lXMLNode,'Surname',pANSAAP.Name,pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Surname');
+
+          IF NOT IsAddElement(lXMLNode,'First_Name',pANSAAP.FullName,pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'First_Name');
+
+        END ELSE BEGIN
+          IF NOT IsAddElement(lXMLNode,'Salutation',pANSAAP."Corporation ID",pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Salutation');
+
+          IF NOT IsAddElement(lXMLNode,'Name',pANSAAP.Name,pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Name');
+
+          IF NOT IsAddElement(lXMLNode,'Name2',pANSAAP.FullName,pNameSpace,lXMLNewNode) THEN
+            ERROR(Text000,'Name2');
+        END;
+
+        IF NOT IsAddElement(lXMLNode,'Address',pANSAAP."Address 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Address');
+
+        IF NOT IsAddElement(lXMLNode,'Address2',pANSAAP."Address 2",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Address2');
+
+        IF NOT IsAddElement(lXMLNode,'Address3',pANSAAP."Address 3",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Address3');
+
+        IF NOT IsAddElement(lXMLNode,'PostCode',pANSAAP."Post Code",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PostCode');
+
+        IF NOT IsAddElement(lXMLNode,'City',pANSAAP.City,pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'City');
+
+        IF NOT IsAddElement(lXMLNode,'Country',pANSAAP.Country,pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Country');
+
+        IF NOT IsAddElement(lXMLNode,'CorporateRegion',pANSAAP."Customer County",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'CorporateRegion');
+
+        IF NOT IsAddElement(lXMLNode,'PhoneNo',pANSAAP."Phone No. 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PhoneNo');
+
+        IF NOT IsAddElement(lXMLNode,'PhoneNo2',pANSAAP."Phone No. 2",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PhoneNo2');
+
+        IF NOT IsAddElement(lXMLNode,'FaxNo',pANSAAP."Fax No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'FaxNo');
+
+        IF NOT IsAddElement(lXMLNode,'Email',pANSAAP."E-Mail 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Email');
+
+        IF NOT IsAddElement(lXMLNode,'Email2',pANSAAP."E-Mail 2",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Email2');
+
+        IF NOT IsAddElement(lXMLNode,'BirthDate',ToolsMgt.IntegerToText(pANSAAP."Birth Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'BirthDate');
+
+        IF NOT IsAddElement(lXMLNode,'RayedDate',ToolsMgt.IntegerToText(pANSAAP."Radiation Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'RayedDate');
+
+        IF NOT IsAddElement(lXMLNode,'ChangeDate',ToolsMgt.IntegerToText(pANSAAP."Movement Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ChangeDate');
+
+      END;
+    END;
+
+    PROCEDURE _WriteMemberContract@1100281002(VAR pXMLDocumentNode@1100481005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pANSRAP@1100281001 : Record 50119;pNameSpace@1100481006 : Text[30];VAR pXMLNode@1100481022 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481015 : Codeunit 8016710;
+      lXMLDocHeaderNode@1100481017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100481016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lTest@1100281002 : Integer;
+      lChar@1100281003 : Char;
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT IsAddElement(pXMLDocumentNode,'MemberContract','',pNameSpace,lXMLNode) THEN
+          ERROR(Text000,'MemberContract');
+
+        IF NOT IsAddElement(lXMLNode,'CorporateNo',pANSRAP."Customer No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'CorporateNo');
+
+        IF NOT IsAddElement(lXMLNode,'MemberNo',pANSRAP."Contact No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'MemberNo');
+
+        IF NOT IsAddElement(lXMLNode,'ContractReference',pANSRAP."Warranty No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ContractReference');
+
+        IF NOT IsAddElement(lXMLNode,'ContractForm',pANSRAP."Contract Code",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ContractForm');
+
+        IF NOT IsAddElement(lXMLNode,'ResidenceType',pANSRAP."Residence Type",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ResidenceType');
+
+        IF NOT IsAddElement(lXMLNode,'Address',pANSRAP."Address 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Address');
+
+        IF NOT IsAddElement(lXMLNode,'Address2',pANSRAP."Address 2",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Address2');
+
+        IF NOT IsAddElement(lXMLNode,'Address3',pANSRAP."Address 3",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Address3');
+
+        IF NOT IsAddElement(lXMLNode,'PostCode',pANSRAP."Post Code",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PostCode');
+
+        pANSRAP.City := ToolsMgt.ReplaceControlCaracter(pANSRAP.City);
+        IF NOT IsAddElement(lXMLNode,'City',pANSRAP.City,pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'City');
+
+        IF NOT IsAddElement(lXMLNode,'Country',pANSRAP.Country,pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'Country');
+
+        IF NOT IsAddElement(lXMLNode,'PhoneNo',pANSRAP."Phone No. 1",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PhoneNo');
+
+        IF NOT IsAddElement(lXMLNode,'StartDate',ToolsMgt.IntegerToText(pANSRAP."Contract Start Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'StartDate');
+
+        IF NOT IsAddElement(lXMLNode,'EndDate',ToolsMgt.IntegerToText(pANSRAP."Contract End Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'EndDate');
+
+        IF NOT IsAddElement(lXMLNode,'OccupierNature',COPYSTR(pANSRAP.Filler,1,1),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'OccupierNature');
+
+        IF NOT IsAddElement(lXMLNode,'PropertyType',COPYSTR(pANSRAP.Filler,2,1),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'PropertyType');
+
+        IF NOT IsAddElement(lXMLNode,'DeductibleAmount1',COPYSTR(pANSRAP.Filler,3,13),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'DeductibleAmount1');
+
+        IF NOT IsAddElement(lXMLNode,'DeductibleAmount2',COPYSTR(pANSRAP.Filler,21,13),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'DeductibleAmount2');
+
+        IF NOT IsAddElement(lXMLNode,'ChangeDate',ToolsMgt.IntegerToText(pANSRAP."Movement Date"),pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'ChangeDate');
+
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 02/05/12 @a ISAT.ST @v IMH6.01.133 @s Interface fichier soci‚taire @h 3440 @c Corrections */
+      /** @r IMH01 @d 20/06/11 @a ISAT.EBA @v IMH6.01.133 @s Interface fichier soci‚taire */
+    }
+    END.
+  }
+}

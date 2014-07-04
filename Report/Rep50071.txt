@@ -1,0 +1,431 @@
+OBJECT Report 50071 Ansaap Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/07/11;
+    Time=15:19:58;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    ProcessingOnly=Yes;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        OnAfterGetRecord=BEGIN
+                           PhoneStandardization.SetHideMessage(TRUE);
+                           ReceiveDataBaseRecord;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      ToolsMgt@1100281000 : Codeunit 8016602;
+      PhoneStandardization@1100281001 : Codeunit 50099;
+
+    LOCAL PROCEDURE ReceiveDataBaseRecord@1100281012();
+    VAR
+      lANSAAP@1100281002 : Record 50118;
+      lANSAAP2@1100281011 : Record 50118;
+      lANSRAP@1100281003 : Record 50119;
+      lANSRAP2@1100281014 : Record 50119;
+      lContactNo@1100281000 : Code[20];
+      lCurrentCounter@1100281001 : Integer;
+      lStartDate@1100281004 : DateTime;
+      lEndDate@1100281005 : DateTime;
+      lTextFormat@1100281006 : TextConst 'FRA=<Day,2>-<Month,2>-<Year> <Hours24>.<Minutes,2>.<Seconds,2><Second dec>';
+    BEGIN
+      lCurrentCounter := 0;
+      lStartDate := CURRENTDATETIME;
+
+      lANSAAP.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.");
+      lANSAAP.SETRANGE("Treatment Status",lANSAAP."Treatment Status"::Pending);
+      IF lANSAAP.FINDSET THEN BEGIN
+        REPEAT
+          lANSAAP2.RESET;
+          lANSAAP2.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.");
+          lANSAAP2.SETRANGE("Treatment Status",lANSAAP."Treatment Status"::Pending);
+          lANSAAP2.SETRANGE("Contact No.",lANSAAP."Contact No.");
+          lANSAAP2.SETRANGE("Customer No.",lANSAAP."Customer No.");
+          IF lANSAAP2.FINDLAST THEN BEGIN
+            lCurrentCounter += 1;
+            lContactNo := CreateContact(lANSAAP2);
+            lANSAAP2.MODIFYALL("Treatment Status",lANSAAP2."Treatment Status"::Processed);
+            CreateContract(lContactNo);
+          END;
+        UNTIL (lANSAAP.NEXT = 0) OR (lCurrentCounter > 1000);
+      END;
+      lEndDate := CURRENTDATETIME;
+      MESSAGE('Deb : ' + FORMAT(lStartDate,0,lTextFormat) + ' - ' + 'Fin : ' + FORMAT(lEndDate,0,lTextFormat));
+    END;
+
+    PROCEDURE CreateContact@1100481003(pANSAAP@1100281003 : Record 50118) rValue : Code[20];
+    VAR
+      lText001@1100281009 : TextConst 'ENU=Create by beneficiary import;FRA=Cr‚er par import soci‚taire';
+      lContact@1100281000 : Record 5050;
+      lMemberNo@1100281001 : Code[20];
+      lCorporateNo@1100281002 : Code[20];
+      lSalutationCode@1100281004 : Code[10];
+      lCorporateRegionCode@1100281008 : Code[10];
+      lBirthDate@1100281005 : Date;
+      lRayedDate@1100281006 : Date;
+      lModifiedDate@1100281007 : Date;
+    BEGIN
+      pANSAAP.Name := DELCHR(pANSAAP.Name,'=',' ');
+      pANSAAP.FullName := DELCHR(pANSAAP.FullName,'=',' ');
+      pANSAAP."Address 1" := DELCHR(pANSAAP."Address 1",'=',' ');
+      pANSAAP."Address 2" := DELCHR(pANSAAP."Address 2",'=',' ');
+      pANSAAP."Address 3" := DELCHR(pANSAAP."Address 3",'=',' ');
+      pANSAAP.City := DELCHR(pANSAAP.City,'=',' ');
+      WITH lContact DO BEGIN
+        lMemberNo := pANSAAP."Contact No.";
+        lCorporateNo := GetSimpleCrossRef(DATABASE::Customer,'ANSAAP',pANSAAP."Customer No.");
+        SETCURRENTKEY("Member No.","Corporate No.");
+        SETRANGE("Member No.",lMemberNo);
+        SETRANGE("Corporate No.",lCorporateNo);
+        IF FINDFIRST THEN BEGIN
+          IF pANSAAP."Person Code" = 'P' THEN BEGIN
+            lSalutationCode := GetSimpleCrossRef(DATABASE::Salutation,'ANSAAP',pANSAAP."Person ID");
+            IF "Salutation Code" <> lSalutationCode THEN BEGIN
+              "Salutation Code" := lSalutationCode;
+            END;
+            IF Surname <> pANSAAP.Name THEN BEGIN
+              Surname := pANSAAP.Name;
+            END;
+            IF "First Name" <> pANSAAP.FullName THEN BEGIN
+              "First Name" := pANSAAP.FullName;
+            END;
+            Name := CalculatedName;
+          END ELSE BEGIN
+            lSalutationCode := GetSimpleCrossRef(DATABASE::Salutation,'ANSAAP',pANSAAP."Corporation ID");
+            IF "Salutation Code" <> lSalutationCode THEN BEGIN
+              "Salutation Code" := lSalutationCode;
+            END;
+            IF Name <> pANSAAP.Name THEN BEGIN
+              Name := pANSAAP.Name;
+            END;
+            IF "Name 2" <> pANSAAP.FullName THEN BEGIN
+              "Name 2" := pANSAAP.FullName;
+            END;
+            NameBreakdown;
+          END;
+
+          IF Address <> pANSAAP."Address 1" THEN BEGIN
+            Address := pANSAAP."Address 1";
+          END;
+          IF "Address 2" <> pANSAAP."Address 2" THEN BEGIN
+            "Address 2" := pANSAAP."Address 2";
+          END;
+          "Post Code" := pANSAAP."Post Code";
+          City := pANSAAP.City;
+          "Country/Region Code" := pANSAAP.Country;
+          IF pANSAAP."Customer No." IN ['MB','MC','MCS'] THEN BEGIN
+            "Corporate Region Code" :=
+              GetDoubleCrossRef(
+                DATABASE::"Corporate Region",
+                'ANSAAP',lCorporateNo,pANSAAP."Corporation ID");
+          END;
+          "Phone No." := pANSAAP."Phone No. 1";
+          PhoneStandardization.ValidatePhoneNo(DATABASE::Contact,9,"Country/Region Code","Phone No.");
+          "Mobile Phone No." := pANSAAP."Phone No. 2";
+          PhoneStandardization.ValidatePhoneNo(DATABASE::Contact,5061,"Country/Region Code","Mobile Phone No.");
+          "Fax No." := pANSAAP."Fax No.";
+          PhoneStandardization.ValidatePhoneNo(DATABASE::Contact,84,"Country/Region Code","Fax No.");
+          "E-Mail" := LOWERCASE(pANSAAP."E-Mail 1");
+          "Search E-Mail" := "E-Mail";
+          "E-Mail 2" := LOWERCASE(pANSAAP."E-Mail 2");
+          Birthdate := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Birth Date"));
+          "Rayed Date" := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Radiation Date"));
+          "Last Date Modified" := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Movement Date"));
+
+          MODIFY(TRUE);
+        END ELSE BEGIN
+          INIT;
+          Type := Type::Company;
+          "Corporate No." := lCorporateNo;
+          "Member No." := lMemberNo;
+          "Service Contact" := "Service Contact"::Beneficiary;
+          IF pANSAAP."Person Code" = 'P' THEN BEGIN
+            "Salutation Code" := GetSimpleCrossRef(DATABASE::Salutation,'ANSAAP',pANSAAP."Person ID");
+            Surname := pANSAAP.Name;
+            "First Name" := pANSAAP.FullName;
+            Name := CalculatedName;
+          END ELSE BEGIN
+            "Salutation Code" := GetSimpleCrossRef(DATABASE::Salutation,'ANSAAP',pANSAAP."Corporation ID");
+            Name := pANSAAP.Name;
+            "Name 2" := pANSAAP.FullName;
+            NameBreakdown;
+          END;
+          Address := pANSAAP."Address 1";
+          "Address 2" := pANSAAP."Address 2";
+          "Post Code" := pANSAAP."Post Code";
+          City := pANSAAP.City;
+          "Country/Region Code" := pANSAAP.Country;
+          IF pANSAAP."Customer No." IN ['MB','MC','MCS'] THEN BEGIN
+            "Corporate Region Code" :=
+              GetDoubleCrossRef(
+                DATABASE::"Corporate Region",
+                'ANSAAP',lCorporateNo,pANSAAP."Corporation ID");
+          END;
+
+          "Phone No." := pANSAAP."Phone No. 1";
+          "Mobile Phone No." := pANSAAP."Phone No. 2";
+          "Fax No." := pANSAAP."Fax No.";
+
+          "E-Mail" := LOWERCASE(pANSAAP."E-Mail 1");
+          "Search E-Mail" := "E-Mail";
+          "E-Mail 2" := LOWERCASE(pANSAAP."E-Mail 2");
+
+          Birthdate := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Birth Date"));
+          "Rayed Date" := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Radiation Date"));
+          "Last Date Modified" := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Movement Date"));
+
+          INSERT(TRUE);
+        END;
+      END;
+      rValue := lContact."No.";
+    END;
+
+    PROCEDURE CreateContract@1100281000(pContactNo@1100281007 : Code[20]);
+    VAR
+      lContact@1100281006 : Record 5050;
+      lANSRAP@1100281002 : Record 50119;
+      lANSRAP2@1100281003 : Record 50119;
+      lContContract@1100281005 : Record 50059;
+      lContAltAddr@1100281001 : Record 5051;
+      lCpt@1100281004 : Integer;
+      lCorporateNoFilter@1100281000 : Text[1024];
+    BEGIN
+      IF NOT lContact.GET(pContactNo) THEN BEGIN
+        EXIT;
+      END;
+
+      lCorporateNoFilter := GetCorporateNo(lContact."Corporate No.");
+
+      lANSRAP.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.","Warranty No.");
+      lANSRAP.SETRANGE("Treatment Status",lANSRAP."Treatment Status"::Pending);
+      lANSRAP.SETRANGE("Contact No.",lContact."Member No.");
+      lANSRAP.SETFILTER("Customer No.",lCorporateNoFilter);
+      IF lANSRAP.FINDSET THEN BEGIN
+        REPEAT
+          lANSRAP2.RESET;
+          lANSRAP2.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.","Warranty No.");
+          lANSRAP2.SETRANGE("Treatment Status",lANSRAP2."Treatment Status"::Pending);
+          lANSRAP2.SETRANGE("Contact No.",lANSRAP."Contact No.");
+          lANSRAP2.SETRANGE("Customer No.",lANSRAP."Customer No.");
+          lANSRAP2.SETRANGE("Warranty No.",lANSRAP."Warranty No.");
+          IF lANSRAP2.FINDLAST THEN BEGIN
+            lANSRAP2."Address 1" := DELCHR(lANSRAP2."Address 1",'=',' ');
+            lANSRAP2."Address 2" := DELCHR(lANSRAP2."Address 2",'=',' ');
+            lANSRAP2."Address 3" := DELCHR(lANSRAP2."Address 3",'=',' ');
+            lANSRAP2.City := DELCHR(lANSRAP2.City,'=',' ');
+
+            lCpt := lCpt + 1;
+            lContContract.RESET;
+            lContContract.SETRANGE("Contact No.",lContact."No.");
+            lContContract.SETRANGE("Corporate No.",lContact."Corporate No.");
+            lContContract.SETRANGE("Contract Reference",lANSRAP."Warranty No.");
+            IF lContContract.FINDLAST THEN BEGIN
+              IF (lContContract.Name = '') THEN BEGIN
+                lContContract.Name := lContact.Name;
+              END;
+              IF EVALUATE(lContContract."Start Date",FORMAT(lANSRAP2."Contract Start Date")) THEN BEGIN
+                lContContract.VALIDATE("Start Date");
+              END;
+              IF EVALUATE(lContContract."Expiration Date",FORMAT(lANSRAP2."Contract End Date")) THEN BEGIN
+                lContContract.VALIDATE("Expiration Date");
+              END;
+              IF (lANSRAP2.Filler = '00001') AND (lANSRAP2."Customer No." = 'MB') THEN BEGIN
+                IF EVALUATE(lContContract."Deductible 1 (LCY)",COPYSTR(lANSRAP2.Filler,3,13)) THEN BEGIN
+                  lContContract.VALIDATE("Deductible 1 (LCY)");
+                END;
+                IF EVALUATE(lContContract."Deductible 2 (LCY)",COPYSTR(lANSRAP2.Filler,21,13)) THEN BEGIN
+                  lContContract.VALIDATE("Deductible 2 (LCY)");
+                END;
+              END;
+              IF EVALUATE(lContContract."Last Modification Date",FORMAT(lANSRAP2."Movement Date")) THEN;
+              lContContract.MODIFY;
+            END ELSE BEGIN
+              lContContract.INIT;
+              lContContract.SetDisableCheckCorpContract(TRUE);
+              lContContract.VALIDATE("Contact No.",lContact."No.");
+              lContContract.VALIDATE("Corporate No.",lContact."Corporate No.");
+              lContContract.VALIDATE("Contract Reference",lANSRAP."Warranty No.");
+              IF (lContContract.Name = '') THEN BEGIN
+                lContContract.Name := lContact.Name;
+              END;
+              IF EVALUATE(lContContract."Start Date",FORMAT(lANSRAP2."Contract Start Date")) THEN BEGIN
+                lContContract.VALIDATE("Start Date");
+              END;
+              IF EVALUATE(lContContract."Expiration Date",FORMAT(lANSRAP2."Contract End Date")) THEN BEGIN
+                lContContract.VALIDATE("Expiration Date");
+              END;
+              IF (lANSRAP2.Filler = '00001') AND (lANSRAP2."Customer No." = 'MB') THEN BEGIN
+                IF EVALUATE(lContContract."Deductible 1 (LCY)",COPYSTR(lANSRAP2.Filler,3,13)) THEN BEGIN
+                  lContContract.VALIDATE("Deductible 1 (LCY)");
+                END;
+                IF EVALUATE(lContContract."Deductible 2 (LCY)",COPYSTR(lANSRAP2.Filler,21,13)) THEN BEGIN
+                  lContContract.VALIDATE("Deductible 2 (LCY)");
+                END;
+              END;
+              IF EVALUATE(lContContract."Last Modification Date",FORMAT(lANSRAP2."Movement Date")) THEN;
+              lContContract.INSERT(TRUE);
+            END;
+
+            lContAltAddr.RESET;
+            lContAltAddr.SETRANGE("Contact No.",lContact."No.");
+            lContAltAddr.SETRANGE(Code,lContContract."Default Address Code");
+            IF lContAltAddr.FINDFIRST THEN BEGIN
+              lContAltAddr.VALIDATE("Contact No.",lContact."No.");
+              lContAltAddr."Residence Type" := lANSRAP2."Residence Type";
+              lContAltAddr.Address := lANSRAP2."Address 1";
+              lContAltAddr."Address 2" := lANSRAP2."Address 2";
+              lContAltAddr.County := lANSRAP2.County;
+              lContAltAddr."Post Code" := lANSRAP2."Post Code";
+              lContAltAddr.City := lANSRAP2.City;
+
+              lContAltAddr."Phone No." := lANSRAP2."Phone No. 1";
+              PhoneStandardization.ValidatePhoneNo(
+                DATABASE::"Contact Alt. Address",12,lContAltAddr."Country/Region Code",lContAltAddr."Phone No.");
+
+              IF (lANSRAP2.Filler = '00001') AND (lANSRAP2."Customer No." = 'MB') THEN BEGIN
+                lContAltAddr."Occupier Nature" := COPYSTR(lANSRAP2.Filler,1,1);
+                lContAltAddr."Property Type" := COPYSTR(lANSRAP2.Filler,2,1);
+              END;
+              lContAltAddr.UpdatePhoneNoList;
+              lContAltAddr.MODIFY;
+            END ELSE BEGIN
+              lContAltAddr.INIT;
+              lContAltAddr.UpdateAltAddress(lContact);
+              lContAltAddr.VALIDATE("Contact No.",lContact."No.");
+              lContAltAddr.Code := FORMAT(lCpt);
+              lContAltAddr."Residence Type" := lANSRAP2."Residence Type";
+              lContAltAddr.Address := lANSRAP2."Address 1";
+              lContAltAddr."Address 2" := lANSRAP2."Address 2";
+              lContAltAddr.County := lANSRAP2.County;
+              lContAltAddr."Post Code" := lANSRAP2."Post Code";
+              lContAltAddr.City := lANSRAP2.City;
+
+              lContAltAddr."Phone No." := lANSRAP2."Phone No. 1";
+              PhoneStandardization.ValidatePhoneNo(
+                DATABASE::"Contact Alt. Address",12,lContAltAddr."Country/Region Code",lContAltAddr."Phone No.");
+
+              IF (lANSRAP2.Filler = '00001') AND (lANSRAP2."Customer No." = 'MB') THEN BEGIN
+                lContAltAddr."Occupier Nature" := COPYSTR(lANSRAP2.Filler,1,1);
+                lContAltAddr."Property Type" := COPYSTR(lANSRAP2.Filler,2,1);
+              END;
+              lContAltAddr.UpdatePhoneNoList;
+              lContAltAddr.INSERT;
+            END;
+
+            IF lContContract."Default Address Code" <> lContAltAddr.Code THEN BEGIN
+              lContContract.VALIDATE("Default Address Code",lContAltAddr.Code);
+              lContContract.MODIFY;
+            END;
+            lANSRAP2.MODIFYALL("Treatment Status",lANSRAP2."Treatment Status"::Processed);
+          END;
+        UNTIL lANSRAP.NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE GetSimpleCrossRef@1100281001(pTableID@1100281001 : Integer;pEAIPartnerNo@1100281002 : Code[20];pReferenceNo@1100281003 : Code[30]) : Code[20];
+    VAR
+      lEAIPartnerCrossRef@1100281000 : Record 8016748;
+    BEGIN
+      lEAIPartnerCrossRef.SETRANGE("Table ID",pTableID);
+      lEAIPartnerCrossRef.SETRANGE("Partner Code",pEAIPartnerNo);
+      lEAIPartnerCrossRef.SETRANGE("Partner Reference",pReferenceNo);
+      IF NOT lEAIPartnerCrossRef.ISEMPTY THEN BEGIN
+        lEAIPartnerCrossRef.FINDFIRST;
+        EXIT(lEAIPartnerCrossRef."Source No.")
+      END ELSE BEGIN
+        EXIT(pReferenceNo);
+      END;
+    END;
+
+    PROCEDURE GetDoubleCrossRef@1100281003(pTableID@1100281001 : Integer;pEAIPartnerNo@1100281002 : Code[20];pCorporateNo@1100281003 : Code[30];pRegionCode@1100281004 : Code[30]) : Code[20];
+    VAR
+      lEAIPartnerCrossRef@1100281000 : Record 8016748;
+    BEGIN
+      lEAIPartnerCrossRef.SETRANGE("Table ID",pTableID);
+      lEAIPartnerCrossRef.SETRANGE("Partner Code",pEAIPartnerNo);
+      lEAIPartnerCrossRef.SETRANGE("Source No.",pCorporateNo);
+      lEAIPartnerCrossRef.SETRANGE("Partner Reference",pRegionCode);
+      IF NOT lEAIPartnerCrossRef.ISEMPTY THEN BEGIN
+        lEAIPartnerCrossRef.FINDFIRST;
+        EXIT(lEAIPartnerCrossRef."Source No. 2")
+      END ELSE BEGIN
+        EXIT(pRegionCode);
+      END;
+    END;
+
+    PROCEDURE GetCorporateNo@1100281002(pCorporateNo@1100281001 : Code[20]) rValue : Text[1024];
+    VAR
+      lEAIPartnerCrossRef@1100281002 : Record 8016748;
+    BEGIN
+      rValue := '';
+      WITH lEAIPartnerCrossRef DO BEGIN
+        SETRANGE("Table ID",DATABASE::Customer);
+        SETRANGE("Partner Code",'ANSAAP');
+        SETRANGE("Source No.",pCorporateNo);
+        IF FINDSET THEN BEGIN
+          REPEAT
+            IF STRLEN(rValue) = 0 THEN BEGIN
+              rValue := lEAIPartnerCrossRef."Partner Reference";
+            END ELSE BEGIN
+              rValue += '|' + lEAIPartnerCrossRef."Partner Reference";
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    BEGIN
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

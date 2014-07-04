@@ -1,0 +1,137 @@
+OBJECT Codeunit 50293 Test WS Test
+{
+  OBJECT-PROPERTIES
+  {
+    Date=05/10/12;
+    Time=09:49:51;
+    Modified=Yes;
+    Version List=Test accenta;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lFileNameToExport@1100281002 : Text[1024];
+            lTextBuffer@1100281001 : Text[1024];
+            lBoolean@1100281000 : Boolean;
+          BEGIN
+            // Dev
+            //WebServiceAddress := 'http://simhns07:7061/NST2009R2_Dev_IMH/WS/IMH - Dev/Codeunit/SingleFrontOfficeWS';
+            // Recette
+            WebServiceAddress := 'http://simhns08:7065/NST2009R2_RECETTE_IMH/WS/IMH - Recette/Codeunit/WSTest';
+            // Pr‚prod
+            //WebServiceAddress := 'http://simhns09:7059/NST2009R2_PREPROD_IMH/WS/IMH - Preprod/Codeunit/SingleFrontOfficeWS';
+
+            // ENABLE SEND MSG
+            EnableSendMessage := FALSE;
+
+            lFileNameToExport := CommonDialogMgt.OpenFile(Text005,'Dummy',4,Text009,1);
+            IF lFileNameToExport = '' THEN BEGIN
+              EXIT;
+            END;
+            lTextBuffer := lFileNameToExport;
+            WHILE COPYSTR(lTextBuffer,STRLEN(lTextBuffer)) <> '\' DO BEGIN
+              lTextBuffer := COPYSTR(lTextBuffer,1,STRLEN(lTextBuffer) - 1);
+            END;
+
+            IF lFileNameToExport = '' THEN BEGIN
+              ERROR(Text001);
+            END;
+            lBoolean := TRUE;
+
+            // ***** SimplifiedSearchBeneficiary
+            //TestImportFilebyNAV;
+            TestImportFile(lFileNameToExport);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ToolsMgt@1100281004 : Codeunit 8016602;
+      CommonDialogMgt@1100281003 : Codeunit 412;
+      WSTest@1100281002 : Codeunit 50292;
+      WebServiceAddress@1100281001 : Text[1024];
+      EnableSendMessage@1100281000 : Boolean;
+      Text001@1100281008 : TextConst 'FRA=Veuilllez s‚lectionner une sortie';
+      Text005@1100281007 : TextConst 'ENU=Export Attachment;FRA=Rep document';
+      Text008@1100281006 : TextConst 'ENU=Files XML (*.XML)|*.XML;FRA=Fichiers XML (*.XML)|*.XML';
+      Text009@1100281005 : TextConst 'ENU=Files XML (*.XML)|*.XML;FRA=Tous Fichiers (*.*)|*.*';
+
+    PROCEDURE TestImportFile@1000000007(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<ImportFile xmlns="urn:microsoft-dynamics-schemas/codeunit/WSTest">');
+      lOutStream.WRITETEXT('<pFileXML>');
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      COPYSTREAM(lOutStream,lInStreamToAdd);
+      lOutStream.WRITETEXT('</pFileXML>');
+      lOutStream.WRITETEXT('</ImportFile>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'ImportFile_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'ImportFile_Response.xml');
+    END;
+
+    PROCEDURE TestImportFilebyNAV@1100281001();
+    VAR
+      lBoolean@1100281005 : Boolean;
+      lBigText@1100281004 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+    BEGIN
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      lBigText.READ(lInStreamToAdd);
+      lTest := lBigText.LENGTH;
+      WSTest.ImportFile(lBigText)
+    END;
+
+    BEGIN
+    END.
+  }
+}

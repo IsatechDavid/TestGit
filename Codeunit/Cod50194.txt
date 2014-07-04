@@ -1,0 +1,868 @@
+OBJECT Codeunit 50194 WebService Extranet
+{
+  OBJECT-PROPERTIES
+  {
+    Date=04/02/13;
+    Time=21:26:36;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ToolsMgt@1100281000 : Codeunit 8016602;
+      TrueText@1100281003 : TextConst 'FRA=O';
+      FalseText@1100281004 : TextConst 'FRA=N';
+      ExtranetModifJournalMgt@1100281001 : Codeunit 50147;
+      ChangLogMgt@1100281002 : Codeunit 423;
+
+    PROCEDURE ProviderAddressUpdate@1100281000(pProviderNo@1100281001 : Code[20];pType@1100281002 : 'Administrative,Operational';pAddress1@1100281003 : Text[50];pAddress2@1100281004 : Text[50];pPostCode@1100281005 : Code[20];pCity@1100281006 : Text[30];pNewPostCode@1100281008 : Code[20];pNewCity@1100281007 : Text[30];pNewLongCity@1100281009 : Text[30];pExtranetContactNo@1100281012 : Code[20];pExtranetContactName@1100281011 : Text[30];pExtranetContactFirstName@1100281010 : Text[30]) : Boolean;
+    VAR
+      lProvider@1100281000 : Record 50000;
+      lExtranetModifJournalLine@1100281013 : Record 50150;
+      lContactAltAddress@1100281014 : Record 5051;
+      lPostCode@1100281015 : Record 225;
+      lRecref@1100281016 : RecordRef;
+    BEGIN
+      //Mettre … jour l'adresse d'un prestataire.
+      IF NOT lProvider.GET(pProviderNo) THEN
+        EXIT(FALSE);
+
+      IF NOT ToolsMgt.CheckCity2(pPostCode, pCity) THEN
+        EXIT(FALSE);
+
+      IF (pNewPostCode <> '') AND (pNewCity <> '') THEN BEGIN
+        IF NOT ToolsMgt.CheckCity2(pNewPostCode, pNewCity) THEN BEGIN
+          lPostCode.INIT;
+          lPostCode.VALIDATE(Code, pNewPostCode);
+          lPostCode.VALIDATE(City, pNewCity);
+          lPostCode.VALIDATE("Link Post Code", pPostCode);
+          lPostCode.VALIDATE("Link City", pCity);
+          lPostCode.INSERT(TRUE);
+          lPostCode."Creation User ID" := pExtranetContactName;
+          lPostCode."Last Modification User ID" := pExtranetContactName;
+          lPostCode.MODIFY(FALSE);
+          lRecref.GETTABLE(lPostCode);
+          ChangLogMgt.LogInsertion(lRecref);
+        END;
+        pPostCode := pNewPostCode;
+        pCity := pNewCity;
+      END;
+
+      IF pType = pType::Administrative THEN BEGIN
+        IF NOT ((lProvider.Address <> pAddress1) OR (lProvider."Address 2" <> pAddress2)
+            OR (lProvider."Post Code" <> pPostCode) OR (lProvider.City <> pCity)) THEN
+          EXIT(TRUE);
+
+        ExtranetModifJournalMgt.CreateModifJrnlFromProvider(
+          lProvider, 0, 1, pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+          lExtranetModifJournalLine);
+
+        IF lProvider.Address <> pAddress1 THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+            lProvider.FIELDNO(Address), pAddress1, 0D,0DT,0, '', 0);
+        IF lProvider."Address 2" <> pAddress2 THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+            lProvider.FIELDNO("Address 2"), pAddress2, 0D,0DT,0, '', 0);
+        IF (lProvider."Post Code" <> pPostCode) OR (lProvider.City <> pCity) THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+            lProvider.FIELDNO("Post Code"), pPostCode, 0D,0DT,lProvider.FIELDNO(City), pCity, 0);
+      END;
+
+      IF pType = pType::Operational THEN BEGIN
+        lContactAltAddress.SETRANGE("Contact No.", pProviderNo);
+        lContactAltAddress.SETRANGE("Geo. Reference Address", TRUE);
+        IF NOT lContactAltAddress.FINDFIRST THEN
+          EXIT(FALSE);
+        IF NOT ((lContactAltAddress.Address <> pAddress1) OR (lContactAltAddress."Address 2" <> pAddress2)
+            OR (lContactAltAddress."Post Code" <> pPostCode) OR (lContactAltAddress.City <> pCity)) THEN
+          EXIT(TRUE);
+
+        CLEAR(lExtranetModifJournalLine);
+        ExtranetModifJournalMgt.CreateModifJrnlFromContAltAdd(
+          lContactAltAddress, 0, 1, pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+          lExtranetModifJournalLine);
+
+        IF pAddress1 <> '' THEN BEGIN
+          IF lContactAltAddress.Address <> pAddress1 THEN
+            ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+              lContactAltAddress.FIELDNO(Address), pAddress1, 0D,0DT,0, '', 0);
+        END;
+        IF pAddress2 <> '' THEN
+          IF lContactAltAddress."Address 2" <> pAddress2 THEN
+            ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+              lContactAltAddress.FIELDNO("Address 2"), pAddress2, 0D,0DT,0, '', 0);
+        IF (pCity <> '') AND (pPostCode <> '') THEN
+          IF (lContactAltAddress."Post Code" <> pPostCode) OR (lContactAltAddress.City <> pCity) THEN
+            ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+              lContactAltAddress.FIELDNO("Post Code"), pPostCode, 0D,0DT,lContactAltAddress.FIELDNO(City), pCity, 0);
+      END;
+      ///Creation Codes Postaux ???????????????????
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SpecializationProviderUpdate@1100281004(pProviderNo@1100281001 : Code[20];pSpecializationCode@1100281002 : Code[10];pExtranetContactNo@1100281005 : Code[20];pExtranetContactName@1100281004 : Text[30];pExtranetContactFirstName@1100281003 : Text[30]) : Boolean;
+    VAR
+      lProviderSpecialization@1100281000 : Record 50006;
+      lRecref@1100281006 : RecordRef;
+    BEGIN
+      //Mettre … jour les informations d'une sp‚cialit‚ d'un prestataire.
+      IF NOT lProviderSpecialization.GET(pProviderNo, pSpecializationCode) THEN
+        EXIT(FALSE);
+
+      ///MAJ Informations ??????????
+
+
+
+      ///??????????Archivage????????????????
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CalendarProviderDelete@1100281006(pProviderNo@1100281001 : Code[20];pEmergency@1100281007 : Boolean;pSpecializationCode@1100281002 : Code[10];pType@1100281003 : ' ,Annual,Weekly,Interval';pDay@1100281004 : ' ,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday';pStartDate@1100281005 : DateTime;pEndDate@1100281006 : DateTime;pExtranetContactNo@1100281011 : Code[20];pExtranetContactName@1100281010 : Text[30];pExtranetContactFirstName@1100281009 : Text[30]) : Boolean;
+    VAR
+      lProviderChangeCalendar@1100281000 : Record 50007;
+      lExtranetModifJournalLine@1100281008 : Record 50150;
+    BEGIN
+      //Supprimer une indisponibilit‚ calendaire pour un prestataire.
+      lProviderChangeCalendar.SETRANGE("Provider No.", pProviderNo);
+      lProviderChangeCalendar.SETRANGE(Emergency, pEmergency);
+      IF pSpecializationCode <> '' THEN
+        lProviderChangeCalendar.SETRANGE("Specialization Code", pSpecializationCode);
+
+      lProviderChangeCalendar.SETRANGE("Recurring System", pType);
+      CASE pType OF
+        pType::" " : lProviderChangeCalendar.SETRANGE("Start Date", DT2DATE(pStartDate));
+        pType::Annual : lProviderChangeCalendar.SETRANGE("Start Date", DT2DATE(pStartDate));
+        pType::Weekly : lProviderChangeCalendar.SETRANGE(Day, pDay);
+        pType::Interval : BEGIN
+          lProviderChangeCalendar.SETRANGE("Start Date", DT2DATE(pStartDate));
+          lProviderChangeCalendar.SETRANGE("End Date", DT2DATE(pEndDate));
+        END;
+      END;
+      IF NOT lProviderChangeCalendar.ISEMPTY THEN BEGIN
+        lProviderChangeCalendar.FINDFIRST;
+        REPEAT
+          ExtranetModifJournalMgt.CreateModifJrnlFromCalendar(
+            lProviderChangeCalendar, 0, 2,
+            pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+            lExtranetModifJournalLine);
+        UNTIL lProviderChangeCalendar.NEXT = 0;
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CalendarProviderUpdate@1100281010(pProviderNo@1100281027 : Code[20];pEmergency@1100281026 : Boolean;pSpecializationCode@1100281025 : Code[10];pType@1100281024 : ' ,Annual,Weekly,Interval';pDay@1100281023 : ' ,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday';pStartDate@1100281022 : DateTime;pEndDate@1100281021 : DateTime;pNewType@1100281020 : ' ,Annual,Weekly,Interval';pNewDay@1100281019 : ' ,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday';pNewStartDate@1100281018 : DateTime;pNewEndDate@1100281017 : DateTime;pExtranetContactNo@1100281004 : Code[20];pExtranetContactName@1100281003 : Text[30];pExtranetContactFirstName@1100281002 : Text[30]) : Boolean;
+    VAR
+      lProviderChangeCalendar@1100281000 : Record 50007;
+      lExtranetModifJournalLine@1100281001 : Record 50150;
+    BEGIN
+      //Mettre … jour une indisponibilit‚ calendaire pour un prestataire.
+      lProviderChangeCalendar.SETRANGE("Provider No.", pProviderNo);
+      lProviderChangeCalendar.SETRANGE(Emergency, pEmergency);
+      IF pSpecializationCode <> '' THEN
+        lProviderChangeCalendar.SETRANGE("Specialization Code", pSpecializationCode);
+
+      lProviderChangeCalendar.SETRANGE("Recurring System", pType);
+      CASE pType OF
+        pType::" " : lProviderChangeCalendar.SETRANGE("Start Date", DT2DATE(pStartDate));
+        pType::Annual : lProviderChangeCalendar.SETRANGE("Start Date", DT2DATE(pStartDate));
+        pType::Weekly : lProviderChangeCalendar.SETRANGE(Day, pDay);
+        pType::Interval : BEGIN
+          lProviderChangeCalendar.SETRANGE("Start Date", DT2DATE(pStartDate));
+          lProviderChangeCalendar.SETRANGE("End Date", DT2DATE(pEndDate));
+        END;
+      END;
+
+      IF lProviderChangeCalendar.ISEMPTY THEN BEGIN
+        EXIT(FALSE);
+        {
+        //??????ERREUR?????-------------------
+        lProviderChangeCalendar2.INIT;
+        lProviderChangeCalendar2.VALIDATE("Provider No.", pProviderNo);
+        lProviderChangeCalendar2.VALIDATE(Emergency, pEmergency);
+        lProviderChangeCalendar2.VALIDATE("Specialization Code", pSpecializationCode);
+        lProviderChangeCalendar2.VALIDATE("Recurring System", pType);
+        lProviderChangeCalendar2.VALIDATE(Day, pDay);
+        lProviderChangeCalendar2.VALIDATE("Start Date", DT2DATE(pStartDate));
+        lProviderChangeCalendar2.VALIDATE("End Date", DT2DATE(pEndDate));
+        lProviderChangeCalendar2.VALIDATE(Unavailability, TRUE);
+        //lProviderChangeCalendar2."Unavailability Reason Code"  ??????
+        //lProviderChangeCalendar2.Description  ????????????
+        lProviderChangeCalendar2.INSERT(TRUE);
+        }
+      END ELSE BEGIN
+        lProviderChangeCalendar.FINDFIRST;
+        IF NOT ((lProviderChangeCalendar."Recurring System" <> pNewType)
+                OR (lProviderChangeCalendar.Day <> pDay)
+                OR (lProviderChangeCalendar."Start Date" <> DT2DATE(pStartDate))
+                OR (lProviderChangeCalendar."End Date" <> DT2DATE(pEndDate))) THEN
+          EXIT(TRUE);
+          ExtranetModifJournalMgt.CreateModifJrnlFromCalendar(
+            lProviderChangeCalendar, 0, 1,
+            pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+            lExtranetModifJournalLine);
+
+        IF lProviderChangeCalendar."Recurring System" <> pNewType THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("Recurring System"), FORMAT(pType), 0D,0DT,0, '', 0);
+        IF lProviderChangeCalendar.Day <> pDay THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO(Day), FORMAT(pNewDay), 0D,0DT,0, '', 0);
+
+        IF lProviderChangeCalendar."Start Date" <> DT2DATE(pStartDate) THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("Start Date"), FORMAT(DT2DATE(pStartDate)), 0D,0DT,0, '', 0);
+
+        IF lProviderChangeCalendar."End Date" <> DT2DATE(pEndDate) THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+            lProviderChangeCalendar.FIELDNO("End Date"), FORMAT(DT2DATE(pEndDate)), 0D,0DT,0, '', 0);
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ProviderBusinessHoursUpdate@1100281003(pProviderNo@1100281011 : Code[20];pEmergency@1100281010 : Boolean;pDay@1100281008 : ' ,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday';pStartTime@1100281007 : DateTime;pEndTime@1100281006 : DateTime;pNewDay@1100281005 : ' ,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday';pNewStartTime@1100281004 : DateTime;pNewEndTime@1100281003 : DateTime;pExtranetContactNo@1100281002 : Code[20];pExtranetContactName@1100281001 : Text[30];pExtranetContactFirstName@1100281000 : Text[30]) : Boolean;
+    VAR
+      lProviderBusinessHours@1100281014 : Record 50028;
+      lExtranetModifJournalLine@1100281009 : Record 50150;
+    BEGIN
+      //Mettre … jour les horaires d'un prestataire.
+      lProviderBusinessHours.SETRANGE("Provider No.", pProviderNo);
+      lProviderBusinessHours.SETRANGE(Emergency, pEmergency);
+      lProviderBusinessHours.SETRANGE(Day, pDay);
+      lProviderBusinessHours.SETRANGE("Start Time", DT2TIME(pStartTime));
+      lProviderBusinessHours.SETRANGE("End Time", DT2TIME(pEndTime));
+
+      IF lProviderBusinessHours.ISEMPTY THEN BEGIN
+        //ERREUR???????????????????????????
+        //lProviderBusinessHours2.INIT;
+        EXIT(FALSE);
+      END;
+      lProviderBusinessHours.FINDFIRST;
+      IF NOT ((lProviderBusinessHours.Day <> pDay)
+          OR (lProviderBusinessHours."Start Time" <> DT2TIME(pNewStartTime))
+          OR (lProviderBusinessHours."End Time" <> DT2TIME(pNewEndTime))) THEN
+        EXIT;
+
+      ExtranetModifJournalMgt.CreateModifJrnlFromBusHours(
+        lProviderBusinessHours, 0, 1,
+        pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+        lExtranetModifJournalLine);
+
+      IF lProviderBusinessHours.Day <> pDay THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProviderBusinessHours.FIELDNO(Day), FORMAT(pNewDay), 0D,0DT,0, '', 0);
+
+      IF lProviderBusinessHours."Start Time" <> DT2TIME(pNewStartTime) THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProviderBusinessHours.FIELDNO("Start Time"), FORMAT(DT2TIME(pNewStartTime)), 0D,0DT,0, '', 0);
+
+      IF lProviderBusinessHours."End Time" <> DT2TIME(pNewEndTime) THEN
+          ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lProviderBusinessHours.FIELDNO("End Time"), FORMAT(DT2TIME(pNewEndTime)), 0D,0DT,0, '', 0);
+
+      ///??????????Archivage????????????????
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ProviderCompletnessTaskAdd@1100281029(pProviderNo@1100281010 : Code[20];pDocumentType@1100281003 : Option;pExtranetContactNo@1100281002 : Code[20];pExtranetContactName@1100281001 : Text[30];pExtranetContactFirstName@1100281000 : Text[30]) : Boolean;
+    VAR
+      lProvider@1100281004 : Record 50000;
+      lRecref@1100281005 : RecordRef;
+    BEGIN
+      //Ajouter un document de compl‚tude sur un prestataire.
+      IF NOT lProvider.GET(pProviderNo) THEN
+        EXIT(FALSE);
+
+      ///??????????????TODO???????????????????
+
+      ///??????????Archivage????????????????
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InterventionDateUpdate@1100281035(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pInterventionNo@1100281002 : Integer;pDateType@1100281004 : 'Expected Previsit Date,Previsit Date,Expected Work Start Date,Work Start Date,Expected Work End Date,Work End Date';pDate@1100281005 : DateTime;pExtranetContactNo@1100281007 : Code[20];pExtranetContactName@1100281006 : Text[30];pExtranetContactFirstName@1100281003 : Text[30]) : Boolean;
+    VAR
+      lInterventionLine@1100281011 : Record 50075;
+      lXRecInterventionLine@1100281009 : Record 50075;
+      lExtranetModifJournalLine@1100281012 : Record 50150;
+      lRecref@1100281008 : RecordRef;
+      lXRecref@1100281010 : RecordRef;
+    BEGIN
+      //Mettre … jour une date sur une intervention ou un motif de non r‚alisation.
+      IF NOT GetInterv(pServiceHeaderNo, pInterventionNo, lInterventionLine) THEN
+        EXIT;
+      lXRecInterventionLine.COPY(lInterventionLine);
+
+      CASE pDateType OF
+        pDateType::"Expected Previsit Date" :
+          IF lInterventionLine."Expected Previsit Date" <> DT2DATE(pDate) THEN BEGIN
+            lInterventionLine.VALIDATE("Expected Previsit Date", DT2DATE(pDate));
+            lInterventionLine.MODIFY(TRUE);
+            lInterventionLine."Last Modification User ID" := pExtranetContactName;
+            lInterventionLine.MODIFY(FALSE);
+
+          END;
+        pDateType::"Previsit Date" :
+          IF lInterventionLine."Previsit Date" <> DT2DATE(pDate) THEN BEGIN
+            lInterventionLine.VALIDATE("Previsit Date", DT2DATE(pDate));
+            lInterventionLine.MODIFY(TRUE);
+            lInterventionLine."Last Modification User ID" := pExtranetContactName;
+            lInterventionLine.MODIFY(FALSE);
+          END;
+        pDateType::"Expected Work Start Date" :
+          IF lInterventionLine."Expected Work Start Date" <> DT2DATE(pDate) THEN BEGIN
+            lInterventionLine.VALIDATE("Expected Work Start Date", DT2DATE(pDate));
+            lInterventionLine.MODIFY(TRUE);
+            lInterventionLine."Last Modification User ID" := pExtranetContactName;
+            lInterventionLine.MODIFY(FALSE);
+          END;
+        pDateType::"Work Start Date" :
+          IF lInterventionLine."Work Start Date" <> DT2DATE(pDate) THEN BEGIN
+            lInterventionLine.VALIDATE("Work Start Date", DT2DATE(pDate));
+            lInterventionLine.MODIFY(TRUE);
+            lInterventionLine."Last Modification User ID" := pExtranetContactName;
+            lInterventionLine.MODIFY(FALSE);
+          END;
+        pDateType::"Expected Work End Date" :
+          IF lInterventionLine."Expected Work End Date" <> DT2DATE(pDate) THEN BEGIN
+            lInterventionLine.VALIDATE("Expected Work End Date", DT2DATE(pDate));
+            lInterventionLine.MODIFY(TRUE);
+            lInterventionLine."Last Modification User ID" := pExtranetContactName;
+            lInterventionLine.MODIFY(FALSE);
+          END;
+        pDateType::"Work End Date" :
+          IF lInterventionLine."Work End Date" <> DT2DATE(pDate) THEN BEGIN
+            lInterventionLine.VALIDATE("Work End Date", DT2DATE(pDate));
+            lInterventionLine.MODIFY(TRUE);
+            lInterventionLine."Last Modification User ID" := pExtranetContactName;
+            lInterventionLine.MODIFY(FALSE);
+          END;
+      END;
+      lRecref.GETTABLE(lInterventionLine);
+      lXRecref.GETTABLE(lXRecInterventionLine);
+      ChangLogMgt.LogModification(lRecref,lXRecref);
+
+      {
+      CASE pUpdateType OF
+        pUpdateType::Date : BEGIN
+          ExtranetModifJournalMgt.CreateModifJrnlFromInterv(
+            lInterventionLine, 0, 1,
+            pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+            lExtranetModifJournalLine);
+
+          CASE pDateType OF
+            pDateType::"Expected Previsit Date" :
+            IF lInterventionLine."Expected Previsit Date" <> DT2DATE(pDate) THEN
+              ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+                lInterventionLine.FIELDNO("Expected Previsit Date"), FORMAT(DT2DATE(pDate)), 0, '', 0);
+            pDateType::"Previsit Date" :
+              ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+                lInterventionLine.FIELDNO("Previsit Date"), FORMAT(DT2DATE(pDate)), 0, '', 0);
+            pDateType::"Expected Work Start Date" :
+              ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+                lInterventionLine.FIELDNO("Expected Work Start Date"), FORMAT(DT2DATE(pDate)), 0, '', 0);
+            pDateType::"Work Start Date" :
+              ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+                lInterventionLine.FIELDNO("Work Start Date"), FORMAT(DT2DATE(pDate)), 0, '', 0);
+            pDateType::"Expected Work End Date" :
+              ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+                lInterventionLine.FIELDNO("Expected Work End Date"), FORMAT(DT2DATE(pDate)), 0, '', 0);
+            pDateType::"Work End Date" :
+              ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+                lInterventionLine.FIELDNO("Work End Date"), FORMAT(DT2DATE(pDate)), 0, '', 0);
+          END;
+        END;
+
+        pUpdateType::ReasonCode : BEGIN
+          IF pReasonCode = '' THEN
+            EXIT(FALSE);
+          CASE pDateType OF
+            pDateType::"Expected Previsit Date" : ;
+            pDateType::"Previsit Date" : ;
+            pDateType::"Expected Work Start Date" : ;
+            pDateType::"Work Start Date" : ;
+            pDateType::"Expected Work End Date" : ;
+            pDateType::"Work End Date" : ;
+          END;
+        END;
+      END;
+      }
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InterventionQuoteUpdate@1100281001(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pInterventionLineNo@1100281002 : Integer;pIntervQuoteLineNo@1100281012 : Integer;pAmountInclVAT@1100281003 : Decimal;pAmountExclVAT@1100281004 : Decimal;pExtranetContactNo@1100281008 : Code[20];pExtranetContactName@1100281007 : Text[30];pExtranetContactFirstName@1100281006 : Text[30]) : Boolean;
+    VAR
+      lServiceInterventionQuote@1100281011 : Record 50076;
+      lXRecServiceInterventionQuote@1100281010 : Record 50076;
+      lExtranetModifJournalLine@1100281005 : Record 50150;
+      lRecref@1100281009 : RecordRef;
+      lXRecref@1100281013 : RecordRef;
+    BEGIN
+      //Mettre … jour des donn‚es sur un devis d'une intervention.
+      IF NOT lServiceInterventionQuote.GET(pServiceHeaderNo, pServiceNo, pIntervQuoteLineNo) THEN
+        EXIT(FALSE);
+
+      IF NOT ((lServiceInterventionQuote."Amount Incl. VAT" <> pAmountInclVAT)
+          OR (lServiceInterventionQuote."Amount Excl. VAT" <> pAmountExclVAT)) THEN
+        EXIT(TRUE);
+
+      IF lServiceInterventionQuote."Amount Incl. VAT" <> pAmountInclVAT THEN
+        lServiceInterventionQuote.VALIDATE("Amount Incl. VAT", pAmountInclVAT);
+
+      IF lServiceInterventionQuote."Amount Excl. VAT" <> pAmountExclVAT THEN
+        lServiceInterventionQuote.VALIDATE("Amount Excl. VAT", pAmountExclVAT);
+
+      lServiceInterventionQuote.MODIFY(TRUE);
+      lServiceInterventionQuote."Last Modification User ID" := pExtranetContactName;
+      lServiceInterventionQuote.MODIFY(FALSE);
+
+      lRecref.GETTABLE(lServiceInterventionQuote);
+      lXRecref.GETTABLE(lXRecServiceInterventionQuote);
+      ChangLogMgt.LogModification(lRecref,lXRecref);
+
+      {
+      IF not ((lServiceInterventionQuote."Amount Incl. VAT" <> pAmountInclVAT)
+          or (lServiceInterventionQuote."Amount Excl. VAT" <> pAmountExclVAT)) THEN
+        Exit(true);
+      ExtranetModifJournalMgt.CreateModifJrnlFromIntervQuote(
+        lServiceInterventionQuote, 0, 1,
+        pExtranetContactNo, pExtranetContactName, pExtranetContactFirstName,
+        lExtranetModifJournalLine);
+
+      IF lServiceInterventionQuote."Amount Incl. VAT" <> pAmountInclVAT THEN
+        ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lServiceInterventionQuote.FIELDNO("Amount Incl. VAT"), FORMAT(pAmountInclVAT), 0, '', 0);
+
+      IF lServiceInterventionQuote."Amount Excl. VAT" <> pAmountExclVAT THEN
+        ExtranetModifJournalMgt.CreateModifJrnlField(lExtranetModifJournalLine,
+          lServiceInterventionQuote.FIELDNO("Amount Excl. VAT"), FORMAT(pAmountExclVAT), 0, '', 0);
+      }
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InterventionCommentAdd@1100281015(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pInterventionNo@1100281002 : Integer;pComment@1100281003 : BigText;pExtranetContactNo@1100281009 : Code[20];pExtranetContactName@1100281008 : Text[30];pExtranetContactFirstName@1100281007 : Text[30]) : Boolean;
+    VAR
+      lServiceInterventionLine@1100281011 : Record 50075;
+      lAdvCommentLine@1100281005 : Record 50056;
+      lAdvCommentLine2@1100281004 : Record 50056;
+      lTextMgt@1100281006 : Codeunit 50085;
+      lRecref@1100281010 : RecordRef;
+    BEGIN
+      //Ajouter un commentaire sur une intervention.
+      IF NOT GetInterv(pServiceHeaderNo, pInterventionNo, lServiceInterventionLine) THEN
+        EXIT(FALSE);
+
+      IF pComment.LENGTH = 0 THEN BEGIN
+        EXIT(FALSE);
+      END;
+
+      lAdvCommentLine.INIT;
+      lAdvCommentLine.VALIDATE("Source Table ID", DATABASE::"Service Intervention Line");
+      lAdvCommentLine.VALIDATE("Source No.", lServiceInterventionLine."Service No.");
+      lAdvCommentLine.VALIDATE("Source No. 2", lServiceInterventionLine."Service Header No.");
+      lAdvCommentLine.VALIDATE("Source No. 3", lServiceInterventionLine."Line No.");
+      lAdvCommentLine."Source No. 3" := 0;
+      lAdvCommentLine."Source No. 4" := '';
+      //lAdvCommentLine.SetUpNewLine;
+      //lAdvCommentLine.Date := DT2DATE();???????????????????TODO date commentaire???????????????????
+      //lAdvCommentLine.Comment := pComment;
+      //lAdvCommentLine."Fusion User Name" := pRequestUserName;
+      lTextMgt.SaveBigText(lAdvCommentLine, lAdvCommentLine.Date, pComment);
+
+      //Gestion date de cr‚ation commentaire
+      lAdvCommentLine."Creation User ID" := pExtranetContactName;
+      lAdvCommentLine."Last Modification User ID" := pExtranetContactName;
+      lAdvCommentLine.MODIFY(FALSE);
+      lAdvCommentLine.RESET;
+      lAdvCommentLine2.SETRANGE("Source Table ID",lAdvCommentLine."Source Table ID");
+      lAdvCommentLine2.SETRANGE("Source No.",lAdvCommentLine."Source No.");
+      lAdvCommentLine2.SETRANGE("Source No. 2",lAdvCommentLine."Source No. 2");
+      lAdvCommentLine2.SETRANGE("Source No. 3",lAdvCommentLine."Source No. 3");
+      lAdvCommentLine2.SETRANGE("Source No. 4",lAdvCommentLine."Source No. 4");
+      lAdvCommentLine2.SETRANGE("Attached To Line No.", lAdvCommentLine."Line No.");
+      IF NOT lAdvCommentLine2.ISEMPTY THEN BEGIN
+        lAdvCommentLine2.MODIFYALL("Creation User ID", lAdvCommentLine."Creation User ID");
+        lAdvCommentLine2.MODIFYALL("Last Modification User ID", lAdvCommentLine."Last Modification User ID");
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InterventionQuoteAdd@1100281022(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pInterventionNo@1100281002 : Integer;pAttachBinaryContent@1100281003 : BigText;pAttachDescriptionText50@1100281006 : Text[50];pAttachFileName@1100281005 : Text[100];pAttachFileExtension@1100281004 : Text[30];pExtranetContactNo@1100281010 : Code[20];pExtranetContactName@1100281009 : Text[30];pExtranetContactFirstName@1100281008 : Text[30]) : Boolean;
+    VAR
+      lServIntervLine@1100281018 : Record 50075;
+      lServIntervQuote@1100281011 : Record 50076;
+      lSegLine@1100281019 : TEMPORARY Record 5077;
+      lInteractionLogEntry@1100281020 : Record 5065;
+      lDocAttachment@1100281007 : Record 50021;
+      lInterfaceSetup@1100281012 : Record 50139;
+      lRecref@1100281013 : RecordRef;
+    BEGIN
+      //Ajouter un document de devis sur une intervention.
+      IF NOT GetInterv(pServiceHeaderNo, pInterventionNo, lServIntervLine) THEN
+        EXIT(FALSE);
+
+      lServIntervQuote.INIT;
+      lServIntervQuote."Service Header No." := lServIntervLine."Service Header No.";
+      lServIntervQuote."Intervention Line No." := lServIntervLine."Line No.";
+      lServIntervQuote."Intervention No." := lServIntervLine."Intervention No.";
+      lServIntervQuote."Contact No." := lServIntervLine."Contact No.";
+      lServIntervQuote."Service Order Type" := lServIntervLine."Service Order Type";
+      lServIntervQuote.InitDepreciation; //IMH08
+      lServIntervQuote.INSERT(TRUE);
+      lServIntervQuote."Creation User ID" := pExtranetContactName;
+      lServIntervQuote."Last Modification User ID" := pExtranetContactName;
+      lServIntervQuote.MODIFY(FALSE);
+
+      lRecref.GETTABLE(lServIntervQuote);
+      ChangLogMgt.LogInsertion(lRecref);
+
+      IF pAttachBinaryContent.LENGTH = 0 THEN
+        EXIT(TRUE);
+
+      lSegLine.SetHideWizard(2);
+      //????????????????????ModŠle interaction
+      lInterfaceSetup.GET;
+      IF lInterfaceSetup."Ex. Crt Quote Interact Tmpl" = '' THEN
+        EXIT;
+      IF NOT lSegLine.CreateInteracFromIntervQuote(lServIntervQuote, lInterfaceSetup."Ex. Crt Quote Interact Tmpl") THEN
+        EXIT;
+      lInteractionLogEntry.GET(lSegLine."Created Interac. Log Entry No.");
+      lInteractionLogEntry."Creation User ID" := pExtranetContactName;
+      lInteractionLogEntry.MODIFY(FALSE);
+
+      lDocAttachment."Service No." := lServIntervQuote."Service No.";
+      lDocAttachment."Service Document No." := lServIntervQuote."Service Header No.";
+      lDocAttachment."Service Intervention Line No." := lServIntervQuote."Intervention Line No.";
+      lDocAttachment."Intervention Quote Line No." := lServIntervQuote."Line No.";
+      CreateAttachByInteraction(lInteractionLogEntry,pAttachBinaryContent, pAttachDescriptionText50,
+        pAttachFileName, pAttachFileExtension, lDocAttachment);
+      lDocAttachment."Creation User ID" := pExtranetContactName;
+      lDocAttachment."Last Modification User ID" := pExtranetContactName;
+      lDocAttachment.MODIFY(FALSE);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InterventionDocAdd@1100281028(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pInterventionNo@1100281002 : Integer;pTypeDocument@1100281006 : 'Quote,Invoice,Minute,Other';pAttachBinaryContent@1100281010 : BigText;pAttachDescriptionText50@1100281009 : Text[50];pAttachFileName@1100281008 : Text[100];pAttachFileExtension@1100281007 : Text[30];pExtranetContactNo@1100281005 : Code[20];pExtranetContactName@1100281004 : Text[30];pExtranetContactFirstName@1100281003 : Text[30]) : Boolean;
+    VAR
+      lServIntervLine@1100281017 : Record 50075;
+      lSegLine@1100281015 : TEMPORARY Record 5077;
+      lInteractionLogEntry@1100281014 : Record 5065;
+      lDocAttachment@1100281013 : Record 50021;
+      lInterfaceSetup@1100281012 : Record 50139;
+      lInteractionTempCode@1100281011 : Code[10];
+    BEGIN
+      //Ajouter un document sur une intervention.
+      IF NOT GetInterv(pServiceHeaderNo, pInterventionNo, lServIntervLine) THEN
+        EXIT(FALSE);
+      lInterfaceSetup.GET;
+      CASE pTypeDocument OF
+        pTypeDocument::Quote : BEGIN
+          lInteractionTempCode := lInterfaceSetup."Ex. Crt Quote Interact Tmpl";
+        END;
+        pTypeDocument::Invoice : BEGIN
+          lInteractionTempCode := lInterfaceSetup."Ex. Doc Invoice Interact Tmpl";
+        END;
+        pTypeDocument::Minute : BEGIN
+          lInteractionTempCode := lInterfaceSetup."Ex. Doc Minute Interact Tmpl";
+        END;
+      END;
+
+      IF pAttachBinaryContent.LENGTH = 0 THEN
+        EXIT(TRUE);
+
+      lSegLine.SetHideWizard(2);
+      lInterfaceSetup.GET;
+      IF lInteractionTempCode = '' THEN
+        EXIT(FALSE);
+      IF NOT lSegLine.CreateInteracFromIntervention(lServIntervLine, lInteractionTempCode) THEN
+        EXIT;
+      lInteractionLogEntry.GET(lSegLine."Created Interac. Log Entry No.");
+      lInteractionLogEntry."Creation User ID" := pExtranetContactName;
+      lInteractionLogEntry.MODIFY(FALSE);
+
+      lDocAttachment."Service No." := lServIntervLine."Service No.";
+      lDocAttachment."Service Document No." := lServIntervLine."Service Header No.";
+      lDocAttachment."Service Intervention Line No." := lServIntervLine."Line No.";
+      CreateAttachByInteraction(lInteractionLogEntry,pAttachBinaryContent, pAttachDescriptionText50,
+        pAttachFileName, pAttachFileExtension, lDocAttachment);
+      lDocAttachment."Creation User ID" := pExtranetContactName;
+      lDocAttachment."Last Modification User ID" := pExtranetContactName;
+      lDocAttachment.MODIFY(FALSE);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InterventionContactAdd@1100281032(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pContactName@1100281003 : Text[50];pContactAddress@1100281004 : Text[50];pContactAddress2@1100281005 : Text[50];pContactPostCode@1100281006 : Code[20];pContactCity@1100281007 : Text[30];pContactPhoneNo@1100281011 : Text[30];pContactMobilePhoneNo@1100281012 : Text[20];pContactType@1100281013 : 'Contact involved,Guarding,Moving,Public Storage,Annexe Contact,Disaster Declaration,Voucher,Expert Contact';pExtranetContactNo@1100281009 : Code[20];pExtranetContactName@1100281008 : Text[30];pExtranetContactFirstName@1100281002 : Text[30]) : Boolean;
+    VAR
+      lServiceHeaderAddress@1100281014 : Record 50068;
+      lRecref@1100281010 : RecordRef;
+    BEGIN
+      //Ajouter un contact sur une intervention.
+      lServiceHeaderAddress.INIT;
+      lServiceHeaderAddress.VALIDATE("Service Header No.", pServiceHeaderNo);
+      lServiceHeaderAddress.VALIDATE("Address Type", pContactType);
+      lServiceHeaderAddress.VALIDATE(Name, pContactName);
+      lServiceHeaderAddress.VALIDATE(Address, pContactAddress);
+      lServiceHeaderAddress.VALIDATE("Address 2", pContactAddress2);
+      lServiceHeaderAddress.City := pContactCity;
+      lServiceHeaderAddress.VALIDATE("Post Code", pContactPostCode);
+      lServiceHeaderAddress.VALIDATE("Phone No.", pContactPhoneNo);
+      lServiceHeaderAddress.VALIDATE("Mobile Phone No.", pContactMobilePhoneNo);
+      lServiceHeaderAddress.INSERT(TRUE);
+      lServiceHeaderAddress."Creation User ID" := pExtranetContactName;
+      lServiceHeaderAddress."Last Modification User ID" := pExtranetContactName;
+      lServiceHeaderAddress.MODIFY(FALSE);
+
+      lRecref.GETTABLE(lServiceHeaderAddress);
+      ChangLogMgt.LogInsertion(lRecref);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InterventionContactChange@1100281036(pServiceHeaderNo@1100281007 : Code[20];pAddressType@1100281008 : 'Contact involved,Guarding,Moving,Public Storage,Annexe Contact,Disaster Declaration,Voucher,Expert Contact';pAddressNo@1100281000 : Integer;pContactName@1100281013 : Text[50];pContactAddress@1100281012 : Text[50];pContactAddress2@1100281011 : Text[50];pContactPostCode@1100281010 : Code[20];pContactCity@1100281009 : Text[30];pContactPhoneNo@1100281003 : Text[30];pContactMobilePhoneNo@1100281002 : Text[20];pExtranetContactNo@1100281006 : Code[20];pExtranetContactName@1100281005 : Text[30];pExtranetContactFirstName@1100281004 : Text[30]) : Boolean;
+    VAR
+      lServiceHeaderAddress@1100281001 : Record 50068;
+      lRecref@1100281014 : RecordRef;
+      lXRecServiceHeaderAddress@1100281016 : Record 50068;
+      lXRecref@1100281015 : RecordRef;
+    BEGIN
+      //Permet la modification de donn‚es sur un contact sur une intervention.
+      IF lServiceHeaderAddress.GET(pServiceHeaderNo, pAddressType, pAddressNo) THEN
+        EXIT(FALSE);
+
+      IF NOT ((lServiceHeaderAddress.Name <> pContactName)
+          OR (lServiceHeaderAddress.Address <> pContactAddress)
+          OR (lServiceHeaderAddress."Address 2" <> pContactAddress2)
+          OR (lServiceHeaderAddress.City <> pContactCity)
+          OR (lServiceHeaderAddress."Post Code" <> pContactPostCode)
+          OR (lServiceHeaderAddress."Phone No." <> pContactPhoneNo)
+          OR (lServiceHeaderAddress."Mobile Phone No." <> pContactMobilePhoneNo)) THEN
+        EXIT;
+
+
+        IF lServiceHeaderAddress.Name <> pContactName THEN BEGIN
+          lServiceHeaderAddress.VALIDATE(Name, pContactName);
+        END;
+        IF lServiceHeaderAddress.Address <> pContactAddress THEN BEGIN
+          lServiceHeaderAddress.VALIDATE(Address, pContactAddress);
+        END;
+        IF lServiceHeaderAddress."Address 2" <> pContactAddress2 THEN BEGIN
+          lServiceHeaderAddress.VALIDATE("Address 2", pContactAddress2);
+        END;
+        IF (lServiceHeaderAddress.City <> pContactCity) OR (lServiceHeaderAddress."Post Code" <> pContactPostCode) THEN BEGIN
+          IF NOT ToolsMgt.CheckCity2(pContactPostCode,pContactCity) THEN
+            EXIT;
+          lServiceHeaderAddress.City := pContactCity;
+          lServiceHeaderAddress.VALIDATE("Post Code", pContactPostCode);
+        END;
+        IF lServiceHeaderAddress."Phone No." <> pContactPhoneNo THEN BEGIN
+          lServiceHeaderAddress.VALIDATE("Phone No.", pContactPhoneNo);
+        END;
+        IF lServiceHeaderAddress."Mobile Phone No." <> pContactMobilePhoneNo THEN BEGIN
+          lServiceHeaderAddress.VALIDATE("Mobile Phone No.", pContactMobilePhoneNo);
+        END;
+
+      lServiceHeaderAddress.MODIFY(TRUE);
+      lServiceHeaderAddress."Last Modification User ID" := pExtranetContactName;
+      lServiceHeaderAddress.MODIFY(FALSE);
+
+      lRecref.GETTABLE(lServiceHeaderAddress);
+      lXRecref.GETTABLE(lXRecServiceHeaderAddress);
+      ChangLogMgt.LogModification(lRecref,lXRecref);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE IMHContact@1100281044(pProviderNo@1100281000 : Code[20];pServiceNo@1100281007 : Code[20];pServiceHeaderNo@1100281006 : Code[20];pInterventionLineNo@1100281005 : Integer;pIntervQuoteLineNo@1100281004 : Integer;pProviderNotificationEntryNo@1100281003 : Integer;pAcknoledgeDate@1100281001 : DateTime) : Boolean;
+    VAR
+      lProvider@1100281011 : Record 50000;
+      lProviderNotification@1100281002 : Record 50153;
+    BEGIN
+      //Cr‚ation d'une activit‚ corbeille pour contacter IMH que ce soit un prestataire ou toutes autres personnes utilisant l'extranet.
+      //Cela g‚n‚rera une activit‚ corbeille.
+      IF NOT lProvider.GET(pProviderNo) THEN
+        EXIT(FALSE);
+
+      IF NOT lProviderNotification.GET(pProviderNo, pServiceNo,
+                pServiceHeaderNo, pInterventionLineNo, pIntervQuoteLineNo, pProviderNotificationEntryNo) THEN
+        EXIT(FALSE);
+
+      lProviderNotification.VALIDATE("Acknowledgement Date", pAcknoledgeDate);
+      lProviderNotification.Acknowledgement := TRUE;
+      lProviderNotification.MODIFY(TRUE);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE AcceptExpertIntervention@1100281049(pServiceNo@1100281000 : Code[20];pServiceHeaderNo@1100281001 : Code[20];pInterventionLineNo@1100281002 : Integer;pExtranetContactNo@1100281010 : Code[20];pExtranetContactName@1100281009 : Text[30];pExtranetContactFirstName@1100281008 : Text[30]) : Boolean;
+    VAR
+      lServiceInterventionQuote@1100281011 : Record 50076;
+    BEGIN
+      //Acceptation par un expert d'une des interventions … expertiser propos‚e par Navision.
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE DocumentQueueUpdate@1100281008(pProviderNo@1100281000 : Code[20];pFlowCode@1100281001 : Code[10];pEntryNo@1100281002 : Integer;pDescriptionQualification@1100281021 : Text[250];pDocumentType@1100281020 : ' ,Invoice,Quote,Minutes,Service Request,Provider Document';pDocumentDate@1100281003 : DateTime;pAmount@1100281004 : Decimal;pAmountVAT@1100281005 : Decimal;pAmountIncludingVAT@1100281006 : Decimal;pVATBaseAmount@1100281007 : Decimal;pExemptVATBaseAmount@1100281008 : Decimal;pReducedVATBaseAmount@1100281009 : Decimal;pNormalVATBaseAmount@1100281010 : Decimal;pAmountObsolescence@1100281011 : Decimal;pFranchiseAmount@1100281012 : Decimal;pTreatmentStat@1100281013 : 'Success,Error';pErrorMessage@1100281014 : Text[250]) : Boolean;
+    VAR
+      lErrorText001@1100281015 : TextConst 'ENU=The provider %1 is not exist.;FRA=[Erreur nø prestataire] : Le prestataire %1 n''existe pas.';
+      lProvider@1100281016 : Record 50000;
+      lDocumentQueue@1100281017 : Record 50054;
+      lErrorText002@1100281018 : TextConst 'ENU=The qualification document %1-%2 is not exist.;FRA=[Erreur nø document qualification] : Le document qualification %1-%2 n''existe pas.';
+      lErrorText003@1100281019 : TextConst 'ENU=The qualification document %1-%2 has been %3.;FRA=[Erreur statut] : Le document qualification %1-%2 a ‚t‚ %3.';
+    BEGIN
+      //Modification de la qualification des documents scann‚s par un prestataire
+
+      IF lProvider.GET(pProviderNo) THEN BEGIN
+        pTreatmentStat := pTreatmentStat::Error;
+        pErrorMessage := STRSUBSTNO(lErrorText001,pProviderNo);
+        EXIT(FALSE);
+      END;
+
+      IF NOT lDocumentQueue.GET(pFlowCode, lDocumentQueue."Queue Type"::Receipt, pEntryNo) THEN BEGIN
+        pTreatmentStat := pTreatmentStat::Error;
+        pErrorMessage := STRSUBSTNO(lErrorText002,pFlowCode, pEntryNo);
+        EXIT(FALSE);
+      END;
+
+      IF lDocumentQueue.Status IN [lDocumentQueue.Status::Rejected, lDocumentQueue.Status::Posted] THEN BEGIN
+        pTreatmentStat := pTreatmentStat::Error;
+        pErrorMessage := STRSUBSTNO(lErrorText003,pFlowCode, pEntryNo, FORMAT(lDocumentQueue.Status));
+      END;
+
+
+      lDocumentQueue.SetHideMessage(TRUE);
+      lDocumentQueue.VALIDATE("Document Type", pDocumentType);
+      lDocumentQueue.VALIDATE("Document Date", DT2DATE(pDocumentDate));
+      lDocumentQueue.Amount := pAmount;
+      lDocumentQueue."Amount VAT" := pAmountVAT;
+      lDocumentQueue."Amount VAT" := pAmountIncludingVAT;
+      lDocumentQueue."VAT Base Amount" := pVATBaseAmount;
+      lDocumentQueue."Exempt VAT Base Amount" := pExemptVATBaseAmount;
+      lDocumentQueue."Reduced VAT Base Amount" := pReducedVATBaseAmount;
+      lDocumentQueue."Normal VAT Base Amount" := pNormalVATBaseAmount;
+      lDocumentQueue."Amount obsolescence" := pAmountObsolescence;
+      lDocumentQueue."Franchise Amount" := pFranchiseAmount;
+
+      pErrorMessage := lDocumentQueue.CheckVatAmount(0, FALSE);
+      IF pErrorMessage <> '' THEN BEGIN
+        pTreatmentStat := pTreatmentStat::Error;
+        EXIT(FALSE);
+      END;
+
+      lDocumentQueue."Status To Qualify" := lDocumentQueue."Status To Qualify"::Treated;
+      lDocumentQueue."Description Qualification" := pDescriptionQualification;
+      lDocumentQueue.MODIFY(TRUE);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE DocumentQueueDelete@1100281030(pProviderNo@1100281000 : Code[20];pFlowCode@1100281001 : Code[10];pEntryNo@1100281002 : Integer;pTreatmentStat@1100281013 : 'Success,Error';pErrorMessage@1100281014 : Text[250]) : Boolean;
+    VAR
+      lErrorText001@1100281015 : TextConst 'ENU=The provider %1 is not exist.;FRA=[Erreur nø prestataire] : Le prestataire %1 n''existe pas.';
+      lProvider@1100281016 : Record 50000;
+      lDocumentQueue@1100281017 : Record 50054;
+      lErrorText002@1100281018 : TextConst 'ENU=The qualification document %1-%2 is not exist.;FRA=[Erreur nø document qualification] : Le document qualification %1-%2 n''existe pas.';
+      lErrorText003@1100281019 : TextConst 'ENU=The qualification document %1-%2 has been %3.;FRA=[Erreur statut] : Le document qualification %1-%2 a ‚t‚ %3.';
+    BEGIN
+      //Suppression de la qualification des documents scann‚s par un prestataire
+
+      IF lProvider.GET(pProviderNo) THEN BEGIN
+        pTreatmentStat := pTreatmentStat::Error;
+        pErrorMessage := STRSUBSTNO(lErrorText001,pProviderNo);
+        EXIT(FALSE);
+      END;
+
+      IF NOT lDocumentQueue.GET(pFlowCode, lDocumentQueue."Queue Type"::Receipt, pEntryNo) THEN BEGIN
+        pTreatmentStat := pTreatmentStat::Error;
+        pErrorMessage := STRSUBSTNO(lErrorText002,pFlowCode, pEntryNo);
+        EXIT(FALSE);
+      END;
+
+      IF lDocumentQueue.Status IN [lDocumentQueue.Status::Rejected, lDocumentQueue.Status::Posted] THEN BEGIN
+        pTreatmentStat := pTreatmentStat::Error;
+        pErrorMessage := STRSUBSTNO(lErrorText003,pFlowCode, pEntryNo, FORMAT(lDocumentQueue.Status));
+      END;
+
+      lDocumentQueue.DELETE(TRUE);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateAttachByInteraction@1100281005(pInteractionLogEntry@1100281005 : Record 5065;pAttachBinaryContent@1100281003 : BigText;pAttachDescriptionText50@1100281002 : Text[50];pAttachFileName@1100281001 : Text[100];pAttachFileExtension@1100281000 : Text[30];VAR pDocAttach@1100281004 : Record 50021);
+    VAR
+      lFile@1100281011 : File;
+      lFileName@1100281010 : Text[250];
+      lDocAttachmentFilter@1100281009 : Record 50021;
+      lSourceAttchMgt@1100281007 : Codeunit 50003;
+      lAttachmentTemp@1100281006 : TEMPORARY Record 5062;
+      lTempBlob@1100281016 : Record 99008535;
+      lXmlDoc@1100281015 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlNodeList@1100281014 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lAttributeNode@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lOutStream@1100281018 : OutStream;
+      lAdoStream@1100281017 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+    BEGIN
+      lTempBlob.Blob.CREATEOUTSTREAM(lOutStream);
+      pAttachBinaryContent.WRITE(lOutStream);
+      IF ISCLEAR(lXmlDoc) THEN BEGIN
+        CREATE(lXmlDoc);
+      END;
+      lXmlDoc.load(lTempBlob.Blob);
+      lXmlNodeList := lXmlDoc.getElementsByTagName('ROOT');
+      lXmlDomElement := lXmlNodeList.item(0);
+      lAttributeNode := lXmlDomElement.selectSingleNode('BinaryString');
+      lAttributeNode.dataType := 'bin.base64';
+
+      CREATE(lAdoStream);
+      lAdoStream.Open;
+      lAdoStream.Type := 1;
+
+      lAdoStream.Write(lAttributeNode.nodeTypedValue);
+      lFile.CREATETEMPFILE;
+      lFileName := lFile.NAME + '_' + pAttachFileName+'.'+pAttachFileExtension;
+      lAdoStream.SaveToFile(lFileName);
+      lAdoStream.Close;
+
+
+      lDocAttachmentFilter.RESET;
+      lDocAttachmentFilter.SETRANGE("Interaction Log Entry No.", pInteractionLogEntry."Entry No.");
+      lDocAttachmentFilter := pDocAttach;
+
+      lDocAttachmentFilter."Key Integer 1" := 0;
+      lDocAttachmentFilter."Key Integer 2" := 0;
+      lDocAttachmentFilter."Key Code 1" := '';
+      lDocAttachmentFilter."Key Code 2" := '';
+      lDocAttachmentFilter.Description := pAttachDescriptionText50;
+      lDocAttachmentFilter."Description 2" := COPYSTR(pAttachFileName,1,MAXSTRLEN(lDocAttachmentFilter."Description 2"));
+
+      lSourceAttchMgt.CreateAttachment(lDocAttachmentFilter, lFileName,
+                                       lAttachmentTemp);
+
+      IF ERASE(lFileName) THEN;
+    END;
+
+    PROCEDURE GetInterv@1100281007(pServHeaderNo@1100281000 : Code[20];pIntervNo@1100281001 : Integer;VAR pIntervLine@1100281002 : Record 50075) : Boolean;
+    BEGIN
+      pIntervLine.RESET;
+      pIntervLine.SETRANGE("Service Header No.", pServHeaderNo);
+      pIntervLine.SETRANGE("Intervention No.", pIntervNo);
+      EXIT(pIntervLine.FINDFIRST);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 16/03/11 @a ISAT.ZW @v IMH6.01.165 @s Interface Extranet @c cr‚ation */
+    }
+    END.
+  }
+}

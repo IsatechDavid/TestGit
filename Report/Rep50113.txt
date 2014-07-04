@@ -1,0 +1,147 @@
+OBJECT Report 50113 Update Serv. Interv. Min.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=09/12/11;
+    Time=00:45:18;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    ProcessingOnly=Yes;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table38;
+        DataItemTableView=SORTING(Service No.,Service Header No.,Intervention Line No.,Quote Line No.)
+                          WHERE(Document Type=CONST(Invoice));
+        DataItemVarName=InvHeader;
+        OnPreDataItem=BEGIN
+                        ServiceSetup.GET;
+                        LedgerSetup.GET;
+                        TotalCpt := COUNT;
+                        Window.OPEN('Avancement\@1@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\#2############');
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           Cpt += 1;
+                           Window.UPDATE(1,ROUND(Cpt / TotalCpt * 9999,1));
+
+                           //ServIntervMinutes.RESET;
+                           //ServIntervMinutes.SETRANGE("Service Header No.","Service Header No.");
+                           //ServIntervMinutes.SETRANGE("Service Intervention Line No.","Intervention Line No.");
+                           //IF ServIntervMinutes.FINDFIRST THEN  BEGIN
+                           //IF ServIntervMinutes."Post Minute" THEN
+                           //  CurrReport.SKIP;
+                           //END;
+
+                           PurchOrder.RESET;
+                           PurchOrder.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+                           PurchOrder.SETRANGE("Service No.","Service No.");
+                           PurchOrder.SETRANGE("Service Header No.","Service Header No.");
+                           PurchOrder.SETRANGE("Intervention Line No.","Intervention Line No.");
+                           PurchOrder.SETRANGE("Document Type",PurchOrder."Document Type"::Order);
+                           IF PurchOrder.ISEMPTY THEN BEGIN
+
+                             IF ServIntervLine.GET("Service Header No.","Intervention Line No.") THEN BEGIN
+                               IF (ServIntervLine.Urgent) AND
+                                  (ServIntervLine."Non-Urgent Pursuit"
+                                    IN [ServIntervLine."Non-Urgent Pursuit"::" ",ServIntervLine."Non-Urgent Pursuit"::No])
+                               THEN BEGIN
+
+                                 ServIntervMinutes.RESET;
+                                 ServIntervMinutes.SETRANGE("Service Header No.",ServIntervLine."Service Header No.");
+                                 ServIntervMinutes.SETRANGE("Service Intervention Line No.",ServIntervLine."Line No.");
+                                 ServIntervMinutes.SETFILTER(ServIntervMinutes."Receipt Date",'>%1',LedgerSetup."Allow Posting From");
+                                       ServIntervMinutes.SETFILTER(ServIntervMinutes."Amount Incl. VAT",'<>%1',0);
+                                 //ServIntervMinutes.SETRANGE(Status,ServIntervMinutes.Status::Validated);
+                                 ServIntervMinutes.SETRANGE(Reserves,ServIntervMinutes.Reserves);
+                                 IF ServIntervMinutes.FINDFIRST THEN BEGIN
+                                   REPEAT
+                                     IF ServIntervMinutes.Type = ServIntervMinutes.Type::"End of work" THEN BEGIN
+                                       ServIntervMinutes.VALIDATE(Type,ServIntervMinutes.Type::Urgent);
+                                       IF ServIntervMinutes."VAT Bus. Posting Group" = '' THEN
+                                         ServIntervMinutes."VAT Bus. Posting Group" := ServiceSetup."VAT Bus. Posting Group Default";
+                                       IF ServIntervMinutes."VAT Prod. Posting Group" = ''  THEN  BEGIN
+                                         IF "Service Order Type" = 'ARN' THEN
+                                         ServIntervMinutes.VALIDATE("VAT Prod. Posting Group",'5,5%');
+                                         IF ("Service Order Type" = 'ASS_HS') OR ("Service Order Type" = 'ASS_SIN') THEN
+                                         ServIntervMinutes.VALIDATE("VAT Prod. Posting Group",'19,6%');
+                                       END;
+                                       ServIntervMinutes.VALIDATE("Amount Incl. VAT");
+                                       ServIntervMinutes.Status := ServIntervMinutes.Status::" ";
+                                       ServIntervMinutes.VALIDATE("Post Minute",TRUE);
+                                       ServIntervMinutes.MODIFY;
+                                     END;
+                                   UNTIL ServIntervMinutes.NEXT = 0;
+                                 END;
+
+                               END;
+                             END;
+
+                           END;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         Window.CLOSE;
+                       END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      PurchOrder@1100281000 : Record 38;
+      ServIntervLine@1100281001 : Record 50075;
+      ServIntervMinutes@1000000000 : Record 50084;
+      Window@1000000001 : Dialog;
+      TotalCpt@1000000002 : Integer;
+      Cpt@1000000003 : Integer;
+      PostingGroup@1000000004 : Code[10];
+      ServiceSetup@1000000005 : Record 5911;
+      LedgerSetup@1000000006 : Record 98;
+
+    BEGIN
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

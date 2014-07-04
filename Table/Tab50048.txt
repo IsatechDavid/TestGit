@@ -1,0 +1,1152 @@
+OBJECT Table 50048 Tray Line
+{
+  OBJECT-PROPERTIES
+  {
+    Date=10/06/14;
+    Time=16:16:10;
+    Modified=Yes;
+    Version List=IMH6.01,5005,IMH6.01.P010;
+  }
+  PROPERTIES
+  {
+    OnInsert=VAR
+               lServLog@1100281001 : Codeunit 50149;
+             BEGIN
+               TESTFIELD("Team Code");
+               //<<IMH08.ST
+               Team.GET("Team Code");
+               IF Team.Blocked THEN
+                 ERROR(STRSUBSTNO(Text003,"Team Code"));
+               //>>IMH08.ST
+               VALIDATE("Linked To Table");
+               //<<IMH08.ST
+               IF "Expected End Date" = 0D THEN
+                 VALIDATE("Expected End Date", WORKDATE);
+               IF "Expected End Time" = 0T THEN
+                 VALIDATE("Expected End Time", TIME);
+               //>>IMH08.ST
+               TouchRecord(TRUE);
+               ServLog.LogTrayLine(Rec, 0); //IMH16.ST
+               IF "Entry No." = 0 THEN
+                 "Entry No." := GetNextEntryNo;
+             END;
+
+    OnModify=BEGIN
+               VALIDATE("Linked To Table");
+               TouchRecord(FALSE);
+               ServLog.LogTrayLine(Rec, 1); //IMH16.ST
+             END;
+
+    OnDelete=VAR
+               lAdvCommentLine@1100281000 : Record 50056;
+               lRecordLock@1100281001 : Record 50096;
+               lTrayLineProvSearchEntry@1100281002 : Record 50144;
+             BEGIN
+               lAdvCommentLine.SETRANGE("Source Table ID",DATABASE::"Tray Line");
+               lAdvCommentLine.SETRANGE("Source No.","Team Code");
+               lAdvCommentLine.SETRANGE("Source No. 3","Entry No.");
+               IF NOT lAdvCommentLine.ISEMPTY THEN
+                 lAdvCommentLine.DELETEALL;
+               //<<IMH13.ST
+               lRecordLock.SETRANGE("Table ID", DATABASE::"Tray Line");
+               lRecordLock.SETRANGE("Source Code", "Team Code");
+               lRecordLock.SETRANGE("Source Integer No.", "Entry No.");
+               IF NOT lRecordLock.ISEMPTY THEN
+                 lRecordLock.DELETEALL;
+               //>>IMH13.ST
+               lTrayLineProvSearchEntry.SETRANGE("Team Code", "Team Code");
+               lTrayLineProvSearchEntry.SETRANGE("Tray Line Entry No.", "Entry No.");
+               IF NOT lTrayLineProvSearchEntry.ISEMPTY THEN
+                 lTrayLineProvSearchEntry.DELETEALL;
+               ServLog.LogTrayLine(Rec, 2); //IMH16.ST
+             END;
+
+    OnRename=BEGIN
+               TESTFIELD("Team Code");
+               TouchRecord(FALSE);
+               ServLog.LogTrayLine(Rec, 3); //IMH16.ST
+             END;
+
+    CaptionML=[ENU=Tray Line;
+               FRA=Activit‚ corbeille];
+    LookupFormID=Form50123;
+    DrillDownFormID=Form50123;
+  }
+  FIELDS
+  {
+    { 1   ;   ;Team Code           ;Code10        ;TableRelation=Team.Code;
+                                                   OnValidate=VAR
+                                                                lTrayLineProvSearchEntry@1100281001 : Record 50144;
+                                                              BEGIN
+                                                                IF "Team Code" <> '' THEN BEGIN
+                                                                  Team.GET("Team Code");
+                                                                  IF Team.Blocked THEN
+                                                                    ERROR(STRSUBSTNO(Text003,"Team Code"));
+                                                                  "Team Group Code" := Team."Team Group Code";
+                                                                  AssignUser; //IMH23.ST
+                                                                END
+                                                                ELSE BEGIN
+                                                                  "Team Group Code" := '';
+                                                                END;
+
+                                                                IF ("Team Code" <> '') AND ("Entry No." <> 0) THEN BEGIN
+                                                                //<<IMH14
+                                                                lTrayLineProvSearchEntry.SETRANGE("Team Code", "Team Code");
+                                                                lTrayLineProvSearchEntry.SETRANGE("Tray Line Entry No.", "Entry No.");
+                                                                IF NOT lTrayLineProvSearchEntry.ISEMPTY THEN
+                                                                  lTrayLineProvSearchEntry.DELETEALL;
+                                                                //>>IMH14
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Team Code;
+                                                              FRA=Code corbeille] }
+    { 2   ;   ;Entry No.           ;Integer       ;CaptionML=[ENU=Entry No.;
+                                                              FRA=Nø s‚quence] }
+    { 10  ;   ;Status              ;Option        ;OnValidate=BEGIN
+                                                                //<<IMH16.ST
+                                                                IF Status <> xRec.Status THEN
+                                                                  IF Status IN [Status::Completed, Status::Transferred] THEN
+                                                                    ServLog.FinishTrayLine(Status);
+                                                                //>>IMH16.ST
+                                                                VALIDATE(Closed, (Status IN [Status::Completed, Status::Transferred, Status::Canceled]));
+                                                              END;
+
+                                                   CaptionML=[ENU=Status;
+                                                              FRA=Statut];
+                                                   OptionCaptionML=[ENU=Not Started,In Progress,Completed,Transferred,Canceled;
+                                                                    FRA=Non d‚marr‚,En cours,Termin‚,Transf‚r‚,Annul‚];
+                                                   OptionString=Not Started,In Progress,Completed,Transferred,Canceled }
+    { 11  ;   ;Task Code           ;Code10        ;TableRelation=IF (Source Table No.=CONST(0)) "Tray Task"."Task Code" WHERE (Source Table No.=FILTER(<>0),
+                                                                                                                               Showing Filter=FIELD(Showing Filter))
+                                                                                                                               ELSE IF (Source Table No.=FILTER(<>0)) "Tray Task"."Task Code" WHERE (Source Table No.=FIELD(Source Table No.),
+                                                                                                                                                                                                     Showing Filter=FIELD(Showing Filter));
+                                                   OnValidate=VAR
+                                                                lTrayTask@1100281000 : Record 50080;
+                                                                lExpectedEndDateTime@1100281002 : DateTime;
+                                                                lToolsMgt@1100281001 : Codeunit 8016602;
+                                                                lServiceHeader@1100281003 : Record 5900;
+                                                                lService@1000000000 : Record 50066;
+                                                                lFilterTeamTrayTask@1000000001 : TEMPORARY Record 50129;
+                                                                lTeamCode@1100281004 : Code[10];
+                                                              BEGIN
+                                                                IF "Task Code" <> '' THEN BEGIN
+                                                                  //<<IMH39
+                                                                  //<<IMH40
+                                                                  IF (NOT SkipCalcTeamCode) OR ("Team Code" = '') THEN BEGIN
+                                                                    IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, "Service Header No.") THEN BEGIN
+                                                                      VALIDATE("Team Code", lServiceHeader.GetTeamByServiceTask(lServiceHeader, "Task Code"));
+                                                                    END ELSE BEGIN
+                                                                      IF lService.GET("Service No.") THEN BEGIN
+                                                                        lFilterTeamTrayTask."Corporate No." := lService."Corporate No.";
+                                                                        lFilterTeamTrayTask."Corporate Region Code" := lService."Corporate Region Code";
+                                                                      END;
+
+                                                                      lTeamCode := TrayLineMgt.GetTeamByTask("Task Code", lFilterTeamTrayTask, '');
+                                                                      VALIDATE("Team Code", lTeamCode);
+                                                                    END;
+                                                                  END;
+                                                                  //>>IMH40
+                                                                  //>>IMH39
+                                                                  IF NOT lTrayTask.GetTrayTask(Rec, lTrayTask) THEN
+                                                                    EXIT;
+
+                                                                  CASE lTrayTask."End Date Base" OF
+                                                                    lTrayTask."End Date Base"::Workdate : BEGIN
+                                                                      lExpectedEndDateTime := lToolsMgt.CalcDateTmeByFormula(CREATEDATETIME(WORKDATE, TIME),
+                                                                                              lTrayTask."End Date Formula", lTrayTask."End Time Formula");
+                                                                      VALIDATE("Expected End Date", DT2DATE(lExpectedEndDateTime));
+                                                                      VALIDATE("Expected End Time", DT2TIME(lExpectedEndDateTime));
+                                                                    END;
+                                                                  END;
+                                                                  Description := lTrayTask."Default Line Description";
+                                                                  Urgent := lTrayTask.Urgent;
+                                                                  IF lTrayTask."Default Short Comment" <> '' THEN
+                                                                    "Short Comment" := lTrayTask."Default Short Comment"; //IMH18.ST
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Task Code;
+                                                              FRA=Code tƒche] }
+    { 12  ;   ;Description         ;Text80        ;CaptionML=[ENU=Description;
+                                                              FRA=D‚signation] }
+    { 13  ;   ;Closed              ;Boolean       ;OnValidate=VAR
+                                                                lTrayLineMgt@1100281000 : Codeunit 50050;
+                                                              BEGIN
+                                                                IF Closed THEN BEGIN
+                                                                  "Date Closed" := TODAY;
+                                                                  IF Status IN [Status::"Not Started", Status::"In Progress"] THEN
+                                                                    Status := Status::Completed;
+                                                                  "Closed By Salesperson" := ApplicationMgt.GetUserCode(1);
+                                                                //D‚sactiv‚ : plante le NAS
+                                                                //  IF ("Team Code" <> '') AND
+                                                                //     ("Closed By Salesperson" = '')
+                                                                //  THEN
+                                                                //    ERROR(STRSUBSTNO(Text001,FIELDCAPTION("Closed By Salesperson")));
+                                                                //<<IMH09.ST
+                                                                  GetTrayTask;
+                                                                  IF TrayTask."Response Expected" THEN
+                                                                    CreateResponse;
+                                                                  IF TrayTask."Assist Action" = TrayTask."Assist Action"::ToQualify THEN
+                                                                    lTrayLineMgt.QualifyTrayLine(Rec);
+                                                                //>>IMH09.ST
+                                                                END ELSE BEGIN
+                                                                  TESTFIELD("Response Created", FALSE); //IMH09.ST
+                                                                  "Date Closed" := 0D;
+                                                                  IF Status = Status::Completed THEN
+                                                                    Status := Status::"In Progress";
+                                                                  IF "Closed By Salesperson" <> '' THEN
+                                                                    "Closed By Salesperson" := ''
+                                                                END;
+                                                                IF CurrFieldNo <> 0 THEN
+                                                                  MODIFY(TRUE);
+                                                              END;
+
+                                                   CaptionML=[ENU=Closed;
+                                                              FRA=Termin‚e] }
+    { 14  ;   ;Date Closed         ;Date          ;CaptionML=[ENU=Date Closed;
+                                                              FRA=Date cl“ture];
+                                                   Editable=No }
+    { 15  ;   ;Closed By Salesperson;Code10       ;TableRelation=Salesperson/Purchaser.Code;
+                                                   OnValidate=BEGIN
+                                                                IF (xRec."Closed By Salesperson" = '') AND
+                                                                   ("Closed By Salesperson" <> '')
+                                                                THEN
+                                                                  IF CONFIRM(Text002) THEN
+                                                                    VALIDATE(Closed,TRUE)
+                                                                  ELSE
+                                                                    "Closed By Salesperson" := '';
+                                                              END;
+
+                                                   CaptionML=[ENU=Completed By;
+                                                              FRA=R‚alis‚ par];
+                                                   Editable=No }
+    { 19  ;   ;Team Group Code     ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5083),
+                                                                                  Field ID=CONST(50001));
+                                                   CaptionML=[ENU=Team Group Code;
+                                                              FRA=Code groupe corbeille] }
+    { 21  ;   ;Assigned Salesperson Code;Code10   ;TableRelation="Team Salesperson"."Salesperson Code" WHERE (Team Code=FIELD(Team Code));
+                                                   OnValidate=BEGIN
+                                                                IF "Assigned Datetime" = 0DT THEN
+                                                                  "Assigned Datetime" := CREATEDATETIME(WORKDATE, DT2TIME(CURRENTDATETIME));
+                                                              END;
+
+                                                   ValidateTableRelation=No;
+                                                   CaptionML=[ENU=Assigned Salesperson Code;
+                                                              FRA=Personne affect‚e] }
+    { 22  ;   ;Assigned Datetime   ;DateTime      ;CaptionML=[ENU=Assigned Datetime;
+                                                              FRA=Date affect‚e] }
+    { 30  ;   ;Starting Date       ;DateTime      ;CaptionML=[ENU=Starting Date;
+                                                              FRA=Date d‚but] }
+    { 40  ;   ;Expected End Date   ;Date          ;OnValidate=BEGIN
+                                                                IF "Expected End Date" = 0D THEN
+                                                                  "Expected End Date" := xRec."Expected End Date";
+                                                              END;
+
+                                                   CaptionML=[ENU=Expected End Date;
+                                                              FRA=Date d'‚ch‚ance] }
+    { 41  ;   ;Expected End Time   ;Time          ;OnValidate=VAR
+                                                                lDateTime@1100281000 : DateTime;
+                                                              BEGIN
+                                                                IF "Expected End Time" = 0T THEN
+                                                                  "Expected End Time" := xRec."Expected End Time"
+                                                                ELSE BEGIN
+                                                                  lDateTime := CREATEDATETIME("Expected End Date", "Expected End Time");
+                                                                  lDateTime := ROUNDDATETIME(lDateTime, 15 * 60 * 1000, '>'); // arrondi au quart d'heure
+                                                                  "Expected End Time" := DT2TIME(lDateTime);
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Expected End Time;
+                                                              FRA=Heure d'‚ch‚ance];
+                                                   AutoFormatType=11;
+                                                   AutoFormatExpr='<Hours24,2>:<Minutes,2>' }
+    { 43  ;   ;End Date            ;DateTime      ;CaptionML=[ENU=End Date;
+                                                              FRA=Date fin] }
+    { 50  ;   ;Campaign No.        ;Code20        ;TableRelation=Campaign.No.;
+                                                   CaptionML=[ENU=Campaign No.;
+                                                              FRA=Nø ‚vŠnement exceptionnel] }
+    { 60  ;   ;Contact No.         ;Code20        ;TableRelation=Contact;
+                                                   OnValidate=VAR
+                                                                lContact@1100281000 : Record 5050;
+                                                              BEGIN
+                                                                IF lContact.GET("Contact No.") THEN
+                                                                  IF lContact."Service Contact" = lContact."Service Contact"::Provider THEN
+                                                                    "Intervention Provider No." := lContact."No.";
+                                                              END;
+
+                                                   CaptionML=[ENU=Contact No.;
+                                                              FRA=Nø contact] }
+    { 61  ;   ;Contact Name        ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Name WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Contact Name;
+                                                              FRA=Nom contact];
+                                                   Editable=No }
+    { 62  ;   ;Contact City        ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.City WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Contact City;
+                                                              FRA=Ville contact];
+                                                   Editable=No }
+    { 63  ;   ;Contact Post Code   ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Post Code" WHERE (No.=FIELD(Contact No.)));
+                                                   CaptionML=[ENU=Contact Post Code;
+                                                              FRA=Code postal Contact];
+                                                   Editable=No }
+    { 70  ;   ;Short Comment       ;Text120       ;CaptionML=[ENU=Comment;
+                                                              FRA=Commentaire] }
+    { 80  ;   ;Lock Exists         ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Record Lock" WHERE (Table ID=CONST(50048),
+                                                                                          Source Code=FIELD(Team Code),
+                                                                                          Source Integer No.=FIELD(Entry No.)));
+                                                   CaptionML=[ENU=Lock Exists;
+                                                              FRA=Verrou existe];
+                                                   Editable=No }
+    { 90  ;   ;Respond To Team     ;Code10        ;TableRelation=Team.Code;
+                                                   CaptionML=[ENU=Respond To Team;
+                                                              FRA=R‚pondre … la corbeille] }
+    { 91  ;   ;Response            ;Boolean       ;CaptionML=[ENU=Response;
+                                                              FRA=R‚ponse] }
+    { 92  ;   ;Response Created    ;Boolean       ;CaptionML=[ENU=Response Created;
+                                                              FRA=R‚ponse cr‚‚e] }
+    { 93  ;   ;Response Text       ;Text80        ;CaptionML=[ENU=Response Text;
+                                                              FRA=Texte r‚ponse] }
+    { 97  ;   ;Transfer To Team    ;Code10        ;TableRelation=Team.Code;
+                                                   CaptionML=[ENU=Transfer To Team;
+                                                              FRA=Transfert … la corbeille];
+                                                   Editable=No }
+    { 98  ;   ;Team Substitution   ;Boolean       ;CaptionML=[ENU=Team Substitution;
+                                                              FRA=Substitution corbeille];
+                                                   Editable=No }
+    { 99  ;   ;Subst. Source Team Code;Code10     ;TableRelation=Team.Code;
+                                                   CaptionML=[ENU=Substitution Source Team Code;
+                                                              FRA=Code corbeille origine substitution] }
+    { 100 ;   ;Stop Auto Process   ;Boolean       ;CaptionML=[ENU=Stop Auto Process;
+                                                              FRA=Bloquer process auto] }
+    { 101 ;   ;Manual              ;Boolean       ;CaptionML=[ENU=Manual;
+                                                              FRA=Manuel];
+                                                   Editable=No }
+    { 200 ;   ;Attachment          ;BLOB          ;CaptionML=[ENU=Attachment;
+                                                              FRA=Document joint] }
+    { 201 ;   ;Attachment 2        ;BLOB          ;CaptionML=[ENU=Attachment 2;
+                                                              FRA=Document joint 2] }
+    { 205 ;   ;Attachment File Extension;Text30   ;CaptionML=[ENU=Attachment File Extension;
+                                                              FRA=Extension fichier] }
+    { 50000;  ;Linked To Table     ;Option        ;OnValidate=BEGIN
+                                                                CASE "Linked To Table" OF
+                                                                  "Linked To Table"::" " : "Source Table No." := 0;
+                                                                  "Linked To Table"::Contact : "Source Table No." := DATABASE::Contact;
+                                                                  "Linked To Table"::Service : "Source Table No." := DATABASE::Service;
+                                                                  "Linked To Table"::ServiceHeader : "Source Table No." := DATABASE::"Service Header";
+                                                                  "Linked To Table"::Intervention : "Source Table No." := DATABASE::"Service Intervention Line";
+                                                                  "Linked To Table"::DocumentQueue : "Source Table No." := DATABASE::"Document Queue";
+                                                                  "Linked To Table"::CompletnessTask : "Source Table No." := DATABASE::"Completness Task";
+                                                                  "Linked To Table"::InterventionQuote : "Source Table No." := DATABASE::"Service Intervention Quote";
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Linked To Table;
+                                                              FRA=Table li‚e];
+                                                   OptionCaptionML=[ENU=" ,Contact,Service,Service Header,Intervention,Document Queue,Completness Task,Intervention Quote";
+                                                                    FRA=" ,Contact,Service,Ligne produit,Intervention,File de document,Tƒche compl‚tude,Devis intervention"];
+                                                   OptionString=[ ,Contact,Service,ServiceHeader,Intervention,DocumentQueue,CompletnessTask,InterventionQuote] }
+    { 50001;  ;Source Table No.    ;Integer       ;CaptionML=[ENU=Source Table No;
+                                                              FRA=Nø table origine] }
+    { 50002;  ;Linked Document No. ;Code20        ;CaptionML=[ENU=Linked Document No.;
+                                                              FRA=Nø document li‚] }
+    { 50011;  ;Urgent              ;Boolean       ;CaptionML=[ENU=Urgent;
+                                                              FRA=Urgent] }
+    { 50020;  ;Corporate No.       ;Code20        ;TableRelation=Customer.No. WHERE (Service Contact=CONST(Corporate Customer),
+                                                                                     Service Corporate=CONST(Yes));
+                                                   CaptionML=[ENU=Corporate No.;
+                                                              FRA=Nø grand compte] }
+    { 50030;  ;Service No.         ;Code20        ;TableRelation=Service."Service No.";
+                                                   OnValidate=VAR
+                                                                lService@1100281000 : Record 50066;
+                                                                lFilterTeamTrayTask@1000000000 : TEMPORARY Record 50129;
+                                                              BEGIN
+                                                                IF "Service No." = '' THEN
+                                                                  EXIT;
+                                                                lService.GET("Service No.");
+                                                                "Service Urgent" := (lService.Urgent = lService.Urgent::Yes);
+                                                                //<<IMH40
+                                                                IF "Team Code" = '' THEN BEGIN
+                                                                  lFilterTeamTrayTask."Corporate No." := lService."Corporate No.";
+                                                                  lFilterTeamTrayTask."Corporate Region Code" := lService."Corporate Region Code";
+                                                                  VALIDATE("Team Code", TrayLineMgt.GetTeamByTask("Task Code", lFilterTeamTrayTask, ''));
+                                                                END;
+                                                                //>>IMH40
+                                                              END;
+
+                                                   CaptionML=[ENU=Service No.;
+                                                              FRA=Nø service] }
+    { 50032;  ;Service Header No.  ;Code20        ;TableRelation="Service Header".No. WHERE (Service No.=FIELD(Service No.),
+                                                                                             Document Type=CONST(Invoice));
+                                                   OnValidate=VAR
+                                                                lServiceHeader@1100281000 : Record 5900;
+                                                                lPostCode@1100281002 : Record 225;
+                                                                lTerritory@1100281001 : Record 286;
+                                                                lTeam@1000000000 : Record 5083;
+                                                              BEGIN
+                                                                IF "Service Header No." = '' THEN
+                                                                  EXIT;
+                                                                IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, "Service Header No.") THEN BEGIN
+                                                                  VALIDATE("Service No.", lServiceHeader."Service No.");
+                                                                  "Service Urgent" := (lServiceHeader.Urgent = lServiceHeader.Urgent::Yes);
+
+                                                                  IF "Team Code" = '' THEN
+                                                                    //<<IMH39
+                                                                    //VALIDATE("Team Code", lServiceHeader."Default Team Code");
+                                                                    VALIDATE("Team Code", lServiceHeader.GetTeamByServiceTask(lServiceHeader, "Task Code"));
+                                                                    //>>IMH39
+
+                                                                  IF lPostCode.GET(lServiceHeader."Ship-to Post Code", lServiceHeader."Ship-to City") THEN BEGIN
+                                                                    IF lTerritory.GET(lPostCode."IMH Territory Code") THEN
+                                                                      "Service Territory Code" := lTerritory.Code;
+                                                                  END
+                                                                //<<IMH24.ST
+                                                                  ELSE BEGIN
+                                                                    lPostCode.SETRANGE(Code, lServiceHeader."Ship-to Post Code");
+                                                                    IF lPostCode.FINDFIRST THEN
+                                                                      IF lTerritory.GET(lPostCode."IMH Territory Code") THEN
+                                                                        "Service Territory Code" := lTerritory.Code;
+                                                                  END;
+                                                                //>>IMH24.ST
+                                                                END;
+                                                                //<<IMH23.ST
+                                                                IF "Team Code" <> '' THEN
+                                                                  AssignUser;
+                                                                //>>IMH23.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Service Header No.;
+                                                              FRA=Nø ligne produit] }
+    { 50033;  ;Intervention Line No.;Integer      ;TableRelation="Service Intervention Line"."Line No." WHERE (Service Header No.=FIELD(Service Header No.));
+                                                   OnValidate=VAR
+                                                                lInterventionLine@1100281000 : Record 50075;
+                                                              BEGIN
+                                                                IF ("Intervention Line No." = 0) OR ("Service Header No." = '') THEN BEGIN
+                                                                  "Intervention No." := 0;
+                                                                  IF "Intervention Line No." <> xRec."Intervention Line No." THEN
+                                                                    "Intervention Provider No." := '';
+                                                                  EXIT;
+                                                                END;
+                                                                IF lInterventionLine.GET("Service Header No.", "Intervention Line No.") THEN BEGIN
+                                                                  "Intervention No." := lInterventionLine."Intervention No.";
+                                                                  "Service Urgent" := lInterventionLine.Urgent;
+                                                                  "Intervention Provider No." := lInterventionLine."Provider No.";
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Intervention Line No.;
+                                                              FRA=Nø ligne intervention];
+                                                   BlankZero=Yes }
+    { 50034;  ;Intervention No.    ;Integer       ;OnValidate=VAR
+                                                                lInterventionLine@1100281000 : Record 50075;
+                                                              BEGIN
+                                                                IF "Intervention No." = 0 THEN BEGIN
+                                                                  IF "Intervention Line No." <> 0 THEN
+                                                                    VALIDATE("Intervention Line No.", 0);
+                                                                  EXIT;
+                                                                END;
+                                                                TESTFIELD("Service Header No.");
+                                                                lInterventionLine.SETCURRENTKEY("Service Header No.","Intervention No.");
+                                                                lInterventionLine.SETRANGE("Service Header No.", "Service Header No.");
+                                                                lInterventionLine.SETRANGE("Intervention No.", "Intervention No.");
+                                                                lInterventionLine.FINDFIRST;
+                                                                VALIDATE("Intervention Line No.", lInterventionLine."Line No.");
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              lInterventionLine@1100281000 : Record 50075;
+                                                            BEGIN
+                                                              lInterventionLine.SETCURRENTKEY("Service Header No.","Intervention No.");
+                                                              lInterventionLine.FILTERGROUP(2);
+                                                              lInterventionLine.SETRANGE("Service Header No.", "Service Header No.");
+                                                              lInterventionLine.FILTERGROUP(0);
+                                                              IF lInterventionLine.GET("Service Header No.", "Intervention Line No.") THEN;
+                                                              IF FORM.RUNMODAL(0, lInterventionLine) = ACTION::LookupOK THEN BEGIN
+                                                                VALIDATE("Service Header No.", lInterventionLine."Service Header No.");
+                                                                VALIDATE("Intervention Line No.", lInterventionLine."Line No.");
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Intervention No.;
+                                                              FRA=Nø intervention];
+                                                   BlankZero=Yes }
+    { 50035;  ;Service Urgent      ;Boolean       ;CaptionML=[ENU=Service Urgent;
+                                                              FRA=Service urgent] }
+    { 50036;  ;Intervention Quote Line No.;Integer;OnLookup=VAR
+                                                              lInterventionQuote@1100281000 : Record 50076;
+                                                            BEGIN
+                                                              IF NOT lInterventionQuote.GET("Service Header No."
+                                                                                ,"Intervention Line No."
+                                                                                ,"Intervention Quote Line No.") THEN
+                                                                EXIT;
+                                                              IF FORM.RUNMODAL(0, lInterventionQuote) = ACTION::LookupOK THEN BEGIN
+                                                                VALIDATE("Service Header No.", lInterventionQuote."Service Header No.");
+                                                                VALIDATE("Intervention Line No.", lInterventionQuote."Intervention Line No.");
+                                                                VALIDATE("Intervention Line No.", lInterventionQuote."Line No.");
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Intervention Quote Line No.;
+                                                              FRA=Nø ligne devis intervention] }
+    { 50037;  ;Service Order Type  ;Code10        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header"."Service Order Type" WHERE (No.=FIELD(Service Header No.),
+                                                                                                                   Document Type=CONST(Invoice)));
+                                                   CaptionML=[ENU=Service Order Type;
+                                                              FRA=Type produit];
+                                                   Editable=No }
+    { 50038;  ;Service Territory Code;Code10      ;TableRelation=Territory;
+                                                   CaptionML=[ENU=Service Territory Code;
+                                                              FRA=Zone Service IMH (Code)] }
+    { 50040;  ;Intervention Provider No.;Code20   ;TableRelation=Provider.No.;
+                                                   CaptionML=[ENU=Intervention Provider No.;
+                                                              FRA=Nø prestataire intervention];
+                                                   Editable=No }
+    { 50041;  ;Provider Name       ;Text50        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Provider.Name WHERE (No.=FIELD(Intervention Provider No.)));
+                                                   CaptionML=[ENU=Provider Name;
+                                                              FRA=Raison sociale prestataire];
+                                                   Editable=No }
+    { 50042;  ;Service Event Date  ;Date          ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Service."Event Date" WHERE (Service No.=FIELD(Service No.)));
+                                                   CaptionML=[ENU=Service Event Date;
+                                                              FRA=Date ‚vŠnement service];
+                                                   Editable=No }
+    { 50043;  ;Provider No.        ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Provider.No. WHERE (No.=FIELD(Intervention Provider No.)));
+                                                   CaptionML=[ENU=Provider No.;
+                                                              FRA=Nø prestataire];
+                                                   Editable=No }
+    { 50044;  ;Provider Recruitment Origin;Code10 ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Provider."Recruitment Origin" WHERE (No.=FIELD(Intervention Provider No.)));
+                                                   CaptionML=[ENU=Provider Recruitment Origin;
+                                                              FRA=Origine recrutement prestataire] }
+    { 50045;  ;Service Reference No.;Code30       ;CaptionML=[ENU=Service Reference No.;
+                                                              FRA=Nø ‚vŠnement] }
+    { 50046;  ;Mission No.         ;Text30        ;CaptionML=[ENU=Mission No.;
+                                                              FRA=Nø mission] }
+    { 50047;  ;DARAV Message ID    ;Code40        ;CaptionML=[ENU=DARAV Message ID;
+                                                              FRA=ID message DARVA] }
+    { 50050;  ;Document Flow Code  ;Code10        ;TableRelation="Document Flow"."Flow Code";
+                                                   CaptionML=[ENU=Document Flow Code;
+                                                              FRA=Code flux document] }
+    { 50051;  ;Document Queue Type ;Option        ;CaptionML=[ENU=Document Queue Type;
+                                                              FRA=Type file de document];
+                                                   OptionCaptionML=[ENU=Receipt,Emission;
+                                                                    FRA=R‚ception,Emission];
+                                                   OptionString=Receipt,Emission }
+    { 50052;  ;Doc. Queue Entry No.;Integer       ;CaptionML=[ENU=Doc. Queue Entry No.;
+                                                              FRA=Nø s‚quence file de document] }
+    { 50060;  ;Service Cause       ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Service."Service Cause" WHERE (Service No.=FIELD(Service No.)));
+                                                   TableRelation="Fault Reason Code".Code;
+                                                   CaptionML=[ENU=Service Cause;
+                                                              FRA=Cause intervention];
+                                                   Editable=No }
+    { 50070;  ;Visit No.           ;Code20        ;TableRelation="Network Visit";
+                                                   CaptionML=[ENU=Visit No.;
+                                                              FRA=Nø visite] }
+    { 50080;  ;Showing Filter      ;Code4         ;FieldClass=FlowFilter;
+                                                   CaptionML=[ENU=Showing Filter;
+                                                              FRA=Filtre affichage] }
+    { 50090;  ;Extranet            ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Provider.Extranet WHERE (No.=FIELD(Intervention Provider No.)));
+                                                   CaptionML=[ENU=Extranet;
+                                                              FRA=Extranet];
+                                                   Editable=No }
+    { 50500;  ;Creation Date       ;DateTime      ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date de cr‚ation];
+                                                   Editable=No }
+    { 50501;  ;Creation User ID    ;Text30        ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Creation User ID;
+                                                              FRA=Utilisateur cr‚ation];
+                                                   Editable=No }
+    { 50502;  ;Last Modification Date;DateTime    ;CaptionML=[ENU=Last Modification Date;
+                                                              FRA=Date derniŠre modification];
+                                                   Editable=No }
+    { 50503;  ;Last Modification User ID;Text30   ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Last Modification User ID;
+                                                              FRA=Utilisateur derniŠre modification];
+                                                   Editable=No }
+    { 50510;  ;Ship-to City        ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header"."Ship-to City" WHERE (Document Type=CONST(Invoice),
+                                                                                                             No.=FIELD(Service Header No.)));
+                                                   CaptionML=[ENU=Ship-to City;
+                                                              FRA=Ville MEO];
+                                                   Editable=No }
+    { 50511;  ;Ship-to Post Code   ;Code20        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Service Header"."Ship-to Post Code" WHERE (Document Type=CONST(Invoice),
+                                                                                                                  No.=FIELD(Service Header No.)));
+                                                   CaptionML=[ENU=Ship-to Post Code;
+                                                              FRA=Code postal MEO];
+                                                   Editable=No }
+    { 50610;  ;EAI Partner Code    ;Code20        ;TableRelation="EAI Partner".Code;
+                                                   CaptionML=[ENU=EAI Partner Code;
+                                                              FRA=Code partenaire EAI] }
+    { 50611;  ;EAI Entry No.       ;Code20        ;CaptionML=[ENU=EAI Entry No.;
+                                                              FRA=Nø s‚quence EAI];
+                                                   Editable=No }
+  }
+  KEYS
+  {
+    {    ;Team Code,Entry No.                     ;Clustered=Yes }
+    {    ;Team Code,Closed,Expected End Date,Expected End Time }
+    {    ;Contact No.,Closed                       }
+    {    ;Assigned Salesperson Code,Closed         }
+    {    ;Service No.,Service Header No.,Intervention Line No.,Intervention Quote Line No. }
+    {    ;Document Flow Code,Document Queue Type,Doc. Queue Entry No. }
+    {    ;Linked To Table,Contact No.,Linked Document No. }
+    {    ;Task Code,Closed,Expected End Date,Expected End Time }
+    {    ;Team Group Code,Closed,Expected End Date,Expected End Time }
+    {    ;Team Code,Task Code,Creation Date,Status }
+    {    ;Service No.,Service Header No.,Closed    }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=The %1 field must be filled in for tray lines assigned to a team.;FRA=Le champ %1 doit ˆtre rempli pour que les activit‚s corbeille soient affect‚es … une ‚quipe.';
+      Text002@1100281001 : TextConst 'ENU=Do you want to close the ligne?;FRA=Souhaitez-vous fermer l''activit‚ corbeille ?';
+      Team@1000000000 : Record 5083;
+      ApplicationMgt@1100281002 : Codeunit 1;
+      TrayTask@1100281003 : Record 50080;
+      Text003@1100281004 : TextConst 'ENU=You can''t create tray lines because team %1 is blocked.;FRA=Vous ne pouvez pas cr‚er d''activit‚ car la corbeille %1 est bloqu‚e.';
+      ServLog@1100281005 : Codeunit 50149;
+      TrayLineMgt@1000000001 : Codeunit 50050;
+      SkipCalcTeamCode@1100281006 : Boolean;
+
+    PROCEDURE TouchRecord@1100281006(pInsert@1100281000 : Boolean);
+    BEGIN
+      IF pInsert THEN BEGIN
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+      END;
+      "Last Modification Date" := CURRENTDATETIME;
+      "Last Modification User ID" := USERID;
+    END;
+
+    PROCEDURE GetNextEntryNo@1100281001() : Integer;
+    VAR
+      lTrayLine@1100281000 : Record 50048;
+    BEGIN
+      lTrayLine.LOCKTABLE;
+      lTrayLine.SETRANGE("Team Code", "Team Code");
+      IF lTrayLine.ISEMPTY THEN
+        EXIT(1);
+      lTrayLine.FINDLAST;
+      IF lTrayLine."Entry No." < 0 THEN
+        EXIT(1);
+      EXIT(lTrayLine."Entry No." + 1);
+    END;
+
+    PROCEDURE GetExpectedEndAlert@1100281000() : Boolean;
+    VAR
+      lExpectedEndDT@1100281000 : DateTime;
+    BEGIN
+      //IMH08
+      IF ("Expected End Date" = 0D) OR ("Expected End Time" = 0T) OR Closed THEN
+        EXIT(FALSE);
+      lExpectedEndDT := CREATEDATETIME("Expected End Date","Expected End Time");
+      GetTrayTask;
+      IF TrayTask."End Date Delay Alert (hour)" = 0 THEN
+        EXIT(CURRENTDATETIME >= lExpectedEndDT)
+      ELSE
+        EXIT(CURRENTDATETIME >= (lExpectedEndDT + TrayTask."End Date Delay Alert (hour)" * 60 * 60 * 1000));
+    END;
+
+    PROCEDURE IsPostEnddatePreAlert@1100281005() : Boolean;
+    VAR
+      lExpectedEndDT@1100281000 : DateTime;
+    BEGIN
+      //IMH11
+      IF ("Expected End Date" = 0D) OR ("Expected End Time" = 0T) OR Closed THEN
+        EXIT(FALSE);
+      lExpectedEndDT := CREATEDATETIME("Expected End Date","Expected End Time");
+      GetTrayTask;
+      IF TrayTask."End Date Delay Alert (hour)" = 0 THEN
+        EXIT(CURRENTDATETIME < lExpectedEndDT)
+      ELSE
+        EXIT(CURRENTDATETIME < (lExpectedEndDT + TrayTask."End Date Delay Alert (hour)" * 60 * 60 * 1000));
+    END;
+
+    PROCEDURE GetTrayTask@1100281002() : Boolean;
+    BEGIN
+      //IMH08.ST
+      IF "Task Code" = '' THEN BEGIN
+        CLEAR(TrayTask);
+        EXIT(FALSE);
+      END;
+      IF (TrayTask."Source Table" <> "Linked To Table") OR (TrayTask."Task Code" <> "Task Code") THEN
+        IF NOT TrayTask.GET("Linked To Table", "Task Code") THEN BEGIN
+          CLEAR(TrayTask);
+          EXIT(FALSE);
+        END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetTeam@1000000007() : Boolean;
+    BEGIN
+      IF "Team Code" = '' THEN BEGIN
+        CLEAR(Team);
+        EXIT(FALSE);
+      END;
+      IF Team.Code <> "Team Code" THEN
+        IF NOT Team.GET("Team Code") THEN BEGIN
+          CLEAR(Team);
+          EXIT(FALSE);
+        END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE CreateResponse@1100281004();
+    VAR
+      lResultOK@1100281001 : Boolean;
+      lResultTask@1100281000 : Code[10];
+    BEGIN
+      //IMH09.ST Emission message corbeille de r‚ponse
+      GetTrayTask;
+      IF NOT TrayTask."Response Expected" THEN
+        EXIT;
+      IF "Respond To Team" = '' THEN
+        GetResponseTeam;
+
+      lResultOK := (Status = Status::Completed);
+      IF lResultOK THEN
+        TESTFIELD("Response Text"); // obligatoire si ok
+
+      "Response Created" := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetResponseTeam@1100281011();
+    VAR
+      lTeam@1100281000 : Record 5083;
+      lServHeader@1100281001 : Record 5900;
+      lService@1000000001 : Record 50066;
+      lFilterTeamTrayTask@1000000000 : TEMPORARY Record 50129;
+    BEGIN
+      IF "Respond To Team" <> '' THEN
+        EXIT;
+      IF "Service Header No." <> '' THEN BEGIN
+        IF lServHeader.GET(lServHeader."Document Type", "Service Header No.") THEN
+          //<<IMH39
+          //"Respond To Team" := lServHeader."Default Team Code";
+          "Respond To Team" := lServHeader.GetTeamByServiceTask(lServHeader, "Task Code");
+          //>>IMH39
+      //<<IMH40
+      END ELSE BEGIN
+        IF lService.GET("Service No.") THEN BEGIN
+          lFilterTeamTrayTask."Corporate No." := lService."Corporate No.";
+          lFilterTeamTrayTask."Corporate Region Code" := lService."Corporate Region Code";
+          "Respond To Team" := TrayLineMgt.GetTeamByTask("Task Code", lFilterTeamTrayTask, '');
+        END ELSE
+          "Respond To Team" := TrayLineMgt.GetTeamByTask("Task Code", lFilterTeamTrayTask, '');
+      END;
+      //>>IMH40
+
+      IF "Respond To Team" <> '' THEN
+        EXIT;
+      lTeam.FILTERGROUP(2);
+      lTeam.SETFILTER(Code, '<>%1', "Team Code");
+      lTeam.FILTERGROUP(0);
+      IF FORM.RUNMODAL(0, lTeam) = ACTION::LookupOK THEN
+        "Respond To Team" := lTeam.Code
+      ELSE
+        ERROR('');
+    END;
+
+    PROCEDURE GetServiceTerritoryName@1100281003() : Text[50];
+    VAR
+      lServiceHeader@1100281000 : Record 5900;
+      lPostCode@1100281001 : Record 225;
+      lTerritory@1100281002 : Record 286;
+    BEGIN
+      //IMH17
+      IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, "Service Header No.") THEN
+        IF lPostCode.GET(lServiceHeader."Ship-to Post Code", lServiceHeader."Ship-to City") THEN
+          IF lTerritory.GET(lPostCode."IMH Territory Code") THEN
+            EXIT(lTerritory.Name);
+    END;
+
+    PROCEDURE ShowAttachment@1100281007();
+    VAR
+      lDocAttachment@1100281000 : Record 50021;
+      lAttachmentMgt@1100281001 : Codeunit 50002;
+    BEGIN
+      IF ("Document Flow Code" = '') OR ("Doc. Queue Entry No." = 0)  THEN
+        EXIT;
+      lDocAttachment.SETRANGE(lDocAttachment."Referent Table No.", DATABASE::"Document Queue");
+      lDocAttachment.SETRANGE("Key Integer 1", "Document Queue Type");
+      lDocAttachment.SETRANGE("Key Integer 2", "Doc. Queue Entry No.");
+      lDocAttachment.SETRANGE("Key Code 1", "Document Flow Code");
+
+      //<<IMH22
+      IF lDocAttachment.ISEMPTY THEN BEGIN
+        lDocAttachment.RESET;
+        lDocAttachment.SETCURRENTKEY("Document Flow Code","Queue Type","Doc. Queue Entry No.");
+        lDocAttachment.SETRANGE("Document Flow Code", "Document Flow Code");
+        lDocAttachment.SETRANGE("Queue Type", "Document Queue Type");
+        lDocAttachment.SETRANGE("Doc. Queue Entry No.", "Doc. Queue Entry No.");
+      END;
+      //>>IMH22
+      IF lDocAttachment.COUNT = 1 THEN BEGIN
+        lDocAttachment.FINDFIRST;
+        lAttachmentMgt.ShowAttachment(lDocAttachment)
+      END ELSE BEGIN
+        FORM.RUN(0, lDocAttachment);
+      END;
+    END;
+
+    PROCEDURE SearchServiceDoc@1100281008();
+    VAR
+      lServiceSearchMgt@1100281002 : Codeunit 50060;
+      lServIntervLine@1100281007 : Record 50075;
+      lServiceNo@1100281001 : Code[20];
+      lServiceHeaderNo@1100281004 : Code[20];
+      lServInterventionLineNo@1100281003 : Integer;
+      lServiceType@1100281000 : Option;
+      lServiceHeader@1100281005 : Record 5900;
+      lService@1100281006 : Record 50066;
+    BEGIN
+      //IMH02 isat.zw
+      lServIntervLine.SETFILTER("Service No.", "Service No.");
+      lServIntervLine.SETFILTER("Service Header No.", "Service Header No.");
+      //IF "Service No." = '' THEN BEGIN
+        lServIntervLine.SETFILTER("Contact No.", "Contact No.");
+        //lServIntervLine.SETFILTER("Contact Name", Name);
+        //lServIntervLine.SETFILTER("Corporate No.", "Corporate No.");
+      //END;
+      IF lServiceSearchMgt.SearchServiceDoc(lServIntervLine, lServiceType,
+                                            lServiceNo, lServiceHeaderNo, lServInterventionLineNo) THEN BEGIN
+        VALIDATE("Service No.", lServiceNo);
+        IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, lServiceHeaderNo) THEN
+          VALIDATE("Service No.", lServiceHeader."Service No.");
+        //IF lServiceHeaderNo <> '' THEN
+          VALIDATE("Service Header No.", lServiceHeaderNo);
+
+        //IF lServInterventionLineNo <> 0 THEN
+          VALIDATE("Intervention Line No.", lServInterventionLineNo);
+
+        IF lService.GET("Service No.") THEN
+          VALIDATE("Contact No.", lService."Contact No.");
+        MODIFY(TRUE);
+      END;
+    END;
+
+    PROCEDURE GetProviderPhoneNo@1000000000(pProviderNo@1100281001 : Code[20]) rValue : Text[30];
+    VAR
+      lProvider@1100281000 : Record 50000;
+      lContact@1100281002 : Record 5050;
+    BEGIN
+      // IMH02.PC
+      // Permet de r‚cup‚rer le premier nø de t‚l‚phone d'un prestataire
+
+      rValue := '';
+
+      IF NOT lProvider.GET(pProviderNo) THEN BEGIN
+        EXIT;
+      END;
+      WITH lContact DO BEGIN
+        IF GET(lProvider."Admin. Contact No.") THEN BEGIN
+          IF "Phone No." <> '' THEN BEGIN
+            rValue := "Phone No.";
+          END;
+          IF ("Mobile Phone No." <> '') AND (rValue = '') THEN BEGIN
+            rValue := "Mobile Phone No.";
+          END;
+          IF ("Mobile Phone No. 2" <> '') AND (rValue = '') THEN BEGIN
+            rValue := "Mobile Phone No. 2";
+          END;
+          IF ("Business Phone No." <> '') AND (rValue = '') THEN BEGIN
+            rValue := "Business Phone No.";
+          END;
+          IF ("Constraint Phone No." <> '') AND (rValue = '') THEN BEGIN
+            rValue := "Constraint Phone No.";
+          END;
+        END;
+      END;
+      IF rValue = '' THEN BEGIN
+        WITH lProvider DO BEGIN
+          IF "Phone No." <> '' THEN BEGIN
+            rValue := "Phone No.";
+          END;
+          IF ("Mobile Phone No." <> '') AND (rValue = '') THEN BEGIN
+            rValue := "Mobile Phone No.";
+          END;
+          IF ("Mobile Phone No. 2" <> '') AND (rValue = '') THEN BEGIN
+            rValue := "Mobile Phone No. 2";
+          END;
+          IF ("Business Phone No." <> '') AND (rValue = '') THEN BEGIN
+            rValue := "Business Phone No.";
+          END;
+          IF ("Constraint Phone No." <> '') AND (rValue = '') THEN BEGIN
+            rValue := "Constraint Phone No.";
+          END;
+        END;
+      END;
+      rValue := DELCHR(rValue,'=',' ');
+    END;
+
+    PROCEDURE GetContactPhoneNo@1000000001(pContactNo@1100281001 : Code[20]) rValue : Text[30];
+    VAR
+      lContact@1100281002 : Record 5050;
+    BEGIN
+      // IMH02.PC
+      // Permet de r‚cup‚rer le premier nø de t‚l‚phone d'un contact
+
+      rValue := '';
+
+      WITH lContact DO BEGIN
+        IF NOT GET(pContactNo) THEN BEGIN
+          EXIT;
+        END;
+
+        IF "Phone No." <> '' THEN BEGIN
+          rValue := "Phone No.";
+        END;
+        IF ("Mobile Phone No." <> '') AND (rValue = '') THEN BEGIN
+          rValue := "Mobile Phone No.";
+        END;
+        IF ("Mobile Phone No. 2" <> '') AND (rValue = '') THEN BEGIN
+          rValue := "Mobile Phone No. 2";
+        END;
+        IF ("Business Phone No." <> '') AND (rValue = '') THEN BEGIN
+          rValue := "Business Phone No.";
+        END;
+        IF ("Constraint Phone No." <> '') AND (rValue = '') THEN BEGIN
+          rValue := "Constraint Phone No.";
+        END;
+      END;
+      rValue := DELCHR(rValue,'=',' ');
+    END;
+
+    PROCEDURE GetServiceCauseDescription@1000000002() : Text[50];
+    VAR
+      lService@1000000000 : Record 50066;
+      lFaultReasonCode@1000000001 : Record 5917;
+    BEGIN
+
+      IF NOT lService.GET("Service No.") THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT lFaultReasonCode.GET(lService."Service Cause") THEN BEGIN
+        EXIT;
+      END;
+
+      EXIT(lFaultReasonCode.Description);
+    END;
+
+    LOCAL PROCEDURE AssignUser@1000000003() : Boolean;
+    VAR
+      lUserSetup@1000000000 : Record 91;
+      lServHeader@1000000001 : Record 5900;
+      lUserID@1000000002 : Text[30];
+    BEGIN
+      //IMH23.ST
+      IF NOT GetTeam THEN
+        EXIT;
+      IF Team."User Assignment" = Team."User Assignment"::" " THEN
+        EXIT;
+      CASE Team."User Assignment" OF
+        Team."User Assignment"::" " : EXIT(FALSE);
+        Team."User Assignment"::ServiceCreator : BEGIN
+          IF "Service Header No." <> '' THEN BEGIN
+            IF lServHeader.GET(lServHeader."Document Type"::Invoice, "Service Header No.") THEN
+              lUserID := lServHeader."Creation User ID";
+          END;
+        END;
+      END;
+      IF lUserID <> '' THEN BEGIN
+        IF lUserSetup.GET(lUserID) THEN
+          "Assigned Salesperson Code" := lUserSetup."Salespers./Purch. Code";
+      END;
+    END;
+
+    PROCEDURE GetMainBuildingTrade@1000000004() : Text[250];
+    VAR
+      lServIntervLine@1000000000 : Record 50075;
+    BEGIN
+      IF lServIntervLine.GET("Service Header No.","Intervention Line No.") THEN BEGIN
+        lServIntervLine.CALCFIELDS("Building Trade Description");
+        EXIT(lServIntervLine."Building Trade Description");
+      END;
+    END;
+
+    PROCEDURE GetMainSpeciality@1000000006() : Text[250];
+    VAR
+      lServIntervLine@1000000000 : Record 50075;
+    BEGIN
+      IF lServIntervLine.GET("Service Header No.","Intervention Line No.") THEN BEGIN
+        lServIntervLine.CALCFIELDS("Main Speciality Description");
+        EXIT(lServIntervLine."Main Speciality Description");
+      END;
+    END;
+
+    PROCEDURE GetServiceFilter@1100281019();
+    VAR
+      lUserSetup@1100281000 : Record 91;
+      lShowingFilter@1100281001 : Code[1024];
+    BEGIN
+      //IMH30
+      SETFILTER("Showing Filter", '');
+      IF NOT lUserSetup.GET(USERID) THEN
+        EXIT;
+
+      IF lUserSetup."Show To DGS" THEN
+        lShowingFilter := '1???';
+      IF lUserSetup."Show To DPR" THEN BEGIN
+        IF lShowingFilter = '' THEN
+          lShowingFilter := '?1??'
+        ELSE
+          lShowingFilter += '|' + '?1??';
+      END;
+      IF lUserSetup."Show To DFC" THEN BEGIN
+        IF lShowingFilter = '' THEN
+          lShowingFilter := '??1?'
+        ELSE
+          lShowingFilter += '|' + '??1?';
+      END;
+      IF lUserSetup."Show To DQP" THEN BEGIN
+        IF lShowingFilter = '' THEN
+          lShowingFilter := '???1'
+        ELSE
+          lShowingFilter += '|' + '???1';
+      END;
+
+
+      SETFILTER("Showing Filter", lShowingFilter);
+    END;
+
+    PROCEDURE GetMainSpecDescr@1100281010() : Text[50];
+    VAR
+      lProvider@1000000000 : Record 50000;
+      lSpecialization@1000000001 : Record 50005;
+    BEGIN
+      // IMH20.PC
+      IF NOT lProvider.GET("Contact No.") THEN BEGIN
+        EXIT;
+      END;
+      IF NOT lSpecialization.GET(lProvider."Main Specialization Code") THEN BEGIN
+        EXIT;
+      END;
+      EXIT(lSpecialization.Description);
+    END;
+
+    PROCEDURE GetMainBuildDescr@1100281009() : Text[50];
+    VAR
+      lProvider@1000000000 : Record 50000;
+      lBuildingTrade@1000000001 : Record 50032;
+    BEGIN
+      // IMH20.PC
+      IF NOT lProvider.GET("Contact No.") THEN BEGIN
+        EXIT;
+      END;
+      IF NOT lBuildingTrade.GET(lProvider."Main Building Trade No.") THEN BEGIN
+        EXIT;
+      END;
+      EXIT(lBuildingTrade.Description);
+    END;
+
+    PROCEDURE ShowCard@1000000005();
+    BEGIN
+      FORM.RUN(FORM::"Tray Line Card", Rec);
+    END;
+
+    PROCEDURE SetSkipCalcTeamCode@1100281012(pSkipCalcTeamCode@1100281000 : Boolean);
+    BEGIN
+      //IMH40
+      SkipCalcTeamCode := pSkipCalcTeamCode;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH41 @d 10/06/14 @a ISAT.ZW @v IMH6.01.P010 @s Projet PMU @c Ajout champ 205 "Attachment File Extension" */
+      /** @r IMH40 @d 26/03/14 @a ISAT.ZW @v IMH6.01.5005 @s Reorganisation DPS @h 5005
+          @c Ajout la utilisation de la nouvelle Fonction GetTeamByTask */
+      /** @r IMH39 @d 24/02/14 @a ISAT.ZW @v IMH6.01.4985 @s R‚organisation DPS @c Gestion de code corbeille service par d‚faut */
+      /** @r IMH38 @d 05/12/13 @a ISAT.ACO @v IMH6.01.4128 @s SUPPORT @h 4128 @c Ajout Flowfield 50044 "Recruitment Origin Provider" */
+      /** @r IMH37 @d 17/10/13 @a ISAT.EBA @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR / R‚gion */
+      /** @r IMH36 @d 22/05/13 @a ISAT.PC @v IMH6.01.222 @s Uniformisation Darva @c Ajout champ 201, Attachment 2 */
+      /** @r IMH35 @d 26/03/13 @a Isat.PC @v IMH6.01.346 @s Hotifx
+          @c ajout cl‚ Service No.,Service Header No.,Closed */
+      /** @r IMH34 @d 28/11/12 @a IMH.DBR @v IMH6.01.P009  @s version 1.4 @h 4065
+          @c Modification relation du champ extranet pour filtre" */
+      /** @r IMH33 @d 11/10/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 2029
+          @c Suppression validation de tableRelation du champ "Personne affect‚e" */
+      /** @r IMH32 @d 19/07/12 @a ISAT.PC @v IMH6.01.226 @s version 1.4 @h 2029
+          @c Ajout fonctions showcard */
+      /** @r IMH31 @d 25/05/12 @a ISAT.ZW @v IMH6.01.120 @s Gestion des corbeilles @h 3211
+          @c Ajout fonctions de recup corps de metier principal et sp‚cialit‚ principale */
+      /** @r IMH30 @d 16/05/12 @a ISAT.LLT @v IMH6.01.120 @s Gestion des corbeilles @h 1141
+          @c Ajout champ 50080 et modif table relation de code tache
+      /** @r IMH29 @d 10/05/12 @a ISAT.PC @v IMH6.01.120 @s Gestion des corbeilles @h 2331
+          @c Ajout champ 63, Contact Post Code */
+      /** @r IMH28 @d 23/04/12 @a ISAT.LLT @v IMH6.01.120 @s Gestion des corbeilles @h 3211
+          @c Ajout fonctions de recup corps de metier principal et sp‚cialit‚ principale */
+      /** @r IMH27 @d 11/04/12 @a ISAT.ZW @v IMH6.01.120 @s Gestion des corbeilles @h 2033 @h 2331
+          @c Ajout champ 63 Contact City */
+      /** @r IMH26 @d 02/04/12 @a ISAT.PC @v IMH6.01.201 @s Report 41
+          @c Ajout cl‚ Team Code,Task Code,Creation Date,Status pour report 41 */
+      /** @r IMH25 @d 13/03/12 @a ISAT.ZW @v IMH6.01.120 @s Gestion des Visites @c Ajout champ Nø visite */
+      /** @r IMH24 @d 09/02/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles @h 2216 */
+      /** @r IMH23 @d 17/12/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles @c Assignation utilisateur */
+      /** @r IMH22 @d 07/12/11 @a ISAT.ZW @v IMH6.01.120 @s Gestion des corbeilles @c Affichage doc joint document flux */
+      /** @r IMH21 @d 30/11/11 @a ISAT.EBA @v IMH6.01.134 @s DARVA Management
+          @c Ajout de champ 50045 "Service Reference No."
+          @c Ajout de champ 50046 "Mission No."
+          @c Ajout de champ 50047 "DARVA Message ID"
+          @c Ajout de champ 50611 "EAI Entry No." */
+      /** @r IMH20 @d 15/09/11 @a ISAT.ZW @v IMH6.01.120 @s Gestion des corbeilles @c Ajout Attachment */
+      /** @r IMH19 @d 25/08/11 @a ISAT.PC @v IMH6.01.120 @h 403 @s Gestion des corbeilles @c Ajout code */
+      /** @r IMH18 @d 08/07/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles @c Ajout commentaire par d‚faut */
+      /** @r IMH17 @d 17/06/11 @a ISAT.?? @v IMH6.01.120 @s Gestion des corbeilles @c Ajout fonction GetServiceTerritoryName */
+      /** @r IMH16 @d 17/06/11 @a ISAT.ST @v IMH6.01.161 @s Log Service @c Appel statut termin‚ et triggers de table */
+      /** @r IMH15 @d 10/06/11 @a ISAT.ST @v IMH6.01.120 @s gestion des corbeilles
+          @c AJout index Team Group Code,Closed,Expected End Date,Expected End Time pour accŠs RoleCenter */
+      /** @r IMH14 @d 19/05/11 @a ISAT.ZW @v IMH6.01.018 @s gestion intervention
+          @c Suppression les enregistrements table li‚ Tray Line Prov. Search Entry */
+      /** @r IMH13 @d 25/03/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Delete lock sur le delete, ajout champ 80 Lock Exists */
+      /** @r IMH12 @d 10/03/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Ajout index Task Code,Closed,Expected End Date,Expected End Time pour accŠs par les tƒches */
+      /** @r IMH11 @d 28/01/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Creation fonction IsPostEnddatePreAlert */
+      /** @r IMH10 @d 17/02/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Verrous - Suppresion champs 50510 "Locking Date" et 50511 "Locking User ID" et cl‚  */
+      /** @r IMH09 @d 08/02/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Gestion r‚ponse corbeille, transfert et substitution
+          @c Ajout champ 90 Respond To Team
+          @c Ajout champ 91 Response
+          @c Ajout champ 92 Response Created
+          @c Ajout champ 93 Response Text
+          @c Ajout champ 97 Transfer To Team
+          @c Ajout champ 98 Team Substitution
+          @c Ajout champ 99 Subst. Source Team Code
+      */
+      /** @r IMH08 @d 28/01/11 @a ISAT.ST @v IMH6.01.120 @s Gestion des corbeilles
+          @c Date/heure ‚ch‚ance obligatoire
+          @c Ajout GetExpectedEndAlert (copie fonction de la page)
+          @c Statut bloqu‚ sur corbeille */
+      /** @r IMH07 @d 26/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout champ 100 "Stop Auto Process" */
+      /** @r IMH06 @d 21/01/11 @a ISAT.LLT @v IMH6.01.013 @s Gestion des corbeilles
+          @c Ajout champ 50036 Intervention Quote Line No. */
+      /** @r IMH05 @d 14/12/2010 @a ISAT.ZW @v IMH6.01.013 @s Gestion des corbeilles @c fonction CalcExpectedEndDate */
+      /** @r IMH04 @d 13/12/2010 @a ISAT.ZW @v IMH6.01.013 @s Gestion des corbeilles
+          @c Ajout champ source table No. */
+      /** @r IMH03 @d 08/12/2010 @a ISAT.ZW @v IMH6.01.013 @s Gestion des corbeilles
+          @c Caption ‚quipe --> corbeille */
+      /** @r IMH02 @d 09/11/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c passage du champs nø service de integer a code(20) */
+      /** @r IMH01 @d 26/10/10 @a ISAT.ZW @v IMH6.01.013 @s Gestion des corbeilles @c Creation Objet */
+    }
+    END.
+  }
+}

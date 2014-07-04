@@ -1,0 +1,280 @@
+OBJECT Dataport 8016606 RDD - Import Fixed Asset
+{
+  OBJECT-PROPERTIES
+  {
+    Date=05/06/11;
+    Time=13:50:32;
+    Modified=Yes;
+    Version List=ISA6.00,IMISAT6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=RDD - Import Fixed Asset;
+               FRA=RDD - Import des Immobilisations];
+    Import=Yes;
+    FieldStartDelimiter=<None>;
+    FieldEndDelimiter=<None>;
+    FieldSeparator=[;];
+    OnPreDataport=BEGIN
+                    CurrDataport.IMPORT(TRUE);
+                    CurrDataport.FILENAME(TxtFileName);
+
+                    FASetup.GET;
+                  END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table2000000026;
+        AutoSave=No;
+        AutoUpdate=No;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=FILTER(1..));
+        OnPreDataItem=BEGIN
+                        FAJnlTemplate.RESET;
+                        FAJnlTemplate.SETRANGE(Recurring,FALSE);
+                        FAJnlTemplate.FIND('-');
+
+                        FAJnlLine.SETRANGE("Journal Template Name",FAJnlTemplate.Name);
+                        FAJnlManagement.OpenJournal(CurrentJnlBatchName,FAJnlLine);
+
+                        FAJnlLine.FILTERGROUP := 2;
+                        FAJnlTemplate.FIND('=');
+                        FAJnlBatch.GET(FAJnlTemplate.Name,CurrentJnlBatchName);
+                        FAJnlLine.RESET;
+                        FAJnlLine.FILTERGROUP := 0;
+
+                        FAJnlLine.SETRANGE("Journal Template Name");
+                        FAJnlLine.SETRANGE("Journal Batch Name");
+                        IF FAJnlLine.FIND('+') THEN
+                          LineNo := FAJnlLine."Line No." + 10000
+                        ELSE
+                          LineNo := 10000;
+
+                        IF CONFIRM('Supprimer toutes les plans d''immortissements d‚j… int‚gr‚?') THEN
+                          FaDeprecBook.DELETEALL;
+                      END;
+
+        OnAfterImportRecord=BEGIN
+                              IF ImmoNo = '' THEN
+                                CurrDataport.BREAK;
+
+                              FA.GET(ImmoNo);
+                              //Plan d'amortissement
+                              WITH FaDeprecBook DO
+                              BEGIN
+                                INIT;
+                                "FA No." := ImmoNo;
+                                VALIDATE("Depreciation Book Code",Loi1No);
+                                VALIDATE("FA Posting Group",FA."FA Posting Group");
+                                VALIDATE("Depreciation Method",Loi1Methode);
+                                IF DecliningMethod THEN BEGIN
+                                  VALIDATE("Declining-Balance %",Loi1Coef * 12 / Loi1NbMois * 100);
+                                END;
+                                VALIDATE("Depreciation Starting Date",Loi1DateDebut);
+                                VALIDATE("No. of Depreciation Months",Loi1NbMois);
+                                INSERT(TRUE);
+
+                                IF Loi2No<>'' THEN BEGIN
+                                  INIT;
+                                  "FA No." := ImmoNo;
+                                  VALIDATE("Depreciation Book Code",Loi2No);
+                                  VALIDATE("FA Posting Group",FA."FA Posting Group");
+                                  VALIDATE("Depreciation Method",Loi2Methode);
+                                  IF DecliningMethod THEN BEGIN
+                                    VALIDATE("Declining-Balance %",Loi2Coef * 12 / Loi2NbMois * 100);
+                                  END;
+                                  VALIDATE("Depreciation Starting Date",Loi2DateDebut);
+                                  VALIDATE("No. of Depreciation Months",Loi2NbMois);
+                                  INSERT(TRUE);
+                                END;
+
+                                IF Loi3No<>'' THEN BEGIN
+                                  INIT;
+                                  "FA No." := ImmoNo;
+                                  VALIDATE("Depreciation Book Code",Loi3No);
+                                  VALIDATE("FA Posting Group",FA."FA Posting Group");
+                                  VALIDATE("Depreciation Method",Loi3Methode);
+                                  IF DecliningMethod THEN BEGIN
+                                    VALIDATE("Declining-Balance %",Loi3Coef * 12 / Loi3NbMois * 100);
+                                  END;
+                                  VALIDATE("Depreciation Starting Date",Loi3DateDebut);
+                                  VALIDATE("No. of Depreciation Months",Loi3NbMois);
+                                  INSERT(TRUE);
+                                END;
+                              END;
+
+                              //Feuille d'immo pour co–t d'acquisition
+                              WITH FAJnlLine DO
+                              BEGIN
+                                INIT;
+
+                                "Journal Template Name" := FAJnlTemplate.Name;
+                                "Journal Batch Name" := FAJnlBatch.Name;
+
+                                "Source Code" := FAJnlTemplate."Source Code";
+                                "Reason Code" := FAJnlBatch."Reason Code";
+                                "Posting No. Series" := FAJnlBatch."Posting No. Series";
+
+                                "Line No." := LineNo;
+                                "Document No." := DocNo;
+                                VALIDATE("Document Type","Document Type"::Invoice);
+                                VALIDATE("FA Posting Date",DateAcquisition);
+                                VALIDATE("FA Posting Type","FA Posting Type"::"Acquisition Cost");
+                                VALIDATE("FA No.",FaDeprecBook."FA No.");
+                                VALIDATE("Depreciation Book Code",Loi1No);
+                                VALIDATE(Amount,ValeurAcquisition);
+                                INSERT(TRUE);
+                              END;
+                              LineNo := LineNo + 10000;
+
+                              //Feuille d'immo pour amortissement
+                              IF NOT FAJnlBatch2.GET(FAJnlTemplate.Name,Loi1No) THEN BEGIN
+                                CreateNewBatch(Loi1No);
+                                FAJnlBatch2.GET(FAJnlTemplate.Name,Loi1No);
+                              END;
+
+                              FAJnlLine.RESET;
+                              FAJnlLine.SETRANGE("Journal Template Name",FAJnlTemplate.Name);
+                              FAJnlLine.SETRANGE("Journal Batch Name",FAJnlBatch2.Name);
+                              IF FAJnlLine.FIND('+') THEN
+                                LineNo2 := FAJnlLine."Line No." + 10000
+                              ELSE
+                                LineNo2 := 10000;
+
+                              FAJnlLine.RESET;
+                              WITH FAJnlLine DO
+                              BEGIN
+                                INIT;
+
+                                "Journal Template Name" := FAJnlTemplate.Name;
+                                "Journal Batch Name" := FAJnlBatch2.Name;
+
+                                "Source Code" := FAJnlTemplate."Source Code";
+                                "Reason Code" := FAJnlBatch2."Reason Code";
+                                "Posting No. Series" := FAJnlBatch2."Posting No. Series";
+
+                                "Line No." := LineNo2;
+                                "Document No." := DocNo;
+                                VALIDATE("FA Posting Date",DateTotalAmort);
+                                VALIDATE("FA Posting Type","FA Posting Type"::Depreciation);
+                                VALIDATE("FA No.",FaDeprecBook."FA No.");
+                                VALIDATE("Depreciation Book Code",Loi1No);
+                                VALIDATE(Amount,-ValeurTotaleEco);
+                                INSERT(TRUE);
+                              END;
+                            END;
+
+      }
+      FIELDS
+      {
+        {      ;     ;ImmoNo               }
+        {      ;     ;ValeurAcquisition    }
+        {      ;     ;DateAcquisition      }
+        {      ;     ;ValeurTotaleEco      }
+        {      ;     ;ValeurTotaleFiscale  }
+        {      ;     ;DateTotalAmort       }
+        {      ;     ;Loi1No               }
+        {      ;     ;Loi1Methode          }
+        {      ;     ;Loi1DateDebut        }
+        {      ;     ;Loi1Coef             }
+        {      ;     ;Loi1NbMois           }
+        {      ;     ;Loi2No               }
+        {      ;     ;Loi2Methode          }
+        {      ;     ;Loi2DateDebut        }
+        {      ;     ;Loi2Coef             }
+        {      ;     ;Loi2NbMois           }
+        {      ;     ;Loi3No               }
+        {      ;     ;Loi3Methode          }
+        {      ;     ;Loi3DateDebut        }
+        {      ;     ;Loi3Coef             }
+        {      ;     ;Loi3NbMois           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=8250;
+      Height=990;
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 1000000000;TextBox;3410 ;0    ;1700 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Document No.;
+                                                              FRA=Nø document];
+                                                   OptionCaptionML=[ENU=Document No.;
+                                                                    FRA=Nø document];
+                                                   SourceExpr=DocNo }
+      { 1000000001;Label  ;0    ;0    ;3300 ;440  ;ParentControl=1000000000 }
+      { 1   ;TextBox      ;3410 ;550  ;4840 ;440  ;InPage=-1;
+                                                   AssistEdit=Yes;
+                                                   CaptionML=[ENU=File to Import :;
+                                                              FRA=Fichier … importer :];
+                                                   SourceExpr=TxtFileName }
+      { 1000000003;Label  ;0    ;550  ;3300 ;440  ;ParentControl=1 }
+    }
+  }
+  CODE
+  {
+    VAR
+      FAJnlManagement@8016603 : Codeunit 5638;
+      FASetup@8016600 : Record 5603;
+      FaDeprecBook@8016601 : Record 5612;
+      FAJnlTemplate@8016618 : Record 5619;
+      FAJnlBatch@8016619 : Record 5620;
+      FAJnlBatch2@8016617 : Record 5620;
+      FAJnlLine@8016615 : Record 5621;
+      CurrentJnlBatchName@8016616 : Code[20];
+      TxtFileName@8016622 : Text[250];
+      LineNo@8016631 : Integer;
+      LineNo2@8016635 : Integer;
+      DocNo@8016632 : Code[20];
+      ImmoNo@8016604 : Code[20];
+      ValeurAcquisition@8016605 : Decimal;
+      DateAcquisition@8016606 : Date;
+      ValeurTotaleEco@8016607 : Decimal;
+      ValeurTotaleFiscale@8016608 : Decimal;
+      DateTotalAmort@8016609 : Date;
+      Loi1No@8016610 : Code[10];
+      Loi1Methode@8016611 : Integer;
+      Loi1DateDebut@8016612 : Date;
+      Loi1Coef@8016613 : Decimal;
+      Loi1NbMois@8016614 : Integer;
+      Loi2No@8016625 : Code[10];
+      Loi2Methode@8016624 : Integer;
+      Loi2DateDebut@8016623 : Date;
+      Loi2Coef@8016621 : Decimal;
+      Loi2NbMois@8016620 : Integer;
+      Loi3No@8016630 : Code[10];
+      Loi3Methode@8016629 : Integer;
+      Loi3DateDebut@8016628 : Date;
+      Loi3Coef@8016627 : Decimal;
+      Loi3NbMois@8016626 : Integer;
+      Text001@8016634 : TextConst 'ENU=Fixed Asset Journal;FRA=Feuille immobilisation';
+      FA@1100281000 : Record 5600;
+
+    PROCEDURE CreateNewBatch@8016600(NewBatchCode@8016600 : Code[10]);
+    VAR
+      LocFAJnlBatch@8016601 : Record 5620;
+    BEGIN
+      LocFAJnlBatch.INIT;
+      LocFAJnlBatch."Journal Template Name" := FAJnlTemplate.Name;
+      LocFAJnlBatch.SetupNewBatch;
+      LocFAJnlBatch.Name := NewBatchCode;
+      LocFAJnlBatch.Description := Text001;
+      LocFAJnlBatch.INSERT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r ISA02 @d 07/07/09 @a ISAT.MA @v ISA6.00.00.01 @s Migration v6 **/
+      /** @r ISA01 @d 07/07/09 @a ISAT.MA @v IMISAT6.00.00.01 @s Migration v6 **/
+    }
+    END.
+  }
+}

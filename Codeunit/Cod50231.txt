@@ -1,0 +1,104 @@
+OBJECT Codeunit 50231 Send Campaign SMS
+{
+  OBJECT-PROPERTIES
+  {
+    Date=10/06/13;
+    Time=17:10:19;
+    Modified=Yes;
+    Version List=IMH6.01,OPTIM,JUIN;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 5050=rimd,
+                TableData 5071=rimd,
+                TableData 5900=rimd,
+                TableData 50011=rimd,
+                TableData 50075=rimd,
+                TableData 50185=rimd,
+                TableData 50186=rimd;
+    OnRun=BEGIN
+            SendSMS
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProviderSetup@1100281000 : Record 50011;
+
+    PROCEDURE SendSMS@1000000001();
+    VAR
+      lCampaign@1000000000 : Record 5071;
+      lContact@1100281000 : Record 5050;
+      lServiceHeader@1000000001 : Record 5900;
+      lServiceInterventionLine@1000000002 : Record 50075;
+      lSMSSendEntry@1000000003 : Record 50186;
+      lSMSTemplate@1100281004 : Record 50185;
+      lSMSSendEntryTmp@1000000005 : TEMPORARY Record 50186;
+      lSMSMgt@1000000004 : Codeunit 50225;
+      lSMSBody@1100281001 : BigText;
+      lInStream@1100281002 : InStream;
+      lType@1100281003 : 'Service,ServiceHeader,Intervention';
+    BEGIN
+      ProviderSetup.GET;
+      IF lSMSTemplate.GET(ProviderSetup."Campaign SMS Template") THEN;
+      lCampaign.SETRANGE(Active,TRUE);
+      lCampaign.SETRANGE("Activate Send SMS",TRUE);
+      IF lCampaign.FINDSET THEN
+      REPEAT
+        lServiceHeader.SETCURRENTKEY("Campaign No.");
+        lServiceHeader.SETRANGE("Campaign No.",lCampaign."No.");
+      //<<IMH03.ST
+        lServiceHeader.SETFILTER("Creation Date", '<=%1',
+                                 CURRENTDATETIME - (ProviderSetup."Campaign Send SMS Delay (H.)" * 3600000));
+        IF NOT lServiceHeader.ISEMPTY THEN
+      //>>IMH03.ST
+        IF lServiceHeader.FINDSET THEN
+        REPEAT
+      //<<IMH03.ST var non utilis‚
+      //    lContact.GET(lServiceHeader."Contact No.");
+      //>>IMH03.ST
+          lServiceInterventionLine.SETRANGE("Service Header No.",lServiceHeader."No.");
+          //IMH02
+          lServiceInterventionLine.SETFILTER("Intervention Status", '<>%1', lServiceInterventionLine."Intervention Status"::Cancel);
+
+          IF lServiceInterventionLine.ISEMPTY THEN
+          BEGIN
+            IF ((CURRENTDATETIME - lServiceHeader."Creation Date")/3600000) >= ProviderSetup."Campaign Send SMS Delay (H.)"  THEN BEGIN
+              lSMSSendEntry.SETCURRENTKEY("Contact No.");
+              lSMSSendEntry.SETRANGE("Contact No.",lServiceHeader."Contact No.");
+              lSMSSendEntry.SETRANGE("Campaign No.",lCampaign."No.");
+              IF lSMSSendEntry.ISEMPTY THEN
+              BEGIN
+                IF lSMSMgt.CheckPhoneNo(lServiceHeader."Ship-to Mobile Phone No.") THEN
+                BEGIN
+                  lCampaign.CALCFIELDS(lCampaign."SMS Body");
+                  lCampaign."SMS Body".CREATEINSTREAM(lInStream);
+                  CLEAR(lSMSBody);  //IMH02
+                  lSMSBody.READ(lInStream);
+                  lSMSSendEntryTmp."Service No." := lServiceHeader."Service No.";
+                  lSMSSendEntryTmp."Service Header No." := lServiceHeader."No.";
+                  lSMSSendEntryTmp."Contact No." := lServiceHeader."Contact No.";
+                  lSMSSendEntryTmp."Phone No." := lServiceHeader."Ship-to Mobile Phone No.";
+                  lSMSSendEntryTmp."Send Type" := lSMSSendEntryTmp."Send Type"::Automatique;  //IMH03
+                  lSMSMgt.SendTextSMS(1, lSMSTemplate."Interaction Template Code",
+                      ProviderSetup."Campaign SMS Template", lSMSSendEntryTmp, lSMSBody);
+                  COMMIT;   //IMH04
+                END;
+              END;
+            END;
+          END;
+        UNTIL lServiceHeader.NEXT =0;
+      UNTIL lCampaign.NEXT=0
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 10/06/13 @a ISAT.ZW @v IMH6.01.347 @s JUIN @c Ajout commit … la validation de ligne */
+      /** @r IMH03 @d 29/11/12 @a ISAT.ST @v IMH6.01.P008 @s Projet SMS @c Optimisation */
+      /** @r IMH02 @d 04/10/12 @a ISAT.ZW @v IMH6.01.213 @s Projet SMS @c Modification */
+      /** @r IMH01 @d 02/10/12 @a ISAT.ML @v IMH6.01.213 @s Projet SMS @c Cr‚ation */
+    }
+    END.
+  }
+}

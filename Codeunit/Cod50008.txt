@@ -1,0 +1,384 @@
+OBJECT Codeunit 50008 Doc. Queue-Post
+{
+  OBJECT-PROPERTIES
+  {
+    Date=11/12/13;
+    Time=17:30:25;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=50054;
+    OnRun=BEGIN
+            RunWithCheck(Rec);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      DocFlowMgt@1100281001 : Codeunit 50006;
+      InterventionMgt@1100281002 : Codeunit 50014;
+      DocumentQueue@1100281000 : Record 50054;
+      DocumentQueueLinked@1100281003 : Record 50054;
+      Text001@1100281004 : TextConst 'ENU=%1 should be have a value in the document queue line No. %2.;FRA=%1 doit avoir une valeur dans la file de document nø ligne %2.';
+      Text002@1100281005 : TextConst 'ENU=The contact type should be %1 in the document queue line No. %2.;FRA=Le type de contact doit ˆtre %1 dans la file de document nø ligne %2.';
+      DocumentFlowMgt@1100281006 : Codeunit 50006;
+      TrayLine@1100281007 : Record 50048;
+      HideError@1100281008 : Boolean;
+
+    PROCEDURE RunWithCheck@1100281000(VAR pDocumentQueue@1100281000 : Record 50054);
+    BEGIN
+      //Valitation file de document
+      DocumentQueue.COPY(pDocumentQueue);
+      Code(TRUE);
+      pDocumentQueue := DocumentQueue;
+    END;
+
+    PROCEDURE Code@1100281002(pCheckLine@1100281000 : Boolean);
+    VAR
+      lDocAttachTmp@1100281001 : TEMPORARY Record 50021;
+    BEGIN
+      //traiter la liste des files de document de statut trait‚
+      //commit aprŠs traitement d'une ligne
+      DocumentQueue.SETRANGE(Status, DocumentQueue.Status::Done);
+      //DocumentQueue.SETRANGE("Linked Entry No.", 0);
+      IF DocumentQueue.FINDFIRST THEN
+        REPEAT
+          CheckLine(DocumentQueue);
+          LoadDocAttachToTemp(DocumentQueue, lDocAttachTmp);
+          CreateDocument;
+          DocumentQueue.CALCFIELDS(Attachment);
+          IF DocumentQueue.Status = DocumentQueue.Status::Done THEN BEGIN
+            DocumentQueue.Status := DocumentQueue.Status::Posted;
+            DocumentQueue.MODIFY(FALSE);
+          END;
+          IF NOT DocumentFlowMgt.LaunchingDocumentAction(DocumentQueue, TrayLine) THEN
+            CLEAR(TrayLine);
+          //IF (DocumentQueue.Attachment > 0) THEN
+          //  CreateInteraction;
+
+          {
+          DocumentQueueLinked.COPY(DocumentQueue);
+          DocumentQueueLinked.SETRANGE("Linked Entry No.", DocumentQueue."Entry No.");
+          //DocFlowMgt.FinishDocQueueTrayLines(DocumentQueue);
+          //DocumentQueue.DELETE(TRUE);
+          DocumentQueueLinked.MODIFYALL(Status, DocumentQueue.Status::Posted, TRUE);
+          }
+          //<< IMH03.ISAT.VA
+          //Mise en commentaire par VA
+          DocFlowMgt.ArchiveDocQueueFile(DocumentQueue, lDocAttachTmp);
+          //>> IMH03.ISAT.VA
+          COMMIT;
+        UNTIL DocumentQueue.NEXT = 0;
+    END;
+
+    PROCEDURE CheckLine@1100281001(VAR pDocumentQueue@1100281000 : Record 50054) : Boolean;
+    VAR
+      lContact@1100281001 : Record 5050;
+      lServiceHeader@1100281002 : Record 5900;
+      lServiceOrderType@1100281003 : Record 5903;
+      lProvider@1100281004 : Record 50000;
+      lErrorText@1100281005 : Text[250];
+    BEGIN
+      //controle des champs de file
+      IF pDocumentQueue."Document Type" = pDocumentQueue."Document Type"::" " THEN
+        lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Document Type"), pDocumentQueue."Line No.");
+
+      //<< IMH05 IMH.WGA
+      IF pDocumentQueue.Description = '' THEN BEGIN
+        lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION(Description), pDocumentQueue."Line No.");
+      END;
+      //>> IMH05
+
+      IF NOT (pDocumentQueue."Document Type" IN [pDocumentQueue."Document Type"::"Service Request",
+                                                 pDocumentQueue."Document Type"::"DGS To Qualify",
+                                                 pDocumentQueue."Document Type"::"DPR To Qualify",
+                                                 //pDocumentQueue."Document Type"::"DFC To Qualify",
+                                                 pDocumentQueue."Document Type"::"Document Follow Up",
+                                                 pDocumentQueue."Document Type"::"DQP To Qualify",
+                                                 pDocumentQueue."Document Type"::Claim]) THEN
+        IF pDocumentQueue."Contact No." = '' THEN
+          lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Contact No."), pDocumentQueue."Line No.");
+      IF NOT (pDocumentQueue."Document Type" IN [pDocumentQueue."Document Type"::"Provider Document",
+                                                 pDocumentQueue."Document Type"::"Service Request",
+                                                 pDocumentQueue."Document Type"::"DGS To Qualify",
+                                                 pDocumentQueue."Document Type"::"DPR To Qualify",
+                                                 pDocumentQueue."Document Type"::"DFC To Qualify",
+                                                 pDocumentQueue."Document Type"::"Document Follow Up",
+                                                 pDocumentQueue."Document Type"::"DQP To Qualify",
+                                                 pDocumentQueue."Document Type"::Claim]) THEN BEGIN
+        CASE pDocumentQueue."Service Document Type" OF
+          pDocumentQueue."Service Document Type"::Service :
+            IF pDocumentQueue."Service No." = '' THEN
+              lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service No."), pDocumentQueue."Line No.");
+          pDocumentQueue."Service Document Type"::"Service Header" :
+            IF pDocumentQueue."Service Document No." = '' THEN
+              lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Document No."), pDocumentQueue."Line No.");
+          pDocumentQueue."Service Document Type"::Intervention : BEGIN
+            IF pDocumentQueue."Service Document No." = '' THEN BEGIN
+              lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Document No."), pDocumentQueue."Line No.");
+            END ELSE BEGIN
+              lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pDocumentQueue."Service Header No.");
+              lServiceOrderType.GET(lServiceHeader."Service Order Type");
+              IF (lServiceOrderType."Interv. Process Code" <> '') THEN
+              BEGIN
+                IF pDocumentQueue."Service Intervention Line No." = 0 THEN
+                  lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Intervention Line No."),
+                    pDocumentQueue."Line No.");
+               END;
+             END;
+          END;
+        END;
+      END;
+      CASE pDocumentQueue."Document Type" OF
+        pDocumentQueue."Document Type"::Invoice : BEGIN
+          IF pDocumentQueue."Service Document No." = '' THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Document No."), pDocumentQueue."Line No.");
+          IF pDocumentQueue."Service Header No." = '' THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Header No."), pDocumentQueue."Line No.");
+          IF pDocumentQueue."Service Header No." <> '' THEN BEGIN
+            lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pDocumentQueue."Service Header No.");
+            lServiceOrderType.GET(lServiceHeader."Service Order Type");
+          END;
+          IF (lServiceOrderType."Interv. Process Code" <> '') THEN
+            IF pDocumentQueue."Service Intervention Line No." = 0 THEN
+              lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Intervention Line No."), pDocumentQueue."Line No.")
+      ;
+          IF pDocumentQueue.Amount = 0 THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION(Amount), pDocumentQueue."Line No.");
+          IF pDocumentQueue."Amount Including VAT" = 0 THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Amount Including VAT"), pDocumentQueue."Line No.");
+          IF pDocumentQueue."Vendor Invoice No." = '' THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Vendor Invoice No."), pDocumentQueue."Line No.");
+          IF pDocumentQueue."Document Date" = 0D THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Document Date"), pDocumentQueue."Line No.");
+        END;
+        pDocumentQueue."Document Type"::Quote : BEGIN
+          IF pDocumentQueue."Service Document No." = '' THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Document No."), pDocumentQueue."Line No.");
+          IF pDocumentQueue."Service Intervention Line No." = 0 THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Intervention Line No."), pDocumentQueue."Line No.");
+          IF pDocumentQueue.Amount = 0 THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION(Amount), pDocumentQueue."Line No.");
+          IF pDocumentQueue."Amount Including VAT" = 0 THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Amount Including VAT"), pDocumentQueue."Line No.");
+        END;
+        pDocumentQueue."Document Type"::Minutes : BEGIN
+          IF pDocumentQueue."Service Document No." = '' THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Document No."), pDocumentQueue."Line No.");
+          IF pDocumentQueue."Service Intervention Line No." = 0 THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Intervention Line No."), pDocumentQueue."Line No.");
+        END;
+        pDocumentQueue."Document Type"::"Service Request" : BEGIN
+          IF pDocumentQueue."Contact No." <> '' THEN BEGIN
+            lContact.GET(pDocumentQueue."Contact No.");
+            IF lContact."Service Contact" <> lContact."Service Contact"::Beneficiary THEN
+              lErrorText := STRSUBSTNO(Text002, pDocumentQueue.FIELDCAPTION("Service Intervention Line No."), pDocumentQueue."Line No.")
+      ;
+            //lContact.TESTFIELD("Service Contact", lContact."Service Contact"::Beneficiary);
+          END;
+        END;
+        pDocumentQueue."Document Type"::"Provider Document" : BEGIN
+          IF pDocumentQueue."Contact No." <> '' THEN
+            lProvider.GET(pDocumentQueue."Contact No.");
+        END;
+        pDocumentQueue."Document Type"::"Document Follow Up" : BEGIN
+          IF pDocumentQueue."Service Header No." = '' THEN
+            lErrorText := STRSUBSTNO(Text001, pDocumentQueue.FIELDCAPTION("Service Header No."), pDocumentQueue."Line No.");
+        END;
+        pDocumentQueue."Document Type"::"DFC To Qualify" : BEGIN
+          IF pDocumentQueue."Vendor Invoice No." = '' THEN
+            lErrorText := STRSUBSTNO(Text001,
+              pDocumentQueue.FIELDCAPTION("Vendor Invoice No."), pDocumentQueue."Line No.");
+        END;
+      END;
+      IF lErrorText <> '' THEN BEGIN
+        IF NOT HideError THEN
+          ERROR(lErrorText);
+        EXIT(FALSE);
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateInteraction@1100281005();
+    VAR
+      lInteractionLogEntry@1100281003 : Record 5065;
+      lSegmentLineTmp@1100281002 : TEMPORARY Record 5077;
+      lServIntervQuote@1100281004 : TEMPORARY Record 50076;
+      lDocFlow@1100281001 : Record 50053;
+      lInteractionTemplateCode@1100281000 : Code[20];
+    BEGIN
+      //IMH02
+      IF lDocFlow.GET(DocumentQueue."Flow Code") THEN;
+      CASE DocumentQueue."Document Type" OF
+        DocumentQueue."Document Type"::" " : lInteractionTemplateCode := lDocFlow."Interaction Template Code";
+        DocumentQueue."Document Type"::Invoice : lInteractionTemplateCode := lDocFlow."Invoice Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::Quote : lInteractionTemplateCode := lDocFlow."Quote Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::Minutes : lInteractionTemplateCode := lDocFlow."Minute Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::"Service Request" : lInteractionTemplateCode := lDocFlow."Serv Request Interac. Tmpl.";
+        DocumentQueue."Document Type"::"Provider Document" : lInteractionTemplateCode := lDocFlow."Prov Doc.  Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::Claim : lInteractionTemplateCode := lDocFlow."Claim Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::"DGS To Qualify" : lInteractionTemplateCode := lDocFlow."DGS Qualif Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::"DPR To Qualify" : lInteractionTemplateCode := lDocFlow."DPR Qualif Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::"DFC To Qualify" : lInteractionTemplateCode := lDocFlow."DFC Qualif Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::"Document Follow Up" : lInteractionTemplateCode := lDocFlow."Doc. Flw. Interac. Tmpl. Code";
+        DocumentQueue."Document Type"::"DQP To Qualify" : lInteractionTemplateCode := lDocFlow."DQP Qualif Interac. Tmpl. Code";
+      END;
+      lSegmentLineTmp.SetHideWizard(2);
+      lSegmentLineTmp.CreateInteracFromDocQueue(DocumentQueue, lInteractionTemplateCode);
+      lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+      IF lInteractionTemplateCode = '' THEN BEGIN
+        lInteractionLogEntry.Description := DocumentQueue.Description;
+        lInteractionLogEntry."Corporate No." := DocumentQueue."Corporate No.";
+      END;
+      lInteractionLogEntry."Service No." := DocumentQueue."Service No.";
+      lInteractionLogEntry."Service Header No." := DocumentQueue."Service Header No.";
+      lInteractionLogEntry."Intervention Line No." := DocumentQueue."Service Intervention Line No.";
+
+      lInteractionLogEntry.MODIFY(FALSE);
+
+      DocFlowMgt.CopyDocAttachment(DocumentQueue, lServIntervQuote, lInteractionLogEntry, 2);
+      {
+      IF DocumentQueueLinked.FINDFIRST THEN
+        REPEAT
+          CopyDocAttachment(DocumentQueueLinked, lServIntervQuote, lInteractionLogEntry, 2);
+        UNTIL DocumentQueueLinked.NEXT = 0;
+      }
+    END;
+
+    PROCEDURE CreateDocument@1100281003();
+    VAR
+      lIntervQuote@1100281000 : Record 50076;
+      lPurchHeader@1100281001 : Record 38;
+      lDocumentQueueHistoryTmp@1100281002 : TEMPORARY Record 50109;
+    BEGIN
+      CASE DocumentQueue."Document Type" OF
+        DocumentQueue."Document Type"::" " : ;
+        DocumentQueue."Document Type"::Invoice, DocumentQueue."Document Type"::"DFC To Qualify" : BEGIN
+          IF NOT DocumentQueue."Skip Document Create" THEN //IMH04.ST
+            DocFlowMgt.CreateInvoiceByDocQueue(lPurchHeader, DocumentQueue);
+          DocumentQueue."Document No." := lPurchHeader."No.";
+          lDocumentQueueHistoryTmp.TRANSFERFIELDS(DocumentQueue);
+          lDocumentQueueHistoryTmp.INSERT;
+          DocFlowMgt.CreateInteractionByHistoryLine(lDocumentQueueHistoryTmp);
+        END;
+        DocumentQueue."Document Type"::Quote : BEGIN
+          IF NOT DocumentQueue."Skip Document Create" THEN //IMH04.ST
+            InterventionMgt.CreateIntervQuoteByDocQueue(lIntervQuote, DocumentQueue, FALSE, FALSE);
+          DocumentQueue.MODIFY;
+          lDocumentQueueHistoryTmp.TRANSFERFIELDS(DocumentQueue);
+          lDocumentQueueHistoryTmp.INSERT;
+          DocFlowMgt.CreateInteractionByHistoryLine(lDocumentQueueHistoryTmp);
+        END;
+        DocumentQueue."Document Type"::Minutes : BEGIN
+          lDocumentQueueHistoryTmp.TRANSFERFIELDS(DocumentQueue);
+          lDocumentQueueHistoryTmp.INSERT;
+          DocFlowMgt.CreateInteractionByHistoryLine(lDocumentQueueHistoryTmp);
+        END;
+        DocumentQueue."Document Type"::"Service Request": BEGIN
+          DocumentQueue.Status := DocumentQueue.Status::"Create Service";
+          DocumentQueue.MODIFY(FALSE);
+        END;
+        DocumentQueue."Document Type"::"Provider Document" : BEGIN
+          lDocumentQueueHistoryTmp.TRANSFERFIELDS(DocumentQueue);
+          lDocumentQueueHistoryTmp.INSERT;
+          DocFlowMgt.CreateInteractionByHistoryLine(lDocumentQueueHistoryTmp);
+        END;
+        DocumentQueue."Document Type"::"DGS To Qualify", DocumentQueue."Document Type"::"DPR To Qualify",
+        DocumentQueue."Document Type"::"DQP To Qualify", DocumentQueue."Document Type"::Claim: BEGIN
+          DocumentQueue.Status := DocumentQueue.Status::"To Qualify";
+          DocumentQueue.MODIFY(FALSE);
+        END;
+        DocumentQueue."Document Type"::"Document Follow Up" : BEGIN
+          lDocumentQueueHistoryTmp.TRANSFERFIELDS(DocumentQueue);
+          lDocumentQueueHistoryTmp.INSERT;
+          DocFlowMgt.CreateInteractionByHistoryLine(lDocumentQueueHistoryTmp);
+        END;
+      END;
+    END;
+
+    PROCEDURE CheckFlagLine@1100281004(VAR pDocumentQueue@1100281000 : Record 50054) Result : Boolean;
+    VAR
+      lContact@1100281001 : Record 5050;
+      lServiceHeader@1100281003 : Record 5900;
+      lServiceOrderType@1100281002 : Record 5903;
+    BEGIN
+      HideError := TRUE;
+      EXIT(CheckLine(pDocumentQueue));
+      {
+      Result := TRUE;
+      //controle des champs de file
+      IF pDocumentQueue."Contact No." = '' THEN
+        EXIT(FALSE);
+      //pDocumentQueue.TESTFIELD("Contact No.");
+      CASE pDocumentQueue."Service Document Type" OF
+        pDocumentQueue."Service Document Type"::Service :
+          IF (pDocumentQueue."Service No." = '') THEN Result := FALSE;
+        pDocumentQueue."Service Document Type"::"Service Header" :
+          IF (pDocumentQueue."Service Document No." = '') THEN Result := FALSE;
+        pDocumentQueue."Service Document Type"::Intervention : BEGIN
+          IF (pDocumentQueue."Service Document No." = '') THEN Result := FALSE;
+          IF (pDocumentQueue."Service Intervention Line No." = 0) THEN Result := FALSE;
+        END;
+      END;
+
+      CASE pDocumentQueue."Document Type" OF
+        pDocumentQueue."Document Type"::Invoice : BEGIN
+          IF (pDocumentQueue."Service Document No." = '') THEN Result := FALSE;
+          Result := lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pDocumentQueue."Service Header No.");
+          Result := lServiceOrderType.GET(lServiceHeader."Service Order Type");
+          IF (lServiceOrderType."Interv. Process Code" <> '') THEN
+            IF (pDocumentQueue."Service Intervention Line No." = 0) THEN Result := FALSE;
+          IF (pDocumentQueue.Amount = 0) THEN Result := FALSE;
+          IF (pDocumentQueue."Amount Including VAT" = 0) THEN Result := FALSE;
+          IF (pDocumentQueue."Vendor Invoice No." = '') THEN Result := FALSE;
+          IF (pDocumentQueue."Document Date" = 0D) THEN Result := FALSE;
+        END;
+        pDocumentQueue."Document Type"::Quote,
+        pDocumentQueue."Document Type"::Minutes : BEGIN
+          IF (pDocumentQueue."Service Document No." = '') THEN Result := FALSE;
+          IF (pDocumentQueue."Service Intervention Line No." = 0) THEN Result := FALSE;
+        END;
+        pDocumentQueue."Document Type"::"Service Request" : BEGIN
+          Result := lContact.GET(pDocumentQueue."Contact No.");
+          IF (lContact."Service Contact" <> lContact."Service Contact"::Beneficiary) THEN Result := FALSE;
+        END;
+      END;
+
+
+      EXIT(Result);
+      }
+    END;
+
+    PROCEDURE LoadDocAttachToTemp@1100281006(pDocumentQueue@1100281000 : Record 50054;VAR pDocAttachTmp@1100281001 : Record 50021);
+    VAR
+      lDocAttachment@1100281002 : Record 50021;
+    BEGIN
+      lDocAttachment.SETRANGE("Referent Table No.", DATABASE::"Document Queue");
+      lDocAttachment.SETRANGE("Key Integer 1", pDocumentQueue."Queue Type");
+      lDocAttachment.SETRANGE("Key Integer 2", pDocumentQueue."Entry No.");
+      lDocAttachment.SETRANGE("Key Code 1", pDocumentQueue."Flow Code");
+      IF NOT lDocAttachment.ISEMPTY THEN BEGIN
+        lDocAttachment.FINDFIRST;
+        REPEAT
+          pDocAttachTmp := lDocAttachment;
+          pDocAttachTmp.INSERT(FALSE);
+        UNTIL lDocAttachment.NEXT = 0;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 11/12/13 @a IMH.WGA @s IMH6.01.3506 @s Ajout Controle Designation Activites Corbeilles @h 3506
+          @c Modification Fonction CheckLine Ajout Controle Designation Activites Corbeilles */
+      /** @r IMH04 @d 03/04/12 @a ISAT.ST @s IMH6.01.165 @s Extranet Prestataire @h 3039 @c Gestion Skip Document */
+      /** @r IMH03 @d 08/11/11 @a ISAT.VA @v IMH6.01.004 @s La fonction archive … disparu */
+      /** @r IMH02 @d 25/02/11 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management
+          @c Cr‚er une interaction automatique lors de la validation des flux entrants */
+      /** @r IMH01 @d 05/10/10 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

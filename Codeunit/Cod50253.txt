@@ -1,0 +1,78 @@
+OBJECT Codeunit 50253 MATMUT Get Response SDR64
+{
+  OBJECT-PROPERTIES
+  {
+    Date=16/10/13;
+    Time=11:38:30;
+    Modified=Yes;
+    Version List=IMH6.01,MATMUT01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=BEGIN
+            Code(Rec);
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE Code@1100281001(VAR pEAISentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lServiceHeader@1100281009 : Record 5900;
+      lServiceInterventionLine@1100281007 : Record 50075;
+      lInterfaceReference@1100281008 : Record 50164;
+      lRecRef@1100281006 : RecordRef;
+      lOriginalXmlDoc@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDomElement@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lDomNode@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lInStream@1100281001 : InStream;
+      lPartNum@1100281004 : Code[10];
+    BEGIN
+      CLEAR(lOriginalXmlDoc);
+      CREATE(lOriginalXmlDoc);
+
+      pEAISentMQBuffer.CALCFIELDS("XML Source");
+      pEAISentMQBuffer."Response XML Source".CREATEINSTREAM(lInStream);
+      lOriginalXmlDoc.load(lInStream);
+
+      lXmlDomElement := lOriginalXmlDoc.getElementsByTagName('ns2:prestataire').item(0);
+      IF ISCLEAR(lXmlDomElement) THEN BEGIN
+        EXIT;
+      END;
+      lDomNode := lXmlDomElement.selectSingleNode('ns2:numeroPartie');
+      IF ISCLEAR(lDomNode) THEN BEGIN
+        EXIT;
+      END;
+      lPartNum := lDomNode.text;
+
+      lRecRef.GETTABLE(lServiceInterventionLine);
+      lRecRef.GET(pEAISentMQBuffer.RecordId);
+      lRecRef.SETTABLE(lServiceInterventionLine);
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,lServiceInterventionLine."Service Header No.");
+
+      lInterfaceReference.SETRANGE("Source Table ID",DATABASE::"Service Intervention Line");
+      lInterfaceReference.SETRANGE("Source No.",lServiceHeader."Service No.");
+      lInterfaceReference.SETRANGE("Source No. 2",lServiceHeader."No.");
+      lInterfaceReference.SETRANGE("Source No. 3",lServiceInterventionLine."Line No.");
+      IF lInterfaceReference.FINDFIRST THEN BEGIN
+        lInterfaceReference."DARVA Reference" := lPartNum;
+        lInterfaceReference.MODIFY;
+      END ELSE BEGIN
+        lInterfaceReference."Source Table ID" := DATABASE::"Service Intervention Line";
+        lInterfaceReference."Source No." := lServiceHeader."Service No.";
+        lInterfaceReference."Source No. 2" := lServiceHeader."No.";
+        lInterfaceReference."Source No. 3" := lServiceInterventionLine."Line No.";
+        lInterfaceReference."DARVA Reference" := lPartNum;
+        lInterfaceReference.INSERT(TRUE);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 15/10/13 @a ISAT.PC @v IMH6.01.348 @s DARVA MATMUT Lot 1 @s Cr‚ation */
+    }
+    END.
+  }
+}

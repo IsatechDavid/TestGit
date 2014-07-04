@@ -1,0 +1,2008 @@
+OBJECT Codeunit 50014 Intervention Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/06/14;
+    Time=17:17:44;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.P011;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProviderSearchMgt@1100281013 : Codeunit 50284;
+      FirstProviderSearch@1100281000 : Codeunit 50000;
+      FolderMgt@1100281001 : Codeunit 50004;
+      Text001@1100281002 : TextConst 'ENU=You can''t create the intervention, because there aren''t the speciality code associated with this service header.;FRA=Vous ne pouvez pas cr‚er l''intervention, car il n''y a pas de code sp‚cialit‚ associ‚ … cette ligne produit.';
+      Text002@1100281003 : TextConst 'ENU=Would you like to start an automatic search ?;FRA=Souhaitez-vous lancer une recherche automatique ?';
+      Text003@1100281004 : TextConst 'ENU=All specialties are affected to an intervention.;FRA=Toutes les sp‚cialit‚s ont d‚j… une intervention en cours.';
+      Text004@1100281005 : TextConst 'ENU=Ship-to Address must be filled on Service Header.;FRA=L''adresse  de mise en oeuvre doit ˆtre renseign‚e sur la ligne produit.';
+      Text005@1100281006 : TextConst 'ENU=You have %1 service quotes in status active.;FRA=Vous avez actuellement %1 devis en statut actif.';
+      ServInfoPane@1000000000 : Codeunit 50062;
+      SkipMessage@1100281007 : Boolean;
+      Text006@1100281008 : TextConst 'ENU=You have already a intervention in progress.;FRA=Vous avez d‚j… une intervention en cours.';
+      Text007@1100281009 : TextConst 'ENU=Any provider has been found;FRA=Aucun prestataire n''a ‚t‚ trouv‚';
+      Text008@1100281010 : TextConst 'ENU=Search cancelled.;FRA=Recherche abandonn‚e.';
+      UrgentIntervention@1100281011 : Boolean;
+      Text009@1100281012 : TextConst 'ENU=Do you want to launch urgent search?;FRA=Voulez-vous lancer une recherche en urgent?';
+      Text010@1100281014 : TextConst 'ENU=Ship-to to adresse georeference has not been set.;FRA=La localisation de l''adresse n''a pas pu ˆtre faite.';
+      Text011@1100281015 : TextConst 'ENU=Continue ?;FRA=Continuer ?';
+      Text012@1100281016 : TextConst 'ENU=The provider filled not the condition, a tray line is generated to the DPR.;FRA=Le prestataire ne remplit pas les conditions, une activit‚ corbeille est g‚n‚r‚e vers le DPR.';
+      HideMessageProviderNotFound@1100281017 : Boolean;
+      ShowSpecSelectionForm@1100281018 : Boolean;
+      LaunchProcessStatus@1100281019 : Boolean;
+      Text013@1100281020 : TextConst 'FRA=L''ensemble des sp‚cialit‚s ont ‚t‚s attribu‚es';
+      Text014@1100281021 : TextConst 'FRA=Descriptif des travaux … corriger, pr‚sence de champs incorrects pour la recherche prestataire.';
+      CreateManualWithoutCheckMode@1100281022 : Boolean;
+      Text015@1000000001 : TextConst 'ENU=Setup error, please set up provider search for service header type %1, serach type %2 and  code %2 %3.;FRA=Erreur de param‚trage, merci de param‚trer la recherche prestataire pour le type ligne produit "%1", le type de recherche "%2" et le code %2 "%3"';
+      Text016@1000000002 : TextConst 'ENU=Requisitioner;FRA=demandeur';
+      Text017@1000000003 : TextConst 'ENU=Service cause;FRA=cause intervention';
+
+    PROCEDURE CreateInterventionFromServ@1100281000(VAR pServiceHeader@1100281000 : Record 5900;pShowCard@1100281004 : Boolean) : Boolean;
+    VAR
+      lContactSearchMgt@1100281008 : Codeunit 50097;
+      lTrayLineMgt@1100281019 : Codeunit 50050;
+      lInterventionLine@1100281001 : Record 50075;
+      lInterventionLine2@1100281029 : Record 50075;
+      lServOrderType@1100281002 : Record 5903;
+      lTempProviderSearchBasket@1100281003 : TEMPORARY Record 51002;
+      lTempIntervention@1100281005 : TEMPORARY Record 50075;
+      lTrayLine@1100281020 : Record 50048;
+      lTrayLineProvSearchEntry@1100281021 : Record 50144;
+      lTrayLineTmp@1100281030 : TEMPORARY Record 50048;
+      lLineNo@1100281007 : Integer;
+      lContactNo@1100281009 : Code[20];
+      lContact@1100281010 : Record 5050;
+      lProvider@1100281011 : Record 50000;
+      lContactFilter@1100281012 : Integer;
+      lProcessCode@1100281013 : Code[10];
+      lProcessStatus@1100281014 : Integer;
+      lProviderSearchOption@1100281017 : 'AutoSearch,ManualSearch,UniqueProvider,UserChoice';
+      lProviderSetup@1100281018 : Record 50011;
+      lTeamCode@1100281016 : Code[10];
+      lServiceSearchLedgerEntryTemp@1100281022 : TEMPORARY Record 50027;
+      lServiceSearchLedgerEntry@1100281023 : Record 50027;
+      lLinesCreated@1100281024 : Integer;
+      lTempAddr@1100281025 : TEMPORARY Record 5051;
+      lTempResultInterv@1100281026 : TEMPORARY Record 50075;
+      lPSRBuffer@1100281027 : TEMPORARY Record 51000;
+      lSpecialityFilter@1100281028 : Text[1024];
+      lProviderSearchCom@1100281006 : Codeunit 50066;
+      lSearchCode@1000000000 : Code[10];
+      lCode@1000000001 : Record 50079;
+      lProviderSearchSetup@1000000002 : Record 50123;
+      lProviderSearchType@1000000003 : 'Requisitioner,Service Cause';
+      lProviderSearchName@1000000004 : Text[30];
+    BEGIN
+      //<<IMH44
+      IF pServiceHeader.Status IN [pServiceHeader.Status::Finished, pServiceHeader.Status::Cancelled] THEN
+        pServiceHeader.FIELDERROR(Status);
+      //>>IMH44
+
+      //<<IMH19 isat.nfo
+      lProviderSearchCom.ClearAffectedProviderBuffer();
+      //>>IMH19 isat.nfo
+      //IMH02 isat.zw
+      //Creation l'intervention
+      IF pServiceHeader."Ship-to Address Code" = '' THEN
+        ERROR(Text004);
+      CopyShipToAddress(pServiceHeader, lTempAddr);
+      // Gestion du g‚ocodage
+      IF lTempAddr."Geo. Reference Code" = '' THEN BEGIN
+        lTempAddr.VALIDATE("Post Code");
+        lTempAddr.MODIFY;
+      END;
+
+      lServOrderType.GET(pServiceHeader."Service Order Type");
+
+      //<<IMH59.ACO
+      IF lServOrderType."Provider Search" IN
+        [lServOrderType."Provider Search"::Requisitioner, lServOrderType."Provider Search"::"Service Cause"] THEN BEGIN
+        CASE lServOrderType."Provider Search" OF
+          lServOrderType."Provider Search"::Requisitioner: BEGIN
+            lSearchCode := pServiceHeader.Requisitioner;
+            lProviderSearchType := lProviderSearchType::Requisitioner;
+            lProviderSearchName := Text016;  //pour message ereur
+          END;
+          lServOrderType."Provider Search"::"Service Cause" : BEGIN
+            lSearchCode := pServiceHeader."Service Cause";
+            lProviderSearchType := lProviderSearchType::"Service Cause";
+            lProviderSearchName := Text017;  //pour message erreur
+          END;
+        END;
+        IF NOT lProviderSearchSetup.GET(lServOrderType.Code, lProviderSearchType, lSearchCode) THEN
+          ERROR(Text015, lServOrderType.Code, lProviderSearchName, lSearchCode);
+
+        lProviderSearchOption := lProviderSearchSetup."Provider Search Type";
+      END ELSE
+        lProviderSearchOption := lServOrderType."Provider Search";
+      //>>IMH59.ACO
+
+      //<<IMH50
+      IF CreateManualWithoutCheckMode THEN BEGIN
+        lProviderSearchOption := lProviderSearchOption::ManualSearch;
+      END;
+      //>>IMH50
+
+      //<<IMH38
+      IF lProviderSearchOption = lProviderSearchOption::AutoSearch THEN BEGIN
+        lServiceSearchLedgerEntry.SETRANGE("Service No.", pServiceHeader."Service No.");
+        lServiceSearchLedgerEntry.SETRANGE("Service Header No.", pServiceHeader."No.");
+        IF NOT lServiceSearchLedgerEntry.ISEMPTY THEN BEGIN
+          lInterventionLine2.SETRANGE("Service Header No.", pServiceHeader."No.");
+          lInterventionLine2.SETFILTER("Intervention Status", '<>%1', lInterventionLine2."Intervention Status"::Cancel); //IMH47
+          IF lInterventionLine2.ISEMPTY THEN
+            lProviderSearchOption := lProviderSearchOption::UserChoice;
+        END;
+      END;
+      //>>IMH38
+      IF lProviderSearchOption = lProviderSearchOption::UserChoice THEN BEGIN
+        IF CONFIRM(Text002) THEN
+          lProviderSearchOption := lProviderSearchOption::AutoSearch
+        ELSE
+          lProviderSearchOption := lProviderSearchOption::ManualSearch;
+      END;
+
+      //IMH27.ST Nouvelle m‚thodes
+      IF lProviderSearchOption IN [lProviderSearchOption::AutoSearch] THEN BEGIN // TEST-USER
+        CASE lProviderSearchOption OF
+          lProviderSearchOption::AutoSearch : BEGIN
+            lLinesCreated := AutoSearch(pServiceHeader, lServOrderType, lTempAddr, lInterventionLine);
+            IF lLinesCreated > 0 THEN
+              DeletePrestSearchTrayLine(pServiceHeader);
+          END;
+          lProviderSearchOption::ManualSearch : BEGIN
+          END;
+          lProviderSearchOption::UniqueProvider : BEGIN
+          END;
+          lProviderSearchOption::UserChoice : BEGIN
+          END;
+          ELSE ERROR('');
+        END; // CASE
+        IF lLinesCreated = 0 THEN
+          EXIT(FALSE);
+        IF lLinesCreated > 1 THEN
+          pShowCard := FALSE;
+
+        IF pServiceHeader.AutoStep THEN
+          pServiceHeader.MODIFY;
+
+        IF pShowCard THEN BEGIN
+          COMMIT;
+          FORM.RUN(FORM::"Intervention Line Card", lInterventionLine);
+        END;
+        EXIT(TRUE);
+      END; // TEST-USER
+
+      lInterventionLine.INIT;
+      lInterventionLine."Line No." := 0;
+      lInterventionLine.VALIDATE("Service Header No.", pServiceHeader."No.");
+      UrgentIntervention := lInterventionLine.Urgent;
+
+      IF lProviderSearchOption <> lProviderSearchOption::UniqueProvider THEN BEGIN//IMH17
+        IF lProviderSearchOption = lProviderSearchOption::ManualSearch THEN
+          ShowSpecSelectionForm := TRUE;
+        LoadProviderSearchBasket(pServiceHeader."No.",lTempProviderSearchBasket,lServOrderType);
+        lInterventionLine.Urgent := UrgentIntervention;
+      END;
+
+      CASE lProviderSearchOption OF
+        lProviderSearchOption::AutoSearch: BEGIN
+          //lTempAddr.TESTFIELD("Geo. Reference Code"); //IMH25.isat.PC
+          //<<IMH61
+          //IF NOT FirstProviderSearch.Search(lInterventionLine, lTempProviderSearchBasket,lTempAddr) THEN BEGIN
+          IF NOT ProviderSearchMgt.Search(lInterventionLine, lTempProviderSearchBasket,lTempAddr) THEN BEGIN
+          //>>IMH61
+            lTempProviderSearchBasket.RESET;
+            //IMH61
+            //FirstProviderSearch.GetRefusedProvider(lServiceSearchLedgerEntryTemp);
+            ProviderSearchMgt.GetRefusedProvider(lServiceSearchLedgerEntryTemp);
+            //>>IMH61
+            lServiceSearchLedgerEntryTemp.RESET;
+            ProviderNotFound(pServiceHeader, lTempProviderSearchBasket,lServiceSearchLedgerEntryTemp);
+            EXIT(FALSE);
+          END;
+          lLinesCreated :=
+            CreateInterventionByBasket(
+              lInterventionLine, pServiceHeader,
+              lTempProviderSearchBasket, lTempResultInterv,TRUE);
+
+          //<<IMH61
+          ProviderSearchMgt.DownloadDebugFile;
+          //>>IMH61
+
+          //<<IMH61
+          //FirstProviderSearch.GetRefusedProvider(lServiceSearchLedgerEntryTemp);
+          ProviderSearchMgt.GetRefusedProvider(lServiceSearchLedgerEntryTemp);
+          //>>IMH61
+          lServiceSearchLedgerEntryTemp.RESET;
+          CreateServSearchLedgerEntry(lServiceSearchLedgerEntryTemp, lTrayLineTmp);
+          IF lLinesCreated > 0 THEN
+            DeletePrestSearchTrayLine(pServiceHeader);
+          IF lLinesCreated = 0 THEN
+            EXIT(FALSE);
+
+          IF pShowCard AND (lLinesCreated > 1) THEN
+            pShowCard := FALSE;
+        END;
+        //<<IMH37
+        lProviderSearchOption::ManualSearch: BEGIN
+          lContact.SETRANGE("Service Contact", lContact."Service Contact"::Provider);
+          IF lContactSearchMgt.SearchContactWithFilters(lContact, lContactNo) THEN BEGIN
+            IF NOT CreateManualWithoutCheckMode THEN BEGIN   //IMH50
+              //<<IMH61
+              //FirstProviderSearch.SearchResult(lInterventionLine, lTempProviderSearchBasket,lTempAddr, lPSRBuffer);
+              ProviderSearchMgt.SearchResult(lInterventionLine, lTempProviderSearchBasket,lTempAddr, lPSRBuffer);
+              //>>IMH61
+              lPSRBuffer.RESET;   //IMH57
+              lPSRBuffer.SETRANGE("Provider No.", lContactNo);
+              IF lPSRBuffer.ISEMPTY THEN BEGIN
+                lTempProviderSearchBasket.DELETEALL;
+                lServiceSearchLedgerEntryTemp.DELETEALL;
+                HideMessageProviderNotFound := TRUE;
+                ProviderNotFound(pServiceHeader, lTempProviderSearchBasket,lServiceSearchLedgerEntryTemp);
+                MESSAGE(Text012);
+                //<<IMH61
+                //FirstProviderSearch.DownloadDebugFile;
+                ProviderSearchMgt.DownloadDebugFile;
+                //>>IMH61
+                EXIT(FALSE);
+              //<<IMH57
+              END ELSE BEGIN
+                lPSRBuffer.FINDFIRST;
+                lSpecialityFilter := lPSRBuffer."Specialization List";
+              END;
+              //>>IMH57
+            END;  //IMH50
+
+            IF NOT lProvider.GET(lContactNo) THEN
+              EXIT(FALSE);
+            {
+            //IMH57 d‚sactiv‚ : gestion filtre par la recherche prestataire
+            IF lTempProviderSearchBasket.FINDFIRST THEN
+              REPEAT
+                IF lSpecialityFilter <> '' THEN BEGIN
+                  //lSpecialityFilter += '|';
+                  lSpecialityFilter += '&';
+                END;
+                lSpecialityFilter += lTempProviderSearchBasket."Speciality Code"
+              UNTIL lTempProviderSearchBasket.NEXT = 0;
+            }
+            lTempProviderSearchBasket.SETFILTER("Speciality Code",
+                ProviderSearchMgt.GetProviderSpecialization(lContactNo,lSpecialityFilter));        //IMH61
+            lTempProviderSearchBasket.MODIFYALL("Provider No.",lContactNo);
+            LaunchProcessStatus := TRUE;
+            CreateInterventionByBasket(lInterventionLine, pServiceHeader, lTempProviderSearchBasket, lTempResultInterv, TRUE);
+
+            lServiceSearchLedgerEntryTemp.DELETEALL;
+            //>>IMH61
+            //FirstProviderSearch.GetRefusedProvider(lServiceSearchLedgerEntryTemp);
+            ProviderSearchMgt.GetRefusedProvider(lServiceSearchLedgerEntryTemp);
+            //>>IMH61
+            lServiceSearchLedgerEntryTemp.RESET;
+            CreateServSearchLedgerEntry(lServiceSearchLedgerEntryTemp, lTrayLineTmp);
+            DeletePrestSearchTrayLine(pServiceHeader);
+          END ELSE
+            ERROR(Text008);
+          //>>IMH37
+        END;
+        lProviderSearchOption::UniqueProvider: BEGIN
+          IF lServOrderType."Provider No." = '' THEN
+            lServOrderType.FIELDERROR("Provider No.");
+          lInterventionLine.VALIDATE("Provider No.", lServOrderType."Provider No.");
+          lInterventionLine."Travel Distance" := ProviderSearchMgt.GetDistance(lProvider."No.",                    //IMH61
+                                                                                lTempAddr."Geo. Reference Code"); //IMH31.ST
+          //<<IMH36.PC
+          IF lInterventionLine."Phone No." = '' THEN BEGIN
+            lInterventionLine."Phone No." := pServiceHeader."Ship-to Phone";
+          END;
+          IF lInterventionLine."Mobile Phone No." = '' THEN BEGIN
+            lInterventionLine."Mobile Phone No." := pServiceHeader."Ship-to Phone 2";
+          END;
+          //>>IMH36.PC
+          lInterventionLine.INSERT(TRUE);
+          LoadUniqueProviderSearchBasket(lInterventionLine);
+        END;
+        ELSE ERROR('');
+      END;
+
+      IF lProviderSearchOption <> lProviderSearchOption::AutoSearch THEN BEGIN
+        StartProcess(lInterventionLine,FALSE);
+        lInterventionLine.MODIFY(TRUE);
+      END
+      //<<IMH27.ST
+      ELSE BEGIN
+        IF ServInfoPane.CalcNoOfSpec(pServiceHeader, TRUE) > 0 THEN BEGIN
+          COMMIT;
+          IF CONFIRM(Text011) THEN
+            CreateInterventionFromServ(pServiceHeader, pShowCard);
+        END;
+      END;
+      //>>IMH27.ST
+
+      IF pServiceHeader.AutoStep THEN
+        pServiceHeader.MODIFY;
+
+      IF pShowCard THEN BEGIN
+        COMMIT;
+        FORM.RUN(FORM::"Intervention Line Card", lInterventionLine);
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateInterventionByBasket@1100281015(VAR pInterventionLine@1100281023 : Record 50075;pServiceHeader@1100281000 : Record 5900;VAR pProviderSearchBasket@1100281020 : TEMPORARY Record 51002;VAR pResultIntervention@1100281003 : Record 50075;pStartProcess@1100281006 : Boolean) rValue : Integer;
+    VAR
+      lTempIntervention@1100281001 : TEMPORARY Record 50075;
+      lInterventionTemplate@1100281004 : Record 50075;
+      lIntervCreated@1100281005 : Integer;
+      lRemainSpec@1100281002 : Boolean;
+    BEGIN
+      //IMH24
+      //Creation d'une ou plusieurs interventions
+      IF pInterventionLine."Campaign No." = '' THEN
+        pInterventionLine."Campaign No." := pServiceHeader."Campaign No.";
+      //pInterventionLine."DARVA Interface" := pServiceHeader."DARVA Interface"; // IMH25.ISAT.MA
+      pInterventionLine."Line No." := 0;
+      lInterventionTemplate := pInterventionLine;
+      rValue := 0;
+      pProviderSearchBasket.SETFILTER("Provider No.", '<>%1', '');
+      IF NOT pProviderSearchBasket.FINDSET THEN
+        EXIT;
+      REPEAT
+        lTempIntervention.SETRANGE("Provider No.", pProviderSearchBasket."Provider No.");
+        IF NOT lTempIntervention.FINDFIRST THEN BEGIN
+          pInterventionLine := lInterventionTemplate;
+          pInterventionLine."Deductible Amount" := 0;
+          pInterventionLine."Unsecured Depreciation Amount" := 0;
+          //IF lInterventionTemplate."Service Header No." = '' THEN
+            pInterventionLine.VALIDATE("Service Header No.", pServiceHeader."No.");
+          //<<IMH40.ISAT.EBA
+          IF lInterventionTemplate."Service Header No." <> '' THEN
+          //>>IMH40.ISAT.EBA
+            pInterventionLine.Urgent := lInterventionTemplate.Urgent;
+          pInterventionLine.VALIDATE("Provider No.", pProviderSearchBasket."Provider No.");
+          IF pProviderSearchBasket.Distance = 0 THEN
+            pInterventionLine."Travel Distance" := ProviderSearchMgt.GetDistance(pProviderSearchBasket."Provider No.",      //IMH61
+                                                                                  pInterventionLine."Geo. Reference Code") //IMH31.ST
+          ELSE
+            pInterventionLine."Travel Distance" := pProviderSearchBasket.Distance;
+          IF pInterventionLine.Urgent THEN
+            pInterventionLine."Arrival Date" := pProviderSearchBasket."Intervention Date"
+          ELSE
+            pInterventionLine."Expected Previsit Date" := pProviderSearchBasket."Intervention Date";
+
+          //<<IMH36.PC
+          IF pInterventionLine."Phone No." = '' THEN BEGIN
+            pInterventionLine."Phone No." := pServiceHeader."Ship-to Phone";
+          END;
+          IF pInterventionLine."Mobile Phone No." = '' THEN BEGIN
+            pInterventionLine."Mobile Phone No." := pServiceHeader."Ship-to Phone 2";
+          END;
+          //>>IMH36.PC
+
+          pInterventionLine.INSERT(TRUE);
+
+          lTempIntervention := pInterventionLine;
+          lTempIntervention.INSERT;
+          rValue += 1;
+        END;
+        CreateServCodeByIntervention(lTempIntervention,
+                                     pProviderSearchBasket."Building Trade No.",//IMH10
+                                     pProviderSearchBasket."Speciality Code",
+                                     pProviderSearchBasket."Main Specialization");
+        IF pProviderSearchBasket."Main Specialization" THEN // shortcut modifi‚
+          lTempIntervention.MODIFY;
+      UNTIL pProviderSearchBasket.NEXT = 0;
+      pProviderSearchBasket.DELETEALL;
+
+      IF pStartProcess THEN
+        lRemainSpec := ServInfoPane.CalcNoOfSpec(pServiceHeader, TRUE) <> 0 //IMH27.ST
+      ELSE
+        lRemainSpec := TRUE;
+
+      //<<IMH37
+      IF lRemainSpec THEN
+        lRemainSpec := NOT LaunchProcessStatus;
+      //>>IMH37
+      // d‚marrage des process aprŠs insertion de tout les rec
+      lTempIntervention.RESET;  //IMH51
+      IF lTempIntervention.FINDSET THEN
+        REPEAT
+          pInterventionLine := lTempIntervention;
+          StartProcess(pInterventionLine, lRemainSpec);
+          pInterventionLine."Multi specialities" := MultiSpecInterv(pInterventionLine);
+          pInterventionLine.MODIFY(TRUE);
+          pResultIntervention := pInterventionLine;
+          pResultIntervention.INSERT;
+        UNTIL lTempIntervention.NEXT=0;
+    END;
+
+    PROCEDURE CreateInterventionFromSearch@1100281011(VAR pServiceHeader@1100281000 : Record 5900;VAR pPSRB@1100281020 : TEMPORARY Record 51000) : Boolean;
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lProviderSpe@1100281004 : Record 50006;
+      lLineNo@1100281007 : Integer;
+      lContactNo@1100281009 : Code[20];
+      lContact@1100281010 : Record 5050;
+      lProvider@1100281011 : Record 50000;
+      lContactFilter@1100281012 : Integer;
+      lProcessCode@1100281013 : Code[10];
+      lProcessStatus@1100281014 : Integer;
+      lProviderSearchOption@1100281017 : 'AutoSearch,ManualSearch,UniqueProvider,UserChoice';
+      lProviderSetup@1100281018 : Record 50011;
+      lTeamCode@1100281016 : Code[10];
+    BEGIN
+      //Creation l'intervention
+      lInterventionLine.INIT;
+      lInterventionLine.VALIDATE("Service Header No.", pServiceHeader."No.");
+      //lInterventionLine."DARVA Interface" := pServiceHeader."DARVA Interface"; // IMH25.ISAT.MA
+
+      lInterventionLine."Line No." := 0;
+      lInterventionLine.VALIDATE("Provider No.", pPSRB."Provider No.");
+      lInterventionLine."Travel Distance" := ProviderSearchMgt.GetDistance(lProvider."No.",       //IMH61
+                                                                            pServiceHeader."Ship-to Geo. Reference Code"); //IMH31.ST
+
+      //lInterventionLine."Travel Distance" := pPSRB.Distance;
+      //IF lInterventionLine.Urgent THEN
+      //  lInterventionLine."Arrival Date" := pPSRB."Intervention Date"
+      //ELSE
+      //  lInterventionLine."Expected Previsit Date" := pPSRB."Intervention Date";
+      lInterventionLine.INSERT(TRUE);
+      lProviderSpe.SETRANGE("Provider No.", pPSRB."Provider No.");
+      lProviderSpe.SETRANGE("Specialization Code",pPSRB."Specialization Code");
+      IF lProviderSpe.FINDFIRST() THEN
+        CreateServCodeByIntervention(lInterventionLine,
+                                     lProviderSpe."Building Trade No.",//IMH10
+                                     pPSRB."Specialization Code",
+                                     lProviderSpe."Main Specialization");
+
+      StartProcess(lInterventionLine,FALSE);
+      lInterventionLine."Multi specialities" := MultiSpecInterv(lInterventionLine);
+      lInterventionLine.MODIFY(TRUE);
+      IF pServiceHeader.AutoStep THEN
+        pServiceHeader.MODIFY;
+    END;
+
+    PROCEDURE CreateInterventionFromAddress@1100281004(VAR pServiceHeader@1100281000 : Record 5900;pServiceHeaderAddress@1100281015 : Record 50068;pShowCard@1100281004 : Boolean) : Boolean;
+    VAR
+      lContactSearchMgt@1100281008 : Codeunit 50097;
+      lInterventionLine@1100281001 : Record 50075;
+      lServOrderType@1100281002 : Record 5903;
+      lTempProviderSearchBasket@1100281003 : TEMPORARY Record 51002;
+      lTempIntervention@1100281005 : TEMPORARY Record 50075;
+      lContactAltAddress@1100281016 : Record 5051;
+      lContactAltAddressTemp@1100281017 : TEMPORARY Record 5051;
+      lLineNo@1100281007 : Integer;
+      lContactNo@1100281009 : Code[20];
+      lContact@1100281010 : Record 5050;
+      lProvider@1100281011 : Record 50000;
+      lContactFilter@1100281012 : Integer;
+      lProcessCode@1100281013 : Code[10];
+      lProcessStatus@1100281014 : Integer;
+      lServiceSearchLedgerEntryTemp@1100281018 : TEMPORARY Record 50027;
+    BEGIN
+      //IMH07
+      //Creation l'intervention
+      //Fonction dupliqu‚ de CreateIntervention
+      // Si adresse <> adresse secondaire alors cr‚ation d'une adresse en temporaire
+      //IF pServiceHeaderAddress.FINDSET THEN;
+      //<<IMH34.PC
+      //IF NOT lContactAltAddress.GET(pServiceHeader."Contact No.",pServiceHeaderAddress."Contact Address Code") THEN BEGIN
+      //>>IMH34.PC
+        lContactAltAddressTemp.INIT;
+        lContactAltAddressTemp."Contact No." := pServiceHeader."Contact No.";
+        lContactAltAddressTemp.Code := 'TEMP';
+        lContactAltAddressTemp.Address := pServiceHeaderAddress.Address;
+        lContactAltAddressTemp."Address 2" := pServiceHeaderAddress."Address 2";
+        lContactAltAddressTemp.City := pServiceHeaderAddress.City;
+        lContactAltAddressTemp."Post Code" := pServiceHeaderAddress."Post Code";
+        lContactAltAddressTemp.County := pServiceHeaderAddress.County;
+        lContactAltAddressTemp."Country/Region Code" := pServiceHeaderAddress."Country/Region Code";
+        lContactAltAddressTemp."Geo. Reference Code" := pServiceHeaderAddress."Geo. Reference Code";
+        lContactAltAddressTemp.Latitude := pServiceHeaderAddress.Latitude;
+        lContactAltAddressTemp.Longitude := pServiceHeaderAddress.Longitude;
+        IF pServiceHeaderAddress."Address Type" = pServiceHeaderAddress."Address Type"::"Public Storage" THEN BEGIN
+          lContactAltAddressTemp.Address := pServiceHeader.Address;
+          lContactAltAddressTemp."Address 2" := pServiceHeader."Address 2";
+          lContactAltAddressTemp.City := pServiceHeader.City;
+          lContactAltAddressTemp."Post Code" := pServiceHeader."Post Code";
+          lContactAltAddressTemp.County := pServiceHeader.County;
+          lContactAltAddressTemp."Country/Region Code" := pServiceHeader."Country/Region Code";
+          lContactAltAddressTemp."Geo. Reference Code" := pServiceHeader."Geo. Reference Code";
+          IF NOT lContactAltAddress.GET(pServiceHeader."Contact No.", pServiceHeader."Ship-to Address Code") THEN
+            CLEAR(lContactAltAddress);
+          lContactAltAddressTemp.Latitude := lContactAltAddress.Latitude;
+          lContactAltAddressTemp.Longitude := lContactAltAddress.Longitude;
+        END
+        ELSE
+          pServiceHeaderAddress.TESTFIELD("Post Code");
+        lContactAltAddressTemp.INSERT;
+      //<<IMH34.PC
+      //END ELSE BEGIN
+      //  lContactAltAddressTemp := lContactAltAddress;
+      //  lContactAltAddressTemp.INSERT;
+      //END;
+      //>>IMH34.PC
+
+      lInterventionLine.INIT;
+      lInterventionLine.VALIDATE("Service Header No.", pServiceHeader."No.");
+      lInterventionLine."Address Type" := pServiceHeaderAddress."Address Type";
+      lInterventionLine."Address No." := pServiceHeaderAddress."Address No.";
+      //lInterventionLine."DARVA Interface" := pServiceHeader."DARVA Interface"; // IMH25.ISAT.MA
+
+      IF lServOrderType.GET(lInterventionLine."Service Order Type") THEN BEGIN
+        CASE lServOrderType."Provider Search" OF
+          lServOrderType."Provider Search"::AutoSearch: BEGIN
+            LoadProviderSearchBasketFromAd(pServiceHeaderAddress,lTempProviderSearchBasket,lServOrderType);
+            //<<IMH61
+            //IF NOT FirstProviderSearch.Search(lInterventionLine, lTempProviderSearchBasket,lContactAltAddressTemp) THEN BEGIN
+            IF NOT ProviderSearchMgt.Search(lInterventionLine, lTempProviderSearchBasket,lContactAltAddressTemp) THEN BEGIN
+            //>>IMH61
+              lTempProviderSearchBasket.RESET;
+              //<<IMH61
+              //FirstProviderSearch.GetRefusedProvider(lServiceSearchLedgerEntryTemp);
+              ProviderSearchMgt.GetRefusedProvider(lServiceSearchLedgerEntryTemp);
+              //>>IMH61
+              lServiceSearchLedgerEntryTemp.RESET;
+              ProviderNotFound(pServiceHeader, lTempProviderSearchBasket,lServiceSearchLedgerEntryTemp);
+              EXIT(FALSE);
+            END;
+
+            lTempProviderSearchBasket.SETFILTER("Provider No.", '<>%1', '');
+            IF lTempProviderSearchBasket.FINDFIRST THEN
+              REPEAT
+                lTempIntervention.SETRANGE("Provider No.", lTempProviderSearchBasket."Provider No.");
+                IF NOT lTempIntervention.FINDFIRST THEN BEGIN
+                  lInterventionLine."Line No." := 0;
+                  lInterventionLine.VALIDATE("Provider No.", lTempProviderSearchBasket."Provider No.");
+                  lInterventionLine."Travel Distance" := lTempProviderSearchBasket.Distance;
+                  IF lInterventionLine.Urgent THEN
+                    lInterventionLine."Arrival Date" := lTempProviderSearchBasket."Intervention Date"
+                  ELSE
+                    lInterventionLine."Expected Previsit Date" := lTempProviderSearchBasket."Intervention Date";
+
+                  lInterventionLine.INSERT(TRUE);
+                  CreateServCodeByIntervention(lInterventionLine,
+                                   pServiceHeaderAddress."Building Trade No.",//IMH10
+                                   pServiceHeaderAddress."Speciality Code",
+                                   TRUE);
+                  lInterventionLine."Multi specialities" := MultiSpecInterv(lInterventionLine);
+                  //d‚clencher action statut
+                  lInterventionLine.GetDefaultProcessStatusCode(lProcessCode, lProcessStatus);
+                  IF lInterventionLine."Process Code" = '' THEN
+                    IF lProcessCode <> '' THEN
+                      lInterventionLine.VALIDATE("Process Code", lProcessCode);
+                  IF lInterventionLine."Process Status No." = 0 THEN
+                    IF lProcessStatus <> 0 THEN
+                      lInterventionLine.VALIDATE("Process Status No.", lProcessStatus);
+                  lInterventionLine.MODIFY(TRUE);
+
+                  lTempIntervention := lInterventionLine;
+                  lTempIntervention.INSERT;
+                END;
+              UNTIL lTempProviderSearchBasket.NEXT = 0;
+      //<<IMH45.ST
+            IF pServiceHeader.AutoStep THEN
+              pServiceHeader.MODIFY;
+      //>>IMH45.ST
+            IF pShowCard THEN BEGIN
+              lTempIntervention.RESET;
+              IF lTempIntervention.COUNT = 1 THEN
+                FORM.RUN(FORM::"Intervention Line Card", lInterventionLine);
+            END;
+            lTempIntervention.RESET;
+            EXIT(NOT lTempIntervention.ISEMPTY);
+          END;
+
+          lServOrderType."Provider Search"::ManualSearch: BEGIN
+            lContact.SETRANGE("Service Contact", lContact."Service Contact"::Provider);
+            lContact.SETRANGE("Member No.", pServiceHeader."Contact No.");
+            IF lContactSearchMgt.SearchContactWithFilters(lContact, lContactNo) THEN
+              lContact.RESET;
+              IF lContact.GET(lContactNo) THEN
+                IF lProvider.GET(lContact."Company No.") THEN BEGIN
+                  lInterventionLine."Line No." := 0;
+                  lInterventionLine.VALIDATE("Provider No.", lProvider."No.");
+                  //
+                  lInterventionLine."Travel Distance" := ProviderSearchMgt.GetDistance(lProvider."No.",          //IMH61
+                                                                              lContactAltAddressTemp."Geo. Reference Code"); //IMH31.ST
+                  lInterventionLine.INSERT(TRUE);
+                  CreateServCodeByIntervention(lInterventionLine,
+                                    pServiceHeaderAddress."Building Trade No.",//IMH10
+                                   pServiceHeaderAddress."Speciality Code",
+                                   TRUE);
+                  lInterventionLine."Multi specialities" := MultiSpecInterv(lInterventionLine);
+                  //d‚clencher action statut
+                  IF lInterventionLine."Process Code" = '' THEN
+                    lInterventionLine.VALIDATE("Process Code", lServOrderType."Interv. Process Code");
+                  IF lInterventionLine."Process Status No." = 0 THEN
+                    lInterventionLine.VALIDATE("Process Status No.", lServOrderType."Interv. Start Status");
+                  lInterventionLine.MODIFY(TRUE);
+      //<<IMH45.ST
+                  IF pServiceHeader.AutoStep THEN
+                    pServiceHeader.MODIFY;
+      //>>IMH45.ST
+                  IF pShowCard THEN BEGIN
+                    COMMIT;
+                    FORM.RUN(FORM::"Intervention Line Card", lInterventionLine);
+                  END;
+                  EXIT(TRUE);
+                END;
+            EXIT(FALSE);
+          END;
+          lServOrderType."Provider Search"::UniqueProvider: BEGIN
+            lInterventionLine.VALIDATE("Provider No.", lServOrderType."Provider No.");
+            lInterventionLine."Travel Distance" := ProviderSearchMgt.GetDistance(lProvider."No.",          //IMH61
+                                                                        lContactAltAddressTemp."Geo. Reference Code"); //IMH31.ST
+          END;
+        END;
+      END;
+
+      lInterventionLine."Line No." := 0;
+      //<<IMH36.PC
+      IF lInterventionLine."Phone No." = '' THEN BEGIN
+        lInterventionLine."Phone No." := pServiceHeader."Ship-to Phone";
+      END;
+      IF lInterventionLine."Mobile Phone No." = '' THEN BEGIN
+        lInterventionLine."Mobile Phone No." := pServiceHeader."Ship-to Phone 2";
+      END;
+      //>>IMH36.PC
+      lInterventionLine.INSERT(TRUE);
+      CreateServCodeByIntervention(lInterventionLine,
+                                   pServiceHeaderAddress."Building Trade No.",//IMH10
+                                   pServiceHeaderAddress."Speciality Code",
+                                   TRUE);
+
+      lInterventionLine."Multi specialities" := MultiSpecInterv(lInterventionLine);
+      //d‚clencher action statut
+      IF lInterventionLine."Process Code" = '' THEN
+        lInterventionLine.VALIDATE("Process Code", lServOrderType."Interv. Process Code");
+      IF lInterventionLine."Process Status No." = 0 THEN
+        lInterventionLine.VALIDATE("Process Status No.", lServOrderType."Interv. Start Status");
+      lInterventionLine.MODIFY(TRUE);
+      //<<IMH45.ST
+      IF pServiceHeader.AutoStep THEN
+        pServiceHeader.MODIFY;
+      //>>IMH45.ST
+
+      IF pShowCard THEN BEGIN
+        COMMIT;
+        FORM.RUN(FORM::"Intervention Line Card", lInterventionLine);
+      END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE CreateServCodeByIntervention@1100281029(VAR pInterventionLine@1100281000 : Record 50075;pBuildingTradeNo@1100281004 : Code[20];pSpecialityCode@1100281003 : Code[10];pMain@1100281002 : Boolean);
+    VAR
+      lServiceCode@1100281001 : Record 50040;
+      lIntervDescr@1100281005 : Record 50070;
+    BEGIN
+      //IMH02 isat.zw
+      WITH lServiceCode DO BEGIN
+        IF lServiceCode.GET("Service Type"::Intervention, pInterventionLine."Service No.", pInterventionLine."Service Header No.",
+            pInterventionLine."Line No.", "Code Type"::Speciality, pSpecialityCode, pBuildingTradeNo) THEN
+          EXIT;
+        INIT;
+        VALIDATE("Service Type", "Service Type"::Intervention);
+        VALIDATE("Service No.", pInterventionLine."Service No.");
+        VALIDATE("Service Header No.", pInterventionLine."Service Header No.");
+        "Intervention Line No." := pInterventionLine."Line No.";
+        "Building Trade No." := pBuildingTradeNo;//IMH10
+        VALIDATE("Code Type", "Code Type"::Speciality);
+        Code := pSpecialityCode;
+        Main := pMain;
+        //<<IMH33
+        lIntervDescr.SETRANGE("Service Header No.",pInterventionLine."Service Header No.");
+        lIntervDescr.SETRANGE("Building Trade No.",pBuildingTradeNo);
+        lIntervDescr.SETRANGE("Speciality Code",pSpecialityCode);
+        IF lIntervDescr.FINDSET THEN BEGIN
+          REPEAT
+            "Amount Incl. VAT" += lIntervDescr."Amount Incl. VAT";
+            "Amount Excl. VAT" += lIntervDescr."Amount Excl. VAT";
+            "VAT %" := lIntervDescr."VAT %"
+          UNTIL lIntervDescr.NEXT = 0;
+        END;
+        "VAT Amount" := "Amount Incl. VAT" - "Amount Excl. VAT";
+
+        //>>IMH33
+        TouchRecord(TRUE);
+        INSERT(FALSE);
+        IF pMain THEN BEGIN
+          pInterventionLine."Main Speciality" := Code;
+          pInterventionLine."Building Trade" := pBuildingTradeNo;//IMH52
+        END;
+      //  INSERT(TRUE);
+      END;
+    END;
+
+    PROCEDURE CreateServIntervQuoteByWizard@1100281001(pServIntervLine@1100281000 : Record 50075);
+    VAR
+      lServIntervQuote@1100281001 : Record 50076;
+      lCreateIntervQuoteWizard@1100281002 : Form 50112;
+      lTempAttachment@1100281003 : TEMPORARY Record 5062;
+    BEGIN
+      //Cr‚ation devis intervention par wizard
+      //<<IMH13
+      lServIntervQuote.SETRANGE("Service Header No.", pServIntervLine."Service Header No.");
+      lServIntervQuote.SETRANGE("Intervention Line No.", pServIntervLine."Line No.");
+      lServIntervQuote.SETRANGE(Active, TRUE);
+      IF lServIntervQuote.COUNT >= 1 THEN
+        MESSAGE(Text005, lServIntervQuote.COUNT);
+      //>>IMH13
+
+      CLEAR(lServIntervQuote);
+      lServIntervQuote.INIT;
+      lServIntervQuote."Service Header No." := pServIntervLine."Service Header No.";
+      lServIntervQuote."Intervention Line No." := pServIntervLine."Line No.";
+      lServIntervQuote."Intervention No." := pServIntervLine."Intervention No.";
+      lServIntervQuote."Contact No." := pServIntervLine."Contact No.";
+      lServIntervQuote."Service Order Type" := pServIntervLine."Service Order Type";
+      lServIntervQuote.InitDepreciation; //IMH08
+      lServIntervQuote.InitOrderAmountInclVAT(pServIntervLine);//IMH32
+      lCreateIntervQuoteWizard.SetValue(lServIntervQuote);
+      lCreateIntervQuoteWizard.RUNMODAL;
+
+      IF lCreateIntervQuoteWizard.GetIsOK THEN BEGIN
+        lCreateIntervQuoteWizard.GetValue(lServIntervQuote, lTempAttachment);
+        //<<IMH06
+      //  lTempAttachment.FINDFIRST;
+        IF lTempAttachment.FINDFIRST THEN;
+        //>>IMH06
+        CreateServIntervQuote(lServIntervQuote, lTempAttachment);
+      END;
+    END;
+
+    PROCEDURE CreateServIntervQuote@1100281005(VAR pServIntervQuote@1100281000 : Record 50076;VAR pTempAttachment@1100281001 : Record 5062);
+    VAR
+      lDocAttachmentFilter@1100281002 : Record 50021;
+      lSourceAttchMgt@1100281003 : Codeunit 50003;
+      lServiceHeader@1100281004 : Record 5900;
+    BEGIN
+      //Creation devis intervention avec documents joint
+      pServIntervQuote.INSERT(TRUE);
+      IF pTempAttachment.FINDFIRST THEN
+        REPEAT
+          lSourceAttchMgt.CreateAttachByIntervQuote(pServIntervQuote,pTempAttachment);
+        UNTIL pTempAttachment.NEXT = 0;
+      //<<IMH30.ST
+      pServIntervQuote.GetProcessCode;
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServIntervQuote."Service Header No.");
+      //IF lServiceHeader."Fusion Service Status Created" THEN
+      //  pServIntervQuote.VALIDATE("Expert Quote Check", pServIntervQuote."Expert Quote Check"::"Expert Check");
+      pServIntervQuote.MODIFY(TRUE);
+      //>>IMH30.ST
+    END;
+
+    PROCEDURE CreateIntervQuoteByDocQueue@1100281002(VAR pServIntervQuote@1100281000 : Record 50076;VAR pDocQueue@1100281002 : Record 50054;pSearchIntervention@1100281001 : Boolean;pShowCard@1100281004 : Boolean);
+    VAR
+      lServIntervLine@1100281003 : Record 50075;
+      lDocQueuePost@1100281005 : Codeunit 50008;
+      lInteractionTemp@1100281006 : TEMPORARY Record 5065;
+      lDocQueue@1100281007 : Record 50054;
+      lServiceHeader@1100281008 : Record 5900;
+    BEGIN
+      pDocQueue.TESTFIELD(Status, pDocQueue.Status::Done);
+      pDocQueue.TESTFIELD("Contact No.");
+
+      IF (pDocQueue."Service Document Type" <> pDocQueue."Service Document Type"::Intervention)
+         OR (pDocQueue."Service Document No." = '')
+         OR (pDocQueue."Service Intervention Line No." = 0) THEN
+        IF pSearchIntervention THEN
+          pDocQueue.SearchService(2);
+
+      pDocQueue.TESTFIELD("Service Document Type", pDocQueue."Service Document Type"::Intervention);
+      pDocQueue.TESTFIELD("Service Document No.");
+      pDocQueue.TESTFIELD("Service Intervention Line No.");
+
+      lServIntervLine.GET(pDocQueue."Service Document No.", pDocQueue."Service Intervention Line No.");
+
+      pServIntervQuote."Service Header No." := lServIntervLine."Service Header No.";
+      pServIntervQuote."Intervention Line No." := lServIntervLine."Line No.";
+      pServIntervQuote."Intervention No." := lServIntervLine."Intervention No.";
+      pServIntervQuote."Contact No." := lServIntervLine."Contact No.";
+      //pServIntervQuote.VALIDATE("Provider No.",pDocQueue."Contact No.");
+      pServIntervQuote."Service Order Type" := lServIntervLine."Service Order Type";
+      pServIntervQuote."Quote Reference" := pDocQueue."Vendor Quote No.";
+      pServIntervQuote."Document Date" := pDocQueue."Document Date";
+      pServIntervQuote."Receive Date" := TODAY;
+      //<<IMH41.PC
+      //pServIntervQuote."Amount Excl. VAT" := pDocQueue.Amount;
+      //pServIntervQuote.CalcAmount(FALSE);
+      //pServIntervQuote."Amount Incl. VAT" := pDocQueue."Amount Including VAT";
+      pServIntervQuote.VALIDATE("Amount Incl. VAT",pDocQueue."Amount Including VAT");
+      pServIntervQuote.VALIDATE("Amount Excl. VAT",pDocQueue.Amount);
+      //>>IMH41.PC
+      pServIntervQuote.CreatePurchOrder;
+      IF (pDocQueue."Franchise Amount" <> 0) THEN
+        pServIntervQuote.VALIDATE("Deductible Amount (LCY)",pDocQueue."Franchise Amount");
+      IF (pDocQueue."Amount obsolescence" <> 0) THEN
+        pServIntervQuote.VALIDATE("Depreciation Amount",pDocQueue."Amount obsolescence");
+      pServIntervQuote."Exempt VAT Base Amount" := pDocQueue."Exempt VAT Base Amount";
+      pServIntervQuote."Reduced VAT Base Amount" := pDocQueue."Reduced VAT Base Amount";
+      pServIntervQuote."Normal VAT Base Amount" := pDocQueue."Normal VAT Base Amount";
+      pServIntervQuote.INSERT(TRUE);
+      //<<IMH30.ST
+      pServIntervQuote.GetProcessCode;
+      lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServIntervQuote."Service Header No.");
+      //IF lServiceHeader."Fusion Service Status Created" THEN
+      //  pServIntervQuote.VALIDATE("Expert Quote Check", pServIntervQuote."Expert Quote Check"::"Expert Check");
+
+      pServIntervQuote.MODIFY(TRUE);
+      pServIntervQuote.CheckInterventionStatus(TRUE);
+      //>>IMH30.ST
+
+      pDocQueue."Service Intervention Quote No." := pServIntervQuote."Line No."; //IMH29.ST r‚activ‚ !
+      //<<IMH19
+      //lDocQueuePost.CopyDocAttachment(pDocQueue, pServIntervQuote, lInteractionTemp, 1);     //IMH15
+      //pDocQueue.DELETE(TRUE);
+      //lDocQueue := pDocQueue;
+      //lDocQueue.SETRECFILTER;
+      //CODEUNIT.RUN(CODEUNIT::"Doc. Queue-Post",lDocQueue);
+      //>>IMH19
+
+      IF pShowCard THEN
+        FORM.RUN(FORM::"Serv. Intervention Quote Card", pServIntervQuote);
+    END;
+
+    PROCEDURE SearchProvider@1100281003(VAR pInterventionLine@1100281000 : Record 50075);
+    VAR
+      lServOrderType@1100281001 : Record 5903;
+      lProviderSearchBasket@1100281002 : TEMPORARY Record 51002;
+      lServiceCode@1100281003 : Record 50040;
+      lLineNo@1100281004 : Integer;
+    BEGIN
+      {//A faire...
+      pInterventionLine.TESTFIELD("Service Order Type");
+      pInterventionLine.TESTFIELD("Provider No.", '');
+      IF lServOrderType.GET(pInterventionLine."Service Order Type") THEN
+        IF lServOrderType."Provider Search" = lServOrderType."Provider Search"::AutoSearch THEN
+          BEGIN
+            //<<IMH03
+            lServiceCode.SETCURRENTKEY("Service Type", "Service Header no."); //IMH39.ST
+            lServiceCode.SETRANGE("Service Type",lServiceCode."Service Type"::ServiceHeader);
+            lServiceCode.SETRANGE("Service Header No.",pInterventionLine."Service Header No.");
+            IF lServiceCode.FINDFIRST THEN
+              REPEAT
+                lLineNo += 10000;
+                lProviderSearchBasket."Speciality Code" := lServiceCode.Code;
+                lProviderSearchBasket."Line No." := lLineNo;
+                lProviderSearchBasket.INSERT(TRUE);
+              UNTIL lServiceCode.NEXT = 0;
+            IF FirstProviderSearch.Search(pInterventionLine,lProviderSearchBasket) THEN BEGIN
+              pInterventionLine.VALIDATE("Provider No.",lProviderSearchBasket."Provider No.");
+              pInterventionLine.MODIFY(TRUE);
+            END;
+
+         END;
+          //IF NOT FirstProviderSearch.Search(pInterventionLine) THEN
+            //pInterventionLine.MODIFY(TRUE);
+         //>>IMH03
+      }
+    END;
+
+    PROCEDURE LoadProviderSearchBasket@1100281006(VAR pServiceHeaderNo@1100281000 : Code[20];VAR pTempProviderSearchBasket@1100281001 : Record 51002;VAR pServiceOrderType@1100281004 : Record 5903);
+    VAR
+      lServiceCode@1100281002 : Record 50040;
+      lInterventionDescription@1100281003 : Record 50070;
+      lInterventionLine@1100281007 : Record 50075;
+      lSpecInterv@1100281006 : Record 50040;
+      lLineNo@1100281005 : Integer;
+      lSpecializationSelectionForm@1100281008 : Form 50264;
+      lTempProviderSearchBasket@1100281009 : TEMPORARY Record 51002;
+      lSkipSelectionSpec@1100281010 : Boolean;
+    BEGIN
+      //IMH05
+      LoadSpec(pServiceHeaderNo, pTempProviderSearchBasket, pServiceOrderType, TRUE, FALSE);
+      pTempProviderSearchBasket.RESET;
+      IF pTempProviderSearchBasket.ISEMPTY AND (NOT SkipMessage) THEN
+      BEGIN
+        lServiceCode.RESET;
+        lServiceCode.SETCURRENTKEY("Service Type","Service Header No.","Code Type",Code);
+        lServiceCode.SETRANGE("Service Type",lServiceCode."Service Type"::Intervention);
+        lServiceCode.SETRANGE("Service Header No.",pServiceHeaderNo);
+        IF lServiceCode.ISEMPTY THEN
+          ERROR(Text001)
+        ELSE
+          ERROR(Text013);
+      END;
+
+      //<<IMH23
+      lSkipSelectionSpec := SkipMessage;
+      IF NOT lSkipSelectionSpec THEN BEGIN
+        lInterventionLine.SETRANGE("Service Header No.", pServiceHeaderNo);
+        IF pTempProviderSearchBasket.COUNT = 1 THEN
+          ShowSpecSelectionForm := FALSE;
+        lSkipSelectionSpec := (lInterventionLine.ISEMPTY) AND (NOT ShowSpecSelectionForm);
+      END;
+
+      IF NOT lSkipSelectionSpec THEN BEGIN
+        COMMIT;
+        lSpecializationSelectionForm.LoadTable(pTempProviderSearchBasket);
+        lSpecializationSelectionForm.SetServiceHeaderNo(pServiceHeaderNo);
+        lSpecializationSelectionForm.LOOKUPMODE := TRUE;
+        lSpecializationSelectionForm.RUNMODAL;
+        IF lSpecializationSelectionForm.GetIsOk THEN BEGIN
+          IF UrgentIntervention THEN
+            IF CONFIRM(Text009) THEN
+              UrgentIntervention := TRUE
+            ELSE
+              UrgentIntervention := FALSE;
+          lSpecializationSelectionForm.GetTable(lTempProviderSearchBasket);
+          pTempProviderSearchBasket.FINDFIRST;
+          REPEAT
+            IF NOT lTempProviderSearchBasket.GET(pTempProviderSearchBasket."Line No.") THEN
+              pTempProviderSearchBasket.DELETE;
+          UNTIL pTempProviderSearchBasket.NEXT = 0;
+        END ELSE
+          ERROR(Text008);
+      END ELSE BEGIN
+      //>>IMH23
+        // V‚rification que les sp‚cialit‚s ne sont pas pr‚sentes sur les interventions existantes
+        lSpecInterv.SETRANGE(lSpecInterv."Service Type", lSpecInterv."Service Type"::Intervention);
+        lSpecInterv.SETRANGE("Service Header No.", pServiceHeaderNo);
+        lSpecInterv.SETRANGE("Code Type", lSpecInterv."Code Type"::Speciality);
+        IF lSpecInterv.FINDSET THEN
+        REPEAT
+          //IF lInterventionLine.GET(lSpecInterv."Service Header No."
+          //  ,lSpecInterv."Intervention Line No.") THEN
+          pTempProviderSearchBasket.RESET;
+          pTempProviderSearchBasket.SETRANGE("Speciality Code",lSpecInterv.Code);
+          IF pTempProviderSearchBasket.FINDFIRST THEN
+            pTempProviderSearchBasket.DELETE;
+        UNTIL lSpecInterv.NEXT = 0;
+      END;
+
+      pTempProviderSearchBasket.RESET;
+      IF pTempProviderSearchBasket.ISEMPTY AND (NOT SkipMessage) THEN
+        ERROR(Text003);
+    END;
+
+    PROCEDURE LoadUniqueProviderSearchBasket@1100281010(pIntervLine@1100281001 : Record 50075);
+    VAR
+      lProvider@1100281004 : Record 50000;
+    BEGIN
+      //IMH17
+      IF NOT lProvider.GET(pIntervLine."Provider No.") THEN
+        EXIT;
+      CreateServCodeByIntervention(pIntervLine, lProvider."Main Building Trade No.", lProvider."Main Specialization Code", TRUE);
+    END;
+
+    PROCEDURE LoadProviderSearchBasketFromAd@1100281009(VAR pServiceHeaderAdress@1100281000 : Record 50068;VAR pTempProviderSearchBasket@1100281001 : TEMPORARY Record 51002;VAR pServiceOrderType@1100281004 : Record 5903);
+    VAR
+      lLineNo@1100281005 : Integer;
+    BEGIN
+      //IMH06
+      //Copie de la fonction LoadProviderSearchBasket
+      //mais recherche des sp‚cialit‚ dans la tables des adresses
+      lLineNo := 10000;
+      // Sp‚cialit‚ d‚finie pour le type produit
+      IF pServiceOrderType."Provider Speciality" <> '' THEN BEGIN
+        pTempProviderSearchBasket."Line No." := lLineNo;
+        pTempProviderSearchBasket."Building Trade No." := pServiceOrderType."Provider Building Trade No.";
+        pTempProviderSearchBasket."Speciality Code" := pServiceOrderType."Provider Speciality";
+        pTempProviderSearchBasket.INSERT;
+        lLineNo += 10000;
+      END;
+      IF pServiceHeaderAdress."Speciality Code" = pServiceOrderType."Provider Speciality" THEN
+        EXIT;
+
+      pTempProviderSearchBasket."Line No." := lLineNo;
+      pTempProviderSearchBasket."Speciality Code" := pServiceHeaderAdress."Speciality Code";
+      pTempProviderSearchBasket."Building Trade No." := pServiceHeaderAdress."Building Trade No.";//IMH10
+      pTempProviderSearchBasket.INSERT;
+
+      IF pTempProviderSearchBasket.ISEMPTY THEN
+        ERROR(Text001);
+    END;
+
+    LOCAL PROCEDURE SaveSpecialityCodeToInterv@1100281007(VAR pIntervLine@1100281008 : Record 50075;VAR pTempProviderSearchBasket@1100281001 : TEMPORARY Record 51002);
+    BEGIN
+      //IMH10
+      WITH pTempProviderSearchBasket DO BEGIN
+        IF NOT FINDSET THEN
+          EXIT;
+        REPEAT
+          CreateServCodeByIntervention(pIntervLine, "Building Trade No.", "Speciality Code", "Main Specialization");
+        UNTIL NEXT = 0;
+        DELETEALL;
+      END; // WITH
+    END;
+
+    PROCEDURE CalcIntervDeductibleAmount@1100281012(VAR pIntervLine@1100281003 : Record 50075;pServiceHeader@1100281000 : Record 5900);
+    VAR
+      lIntervLine@1100281002 : Record 50075;
+      lIntervLine2@1100281001 : Record 50075;
+    BEGIN
+      //IMH21
+      {
+      //<<IMH32
+      // La franchise est affect‚e a la premiere intervention
+      lIntervLine2.SETRANGE("Service Header No.",pServiceHeader."No.");
+      lIntervLine2.SETFILTER("Line No.",'<>%1',pIntervLine."Line No.");
+      lIntervLine2.SETFILTER("Intervention Status",'<%1',lIntervLine2."Intervention Status"::Cancel);
+
+      IF NOT lIntervLine2.ISEMPTY THEN
+        EXIT;
+      //>>IMH32
+      }
+      CASE pServiceHeader."Appropriate Deductible Amount" OF
+        pServiceHeader."Appropriate Deductible Amount"::Other :
+            pIntervLine."Deductible Amount" := pServiceHeader."Deductible Amount";
+        pServiceHeader."Appropriate Deductible Amount"::"Deductible 1" :
+            pIntervLine."Deductible Amount" := pServiceHeader."Deductible 1 (LCY)";
+        pServiceHeader."Appropriate Deductible Amount"::"Deductible 2" :
+            pIntervLine."Deductible Amount" := pServiceHeader."Deductible 2 (LCY)";
+      END;
+      //EXIT;//IMH32
+      lIntervLine.SETRANGE("Service Header No.", pServiceHeader."No.");
+      lIntervLine.SETFILTER("Line No.", '<>%1', pIntervLine."Line No.");
+      lIntervLine.SETFILTER("Intervention Status",'<%1',lIntervLine2."Intervention Status"::Cancel);
+      IF lIntervLine.FINDFIRST THEN
+        REPEAT
+          pIntervLine."Deductible Amount" := pIntervLine."Deductible Amount" - lIntervLine."Deductible Amount";
+        UNTIL lIntervLine.NEXT = 0;
+      IF pIntervLine."Deductible Amount" < 0 THEN
+        pIntervLine."Deductible Amount" := 0;
+    END;
+
+    PROCEDURE AffectIntervDeductibleAmount@1100281025(VAR pIntervLine@1100281003 : Record 50075;pServiceHeader@1100281000 : Record 5900);
+    VAR
+      lIntervLine@1100281002 : Record 50075;
+    BEGIN
+      //<<IMH32
+      // La franchise est affect‚e a la premiere intervention ouverte
+      lIntervLine.SETRANGE("Service Header No.",pServiceHeader."No.");
+      lIntervLine.SETFILTER("Line No.",'<>%1',pIntervLine."Line No.");
+      lIntervLine.SETFILTER("Intervention Status",'<%1',lIntervLine."Intervention Status"::Closed);
+      IF lIntervLine.ISEMPTY THEN
+        EXIT;
+      lIntervLine.FINDFIRST;
+      CASE pServiceHeader."Appropriate Deductible Amount" OF
+        pServiceHeader."Appropriate Deductible Amount"::Other :
+            lIntervLine."Deductible Amount" := pServiceHeader."Deductible Amount";
+        pServiceHeader."Appropriate Deductible Amount"::"Deductible 1" :
+            lIntervLine."Deductible Amount" := pServiceHeader."Deductible 1 (LCY)";
+        pServiceHeader."Appropriate Deductible Amount"::"Deductible 2" :
+            lIntervLine."Deductible Amount" := pServiceHeader."Deductible 2 (LCY)";
+      END;
+      lIntervLine.MODIFY;
+    END;
+
+    PROCEDURE CalcUnsecuredDepreciationAmt@1100281016(VAR pIntervLine@1100281003 : Record 50075;pServiceHeader@1100281000 : Record 5900);
+    VAR
+      lIntervLine@1100281002 : Record 50075;
+    BEGIN
+      //IMH21
+      pIntervLine."Unsecured Depreciation Amount" := pServiceHeader."Unsecured Depreciation Amount";
+      lIntervLine.SETRANGE("Service Header No.", pServiceHeader."No.");
+      lIntervLine.SETFILTER("Line No.", '<>%1', pIntervLine."Line No.");
+
+
+      lIntervLine.SETFILTER("Intervention Status",'<%1',lIntervLine."Intervention Status"::Cancel);
+      IF lIntervLine.FINDFIRST THEN
+        REPEAT
+          pIntervLine."Unsecured Depreciation Amount" := pIntervLine."Unsecured Depreciation Amount"
+                  - lIntervLine."Unsecured Depreciation Amount";
+        UNTIL lIntervLine.NEXT = 0;
+      IF pIntervLine."Unsecured Depreciation Amount" < 0 THEN
+        pIntervLine."Unsecured Depreciation Amount" := 0;
+      //<<IMH48
+
+      IF  pIntervLine."Unsecured Depreciation Amount"  = 0 THEN BEGIN
+
+        pIntervLine."Unsecured Depreciation Amount" := pIntervLine."Global Amount (Incl. VAT)" *
+          pServiceHeader."Unsecured Depreciation %"*0.01;
+      END;
+      //>>IMH48
+    END;
+
+    PROCEDURE CheckElecFailIntervCreation@1100281013(pServiceHeader@1100281000 : Record 5900;pShowError@1100281002 : Boolean) : Boolean;
+    VAR
+      lIntervLine@1100281001 : Record 50075;
+    BEGIN
+      //IMH21
+      lIntervLine.SETRANGE("Service Header No.", pServiceHeader."No.");
+      lIntervLine.SETRANGE("Intervention Status", lIntervLine."Intervention Status"::InProgress);
+      IF NOT lIntervLine.ISEMPTY THEN
+        IF pShowError THEN
+          ERROR(Text006)
+        ELSE
+          EXIT(FALSE);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE SetSkipMessage@1100281008();
+    BEGIN
+      SkipMessage := TRUE;
+    END;
+
+    PROCEDURE ProviderNotFound@1100281014(pServHeader@1100281004 : Record 5900;VAR pProviderSearchBasket@1100281007 : Record 51002;VAR pServiceSearchLedgerEntry@1100281005 : TEMPORARY Record 50027);
+    VAR
+      lTrayLine@1100281001 : Record 50048;
+      lServiceSearchLedgerEntry@1100281006 : Record 50027;
+      lTrayLineProvSearchEntry@1100281008 : Record 50144;
+    BEGIN
+      //IMH54
+      {
+      lProviderSetup.GET;
+
+      IF lProviderSetup."Not Found Provider Team Code" = '' THEN BEGIN
+        pServHeader.TESTFIELD("Default Team Code");
+        lTeamCode := pServHeader."Default Team Code";
+      END ELSE
+        lTeamCode := lProviderSetup."Not Found Provider Team Code";
+      IF pServHeader.Urgent = pServHeader.Urgent::Yes THEN BEGIN
+        lProviderSetup.TESTFIELD("Emerg. Not Found Prov. Task");
+        lTrayTask := lProviderSetup."Emerg. Not Found Prov. Task";
+      END
+      ELSE BEGIN
+        lProviderSetup.TESTFIELD("Non Emerg.Not Found Prov. Task");
+        lTrayTask := lProviderSetup."Non Emerg.Not Found Prov. Task";
+      END;
+
+      lTrayLineMgt.CreateTLFromServHeader(pServHeader,lTeamCode,lTrayTask,FALSE);
+      lTrayLineMgt.GetResultLine(lTrayLine);
+      }
+      CreateProviderNotFoundTrayLine(pServHeader, lTrayLine);
+      //>>IMH54
+
+      pProviderSearchBasket.RESET;
+      IF pProviderSearchBasket.FINDSET THEN
+        REPEAT
+          lTrayLineProvSearchEntry.TRANSFERFIELDS(pProviderSearchBasket);
+          lTrayLineProvSearchEntry."Team Code" := lTrayLine."Team Code";
+          lTrayLineProvSearchEntry."Tray Line Entry No." := lTrayLine."Entry No.";
+          lTrayLineProvSearchEntry."Provider No." := '';  //IMH58
+          IF lTrayLineProvSearchEntry.INSERT THEN;
+        UNTIL pProviderSearchBasket.NEXT = 0;
+
+      CreateServSearchLedgerEntry(pServiceSearchLedgerEntry, lTrayLine);
+
+      IF NOT HideMessageProviderNotFound THEN
+        MESSAGE(Text007);
+    END;
+
+    PROCEDURE CreateProviderNotFoundTrayLine@1000000001(pServHeader@1100281004 : Record 5900;VAR pTrayLine@1000000000 : Record 50048);
+    VAR
+      lTrayLineMgt@1100281003 : Codeunit 50050;
+      lProviderSetup@1100281000 : Record 50011;
+      lTeamCode@1100281002 : Code[10];
+      lTrayTask@1100281009 : Code[10];
+      lTrayLine@1000000001 : Record 50048;
+    BEGIN
+      //IMH54
+      lProviderSetup.GET;
+
+      IF pServHeader.Urgent = pServHeader.Urgent::Yes THEN BEGIN
+        lProviderSetup.TESTFIELD("Emerg. Not Found Prov. Task");
+        lTrayTask := lProviderSetup."Emerg. Not Found Prov. Task";
+      END
+      ELSE BEGIN
+        lProviderSetup.TESTFIELD("Non Emerg.Not Found Prov. Task");
+        lTrayTask := lProviderSetup."Non Emerg.Not Found Prov. Task";
+      END;
+
+      IF lProviderSetup."Not Found Provider Team Code" = '' THEN BEGIN
+        //<<IMh60
+        //pServHeader.TESTFIELD("Default Team Code");
+        //lTeamCode := pServHeader."Default Team Code";
+        lTeamCode := pServHeader.GetTeamByServiceTask(pServHeader, lTrayTask);;
+        //>>IMH60
+      END ELSE
+        lTeamCode := lProviderSetup."Not Found Provider Team Code";
+
+      //<<IMH62.ST
+      lTrayLine.SETRANGE("Team Code", lTeamCode);
+      lTrayLine.SETRANGE("Task Code", lTrayTask);
+      lTrayLine.SETRANGE(Closed, FALSE);
+      lTrayLine.SETRANGE("Linked To Table", lTrayLine."Linked To Table"::ServiceHeader);
+      lTrayLine.SETRANGE("Service Header No.", pServHeader."No.");
+      lTrayLine.SETRANGE("Service No.", pServHeader."Service No.");
+      IF lTrayLine.FINDFIRST THEN BEGIN
+        pTrayLine := lTrayLine;
+        EXIT;
+      END;
+      //>>IMH62.ST
+
+      lTrayLineMgt.CreateTLFromServHeader(pServHeader,lTeamCode,lTrayTask,FALSE);
+      lTrayLineMgt.GetResultLine(pTrayLine);
+    END;
+
+    PROCEDURE CreateServSearchLedgerEntry@1100281024(VAR pServiceSearchLedgerEntry@1100281005 : TEMPORARY Record 50027;pTrayLine@1100281000 : Record 50048);
+    VAR
+      lServiceSearchLedgerEntry@1100281006 : Record 50027;
+    BEGIN
+      IF pServiceSearchLedgerEntry.FINDSET THEN
+        REPEAT
+          lServiceSearchLedgerEntry := pServiceSearchLedgerEntry;
+          IF lServiceSearchLedgerEntry.FIND('=') THEN BEGIN
+            lServiceSearchLedgerEntry."Team Code" := pTrayLine."Team Code";
+            lServiceSearchLedgerEntry."Tray Line Entry No." := pTrayLine."Entry No.";
+            lServiceSearchLedgerEntry.MODIFY(FALSE);
+          END;
+        UNTIL pServiceSearchLedgerEntry.NEXT = 0;
+    END;
+
+    PROCEDURE StartProcess@1100281020(VAR pIntervLine@1100281000 : Record 50075;pInitOnly@1100281003 : Boolean);
+    VAR
+      lProcess@1100281002 : Code[10];
+      lStatus@1100281001 : Integer;
+    BEGIN
+      //d‚clencher action statut
+      IF pIntervLine."Process Code" <> '' THEN
+        EXIT;
+      pIntervLine.GetDefaultProcessStatusCode(lProcess, lStatus);
+      IF pInitOnly THEN BEGIN
+        pIntervLine."Process Code" := lProcess;
+        pIntervLine."Process Status No." := lStatus;
+      END ELSE BEGIN
+        pIntervLine.VALIDATE("Process Code", lProcess);
+        pIntervLine.VALIDATE("Process Status No.", lStatus);
+      END;
+    END;
+
+    PROCEDURE LoadSpec@1100281017(pServiceHeaderNo@1100281002 : Code[20];VAR pSearchBasket@1100281001 : Record 51002;pServiceOrderType@1100281000 : Record 5903;pCheckFields@1100281012 : Boolean;pOnlyRemaining@1100281004 : Boolean);
+    VAR
+      lLineNo@1100281003 : Integer;
+      lServCode@1100281011 : Record 50040;
+      lInterventionDescription@1100281010 : Record 50070;
+      lInterventionLine@1100281009 : Record 50075;
+    BEGIN
+      IF pSearchBasket.FINDLAST THEN
+        lLineNo := pSearchBasket."Line No.";
+
+      lLineNo += 10000;
+      // Sp‚cialit‚ d‚finie pour le type produit
+      IF pServiceOrderType."Provider Speciality" <> '' THEN
+        AddSpec(pSearchBasket, pServiceOrderType."Provider Speciality", pServiceOrderType."Provider Building Trade No.", FALSE, lLineNo);
+
+      //S‚lection des sp‚cialit‚s saisies
+      //Sp‚cialit‚s saisies sur ligne produit
+      WITH lServCode DO BEGIN
+        SETCURRENTKEY("Service Type", "Service Header No."); //IMH39.ST
+        SETRANGE("Service Type", "Service Type"::ServiceHeader);
+        SETRANGE("Service Header No.", pServiceHeaderNo);
+        SETRANGE("Code Type", "Code Type"::Speciality);
+        SETFILTER(Code, '<>%1', '');
+        IF FINDSET THEN
+          REPEAT
+            IF pCheckFields THEN
+              TestFields;
+            AddSpec(pSearchBasket, Code, "Building Trade No.", Main, lLineNo);
+          UNTIL NEXT = 0;
+      END; // WITH
+
+      //S‚lection des sp‚cialit‚s affect‚es aux lieux
+      WITH lInterventionDescription DO BEGIN
+        SETRANGE("Service Header No.",pServiceHeaderNo);
+        SETFILTER("Speciality Code",'<>%1','');
+        IF FINDSET THEN
+          REPEAT
+            IF pCheckFields THEN
+              TestFields;
+            AddSpec(pSearchBasket, "Speciality Code", "Building Trade No.", FALSE, lLineNo);
+          UNTIL NEXT = 0;
+      END;
+
+      pSearchBasket.RESET;
+      IF pSearchBasket.ISEMPTY OR (NOT pOnlyRemaining) THEN
+        EXIT;
+
+      lServCode.RESET;
+      lServCode.SETCURRENTKEY("Service Type", "Service Header No."); //IMH39.ST
+      lServCode.SETRANGE("Service Type", lServCode."Service Type"::Intervention);
+      lServCode.SETRANGE("Service Header No.", pServiceHeaderNo);
+      lServCode.SETRANGE("Code Type", lServCode."Code Type"::Speciality);
+      pSearchBasket.FINDSET;
+      REPEAT
+        lServCode.SETRANGE(Code, pSearchBasket."Speciality Code");
+        IF NOT lServCode.ISEMPTY THEN
+          pSearchBasket.DELETE;
+      UNTIL pSearchBasket.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE AddSpec@1100281018(VAR pSearchBasket@1100281000 : Record 51002;pSpec@1100281001 : Code[20];pBuild@1100281002 : Code[20];pMain@1100281003 : Boolean;VAR pNextLineNo@1100281004 : Integer);
+    BEGIN
+      IF pSpec = '' THEN
+        EXIT;
+      WITH pSearchBasket DO BEGIN
+        RESET;
+        SETRANGE("Speciality Code", pSpec);
+      //  SETRANGE("Building TRade No.", pBuild);
+        IF FINDFIRST THEN BEGIN
+          IF NOT "Main Specialization" AND pMain THEN BEGIN
+            "Main Specialization" := pMain;
+            MODIFY;
+          END;
+        END
+        ELSE BEGIN
+          "Line No." := pNextLineNo;
+          "Building Trade No." := pBuild;
+          "Speciality Code" := pSpec;
+          "Main Specialization" := pMain;
+          INSERT;
+          pNextLineNo += 10000;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE AutoSearch@1100281019(pServHeader@1100281001 : Record 5900;pServOrderType@1100281002 : Record 5903;pShipAddr@1100281004 : Record 5051;VAR pResultInterv@1100281009 : Record 50075) rValue : Integer;
+    VAR
+      lIntervLine@1100281000 : Record 50075;
+      lIntervLine2@1100281003 : Record 50075;
+      lTempProviderSearchBasket@1100281005 : TEMPORARY Record 51002;
+      lTempServiceSearchLedgerEntry@1100281007 : TEMPORARY Record 50027;
+      lServiceSearchLedgerEntry@1100281006 : Record 50027;
+      lTempResultInterv@1100281008 : TEMPORARY Record 50075;
+      lNoOfInterv@1100281010 : Integer;
+      lEndOfLoop@1100281011 : Boolean;
+      lTrayLineTmp@1100281012 : TEMPORARY Record 50048;
+    BEGIN
+      //IMH27.ST
+      IF pShipAddr."Geo. Reference Code" = '' THEN
+        ERROR(Text010);
+      lIntervLine.INIT;
+      lIntervLine."Line No." := 0;
+      lIntervLine.VALIDATE("Service Header No.", pServHeader."No.");
+      REPEAT
+        lEndOfLoop := FALSE;
+        UrgentIntervention := lIntervLine.Urgent;
+        lTempProviderSearchBasket.RESET;
+        lTempProviderSearchBasket.DELETEALL;
+        LoadProviderSearchBasket(pServHeader."No.", lTempProviderSearchBasket, pServOrderType);
+        lIntervLine2 := lIntervLine;
+        lIntervLine2.Urgent := UrgentIntervention;
+        //<<IMH61
+        //IF NOT FirstProviderSearch.Search(lIntervLine2, lTempProviderSearchBasket, pShipAddr) THEN BEGIN
+        IF NOT ProviderSearchMgt.Search(lIntervLine2, lTempProviderSearchBasket, pShipAddr) THEN BEGIN
+        //>>IMH61
+          lTempProviderSearchBasket.RESET;
+          //<<IMH61
+          //FirstProviderSearch.GetRefusedProvider(lTempServiceSearchLedgerEntry);
+          ProviderSearchMgt.GetRefusedProvider(lTempServiceSearchLedgerEntry);
+          //>>IMH61
+          lTempServiceSearchLedgerEntry.RESET;
+          ProviderNotFound(pServHeader, lTempProviderSearchBasket,lTempServiceSearchLedgerEntry);
+          lEndOfLoop := TRUE;
+        END ELSE BEGIN
+          //<<IMH61
+          ProviderSearchMgt.DownloadDebugFile;
+          //>>IMH61
+
+          lNoOfInterv := CreateInterventionByBasket(lIntervLine2, pServHeader, lTempProviderSearchBasket, lTempResultInterv, FALSE);
+          rValue += lNoOfInterv;
+          lEndOfLoop := lNoOfInterv = 0; // l'utilisateur a annul‚
+          IF NOT lEndOfLoop THEN
+            lEndOfLoop := ServInfoPane.CalcNoOfSpec(pServHeader, TRUE) = 0; // toutes les sp‚cialit‚s couvertes
+          lTempServiceSearchLedgerEntry.DELETEALL;
+          //<<IMH61
+          //FirstProviderSearch.GetRefusedProvider(lTempServiceSearchLedgerEntry);
+          ProviderSearchMgt.GetRefusedProvider(lTempServiceSearchLedgerEntry);
+          //>>IMH61
+          lTempServiceSearchLedgerEntry.RESET;
+          CreateServSearchLedgerEntry(lTempServiceSearchLedgerEntry, lTrayLineTmp);
+        END;
+      UNTIL lEndOfLoop;
+      IF NOT lTempResultInterv.FINDSET THEN
+        EXIT;
+      IF rValue = 1 THEN
+        pResultInterv := lTempResultInterv;
+
+      // D‚marrage des processus
+      REPEAT
+        lIntervLine2 := lTempResultInterv;
+        lIntervLine2.VALIDATE("Process Status No.");
+        lIntervLine2.MODIFY(TRUE);
+      UNTIL lTempResultInterv.NEXT=0;
+    END;
+
+    PROCEDURE CopyShipToAddress@1100281021(VAR pServHeader@1100281000 : Record 5900;VAR pContAltAddr@1100281001 : Record 5051);
+    VAR
+      lContAltAddr@1100281002 : Record 5051;
+      lPostCode@1100281003 : Record 225;
+    BEGIN
+      IF pServHeader."Ship-to Geo. Reference Code" = '' THEN BEGIN
+        IF lContAltAddr.GET(pServHeader."Contact No.", pServHeader."Ship-to Address Code") THEN BEGIN
+          IF (lContAltAddr.Address = pServHeader."Ship-to Address") AND
+             (lContAltAddr.City = pServHeader."Ship-to City") AND
+             (lContAltAddr."Post Code" = pServHeader."Ship-to Post Code") AND
+             (lContAltAddr."Country/Region Code" = pServHeader."Ship-to Country/Region Code") THEN BEGIN
+            //<<IMH28
+            IF lContAltAddr."Geo. Reference Code" = '' THEN BEGIN
+              //lContAltAddr.VALIDATE("Post Code");
+              //lContAltAddr.MODIFY;
+              lContAltAddr."Geo. Reference Code" := lPostCode.GetGeoCode(lContAltAddr."Post Code",lContAltAddr.City);
+            END;
+            //>>IMH28
+
+            IF lContAltAddr."Geo. Reference Code" <> '' THEN BEGIN
+              pServHeader."Ship-to Geo. Reference Code" := lContAltAddr."Geo. Reference Code";
+              pServHeader.MODIFY;
+              COMMIT;
+            END;
+          END;
+        END;
+
+        IF pServHeader."Ship-to Geo. Reference Code" = '' THEN BEGIN
+          // Calcul du g‚ocodage du service
+          pServHeader."Ship-to Geo. Reference Code" :=
+            lPostCode.GetGeoCode(pServHeader."Ship-to Post Code",pServHeader."Ship-to City"); //IMH28.ST
+          IF pServHeader."Ship-to Geo. Reference Code" <> '' THEN BEGIN
+            pServHeader.MODIFY;
+            COMMIT;
+          END;
+        END;
+      END;
+
+      CLEAR(pContAltAddr);
+      pContAltAddr.VALIDATE("Contact No.", pServHeader."Contact No.");
+      pContAltAddr.Code := pServHeader."Ship-to Address Code";
+      pContAltAddr."Company Name" := pServHeader."Ship-to Name";
+      pContAltAddr."Company Name 2" := pServHeader."Ship-to Name 2";
+      pContAltAddr.Address := pServHeader."Ship-to Address";
+      pContAltAddr."Address 2" := pServHeader."Ship-to Address 2";
+      pContAltAddr.City := pServHeader."Ship-to City";
+      pContAltAddr."Post Code" := pServHeader."Ship-to Post Code";
+      pContAltAddr.County := pServHeader."Ship-to County";
+      pContAltAddr."Country/Region Code" := pServHeader."Ship-to Country/Region Code";
+      pContAltAddr."Fax No." := pServHeader."Ship-to Fax No.";
+      pContAltAddr."E-mail" := pServHeader."Ship-to E-Mail";
+      pContAltAddr."Phone No." := pServHeader."Ship-to Phone";
+      //pServHeader."Ship-to Phone 2"
+      pContAltAddr."Geo. Reference Code" := pServHeader."Ship-to Geo. Reference Code";
+      pContAltAddr.INSERT(FALSE);
+    END;
+
+    PROCEDURE CreateIntFromServWithPressent@1100281023(VAR pServiceHeader@1100281000 : Record 5900;pShowCard@1100281004 : Boolean) : Boolean;
+    VAR
+      lServiceInterventionLine@1100281003 : Record 50075;
+      lIntervDescriptionDetail@1100281001 : Record 50161;
+      lInterventionDescription@1100281005 : Record 50070;
+      lTempIntervDesc@1100281011 : TEMPORARY Record 50070;
+      lTempAddr@1100281002 : TEMPORARY Record 5051;
+      lTempProvider@1100281007 : TEMPORARY Record 50000;
+      lTempProviderSearchBasket@1100281008 : TEMPORARY Record 51002;
+      lServOrderType@1100281009 : Record 5903;
+      lPSRBuffer@1100281014 : TEMPORARY Record 51000;
+      lTempResultInterv@1100281017 : TEMPORARY Record 50075;
+      lProviderSearchWizard@1100281013 : Form 50022;
+      lToolsMgt@1100281006 : Codeunit 8016602;
+      lSkipMessage@1100281010 : Boolean;
+      lSensedProviderExist@1100281012 : Boolean;
+      lSpecialityFilter@1100281015 : Text[1024];
+      lLineNo@1100281016 : Integer;
+    BEGIN
+      // IMH35.PC
+      // Creation l'intervention depuis une ligne de produit avec des prestataire pr‚ssenti
+
+      //<<IMH44
+      IF pServiceHeader.Status IN [pServiceHeader.Status::Finished, pServiceHeader.Status::Cancelled] THEN
+        pServiceHeader.FIELDERROR(Status);
+      //>>IMH44
+
+      //<<IMH46.ISAT.EBA
+      IF NOT CheckIntervDescription(pServiceHeader,TRUE) THEN
+        EXIT;
+      //>>IMH46.ISAT.EBA
+
+      //<<IMH36.PC
+      lToolsMgt.CheckPostCode(
+        pServiceHeader."Ship-to Post Code",
+        pServiceHeader."Ship-to Country/Region Code",
+        pServiceHeader.FIELDCAPTION("Ship-to Post Code"));
+      IF (pServiceHeader."Ship-to Address" = '') OR
+         (pServiceHeader."Ship-to Post Code" = '') OR
+         (pServiceHeader."Ship-to City" = '')
+      THEN BEGIN
+      //>>IMH36.PC
+        ERROR(Text004);
+      END;
+      CopyShipToAddress(pServiceHeader,lTempAddr);
+      // Gestion du g‚ocodage
+      IF lTempAddr."Geo. Reference Code" = '' THEN BEGIN
+        lTempAddr.VALIDATE("Post Code");
+        lTempAddr.MODIFY;
+      END;
+
+      //<<IMH42.ISAT.EBA
+      lServOrderType.GET(pServiceHeader."Service Order Type");
+
+      lSensedProviderExist := FALSE;
+
+      lTempProvider.RESET;
+      lTempProvider.DELETEALL;
+
+      lInterventionDescription.RESET;
+      lInterventionDescription.SETRANGE("Service Header No.",pServiceHeader."No.");
+      lInterventionDescription.SETFILTER("Sensed Provider No.",'<>%1','');
+      lInterventionDescription.SETRANGE("Intervention Speciality",FALSE);
+      IF lInterventionDescription.FINDSET THEN BEGIN
+        lSensedProviderExist := TRUE;
+        REPEAT
+          lTempIntervDesc := lInterventionDescription;
+          lTempIntervDesc.INSERT;
+
+          lTempProvider."No." := lInterventionDescription."Sensed Provider No.";
+          IF lTempProvider.INSERT THEN;
+        UNTIL lInterventionDescription.NEXT = 0;
+      END;
+
+      lTempProvider.RESET;
+      IF lTempProvider.FINDFIRST THEN BEGIN
+        REPEAT
+
+          lTempProviderSearchBasket.RESET;
+          lTempProviderSearchBasket.DELETEALL;
+
+          lSpecialityFilter := '';
+
+          lTempIntervDesc.RESET;
+          lTempIntervDesc.SETRANGE("Service Header No.",pServiceHeader."No.");
+          lTempIntervDesc.SETRANGE("Sensed Provider No.",lTempProvider."No.");
+          IF lTempIntervDesc.FINDSET THEN BEGIN
+            REPEAT
+              IF lSpecialityFilter <> '' THEN BEGIN
+                lSpecialityFilter += '|';
+              END;
+              lSpecialityFilter += lTempIntervDesc."Speciality Code";
+
+              lLineNo += 10000;
+              AddSpec(lTempProviderSearchBasket, lTempIntervDesc."Speciality Code",
+                lTempIntervDesc."Building Trade No.", FALSE, lLineNo);
+              {
+              lTempProviderSearchBasket."Line No." := lLineNo;
+              lTempProviderSearchBasket."Building Trade No." := lTempIntervDesc."Building Trade No.";
+              lTempProviderSearchBasket."Speciality Code" := lTempIntervDesc."Speciality Code";
+              lTempProviderSearchBasket.INSERT;
+              }
+
+            UNTIL lTempIntervDesc.NEXT = 0;
+          END;
+
+          lServiceInterventionLine.INIT;
+          lServiceInterventionLine."Line No." := 0;
+          lServiceInterventionLine.VALIDATE("Service Header No.",pServiceHeader."No.");
+
+      {
+          FirstProviderSearch.SearchResult(lServiceInterventionLine, lTempProviderSearchBasket,lTempAddr, lPSRBuffer);
+          lPSRBuffer.SETRANGE("Provider No.",lTempProvider."No.");
+
+          IF lPSRBuffer.FINDFIRST THEN BEGIN
+
+            CLEAR(lProviderSearchWizard);
+            lProviderSearchWizard.SetRecords(lPSRBuffer);
+            //lProviderSearchWizard.SetMEOAddr(pContactAltAddress);
+            lProviderSearchWizard.SetSpecializationFilter(lSpecialityFilter);
+            COMMIT;
+            lProviderSearchWizard.RUNMODAL();
+            IF (lProviderSearchWizard.GetIsOk() AND (NOT lProviderSearchWizard.GetIsCancel())) THEN BEGIN
+      }
+            IF ProviderSearchMgt.SearchProvPressent(lTempProvider, lServiceInterventionLine,
+                lTempProviderSearchBasket,lTempAddr, lSpecialityFilter) THEN BEGIN
+      //
+              lServiceInterventionLine.INIT;
+              lServiceInterventionLine."Line No." := 0;
+              lServiceInterventionLine.VALIDATE("Service Header No.",pServiceHeader."No.");
+              UrgentIntervention := lServiceInterventionLine.Urgent;
+              lServiceInterventionLine.VALIDATE("Provider No.",lTempProvider."No.");
+
+              lServiceInterventionLine."Travel Distance" :=
+                ProviderSearchMgt.GetDistance(                //IMH61
+                  lTempProvider."No.",
+                  lTempAddr."Geo. Reference Code");
+
+              lServiceInterventionLine.INSERT(TRUE);
+
+              lTempIntervDesc.RESET;
+              lTempIntervDesc.SETRANGE("Service Header No.",pServiceHeader."No.");
+              lTempIntervDesc.SETRANGE("Sensed Provider No.",lTempProvider."No.");
+              lTempIntervDesc.SETFILTER("Speciality Code",
+                ProviderSearchMgt.GetProviderSpecialization(lTempProvider."No.",lSpecialityFilter));       //IMH61
+              IF lTempIntervDesc.FINDSET THEN BEGIN
+                REPEAT
+
+                  CreateServCodeByIntervention(
+                    lServiceInterventionLine,
+                    lTempIntervDesc."Building Trade No.",
+                    lTempIntervDesc."Speciality Code",
+                    TRUE);
+
+                  lInterventionDescription := lTempIntervDesc;
+                  lInterventionDescription."Sensed Provider Affected" := lInterventionDescription."Sensed Provider Affected"::Yes;
+                  lInterventionDescription.MODIFY;
+                UNTIL lTempIntervDesc.NEXT = 0;
+              END;
+
+              lServiceInterventionLine."Multi specialities" := MultiSpecInterv(lServiceInterventionLine);
+              StartProcess(lServiceInterventionLine,FALSE);
+              IF lServiceInterventionLine."Phone No." = '' THEN BEGIN
+                lServiceInterventionLine."Phone No." := pServiceHeader."Ship-to Phone";
+              END;
+              IF lServiceInterventionLine."Mobile Phone No." = '' THEN BEGIN
+                lServiceInterventionLine."Mobile Phone No." := pServiceHeader."Ship-to Phone 2";
+              END;
+              lServiceInterventionLine.MODIFY(TRUE);
+
+              IF pServiceHeader.AutoStep THEN BEGIN
+                pServiceHeader.MODIFY;
+              END;
+            END;
+          //END;
+        UNTIL lTempProvider.NEXT = 0;
+      END;
+
+      IF lSensedProviderExist THEN BEGIN
+        lInterventionDescription.RESET;
+        lInterventionDescription.SETRANGE("Service Header No.",pServiceHeader."No.");
+        lInterventionDescription.SETRANGE("Intervention Speciality",FALSE);
+        IF lInterventionDescription.ISEMPTY THEN
+          EXIT;
+      END;
+
+      CreateInterventionFromServ(pServiceHeader,pShowCard);
+      //>>IMH42.ISAT.EBA
+    END;
+
+    PROCEDURE CreateIntervWithProvider@1100281032(VAR pServiceHeader@1100281000 : Record 5900;VAR pInterventionLine@1100281005 : Record 50075;pProviderNo@1100281015 : Code[20];pShowCard@1100281004 : Boolean) : Boolean;
+    VAR
+      lServOrderType@1000000001 : Record 5903;
+      lInterventionLine@1100281001 : Record 50075;
+      lProvider@1100281011 : Record 50000;
+      lProviderSpecialization@1100281006 : Record 50006;
+      lTempAddr@1100281025 : TEMPORARY Record 5051;
+      lMessage@1100281003 : Text[250];
+      lInterventionDescription@1100281002 : Record 50070;
+      lTempProviderSearchBasket@1000000000 : TEMPORARY Record 51002;
+      lTempResultInterv@1000000002 : TEMPORARY Record 50075;
+    BEGIN
+      //IMH46
+      IF pProviderNo = '' THEN
+        EXIT;
+
+      lProvider.GET(pProviderNo);
+      lProvider.TESTFIELD(Enable, TRUE);
+      lProvider.TESTFIELD(Exclusion, FALSE);
+      lProvider.TESTFIELD("Black List", FALSE);
+      //Controle agreement prestataire
+      lInterventionDescription.SETRANGE("Service Header No.", pServiceHeader."No.");
+      IF lInterventionDescription.FINDFIRST THEN
+        REPEAT
+          IF FirstProviderSearch.ExclusionProvider(lMessage, 0, 1, pServiceHeader."No.",
+               pProviderNo, pServiceHeader."Corporate No.", lInterventionDescription."Speciality Code") THEN
+            ERROR(lMessage);
+        UNTIL lInterventionDescription.NEXT = 0;
+
+      IF pServiceHeader.Status IN [pServiceHeader.Status::Finished, pServiceHeader.Status::Cancelled] THEN
+        pServiceHeader.FIELDERROR(Status);
+
+      IF pServiceHeader."Ship-to Address Code" = '' THEN
+        ERROR(Text004);
+
+      CopyShipToAddress(pServiceHeader, lTempAddr);
+      // Gestion du g‚ocodage
+      IF lTempAddr."Geo. Reference Code" = '' THEN BEGIN
+        lTempAddr.VALIDATE("Post Code");
+        lTempAddr.MODIFY;
+      END;
+
+      lInterventionLine.INIT;
+      lInterventionLine."Line No." := 0;
+      lInterventionLine.VALIDATE("Service Header No.", pServiceHeader."No.");
+
+      lServOrderType.GET(pServiceHeader."Service Order Type");
+      SkipMessage := TRUE;
+      LoadProviderSearchBasket(pServiceHeader."No.",lTempProviderSearchBasket,lServOrderType);
+      //<<IMH53
+      IF lTempProviderSearchBasket.FINDSET THEN
+        REPEAT
+          lProviderSpecialization.SETRANGE("Provider No.", pProviderNo);
+          lProviderSpecialization.SETRANGE("Building Trade No.", lTempProviderSearchBasket."Building Trade No.");
+          lProviderSpecialization.SETRANGE("Specialization Code", lTempProviderSearchBasket."Speciality Code");
+          IF NOT lProviderSpecialization.ISEMPTY THEN BEGIN
+            lTempProviderSearchBasket."Provider No." := pProviderNo;
+            lTempProviderSearchBasket.MODIFY;
+          END;
+        UNTIL lTempProviderSearchBasket.NEXT = 0;
+      lTempProviderSearchBasket.RESET;
+      //>>IMH53
+      //lTempProviderSearchBasket.MODIFYALL("Provider No.",pProviderNo);
+      LaunchProcessStatus := TRUE;
+      CreateInterventionByBasket(lInterventionLine, pServiceHeader, lTempProviderSearchBasket, lTempResultInterv, TRUE);
+
+      IF pServiceHeader.AutoStep THEN
+        pServiceHeader.MODIFY;
+      //message(format(lInterventionLine));
+      pInterventionLine := lInterventionLine;
+
+      IF pShowCard THEN BEGIN
+        COMMIT;
+        FORM.RUN(FORM::"Intervention Line Card", lInterventionLine);
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CreateIntervManualWithoutCheck@1100281030(VAR pServiceHeader@1100281001 : Record 5900;pShowCard@1100281000 : Boolean) : Boolean;
+    BEGIN
+      //<<IMH50
+      CreateManualWithoutCheckMode := TRUE;
+      EXIT(CreateInterventionFromServ(pServiceHeader, pShowCard));
+      //>>IMH50
+    END;
+
+    PROCEDURE MultiSpecInterv@1100281022(pIntervention@1100281001 : Record 50075) : Boolean;
+    VAR
+      lServiceCode@1100281000 : Record 50040;
+    BEGIN
+      lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+      lServiceCode.SETRANGE("Service No.", pIntervention."Service No.");
+      lServiceCode.SETRANGE("Service Header No.", pIntervention."Service Header No.");
+      lServiceCode.SETRANGE("Intervention Line No.", pIntervention."Line No.");
+      lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+
+      EXIT(lServiceCode.COUNT > 1);
+    END;
+
+    PROCEDURE DeletePrestSearchTrayLine@1100281026(pServHeader@1100281004 : Record 5900);
+    VAR
+      lProviderSetup@1100281000 : Record 50011;
+      lTrayLine@1100281001 : Record 50048;
+      lTrayLineProvSearchEntry@1100281008 : Record 50144;
+      lTeamCode@1100281002 : Code[10];
+      lTrayTask@1100281009 : Code[10];
+      lIntervDescription@1100281003 : Record 50070;
+      lServiceCode@1100281005 : Record 50040;
+      lInterv@1100281006 : Record 50075;
+      lSpecFound@1100281007 : Boolean;
+    BEGIN
+      //<<IMH56.PC
+      IF ServInfoPane.CalcNoOfSpec(pServHeader,TRUE) <> 0 THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH56.PC
+      //<<IMH55
+      lIntervDescription.SETRANGE("Service Header No.", pServHeader."No.");
+      IF lIntervDescription.FINDSET THEN
+        REPEAT
+          lServiceCode.RESET;
+          lServiceCode.SETCURRENTKEY("Service Type","Service Header No.","Code Type",Code);
+          lServiceCode.SETRANGE("Service Type",lServiceCode."Service Type"::Intervention);
+          lServiceCode.SETRANGE("Service Header No.",pServHeader."No.");
+          lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+          lServiceCode.SETRANGE(Code, lIntervDescription."Speciality Code");
+          lServiceCode.SETRANGE("Building Trade No.", lIntervDescription."Building Trade No.");
+          IF NOT lServiceCode.ISEMPTY THEN BEGIN
+            lServiceCode.FINDSET;
+            REPEAT
+              lSpecFound := FALSE;
+              IF lInterv.GET(lServiceCode."Service Header No.", lServiceCode."Intervention Line No.") THEN
+                IF lInterv."Intervention Status" <> lInterv."Intervention Status"::Cancel THEN
+                  lSpecFound := TRUE;
+            UNTIL (lServiceCode.NEXT = 0) OR lSpecFound;
+          END ELSE
+            EXIT;
+        UNTIL lIntervDescription.NEXT = 0;
+      //>>IMH55
+      lProviderSetup.GET;
+      IF pServHeader.Urgent = pServHeader.Urgent::Yes THEN BEGIN
+        lProviderSetup.TESTFIELD("Emerg. Not Found Prov. Task");
+        lTrayTask := lProviderSetup."Emerg. Not Found Prov. Task";
+      END
+      ELSE BEGIN
+        lProviderSetup.TESTFIELD("Non Emerg.Not Found Prov. Task");
+        lTrayTask := lProviderSetup."Non Emerg.Not Found Prov. Task";
+      END;
+
+      IF lProviderSetup."Not Found Provider Team Code" = '' THEN BEGIN
+        //<<IMh60
+        //pServHeader.TESTFIELD("Default Team Code");
+        //lTeamCode := pServHeader."Default Team Code";
+        lTeamCode := pServHeader.GetTeamByServiceTask(pServHeader, lTrayTask);;
+        //>>IMH60
+      END ELSE
+        lTeamCode := lProviderSetup."Not Found Provider Team Code";
+
+      lTrayLine.SETRANGE("Team Code", lTeamCode);
+      lTrayLine.SETRANGE("Task Code", lTrayTask);
+      lTrayLine.SETRANGE("Service Header No.", pServHeader."No.");
+      lTrayLine.SETRANGE(Closed, FALSE);
+      IF NOT lTrayLine.ISEMPTY THEN
+        lTrayLine.DELETEALL(TRUE);
+    END;
+
+    PROCEDURE SetLaunchProcessStatus@1100281028(pLaunchProcessStatus@1100281000 : Boolean);
+    BEGIN
+      LaunchProcessStatus := pLaunchProcessStatus;
+    END;
+
+    PROCEDURE CheckIntervDescription@1100281027(pServiceHeader@1100281001 : Record 5900;pShowError@1100281000 : Boolean) : Boolean;
+    VAR
+      lIntervDesc@1100281002 : Record 50070;
+      lSpecialization@1100281003 : Record 50005;
+    BEGIN
+      //<<IMH46.ISAT.EBA
+      lIntervDesc.RESET;
+      lIntervDesc.SETRANGE("Service Header No.",pServiceHeader."No.");
+      IF lIntervDesc.FINDSET THEN
+        REPEAT
+          IF lSpecialization.GET(lIntervDesc."Speciality Code") THEN BEGIN
+            IF lSpecialization."Blocked On Interv. Creation" THEN BEGIN
+              IF pShowError THEN
+                ERROR(Text014)
+              ELSE
+                EXIT(FALSE);
+            END;
+          END;
+        UNTIL lIntervDesc.NEXT = 0;
+
+      EXIT(TRUE);
+      //>>IMH46.ISAT.EBA
+    END;
+
+    PROCEDURE CreateIntervWithProvBasketAuto@1000000002(VAR pServiceHeader@1100281000 : Record 5900;pProviderNo@1000000006 : Code[20];VAR pPSB@1000000005 : TEMPORARY Record 51002;pCreateWithoutCheck@1000000000 : Boolean;pCheckMode@1000000001 : Boolean) : Boolean;
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lTempIntervention@1100281005 : TEMPORARY Record 50075;
+      lProvider@1100281011 : Record 50000;
+      lTempAddr@1100281025 : TEMPORARY Record 5051;
+      lTempResultInterv@1100281026 : TEMPORARY Record 50075;
+      lPSRBuffer@1100281027 : TEMPORARY Record 51000;
+      lSpecialityFilter@1100281028 : Text[1024];
+    BEGIN
+      //IMH03
+      IF pServiceHeader.Status IN [pServiceHeader.Status::Finished, pServiceHeader.Status::Cancelled] THEN
+        pServiceHeader.FIELDERROR(Status);
+
+      //Creation l'intervention
+      IF pServiceHeader."Ship-to Address Code" = '' THEN
+        ERROR(Text004);
+
+      lInterventionLine.INIT;
+      lInterventionLine."Line No." := 0;
+      lInterventionLine.VALIDATE("Service Header No.", pServiceHeader."No.");
+      UrgentIntervention := lInterventionLine.Urgent;
+
+      IF NOT pCreateWithoutCheck THEN BEGIN
+        CopyShipToAddress(pServiceHeader, lTempAddr);
+        // Gestion du g‚ocodage
+        IF lTempAddr."Geo. Reference Code" = '' THEN BEGIN
+          lTempAddr.VALIDATE("Post Code");
+          lTempAddr.MODIFY;
+        END;
+
+        ProviderSearchMgt.SearchResult(lInterventionLine, pPSB,lTempAddr, lPSRBuffer);
+        lPSRBuffer.RESET;
+        lPSRBuffer.SETRANGE("Provider No.", pProviderNo);
+        IF lPSRBuffer.ISEMPTY THEN BEGIN
+          EXIT(FALSE);
+        END ELSE BEGIN
+          lPSRBuffer.FINDFIRST;
+          lSpecialityFilter := lPSRBuffer."Specialization List";
+        END;
+
+        IF NOT lProvider.GET(pProviderNo) THEN
+          EXIT(FALSE);
+      END;
+
+      //si checkMode, pas de cr‚ation intervention
+      IF pCheckMode THEN
+        EXIT(TRUE);
+
+      pPSB.MODIFYALL("Provider No.", pProviderNo);
+      LaunchProcessStatus := TRUE;
+      CreateInterventionByBasket(lInterventionLine, pServiceHeader, pPSB, lTempResultInterv, TRUE);
+
+      StartProcess(lInterventionLine,FALSE);
+      lInterventionLine.MODIFY(TRUE);
+
+      IF pServiceHeader.AutoStep THEN
+        pServiceHeader.MODIFY;
+
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH63 @d 12/05/14 @a ISAT.ZW @v IMH6.01.P010 @s Projet PMU @c Ajout fonction CreateIntervWithProvBasketAuto */
+      /** @r IMH62 @d 03/06/14 @a ISAT.ST @v IMH6.01.P011 @s New Provider Search @c 5139 @c Ne cr‚‚ pas la recherche presta */
+      /** @r IMH61 @d 09/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search
+          @c Ajouter la gestion de new recherche */
+      /** @r IMH60 @d 24/02/14 @a ISAT.ZW @v IMH6.01.4985 @s R‚organisation DPS @c Gestion de code corbeille service par d‚faut */
+      /** @r IMH59 @d 12/07/13 @a ISAT.ACO @v IMH6.01.351 @s JUILLET @h 4239
+          @c R‚cup‚ratio type recherche si mode recherche Demandeur ou cause intervention */
+      /** @r IMH58 @d 13/05/13 @a ISAT.ZW @v IMH6.01.345 @s MAI @h 4213 @c Correction gestion filtre specialit‚ recherche manuelle */
+      /** @r IMH57 @d 13/05/13 @a ISAT.ZW @v IMH6.01.345 @s MAI @h 4302 @c Correction gestion filtre specialit‚ recherche manuelle */
+      /** @r IMH56 @d 12/02/13 @a ISAT.PC @v IMH6.01.215 @s NEP00006 @h 3995 @c Correction */
+      /** @r IMH55 @d 09/11/12 @a ISAT.ZW @v IMH6.01.228 @s v1.5 @h 4022
+          @c Suppression l'activit‚ recherche DPR au fait qu'il n'y ait plus de sp‚cialit‚ … pourvoir */
+      /** @r IMH54 @d 13/08/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 3614
+          @c Gestion de "autre prestataire" pour la reprise des travaux  - Ajout fonction CreateProviderNotFoundTrayLine */
+      /** @r IMH53 @d 27/04/12 @s ISAT.ZW @v IMH6.01.105 @s EVC @h 3432 @c Correction */
+      /** @r IMH52 @d 16/04/12 @s ISAT.LLT @v IMH6.01.020 @s Creation intervention @h 3118 @c MAJ Corps de m‚tier */
+      /** @r IMH51 @d 03/04/12 @s ISAT.ZW @v IMH6.01.020 @s Recherche prestataire @h 3127
+          @c Recherche prestataire multi sp‚cialit‚s */
+      /** @r IMH50 @d 27/03/12 @a ISAT.ZW @v IMH6.01.020 @s Gestion du service @h 2725
+          @c Ajout fonction CreateIntervManuelWithoutCheck  */
+      /** @r IMH49 @d 07/03/12 @a ISAT.ZW @v IMH6.01.020 @s Gestion du service @h 2054
+          @c Ajout fonction CreateIntervWithProvider  */
+      /** @r IMH48 @d 30/01/12 @a ISAT.LLT @v IMH6.01.020 @s Gestion du service @h 1284 @c Montant vetust‚  */
+      /** @r IMH47 @d 02/01/12 @a ISAT.ZW @v IMH6.01.020 @s Gestion du service @h 2054 @c Gestion des recherche  */
+      /** @r IMH46 @d 27/12/11 @a ISAT.EBA @v IMH6.01.020 @s Gestion du service @c Ajout de fonction  */
+      /** @r IMH45 @d 23/12/11 @a ISAT.ST @v IMH6.01.020 @s Gestion du service @c Avancemement processus auto */
+      /** @r IMH44 @d 08/12/11 @a ISAT.ZW @v IMH6.01.020 @s Gestion recherche @h 2615
+          @c Pas de cr‚ation intervention sur ligne produit clos */
+      /** @r IMH43 @d 05/12/11 @a ISAT.PC @v IMH6.01.020 @s Gestion recherche @c Correctif mantis  */
+      /** @r IMH42 @d 22/11/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service @c Correctif mantis2291 @h 2291 */
+      /** @r IMH41 @d 21/11/11 @a ISAT.PC @v IMH6.01.011 @s Gestion du service @c Gestion TVA sur cr‚ation devis */
+      /** @r IMH40 @d 19/11/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service @c Correctif */
+      /** @r IMH39 @d 17/11/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c SETCURRENTKEY manquant */
+      /** @r IMH38 @d 07/11/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @h 2054 @c Gestion recherche */
+      /** @r IMH37 @d 04/10/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @h 1675 @c Recheche manuelle multi speciailt‚s */
+      /** @r IMH36 @d 26/09/11 @a ISAT.PC @v IMH6.01.011 @s Gestion du service @h 1467 @c Correctif */
+      /** @r IMH35 @d 22/09/11 @a ISAT.PC @v IMH6.01.011 @s Gestion du service @c Gestion du pressenti */
+      /** @r IMH34 @d 16/09/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c On prendre toujours l'adresse MEO */
+      /** @r IMH33 @d 05/09/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Gestion des montants sur sp‚cialit‚s */
+      /** @r IMH32 @d 05/09/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Modif affectation franchise : seulement sur 1Šre intervention */
+      /** @r IMH31 @d 30/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Ajout calcul distance */
+      /** @r IMH30 @d 30/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Init Process Devis */
+      /** @r IMH29 @d 09/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Remise du suivi "Service Intervention Quote No." (supprim‚ quand ?) */
+      /** @r IMH28 @d 03/08/11 @a ISAT.VA @v IMH6.01.018 @s Gestion de la g‚olocalisation */
+      /** @r IMH27 @d 01/08/11 @a ISAT.ST @v IMH6.01.018 @s Gestion intervention
+          @c Appel r‚cursif cr‚ation intervention, r‚-‚criture du codeunit */
+      /** @r IMH26 @d 24/06/11 @a ISAT.ST @v IMH6.01.018 @s Gestion intervention @c R‚organisation / m‚nage du code */
+      /** @r IMH25 @d 17/06/11 @a ISAT.MA @v IMH6.01.134 @s DARVA Management @c Suivi du champ Interface DARVA */
+      /** @r IMH25 @d 17/06/11 @a ISAT.PC @v IMH6.01.018 @s gestion intervention @c Gestion du code de r‚f‚rence g‚o */
+      /** @r IMH24 @d 24/05/11 @a ISAT.ZW @v IMH6.01.018 @s gestion intervention @c creation intervention DPR */
+      /** @r IMH23 @d 19/05/11 @a ISAT.ZW @v IMH6.01.018 @s gestion intervention
+          @c Re Creation intrevention sur les meme descriptif des travaux en s‚lection */
+      /** @r IMH22 @d 14/04/11 @a ISAT.NFO @v IMH6.01.018 @s gestion intervention
+          @c LoadProviderSearchBasket ne pas prendre plusieurs fois la meme spe */
+      /** @r IMH21 @d 05/04/11 @a ISAT.ZW @v IMH6.01.018 @s gestion intervention
+          @c ajout fonction CalcIntervDeductibleAmount + CalcUnsecuredDepreciationAmt + CheckElecFailIntervCreation */
+      /** @r IMH20 @d 30/03/11 @a ISAT.NFO @v IMH6.01.018 @s Gestion Recherche @c Passage du No. de campagne */
+      /** @r IMH19 @d 18/03/11 @a ISAT.ZWO @v IMH6.01.018 @s Gestion GED @c Gestion flux entrant */
+      /** @r IMH19 @d 29/11/11 @a ISAT.NFO @v IMH6.01.018 @s Recherche prestataire
+          @c Nettoyage du buffer de prestataires li‚s */
+      /** @r IMH18 @d 09/03/11 @a ISAT.NFO @v IMH6.01.018 @s Recherche prestataire
+          @c Ajout fonction CreateInterventionFromSearch */
+      /** @r IMH17 @d 02/03/11 @a ISAT.LLT @v IMH6.01.012 @s Gestion de l'intervention
+          @c Pas de recherecher specialit‚ si presta unique */
+      /** @r IMH16 @d 01/03/11 @a ISAT.NFO @v IMH6.01.012 @s Gestion de l'intervention
+          @c Gestion du cas ou la fonction LoadProviderSearchBasket est appel‚ avec un buffer non vide */
+      /** @r IMH15 @d 25/02/11 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention
+          @c Ajout parametres CopyDocumentAttch */
+      /** @r IMH14 @d 25/02/11 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention
+          @c Cr‚er ligne corbeille si prastataire non trouv‚ */
+      /** @r IMH13 @d 17/02/11 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention
+          @c ajouter un message dÉavertissement si le nombre de devis passe … > 1 */
+      /** @r IMH12 @d 15/02/11 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention
+          @c LoadProviderSearchBasket pour UniqueProvider en creation intervention */
+      /** @r IMH11 @d 09/02/11 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention
+          @c CodeUnit 50096 --> codeunit 50097 */
+      /** @r IMH10 @d 27/01/11 @a ISAT.LLT @v IMH6.01.012 @s Gestion de l'intervention
+          @c Enregistrement des spec. de l'intervention */
+      /** @r IMH09 @d 27/01/11 @a ISAT.ST @v IMH6.01.012 @s Gestion de l'intervention
+          @c Test des sp‚cialit‚s et corps de m‚tiers obligatoires */
+      /** @r IMH08 @d 20/01/11 @a ISAT.LLT @v IMH6.01.012 @s Gestion de l'intervention
+          @c Initialisation champs devis
+          @c Correction recherche prestataire (manuel)
+          @c Ajout option choix utilisateur … la recherhe prestataire */
+      /** @r IMH07 @d 20/12/10 @a ISAT.LLT @v IMH6.01.012 @s Gestion de l'intervention @c Duplication fonction (gestion adresse) */
+      /** @r IMH06 @d 15/12/10 @a ISAT.LLT @v IMH6.01.012 @s Gestion de l'intervention @c Autoriser devis sans doc joint */
+      /** @r IMH05 @d 10/12/10 @a ISAT.LLT @v IMH6.01.012 @s Gestion de l'intervention @c Modifs Chargement des sp‚cialit‚s */
+      /** @r IMH04 @d 30/11/10 @a ISAT.LLT @v IMH6.01.012 @s Gestion de l'intervention @c Copie specialit‚s sur ligne intervention */
+      /** @r IMH03 @d 16/11/10 @a ISAT.LLT @v IMH6.01.012 @s Gestion de l'intervention @c Corrections */
+      /** @r IMH02 @d 28/10/10 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention @c creation intervention + recherche Prestataire */
+      /** @r IMH01 @d 13/10/10 @a ISAT.ZW @v IMH6.01.012 @s Gestion de l'intervention @c Cr‚ation objet */
+    }
+    END.
+  }
+}

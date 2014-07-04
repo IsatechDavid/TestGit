@@ -1,0 +1,350 @@
+OBJECT Codeunit 50071 Locking Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=28/11/13;
+    Time=17:26:23;
+    Modified=Yes;
+    Version List=IMH6.01,SUPPORT;
+  }
+  PROPERTIES
+  {
+    TableNo=50096;
+    OnRun=BEGIN
+            // Appel … partir du NAS pour d‚verrouiller les tables en auto (filtre positionn‚)
+            ReleaseWithoutDelay(Rec);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ServiceSetup@1100281000 : Record 5911;
+      ServiceSetupRead@1100281001 : Boolean;
+      Text001@1100281002 : TextConst 'ENU=Service %1 is locked by %2 since %3.;FRA=%1 %2 est verrouill‚ par %3 depuis le %4.';
+      Text002@1100281004 : TextConst 'ENU=Service Header %1 - %2 is locked by %3 since %4;FRA=%1 %2 - %3 est verrouill‚e par %4 depuis le %5.';
+      Text010@1100281006 : TextConst 'ENU=You are not allowed to unlock.;FRA=Vous n''ˆtes pas autoriser … d‚verrouiller.';
+      CallFromRun@1100281007 : Boolean;
+      RecordLock@1100281008 : Record 50096;
+
+    PROCEDURE ReleaseWithDelay@1100281015(VAR pRec@1100281000 : Record 50096);
+    BEGIN
+      // Contr“le du d‚lai
+      pRec.TESTFIELD("Locking Date");
+      IF (CURRENTDATETIME - pRec."Locking Date") < GetLockTimeout(pRec."Table ID") THEN
+        IF NOT IsAdmin(pRec."Table ID") THEN
+          ERROR(Text010);
+
+      ReleaseWithoutDelay(pRec);
+    END;
+
+    LOCAL PROCEDURE ReleaseWithoutDelay@1100281011(VAR pRec@1100281000 : Record 50096);
+    VAR
+      lService@1100281004 : Record 50066;
+      lServiceHeader@1100281003 : Record 5900;
+      lServiceIntervention@1100281002 : Record 50075;
+      lTrayLine@1100281001 : Record 50048;
+    BEGIN
+      IF RecordLock.GET(pRec."Table ID", pRec."Source Code", pRec."Source Integer No.") THEN
+        RecordLock.DELETE;
+    END;
+
+    LOCAL PROCEDURE GetSetup@1100281001();
+    BEGIN
+      IF ServiceSetupRead THEN
+        EXIT;
+      ServiceSetup.GET;
+      ServiceSetupRead := TRUE;
+    END;
+
+    PROCEDURE GetLockTimeout@1100281002(pTableID@1100281000 : Integer) : Integer;
+    VAR
+      lMn@1100281001 : Integer;
+    BEGIN
+      GetSetup;
+      // Param‚trage … pr‚voir : pour l'instant 15min
+      CASE pTableID OF
+        DATABASE::Service : lMn := ServiceSetup."Service Locking Timeout (mn)";
+        DATABASE::"Service Header" : lMn := ServiceSetup."Serv. Hdr. Lock Timeout (mn)";
+        DATABASE::"Service Intervention Line" : lMn := ServiceSetup."Interv. Lock Timeout (mn)";
+        DATABASE::"Service Intervention Quote" : lMn := ServiceSetup."Interv. Quot Lock Timeout(mn)";
+        DATABASE::"Tray Line" : lMn := ServiceSetup."Tray Line Lock Timeout (mn)";
+      END;
+      IF lMn = 0 THEN
+        lMn := 15;
+      EXIT(lMn * 60 * 1000);
+    END;
+
+    LOCAL PROCEDURE SetLock@1100281018(pSourceTable@1100281001 : Integer;VAR pLockingUserID@1100281000 : Text[30];VAR pLockingTime@1100281002 : DateTime;VAR pUpdateRec@1100281003 : Boolean) rValue : Boolean;
+    BEGIN
+      rValue := FALSE;
+      pUpdateRec := FALSE;
+      CASE pLockingUserID OF
+        '' : BEGIN // pas de verrous existant
+          rValue := TRUE;
+          pUpdateRec := TRUE;
+        END;
+        USERID : BEGIN // D‚ja verouill‚ par l'utilisateur
+          rValue := TRUE;
+          // on ne remet pas le temps … jour pour ‚viter les erreurs (un autre utilisateur...)
+        END;
+        ELSE BEGIN
+          IF (CURRENTDATETIME - pLockingTime) > GetLockTimeout(pSourceTable) THEN BEGIN
+            rValue := TRUE;
+            pUpdateRec := TRUE;
+          END;
+        END;
+      END;
+      IF rValue AND pUpdateRec THEN BEGIN
+        pLockingUserID := USERID;
+        pLockingTime := CURRENTDATETIME;
+      END;
+    END;
+
+    LOCAL PROCEDURE ReleaseLock@1100281019(pSourceTable@1100281003 : Integer;VAR pLockingUserID@1100281002 : Text[30];VAR pLockingTime@1100281001 : DateTime;VAR pUpdateRec@1100281000 : Boolean) rValue : Boolean;
+    BEGIN
+      rValue := pLockingUserID IN ['', USERID];
+      IF NOT rValue THEN
+        IF (CURRENTDATETIME - pLockingTime) > GetLockTimeout(pSourceTable) THEN // d‚verrouillage si temps expir‚
+          rValue := TRUE;
+      IF NOT rValue THEN
+        rValue := IsAdmin(pSourceTable);
+      pUpdateRec := FALSE;
+
+      IF rValue THEN
+        IF (pLockingUserID <> '') OR (pLockingTime <> 0DT) THEN BEGIN
+          pLockingUserID := '';
+          pLockingTime := 0DT;
+          pUpdateRec := TRUE;
+        END;
+    END;
+
+    PROCEDURE ServiceCard_GetLock@1100281000(VAR pRec@1100281000 : Record 50066;pShowMessage@1100281001 : Boolean) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      IF pRec."Service No." = '' THEN EXIT(FALSE);
+      EXIT(GetLock(DATABASE::Service, pRec."Service No.", 0, pShowMessage));
+    END;
+
+    PROCEDURE ServiceCard_ReleaseLock@1100281005(VAR pRec@1100281000 : Record 50066) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      IF pRec."Service No." = '' THEN EXIT(FALSE);
+      EXIT(DropLock(DATABASE::Service, pRec."Service No.", 0));
+    END;
+
+    PROCEDURE ServiceHeaderCard_GetLock@1100281003(VAR pRec@1100281000 : Record 5900;pShowMessage@1100281001 : Boolean) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      IF pRec."Service No." = '' THEN EXIT(FALSE);
+      //  IF GetLock(DATABASE::"Service Header", pRec."No.", 0) THEN
+      EXIT(GetLock(DATABASE::Service, pRec."Service No.", 0, pShowMessage));
+    END;
+
+    PROCEDURE ServiceHeaderCard_ReleaseLock@1100281004(VAR pRec@1100281000 : Record 5900) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      IF pRec."Service No." = '' THEN EXIT(FALSE);
+      //  EXIT(DropLock(DATABASE::"Service Header", "No.", 0));
+      EXIT(DropLock(DATABASE::Service, pRec."Service No.", 0));
+    END;
+
+    PROCEDURE TrayLineCard_GetLock@1100281008(VAR pTrayLine@1100281000 : Record 50048;pShowMessage@1100281001 : Boolean) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      //IMH03
+      WITH pTrayLine DO BEGIN
+        IF ("Team Code" = '') OR ("Entry No." = 0) THEN EXIT(FALSE);
+        EXIT(GetLock(DATABASE::"Tray Line", "Team Code", "Entry No.", pShowMessage));
+      END;
+    END;
+
+    PROCEDURE TrayLineCard_ReleaseLock@1100281007(VAR pTrayLine@1100281000 : Record 50048) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      WITH pTrayLine DO BEGIN
+        IF ("Team Code" = '') OR ("Entry No." = 0) THEN EXIT(FALSE);
+        EXIT(DropLock(DATABASE::"Tray Line", "Team Code", "Entry No."));
+      END;
+    END;
+
+    PROCEDURE InterventionCard_GetLock@1100281012(VAR pRec@1100281000 : Record 50075;pShowMessage@1100281001 : Boolean) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      IF (pRec."Service No." = '') OR (pRec."Line No." = 0) THEN EXIT(FALSE);
+      //  IF GetLock(DATABASE::"Service Intervention line", "Service Header No.", "Line NO.") THEN
+      EXIT(GetLock(DATABASE::Service, pRec."Service No.", 0, pShowMessage));
+    END;
+
+    PROCEDURE InterventionCard_ReleaseLock@1100281014(VAR pRec@1100281000 : Record 50075) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      IF (pRec."Service No." = '') OR (pRec."Line No." = 0) THEN EXIT(FALSE);
+      EXIT(DropLock(DATABASE::Service, pRec."Service No.", 0));
+    END;
+
+    PROCEDURE InterventionQuoteCard_GetLock@1100281017(VAR pRec@1100281000 : Record 50076;pShowMessage@1100281001 : Boolean) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      pRec.CALCFIELDS("Service No.");
+      IF (pRec."Service No." = '') OR (pRec."Line No." = 0) THEN EXIT(FALSE);
+      //  IF GetLock(DATABASE::"Service Intervention line", "Service Header No.", "Line NO.") THEN
+      EXIT(GetLock(DATABASE::Service, pRec."Service No.", 0, pShowMessage));
+    END;
+
+    PROCEDURE IntervQuoteCard_ReleaseLock@1100281016(VAR pRec@1100281000 : Record 50076) : Boolean;
+    VAR
+      lUpdateRec@1100281002 : Boolean;
+    BEGIN
+      IF (pRec."Service No." = '') OR (pRec."Line No." = 0) THEN EXIT(FALSE);
+      EXIT(DropLock(DATABASE::Service, pRec."Service No.", 0));
+    END;
+
+    PROCEDURE IsAdmin@1100281009(pSourceTable@1100281000 : Integer) : Boolean;
+    VAR
+      lUserPerm@1100281001 : Codeunit 50093;
+    BEGIN
+      EXIT(lUserPerm.IsLockAdmin(pSourceTable));
+    END;
+
+    LOCAL PROCEDURE GetLock@1100281006(pSourceTable@1100281001 : Integer;pSourceCode@1100281000 : Code[20];pSourceInt@1100281002 : Integer;pShowMsg@1100281003 : Boolean) : Boolean;
+    BEGIN
+      WITH RecordLock DO BEGIN
+        //<<IMH07.PC
+        LOCKTABLE;
+        //>>IMH07.PC
+        IF GET(pSourceTable, pSourceCode, pSourceInt) THEN BEGIN
+          IF "Locking User ID" = USERID THEN BEGIN
+            "Locking Date" := CURRENTDATETIME; // actualisation date verrou
+            "Locking Level" += 1;
+            MODIFY;
+            EXIT(TRUE);
+          END
+          ELSE BEGIN
+            // Contr“le de l'expiration
+            IF (CURRENTDATETIME - "Locking Date") > GetLockTimeout(pSourceTable) THEN BEGIN
+              "Locking Date" := CURRENTDATETIME;
+              "Locking User ID" := USERID;
+              "Locking Level" := 1;
+              MODIFY;
+              EXIT(TRUE);
+            END;
+          END;
+          IF pShowMsg THEN BEGIN
+            IF pSourceInt = 0 THEN
+              MESSAGE(STRSUBSTNO(Text001, GetTableCaption(pSourceTable), pSourceCode, "Locking User ID", "Locking Date"))
+            ELSE
+              MESSAGE(STRSUBSTNO(Text002, GetTableCaption(pSourceTable), pSourceCode, pSourceInt, "Locking User ID", "Locking Date"));
+          END;
+          EXIT(FALSE);
+        END
+        ELSE BEGIN
+          // Cr‚ation du nouveau verrou
+          "Table ID" := pSourceTable;
+          "Source Code" := pSourceCode;
+          "Source Integer No." := pSourceInt;
+          "Locking Date" := CURRENTDATETIME;
+          "Locking User ID" := USERID;
+          "Locking Level" := 1;
+          INSERT(TRUE);
+          EXIT(TRUE);
+        END;
+      END; // WITH
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE DropLock@1100281020(pSourceTable@1100281002 : Integer;pSourceCode@1100281001 : Code[20];pSourceInt@1100281000 : Integer) : Boolean;
+    BEGIN
+      WITH RecordLock DO BEGIN
+        IF GET(pSourceTable, pSourceCode, pSourceInt) THEN BEGIN
+          IF "Locking User ID" = USERID THEN BEGIN
+            "Locking Level" -= 1;
+            IF "Locking Level" < 1 THEN
+              DELETE
+            ELSE
+              MODIFY;
+          END;
+        END;
+      END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE GetTableCaption@1100281013(pTableID@1100281000 : Integer) : Text[1024];
+    VAR
+      lAllObjWithCaption@1100281001 : Record 2000000058;
+    BEGIN
+      IF pTableID = 0 THEN
+        EXIT('');
+      IF lAllObjWithCaption.GET(lAllObjWithCaption."Object Type"::Table, pTableID) THEN
+        EXIT(lAllObjWithCaption."Object Caption");
+    END;
+
+    PROCEDURE ServiceLocked@1100281010(pServiceNo@1100281000 : Code[20];pShowMsg@1100281003 : Boolean) : Boolean;
+    BEGIN
+      //IMH05
+      WITH RecordLock DO BEGIN
+        IF GET(DATABASE::Service, pServiceNo, 0) THEN BEGIN
+          IF "Locking User ID" = USERID THEN BEGIN
+            EXIT(FALSE);
+          END
+          ELSE BEGIN
+            // Contr“le de l'expiration
+            IF (CURRENTDATETIME - "Locking Date") > GetLockTimeout(DATABASE::Service) THEN BEGIN
+              EXIT(FALSE);
+            END;
+          END;
+          IF pShowMsg THEN BEGIN
+            MESSAGE(STRSUBSTNO(Text001, GetTableCaption(DATABASE::Service), pServiceNo, "Locking User ID", "Locking Date"))
+          END;
+          EXIT(TRUE);
+        END;
+      END; // WITH
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE TrayLineLocked@1000000001(pTeamCode@1100281000 : Code[20];pEntryNo@1000000000 : Integer;pShowMsg@1100281003 : Boolean) : Boolean;
+    BEGIN
+      //IMH06
+      WITH RecordLock DO BEGIN
+        IF GET(DATABASE::"Tray Line", pTeamCode, pEntryNo) THEN BEGIN
+          IF "Locking User ID" = USERID THEN BEGIN
+            EXIT(FALSE);
+          END
+          ELSE BEGIN
+            // Contr“le de l'expiration
+            IF (CURRENTDATETIME - "Locking Date") > GetLockTimeout(DATABASE::"Tray Line") THEN BEGIN
+              EXIT(FALSE);
+            END;
+          END;
+          IF pShowMsg THEN BEGIN
+            MESSAGE(STRSUBSTNO(Text001, GetTableCaption(DATABASE::"Tray Line"), pTeamCode, "Locking User ID", "Locking Date"))
+          END;
+          EXIT(TRUE);
+        END;
+      END; // WITH
+      EXIT(FALSE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH07 @d 28/11/13 @a ISAT.PC @v IMH6.01.4838 @s SUPPORT @h 4838 @c gestion du locktable */
+      /** @r IMH06 @d 26/11/13 @a ISAT.ACO @v IMH6.01.4852 @s SUPPORT @h 4852
+          @c Ajout fonction TrayLineLocked */
+      /** @r IMH05 @d 05/01/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c Ajout fonction ServiceLocked */
+      /** @r IMH04 @d 23/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Retour sur verrou : aquisition au service, relache auto */
+      /** @r IMH03 @d 03/01/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Ajout verrou intervention */
+      /** @r IMH02 @d 08/12/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Ajout fonction */
+    }
+    END.
+  }
+}

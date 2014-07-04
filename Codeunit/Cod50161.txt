@@ -1,0 +1,620 @@
+OBJECT Codeunit 50161 Remind process Managment
+{
+  OBJECT-PROPERTIES
+  {
+    Date=04/11/11;
+    Time=17:22:56;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lAttachedFile@1100281000 : Text[250];
+          BEGIN
+            CreateBuffer;
+
+            IF GProviderBuffer.FINDSET THEN
+            REPEAT
+              CreateExcel(GProviderBuffer."No.",lAttachedFile);
+              SendByMail(lAttachedFile,FALSE)
+            UNTIL(GProviderBuffer.NEXT = 0);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      XlApp@1100281011 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024500-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Application";
+      XlWrkBk@1100281010 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";
+      XlWrkSht@1100281009 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020820-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Worksheet";
+      XlPivotTable@1100281008 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";
+      XlPivotCache@1100281007 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002441C-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotCache";
+      XlPivotField@1100281006 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020874-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotField";
+      CurrentRowNo@1100281005 : Integer;
+      HeaderText@1100281004 : ARRAY [6] OF Text[30];
+      HeaderTextToExcel@1100281003 : ARRAY [6] OF Text[30];
+      PivotFieldName@1100281002 : Text[100];
+      HeadingType@1100281001 : 'Date Interval,Number of Days';
+      WDialog@1100281000 : Dialog;
+      Text002@1100281012 : TextConst 'FRA=Vous devez param‚trer un chemin pour l''extraction du fichier';
+      GProviderBuffer@1100281013 : TEMPORARY Record 50000;
+      GServiceInterventionLineBuffer@1100281014 : TEMPORARY Record 50075;
+
+    PROCEDURE CreateBuffer@1100281000();
+    VAR
+      lProviderRec@1100281000 : Record 50000;
+      linterventionLine@1100281001 : Record 50075;
+      lProcessStatusHistory@1100281002 : Record 50047;
+      lProcessStatusHistory2@1100281003 : Record 50047;
+    BEGIN
+      lProcessStatusHistory.RESET;
+      lProcessStatusHistory.SETRANGE("Source Table ID",50075);
+      lProcessStatusHistory.SETRANGE("Change Date",CREATEDATETIME(CALCDATE('<-7D>',TODAY),0T),CREATEDATETIME(TODAY,235900T));
+      lProcessStatusHistory.SETRANGE("Provider Reminder",TRUE);
+      lProcessStatusHistory.SETRANGE("Remind Processed",FALSE);
+      IF lProcessStatusHistory.FINDSET THEN
+      REPEAT
+        IF linterventionLine.GET(lProcessStatusHistory."Source Key Code 1",lProcessStatusHistory."Source Key Integer 1") THEN
+          IF linterventionLine."Process Status No." = lProcessStatusHistory."To Status No." THEN BEGIN
+            IF lProviderRec.GET(linterventionLine."Provider No.") THEN
+              IF NOT lProviderRec.Extranet THEN
+              BEGIN
+                GServiceInterventionLineBuffer := linterventionLine;
+                IF GServiceInterventionLineBuffer.INSERT THEN;
+                GProviderBuffer := lProviderRec;
+                IF GProviderBuffer.INSERT THEN;
+                lProcessStatusHistory2 := lProcessStatusHistory;
+                lProcessStatusHistory2."Remind Processed" := TRUE;
+                lProcessStatusHistory2.MODIFY;
+              END;
+          END ELSE BEGIN
+            lProcessStatusHistory2 := lProcessStatusHistory;
+            lProcessStatusHistory2."Remind Processed" := TRUE;
+            lProcessStatusHistory2.MODIFY;
+          END;
+      UNTIL (lProcessStatusHistory.NEXT = 0);
+    END;
+
+    PROCEDURE CreateExcel@1100281009(pProviderNo@1100281022 : Code[20];VAR pAttachedFile@1100281027 : Text[250]);
+    VAR
+      lText100@1100281010 : TextConst 'ENU=Excel program not found.;FRA=Programme Excel non trouv‚.';
+      lText101@1100281000 : TextConst 'ENU=DatasSource;FRA=DRALL';
+      lText103@1100281024 : TextConst 'FRA=Nø intervention';
+      lText104@1100281020 : TextConst 'FRA=Nom b‚n‚ficiaire';
+      lText105@1100281002 : TextConst 'ENU=Description;FRA=Adresse meo';
+      lText106@1100281003 : TextConst 'ENU=Service No.;FRA=Code postal meo';
+      lText107@1100281004 : TextConst 'ENU=Reference No.;FRA=Ville meo';
+      lText108@1100281005 : TextConst 'ENU=Creation Date;FRA=Nø T‚l‚phone';
+      lText109@1100281006 : TextConst 'ENU=Menber No.;FRA=Nø T‚l‚phone mobile';
+      lText110@1100281007 : TextConst 'ENU=Menber Name;FRA=Statut';
+      lText111@1100281008 : TextConst 'ENU=Member Firstname;FRA=Retard';
+      lStartCounter@1100281001 : Integer;
+      lCounter@1100281011 : Integer;
+      lProcessStatusHistory@1100281009 : Record 50047;
+      lXlFormatType@1100281012 : Integer;
+      lExcelReportSetup@1100281013 : Record 50115;
+    BEGIN
+      // Cr‚ation du fichier Excel
+
+      IF NOT CREATE(XlApp,TRUE,TRUE) THEN BEGIN
+        ERROR(lText100);
+      END;
+
+      IF NOT lExcelReportSetup.GET(lExcelReportSetup."Object Type"::Codeunit,50161,USERID) THEN
+        IF NOT lExcelReportSetup.GET(lExcelReportSetup."Object Type"::Codeunit,50161,'') THEN
+          ERROR(Text002);
+
+      //Cr‚ation de la feuille source de donn‚e du tableau crois‚ dynamique
+      XlApp.Visible := FALSE;
+      XlApp.DisplayAlerts := FALSE;
+      XlWrkBk := XlApp.Workbooks.Open(lExcelReportSetup."Excel Template Path");
+      XlWrkSht := XlWrkBk.Worksheets.Item(lExcelReportSetup."Excel Template Tabs");
+      //XlWrkSht.Name := lText101;
+      //Suppression des feuilles par d‚faut
+      {
+      lStartCounter := XlWrkBk.Worksheets.Count;
+      FOR lCounter := lStartCounter DOWNTO 2 DO BEGIN
+        XlWrkSht := XlWrkBk.Worksheets.Item(lCounter);
+        XlWrkSht.Delete;
+      END;}
+
+      //XlWrkSht := XlWrkBk.Worksheets.Item(1);
+      {XlWrkSht.Range('A1').Value := FORMAT(lText103);
+      XlWrkSht.Range('B1').Value := FORMAT(lText104);
+      XlWrkSht.Range('C1').Value := FORMAT(lText105);
+      XlWrkSht.Range('D1').Value := FORMAT(lText106);
+      XlWrkSht.Range('E1').Value := FORMAT(lText107);
+      XlWrkSht.Range('F1').Value := FORMAT(lText108);
+      XlWrkSht.Range('G1').Value := FORMAT(lText109);
+      XlWrkSht.Range('H1').Value := FORMAT(lText110);
+      }
+      CurrentRowNo := lExcelReportSetup."First Line"-1;
+
+      GServiceInterventionLineBuffer.RESET;
+      GServiceInterventionLineBuffer.SETRANGE("Provider No.",pProviderNo);
+      IF GServiceInterventionLineBuffer.FINDSET THEN
+      REPEAT
+        AddLine(GServiceInterventionLineBuffer);
+      UNTIL (GServiceInterventionLineBuffer.NEXT = 0);
+
+      //XlWrkSht.ExportAsFixedFormat(
+      pAttachedFile := GetDirectory(lExcelReportSetup) + 'RELANCE-' + pProviderNo + '-' +
+                       FORMAT(CURRENTDATETIME,0,'<Day,2><Month,2><Year>') + '.pdf';
+      lXlFormatType:= 0;
+      XlWrkSht.ExportAsFixedFormat(lXlFormatType,pAttachedFile);
+      //pAttachedFile := GetDirectory(lMailSetup) + 'RELANCE-' + pProviderNo + '-' +
+      //                 FORMAT(CURRENTDATETIME,0,'<Day,2><Month,2><Year>') + '.xlsx';
+      //XlWrkBk.SaveCopyAs(pAttachedFile);
+
+      CLEAR(XlWrkSht);
+      XlWrkBk.Close;
+      CLEAR(XlWrkBk);
+      XlApp.Quit;
+      CLEAR(XlApp);
+    END;
+
+    PROCEDURE AddLine@1100281008(pServiceInterventionLine@1100281000 : Record 50075);
+    VAR
+      lService@1100281001 : Record 50066;
+      lServiceInterventionLine@1100281012 : Record 50075;
+      lContact@1100281011 : Record 5050;
+      lProviderAgreement@1100281002 : Record 50012;
+      lFontColor@1100281004 : Integer;
+      lServiceHeader@1100281003 : Record 5900;
+      lProcessStep@1100281005 : Record 50043;
+      lProcessStatusHistory@1100281006 : Record 50047;
+    BEGIN
+      CurrentRowNo += 1;
+      XlWrkSht.Range('A' + FORMAT(CurrentRowNo)).Value := FORMAT(pServiceInterventionLine."Service Header No.");
+      XlWrkSht.Range('B' + FORMAT(CurrentRowNo)).Value := FORMAT(pServiceInterventionLine."Contact Name");
+      XlWrkSht.Range('C' + FORMAT(CurrentRowNo)).Value := FORMAT(pServiceInterventionLine.Address);
+      XlWrkSht.Range('D' + FORMAT(CurrentRowNo)).Value := FORMAT(pServiceInterventionLine."Post Code");
+      XlWrkSht.Range('E' + FORMAT(CurrentRowNo)).Value := FORMAT(pServiceInterventionLine.City);
+      XlWrkSht.Range('F' + FORMAT(CurrentRowNo)).Value := FORMAT(pServiceInterventionLine."Phone No.");
+      pServiceInterventionLine.CALCFIELDS("Mobile Phone No.");
+      XlWrkSht.Range('G' + FORMAT(CurrentRowNo)).Value := FORMAT(pServiceInterventionLine."Mobile Phone No.");
+      //pServiceInterventionLine.CALCFIELDS("Process Status Description");
+      //XlWrkSht.Range('H' + FORMAT(CurrentRowNo)).Value := FORMAT(pServiceInterventionLine."Process Status Description");
+      lProcessStatusHistory.SETRANGE("Source Table ID", DATABASE::"Service Intervention Line");
+      lProcessStatusHistory.SETRANGE("Source Key Code 1", pServiceInterventionLine."Service Header No.");
+      lProcessStatusHistory.SETRANGE("Source Key Integer 1", pServiceInterventionLine."Line No.");
+      IF lProcessStatusHistory.FINDLAST THEN BEGIN
+        lProcessStep.SETCURRENTKEY("Process Code","Previous Status",Active,Priority,"Auto Process Step");
+        lProcessStep.SETRANGE("Process Code", lProcessStatusHistory."From Process Code");
+        lProcessStep.SETRANGE("Previous Status", lProcessStatusHistory."From Status No.");
+        lProcessStep.SETRANGE("Next Process Code", lProcessStatusHistory."To Process Code");
+        lProcessStep.SETRANGE("Next Status", lProcessStatusHistory."To Status No.");
+        //lProcessStep.setrange(Active, true);
+        IF lProcessStep.FINDLAST THEN
+          XlWrkSht.Range('H' + FORMAT(CurrentRowNo)).Value := FORMAT(lProcessStep.Description);
+      END;
+
+    END;
+
+    PROCEDURE GetEOL@1100281013() Result : Text[2];
+    BEGIN
+      Result[1] := 13;
+      Result[2] := 10;
+    END;
+
+    PROCEDURE GetDirectory@1100281004(VAR MailNotificationSetup@1100281000 : Record 50115) rValue : Text[1024];
+    BEGIN
+      rValue := '';
+
+      WITH MailNotificationSetup DO BEGIN
+        CASE "First Part of Path" OF
+          "First Part of Path"::"Define in Notification Setup" : BEGIN
+            rValue :=
+              "Attachment Path";
+            CASE "Second Part of Path" OF
+              "Second Part of Path"::User : rValue += USERID + '\';
+              "Second Part of Path"::"Responsibility Center" : ;
+            END;
+          END;
+          "First Part of Path"::"Define in Responsibility Center" : BEGIN
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE SendByMail@1100281010(VAR pAttachedFile@1100281000 : Text[250];pOpenMail@1100281004 : Boolean);
+    VAR
+      Mail@1100281003 : Codeunit 397;
+      lComanyInfo@1100281002 : Record 79;
+      lDatabaseType@1100281001 : Record 50159;
+      lExcelReportSetup@1100281005 : Record 50115;
+    BEGIN
+      lComanyInfo.GET;
+      IF lDatabaseType.GET(lComanyInfo."Database Type") THEN
+        IF (lDatabaseType."E-Mail" <> '') THEN
+          GProviderBuffer."E-Mail" := lDatabaseType."E-Mail";
+      IF NOT lExcelReportSetup.GET(lExcelReportSetup."Object Type"::Codeunit,50161,USERID) THEN
+        IF NOT lExcelReportSetup.GET(lExcelReportSetup."Object Type"::Codeunit,50161,'') THEN
+          ERROR(Text002);
+
+      Mail.NewMessage(
+        GProviderBuffer."E-Mail",
+        '',
+        lExcelReportSetup."Mail Subject",
+        lExcelReportSetup."Mail Body",
+        pAttachedFile,
+        pOpenMail);
+    END;
+
+    EVENT XlWrkSht@1100281009::SelectionChange@1543(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::BeforeDoubleClick@1537(Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::BeforeRightClick@1534(Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::Activate@304();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::Deactivate@1530();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::Calculate@279();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::Change@1545(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::FollowHyperlink@1470(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::PivotTableUpdate@2156(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::PivotTableAfterValueChange@2886(TargetPivotTable@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::PivotTableBeforeAllocateChanges@2889(TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::PivotTableBeforeCommitChanges@2892(TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::PivotTableBeforeDiscardChanges@2893(TargetPivotTable@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281001 : Integer;ValueChangeEnd@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1100281009::PivotTableChangeSync@2894(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::Open@1923();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::Activate@304();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::Deactivate@1530();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::BeforeClose@1546(VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::BeforeSave@1547(SaveAsUI@1100281001 : Boolean;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::BeforePrint@1549(VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::NewSheet@1550(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::AddinInstall@1552();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::AddinUninstall@1553();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::WindowResize@1554(Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::WindowActivate@1556(Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::WindowDeactivate@1557(Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetSelectionChange@1558(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetBeforeDoubleClick@1559(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetBeforeRightClick@1560(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetActivate@1561(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetDeactivate@1562(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetCalculate@1563(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetChange@1564(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetFollowHyperlink@1854(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetPivotTableUpdate@2157(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::PivotTableCloseConnection@2158(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::PivotTableOpenConnection@2159(Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::Sync@2266(SyncEventType@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::BeforeXmlImport@2283(Map@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281002 : Text[1024];IsRefresh@1100281001 : Boolean;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::AfterXmlImport@2285(Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";IsRefresh@1100281001 : Boolean;Result@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::BeforeXmlExport@2287(Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281001 : Text[1024];VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::AfterXmlExport@2288(Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281001 : Text[1024];Result@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::RowsetComplete@2610(Description@1100281002 : Text[1024];Sheet@1100281001 : Text[1024];Success@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetPivotTableAfterValueChange@2895(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetPivotTableBeforeAllocateChanges@2896(Sh@1100281004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetPivotTableBeforeCommitChanges@2897(Sh@1100281004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetPivotTableBeforeDiscardChanges@2898(Sh@1100281003 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281001 : Integer;ValueChangeEnd@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::SheetPivotTableChangeSync@2899(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::AfterSave@2900(Success@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1100281010::NewChart@2901(Ch@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020821-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Chart");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::NewWorkbook@1565(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetSelectionChange@1558(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetBeforeDoubleClick@1559(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetBeforeRightClick@1560(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetActivate@1561(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetDeactivate@1562(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetCalculate@1563(Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetChange@1564(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookOpen@1567(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookActivate@1568(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookDeactivate@1569(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookBeforeClose@1570(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookBeforeSave@1571(Wb@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";SaveAsUI@1100281001 : Boolean;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookBeforePrint@1572(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookNewSheet@1573(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Sh@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookAddinInstall@1574(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookAddinUninstall@1575(Wb@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WindowResize@1554(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WindowActivate@1556(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WindowDeactivate@1557(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetFollowHyperlink@1854(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetPivotTableUpdate@2157(Sh@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookPivotTableCloseConnection@2160(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookPivotTableOpenConnection@2161(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Target@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookSync@2289(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";SyncEventType@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookBeforeXmlImport@2290(Wb@1100281004 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281002 : Text[1024];IsRefresh@1100281001 : Boolean;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookAfterXmlImport@2291(Wb@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";IsRefresh@1100281001 : Boolean;Result@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookBeforeXmlExport@2292(Wb@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281001 : Text[1024];VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookAfterXmlExport@2293(Wb@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1100281001 : Text[1024];Result@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookRowsetComplete@2611(Wb@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Description@1100281002 : Text[1024];Sheet@1100281001 : Text[1024];Success@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::AfterCalculate@2612();
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetPivotTableAfterValueChange@2895(Sh@1100281002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetPivotTableBeforeAllocateChanges@2896(Sh@1100281004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetPivotTableBeforeCommitChanges@2897(Sh@1100281004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281002 : Integer;ValueChangeEnd@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::SheetPivotTableBeforeDiscardChanges@2898(Sh@1100281003 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1100281001 : Integer;ValueChangeEnd@1100281000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::ProtectedViewWindowOpen@2903(Pvw@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::ProtectedViewWindowBeforeEdit@2905(Pvw@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::ProtectedViewWindowBeforeClose@2906(Pvw@1100281002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow";Reason@1100281001 : Integer;VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::ProtectedViewWindowResize@2908(Pvw@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::ProtectedViewWindowActivate@2909(Pvw@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::ProtectedViewWindowDeactivate@2910(Pvw@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookAfterSave@2911(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Success@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1100281011::WorkbookNewChart@2912(Wb@1100281001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Ch@1100281000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020821-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Chart");
+    BEGIN
+    END;
+
+    BEGIN
+    END.
+  }
+}

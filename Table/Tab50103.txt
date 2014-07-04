@@ -1,0 +1,438 @@
+OBJECT Table 50103 Service Header Voucher
+{
+  OBJECT-PROPERTIES
+  {
+    Date=03/08/12;
+    Time=15:50:07;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnInsert=BEGIN
+               IF "Line No." = 0 THEN
+                 GetNextLineNo;
+               TouchRecord(TRUE);
+
+               IF NOT ServHeader.GET(ServHeader."Document Type"::Invoice, "Service Header No.") THEN
+                 CLEAR(ServHeader);
+               IF ("Reimbursement Contact No." = '') THEN
+                 VALIDATE("Reimbursement Contact No.",ServHeader."Contact No.");
+             END;
+
+    OnModify=BEGIN
+               TouchRecord(FALSE);
+               AutoStepServHeader; //IMH03.ST
+             END;
+
+    OnDelete=BEGIN
+               TESTFIELD("Last Purch. Invoice No.", ''); //IMH07.ST
+             END;
+
+    CaptionML=[ENU=Service Header Voucher;
+               FRA=Ligne produit justificatif];
+    LookupFormID=Form50040;
+    DrillDownFormID=Form50040;
+  }
+  FIELDS
+  {
+    { 1   ;   ;Service Header No.  ;Code20        ;OnValidate=BEGIN
+                                                                IF NOT ServHeader.GET(ServHeader."Document Type"::Invoice, "Service Header No.") THEN
+                                                                  CLEAR(ServHeader);
+                                                                IF "Service No." <> ServHeader."Service No." THEN
+                                                                  VALIDATE("Service No.", ServHeader."Service No.");
+                                                              END;
+
+                                                   CaptionML=[ENU=Service Header No.;
+                                                              FRA=Nø ligne produit] }
+    { 2   ;   ;Line No.            ;Integer       ;CaptionML=[ENU=Line No.;
+                                                              FRA=Nø ligne] }
+    { 10  ;   ;Service No.         ;Code20        ;TableRelation=Service;
+                                                   CaptionML=[ENU=Service No.;
+                                                              FRA=Nø service] }
+    { 20  ;   ;Reimbursement Receipt Date;Date    ;OnValidate=BEGIN
+                                                                IF ("Reimbursement Receipt Date" <> 0D) AND
+                                                                   ("Original Return Expectation") THEN
+                                                                  "Original Return Expectation" := FALSE;
+                                                              END;
+
+                                                   CaptionML=[ENU=Reimbursement Receipt Date;
+                                                              FRA=Date r‚ception de l'original] }
+    { 21  ;   ;Amount To Pay Incl. VAT;Decimal    ;OnValidate=BEGIN
+                                                                CalcAmount(TRUE);
+                                                              END;
+
+                                                   CaptionML=[ENU=Reimbursement Amount;
+                                                              FRA=Montant TTC];
+                                                   BlankZero=Yes }
+    { 22  ;   ;Contact Reimbursement;Boolean      ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Vendor Ledger Entry" WHERE (Service No.=FIELD(Service No.),
+                                                                                                  Service Header No.=FIELD(Service Header No.),
+                                                                                                  Service Header Voucher No.=FIELD(Line No.),
+                                                                                                  Document Type=CONST(Invoice),
+                                                                                                  Open=CONST(No)));
+                                                   CaptionML=[ENU=Contact Reimbursement;
+                                                              FRA=Remboursement effectu‚ au b‚n‚ficiaire];
+                                                   Editable=No }
+    { 23  ;   ;Reimbursement Contact No.;Code20   ;TableRelation=Contact.No. WHERE (Service Contact=FILTER(Beneficiary));
+                                                   OnValidate=BEGIN
+                                                                //<<IMH05.ISAT.EBA
+                                                                TESTFIELD(Post,FALSE);
+                                                                //>>IMH05.ISAT.EBA
+                                                              END;
+
+                                                   CaptionML=[ENU=Reimbursement Contact No.;
+                                                              FRA=Nø contact remboursement] }
+    { 24  ;   ;Reimbursement Refusal Cause;Option ;CaptionML=[ENU=Reimbursement Refusal Cause;
+                                                              FRA=Motif refus remboursement];
+                                                   OptionCaptionML=[ENU=" ,No Original Invoice,Support Not Provided,Voucher older than 2 years,Transfer To IMA";
+                                                                    FRA=" ,Pas de facture originale,Prise en charge non pr‚vue IMH,Autre,Justificatif sup‚rieur … 2 ans,Transmis … IMA"];
+                                                   OptionString=[ ,NoOriginalInvoice,SupportNotProvided,VoucherOlder,TransferToIMA] }
+    { 25  ;   ;Original Return Expectation;Boolean;CaptionML=[ENU=Original Return Expectation;
+                                                              FRA=Attente retour original] }
+    { 26  ;   ;Amount To Pay Excl. VAT;Decimal    ;OnValidate=BEGIN
+                                                                CalcAmount(FALSE);
+                                                              END;
+
+                                                   CaptionML=[ENU=Reimbursement Amount;
+                                                              FRA=Montant HT];
+                                                   BlankZero=Yes }
+    { 27  ;   ;VAT %               ;Decimal       ;OnValidate=BEGIN
+                                                                CalcAmount(FALSE);
+                                                              END;
+
+                                                   CaptionML=[ENU=VAT;
+                                                              FRA=% TVA];
+                                                   BlankZero=Yes }
+    { 28  ;   ;VAT Prod. Posting Group;Code10     ;TableRelation="VAT Product Posting Group";
+                                                   OnValidate=VAR
+                                                                lVATPostingSetup@1100281000 : Record 325;
+                                                              BEGIN
+                                                                //<<IMH15.isat.PC
+                                                                ServiceMgtSetup.GET;
+                                                                IF ("VAT Bus. Posting Group" ='') THEN
+                                                                  "VAT Bus. Posting Group" := ServiceMgtSetup."VAT Bus. Posting Group Default";
+
+                                                                "VAT %" := 0;
+                                                                IF lVATPostingSetup.GET("VAT Bus. Posting Group","VAT Prod. Posting Group") THEN
+                                                                  "VAT %" := lVATPostingSetup."VAT %";
+                                                                CalcAmount(FALSE);
+                                                              END;
+
+                                                   CaptionML=[ENU=VAT Prod. Posting Group;
+                                                              FRA=Taux TVA] }
+    { 29  ;   ;VAT Bus. Posting Group;Code10      ;TableRelation="VAT Business Posting Group";
+                                                   CaptionML=[ENU=VAT Bus. Posting Group;
+                                                              FRA=Groupe compta. march‚ TVA] }
+    { 100 ;   ;Post                ;Boolean       ;OnValidate=VAR
+                                                                lContact@1000000000 : Record 5050;
+                                                                lVendorNo@1000000001 : Code[20];
+                                                                lPurchInvMgt@1000000002 : Codeunit 50080;
+                                                              BEGIN
+                                                                //<<IMH07.ST
+                                                                IF NOT Post THEN BEGIN
+                                                                  IF "Last Purch. Invoice Type" = "Last Purch. Invoice Type"::PostedInvoice THEN
+                                                                    TESTFIELD("Last Purch. Invoice No.", '');
+                                                                END;
+                                                                //>>IMH07.ST
+                                                                //<<IMH05.ISAT.EBA
+                                                                //IF xRec.Post AND (NOT Post) THEN BEGIN
+                                                                //  Post := TRUE;
+                                                                //  EXIT;
+                                                                //END;
+
+                                                                IF Post THEN BEGIN
+                                                                //<<IMH08.ST
+                                                                  IF "Reimbursement Contact No." = '' THEN
+                                                                    FIELDERROR("Reimbursement Contact No.");
+                                                                  lContact.GET("Reimbursement Contact No.");
+                                                                  IF NOT lContact.GetVendor(lVendorNo) THEN BEGIN
+                                                                    lPurchInvMgt.CreateBeneficiaryVendor(lContact."No.", lVendorNo);
+                                                                  END;
+                                                                //>>IMH08.ST
+                                                                  CreateReceipt;
+                                                                  MODIFY;
+                                                                END;
+                                                                //>>IMH05.ISAT.EBA
+                                                              END;
+
+                                                   CaptionML=[ENU=Post;
+                                                              FRA=Valider] }
+    { 200 ;   ;Reimbursement Contact Name;Text50  ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Name WHERE (No.=FIELD(Reimbursement Contact No.)));
+                                                   CaptionML=[ENU=Reimbursement Contact Name;
+                                                              FRA=Nom contact remboursement];
+                                                   Editable=No }
+    { 201 ;   ;Reimbursement Cont. Address;Text50 ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Name WHERE (No.=FIELD(Reimbursement Contact No.)));
+                                                   CaptionML=[ENU=Reimbursement Cont. Address;
+                                                              FRA=Adresse contact remboursement];
+                                                   Editable=No }
+    { 202 ;   ;Reimbursement Cont. Address 2;Text50;
+                                                   FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Address 2" WHERE (No.=FIELD(Reimbursement Contact No.)));
+                                                   CaptionML=FRA=Adresse 2 contact remboursement;
+                                                   Editable=No }
+    { 203 ;   ;Reimbursement Cont. Post Code;Code20;
+                                                   FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Post Code" WHERE (No.=FIELD(Reimbursement Contact No.)));
+                                                   CaptionML=[ENU=Reimbursement Cont. Post Code;
+                                                              FRA=Code postal contact remboursement];
+                                                   Editable=No }
+    { 204 ;   ;Reimbursement Cont. City;Text30    ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Name WHERE (No.=FIELD(Reimbursement Contact No.)));
+                                                   CaptionML=[ENU=Reimbursement Cont. City;
+                                                              FRA=Ville contact remboursement];
+                                                   Editable=No }
+    { 50210;  ;Last Purch. Invoice Type;Option    ;CaptionML=[ENU=Last Invoice Type;
+                                                              FRA=Type derniŠre facture];
+                                                   OptionCaptionML=[ENU=" ,Invoice,PostedInvoice";
+                                                                    FRA=" ,Facture,Facture enregistr‚e"];
+                                                   OptionString=[ ,Invoice,PostedInvoice];
+                                                   Editable=No }
+    { 50211;  ;Last Purch. Invoice No.;Code20     ;TableRelation=IF (Last Purch. Invoice Type=CONST(Invoice)) "Purchase Header".No. WHERE (Document Type=CONST(Invoice))
+                                                                 ELSE IF (Last Purch. Invoice Type=CONST(PostedInvoice)) "Purch. Inv. Header".No.;
+                                                   OnLookup=VAR
+                                                              lPurchInvMgt@1000000000 : Codeunit 50080;
+                                                            BEGIN
+                                                              lPurchInvMgt.ShowInvoiceDoc("Last Purch. Invoice Type", "Last Purch. Invoice No.");
+                                                            END;
+
+                                                   CaptionML=[ENU=Last Invoice No.;
+                                                              FRA=Dernier nø facture];
+                                                   Editable=No }
+    { 50500;  ;Creation Date       ;DateTime      ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date de cr‚ation];
+                                                   Editable=No }
+    { 50501;  ;Creation User ID    ;Text30        ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Creation User ID;
+                                                              FRA=Utilisateur cr‚ation];
+                                                   Editable=No }
+    { 50502;  ;Last Modification Date;DateTime    ;CaptionML=[ENU=Last Modification Date;
+                                                              FRA=Date derniŠre modification];
+                                                   Editable=No }
+    { 50503;  ;Last Modification User ID;Text30   ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Last Modification User ID;
+                                                              FRA=Utilisateur derniŠre modification];
+                                                   Editable=No }
+    { 50504;  ;Date du remboursement;Date         ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Vendor Ledger Entry"."Document Date" WHERE (Service No.=FIELD(Service No.))) }
+    { 50505;  ;Accounting Date     ;Date          ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Cust. Ledger Entry"."Posting Date" WHERE (Service No.=FIELD(Service No.)));
+                                                   Description=Date de Comptabilisation }
+  }
+  KEYS
+  {
+    {    ;Service Header No.,Line No.             ;Clustered=Yes }
+    {    ;Service No.,Line No.                     }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      ServiceMgtSetup@1100281000 : Record 5911;
+      ServHeader@1100281001 : Record 5900;
+      Text001@1100281002 : TextConst 'ENU=You can'' modify %1 because an invoice has been reconciled.;FRA=Vous ne pouvez pas modifier %1 car une facture a ‚t‚ rapproch‚e.';
+      Text002@1100281003 : TextConst 'ENU=You can'' modify %1 because an invoice has been posted.;FRA=Vous ne pouvez pas modifier %1 car une facture a ‚t‚ valid‚e.';
+
+    PROCEDURE TouchRecord@1100281006(pInsert@1100281000 : Boolean);
+    BEGIN
+      IF pInsert THEN BEGIN
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+      END;
+      "Last Modification Date" := CURRENTDATETIME;
+      "Last Modification User ID" := USERID;
+    END;
+
+    PROCEDURE GetNextLineNo@1100281002();
+    VAR
+      lServiceHeaderVoucher@1100281000 : Record 50103;
+    BEGIN
+      lServiceHeaderVoucher.LOCKTABLE(TRUE);
+      lServiceHeaderVoucher.SETRANGE("Service Header No.","Service Header No.");
+      IF lServiceHeaderVoucher.ISEMPTY THEN BEGIN
+        "Line No." := 10000;
+        EXIT;
+      END;
+
+      lServiceHeaderVoucher.FINDLAST;
+      "Line No." := lServiceHeaderVoucher."Line No." + 10000;
+    END;
+
+    PROCEDURE CalcAmount@1100281013(pFromInclVAT@1100281001 : Boolean);
+    VAR
+      lVAT@1100281000 : Decimal;
+      lText001@1100281002 : TextConst 'ENU=The %1 field must be a decimal;FRA=Le champ %1 doit ˆtre de type d‚cimal';
+    BEGIN
+      //<<IMH05.ISAT.EBA
+      TESTFIELD(Post,FALSE);
+      //>>IMH05.ISAT.EBA
+
+      //IMH19.ST
+      //{
+      IF pFromInclVAT THEN BEGIN
+        IF "Amount To Pay Incl. VAT" <> 0 THEN BEGIN
+          "Amount To Pay Excl. VAT" := "Amount To Pay Incl. VAT" / (1 + ("VAT %" / 100));
+        END;
+      END ELSE BEGIN
+        IF "Amount To Pay Excl. VAT" <> 0 THEN BEGIN
+          "Amount To Pay Incl. VAT" := "Amount To Pay Excl. VAT" * (1+ ("VAT %"/100));
+        END;
+      END;
+      //}
+
+      //<<IMH05.ISAT.EBA
+      //CreateReceipt;
+      //>>IMH05.ISAT.EBA
+    END;
+
+    PROCEDURE CreateReceipt@1100281005();
+    VAR
+      lPurchaseInvoicingMgt@1100281000 : Codeunit 50080;
+      lServiceInterventionLine@1100281001 : Record 50075;
+    BEGIN
+      //<<IMH05.ISAT.EBA
+      //IF (("VAT Prod. Posting Group" <> '') AND
+      //    ("VAT Bus. Posting Group" <> '') AND
+      //    ("Amount To Pay Incl. VAT" <> 0) AND
+      //    ("Amount To Pay Excl. VAT" <> 0)) THEN BEGIN
+      //  lPurchaseInvoicingMgt.CreateOrderFromVoucher(Rec);
+      //  lPurchaseInvoicingMgt.ReceiptPurchaseVoucher("Service No.","Service Header No.","Line No.");
+      //END;
+      EXIT; // D‚sactiv‚ ST 27/03/2012
+      TESTFIELD("VAT Prod. Posting Group");
+      TESTFIELD("VAT Bus. Posting Group");
+      TESTFIELD("Amount To Pay Incl. VAT");
+      TESTFIELD("Amount To Pay Excl. VAT");
+
+      lPurchaseInvoicingMgt.CreateOrderFromVoucher(Rec);
+      lPurchaseInvoicingMgt.ReceiptPurchaseVoucher("Service No.","Service Header No.","Line No.");
+      //>>IMH05.ISAT.EBA
+    END;
+
+    PROCEDURE AutoStepServHeader@1100281000();
+    BEGIN
+      //<<IMH03.ST
+      IF ServHeader.GET(ServHeader."Document Type"::Invoice, "Service Header No.") THEN
+        IF ServHeader.AutoStep THEN
+          ServHeader.MODIFY(TRUE);
+      //>>IMH03.ST
+    END;
+
+    PROCEDURE GetPaymentAddr@1100281001(pAutoUpdate@1100281006 : Boolean;pAutoCreate@1100281000 : Boolean) : Code[20];
+    VAR
+      lAppMgt@1100281009 : Codeunit 1;
+      lService@1100281001 : Record 50066;
+      lContact@1100281002 : Record 5050;
+      lVendor@1100281003 : Record 23;
+      lPayAddr@1100281004 : Record 10870;
+      lCode@1100281005 : Code[10];
+      lRecref@1100281007 : RecordRef;
+      lxRecRef@1100281008 : RecordRef;
+    BEGIN
+      //IMH06.ST
+      lService.GET("Service No.");
+      IF "Reimbursement Contact No." <> lService."Contact No." THEN
+        EXIT('');
+
+      IF NOT lContact.GET("Reimbursement Contact No.") THEN
+        EXIT;
+      IF NOT lContact.GetVendor(lVendor."No.") THEN
+        EXIT;
+      IF NOT lVendor.GET(lVendor."No.") THEN
+        EXIT;
+
+      IF (lVendor.Name = lService."Contact Name") AND
+         (lVendor.Address = lService.Address) AND
+         (lVendor."Address 2" = lService."Address 2") AND
+         (lVendor."Address 3" = lService."Address 3") AND
+         (lVendor."Post Code" = lService."Post Code") AND
+         (lVendor.City = lService.City) AND
+         (lVendor.County = lService.County) AND
+         (lVendor."Country/Region Code" = lService."Country/Region Code") THEN
+        EXIT;
+
+      IF STRLEN(lService."Service No.") <= 10 THEN
+        lCode := lService."Service No."
+      ELSE
+        lCode := COPYSTR(lService."Service No.", STRLEN(lService."Service No.") - 9, 10);
+
+      IF lPayAddr.GET(lPayAddr."Account Type"::Vendor, lVendor."No.", lCode) THEN BEGIN
+        IF pAutoUpdate THEN BEGIN
+          IF (lPayAddr.Name <> lService."Contact Name") OR
+             (lPayAddr.Address <> lService.Address) OR
+             (lPayAddr."Address 2" <> lService."Address 2") OR
+             (lPayAddr."Address 3" <> lService."Address 3") OR
+             (lPayAddr."Post Code" <> lService."Post Code") OR
+             (lPayAddr.City <> lService.City) OR
+             (lPayAddr."Country/Region Code" <> lService."Country/Region Code") OR
+             (lPayAddr.County <> lService.County)
+          THEN BEGIN
+            lxRecRef.GETTABLE(lPayAddr);
+            lPayAddr.Name := lService."Contact Name";
+            lPayAddr.Address := lService.Address;
+            lPayAddr."Address 2" := lService."Address 2";
+            lPayAddr."Address 3" := lService."Address 3";
+            lPayAddr."Post Code" := lService."Post Code";
+            lPayAddr.City := lService.City;
+            lPayAddr."Country/Region Code" := lService."Country/Region Code";
+            lPayAddr.County := lService.County;
+            lPayAddr.MODIFY(TRUE);
+            lRecref.GETTABLE(lPayAddr);
+            lAppMgt.OnGlobalModify(lRecref, lxRecRef);
+          END;
+        END;
+        EXIT(lCode);
+      END;
+      IF NOT pAutoCreate THEN
+        EXIT('');
+      lPayAddr."Account Type" := lPayAddr."Account Type"::Vendor;
+      lPayAddr."Account No." := lVendor."No.";
+      lPayAddr.Code := lCode;
+      lPayAddr.Name := lService."Contact Name";
+      lPayAddr.Address := lService.Address;
+      lPayAddr."Address 2" := lService."Address 2";
+      lPayAddr."Address 3" := lService."Address 3";
+      lPayAddr."Post Code" := lService."Post Code";
+      lPayAddr.City := lService.City;
+      lPayAddr."Country/Region Code" := lService."Country/Region Code";
+      lPayAddr.County := lService.County;
+      lPayAddr.INSERT(TRUE);
+      lRecref.GETTABLE(lPayAddr);
+      lAppMgt.OnGlobalInsert(lRecref);
+    END;
+
+    PROCEDURE TestInvoice@1000000000(pFieldCaption@1000000000 : Text[250]);
+    BEGIN
+      //IMH20.ST
+      CASE "Last Purch. Invoice Type" OF
+        "Last Purch. Invoice Type"::" " : EXIT;
+        "Last Purch. Invoice Type"::Invoice : ERROR(Text001, pFieldCaption);
+        "Last Purch. Invoice Type"::PostedInvoice : ERROR(Text002, pFieldCaption);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH08 @d 28/03/12 @a ISAT.ST @v IMH6.01.146 @s Refonte facturation @c Cr‚ation fournisseur */
+      /** @r IMH07 @d 28/02/12 @a ISAT.ST @v IMH6.01.146 @s Refonte facturation
+          @c Ajout des champs 50210 Last Purch. Invoice Type, 50211 Last Purch. Invoice No. */
+      /** @r IMH06 @d 25/02/12 @a ISAT.ST @v IMH6.01.146 @s Comptabilit‚ @c Adresse de rŠglement Ajout GetPaymentAddr */
+      /** @r IMH05 @d 27/10/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service
+          @c Ajout champ 100  Post */
+      /** @r IMH04 @d 26/10/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service
+          @c Modification du champ "Contact Reimbursement" en FlowField */
+      /** @r IMH03 @d 25/10/11 @a ISAT.ST @v IMH6.01.102 @s Gestion du service @c Ajout AutoStep ServiceHeader */
+      /** @r IMH02 @d 29/08/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Calcul montant TVA */
+      /** @r IMH01 @d 23/02/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Cr‚ation */
+    }
+    END.
+  }
+}

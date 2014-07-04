@@ -1,0 +1,550 @@
+OBJECT Codeunit 50284 Provider Search Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=26/05/14;
+    Time=11:14:07;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.P011;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      FirstProvSearch@1100281001 : Codeunit 50000;
+      SecondProvSearch@1100281002 : Codeunit 50285;
+      UserSetup@1100281000 : Record 91;
+      ProviderSetup@1000000000 : Record 50011;
+      ProvSecSearchSetup@1000000002 : Record 50133;
+      GetProviderSetupOK@1000000001 : Boolean;
+      ProvSecSearchSetupOK@1000000003 : Boolean;
+      GetUserSetupOK@1100281003 : Boolean;
+
+    PROCEDURE Search@1100281003(VAR pServiceInterventionLine@1100281002 : Record 50075;VAR pProviderSearchBasket@1100281001 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281000 : Record 5051) : Boolean;
+    BEGIN
+      GetUserSetup;
+      CASE UserSetup."Search Engine" OF
+        UserSetup."Search Engine"::First : BEGIN
+          CLEAR(FirstProvSearch);
+          EXIT(FirstProvSearch.Search(pServiceInterventionLine, pProviderSearchBasket, pContactAltAddress));
+        END;
+        UserSetup."Search Engine"::Second : BEGIN
+          CLEAR(SecondProvSearch);
+          EXIT(SecondProvSearch.Search(pServiceInterventionLine, pProviderSearchBasket, pContactAltAddress));
+        END;
+      END;
+    END;
+
+    PROCEDURE SearchResult@1100281004(VAR pServiceInterventionLine@1100281003 : Record 50075;VAR pProviderSearchBasket@1100281002 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281001 : Record 5051;VAR pPSRBuffer@1100281000 : TEMPORARY Record 51000) : Boolean;
+    VAR
+      lProvSecondSearchBuffer@1100281004 : TEMPORARY Record 51006;
+    BEGIN
+      GetUserSetup;
+      CASE UserSetup."Search Engine" OF
+        UserSetup."Search Engine"::First : BEGIN
+          CLEAR(FirstProvSearch);
+          EXIT(FirstProvSearch.SearchResult(pServiceInterventionLine, pProviderSearchBasket, pContactAltAddress, pPSRBuffer));
+        END;
+        UserSetup."Search Engine"::Second : BEGIN
+          CLEAR(SecondProvSearch);
+          IF SecondProvSearch.SearchResult(pServiceInterventionLine, pProviderSearchBasket,
+                  pContactAltAddress, lProvSecondSearchBuffer) THEN BEGIN
+            LoadPSRBuffer(pPSRBuffer, lProvSecondSearchBuffer);
+            EXIT(TRUE);
+          END;
+        END;
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE SearchProvPressent@1100281009(VAR pProvider@1100281004 : Record 50000;VAR pServiceInterventionLine@1100281002 : Record 50075;VAR pProviderSearchBasket@1100281001 : TEMPORARY Record 51002;VAR pContactAltAddress@1100281000 : Record 5051;pSpecialityFilter@1100281005 : Text[1024]) rValue : Boolean;
+    VAR
+      lPSRBuffer@1100281003 : TEMPORARY Record 51000;
+      lProvSecondSearchBuffer@1100281006 : TEMPORARY Record 51006;
+    BEGIN
+      GetUserSetup;
+      CASE UserSetup."Search Engine" OF
+        UserSetup."Search Engine"::First : BEGIN
+          CLEAR(FirstProvSearch);
+          rValue := FirstProvSearch.SearchProvPressent(pProvider, pServiceInterventionLine,
+                      pProviderSearchBasket, pContactAltAddress, pSpecialityFilter);
+        END;
+        UserSetup."Search Engine"::Second : BEGIN
+          CLEAR(SecondProvSearch);
+          rValue := SecondProvSearch.SearchProvPressent(pProvider, pServiceInterventionLine,
+                      pProviderSearchBasket, pContactAltAddress, pSpecialityFilter);
+        END;
+      END;
+    END;
+
+    PROCEDURE LoadPSRBuffer@1100281022(VAR pPSRBuffer@1100281000 : TEMPORARY Record 51000;VAR pProvSecondSearchBuffer@1100281001 : TEMPORARY Record 51006);
+    BEGIN
+      IF pProvSecondSearchBuffer.FINDSET THEN
+        REPEAT
+          pPSRBuffer."Provider No." := pProvSecondSearchBuffer."Provider No.";
+          pPSRBuffer.Refused := pProvSecondSearchBuffer.Refused;
+          pPSRBuffer."Non-Accept. Reason Code" := pProvSecondSearchBuffer."Non-Accept. Reason Code";
+          pPSRBuffer."Specializations Nb." := pProvSecondSearchBuffer."Specialization Nb";
+          pPSRBuffer."Specialization List" := pProvSecondSearchBuffer."Specialization Filter";
+          pPSRBuffer.Comments := pProvSecondSearchBuffer."Non-Accept. Comments";
+          pPSRBuffer.Distance := pProvSecondSearchBuffer.Distance;
+          pPSRBuffer."Service Header No." := pProvSecondSearchBuffer."Service Header No.";
+          pPSRBuffer.INSERT;
+        UNTIL pProvSecondSearchBuffer.NEXT = 0;
+    END;
+
+    PROCEDURE GetRefusedProvider@1100281033(VAR pServiceSearchLedgerEntryTemp@1100281000 : Record 50027);
+    BEGIN
+      GetUserSetup;
+      IF NOT GetUserSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      CASE UserSetup."Search Engine" OF
+        UserSetup."Search Engine"::First : BEGIN
+          FirstProvSearch.GetRefusedProvider(pServiceSearchLedgerEntryTemp);
+        END;
+        UserSetup."Search Engine"::Second : BEGIN
+          SecondProvSearch.GetRefusedProvider(pServiceSearchLedgerEntryTemp);
+        END;
+      END;
+    END;
+
+    PROCEDURE DownloadDebugFile@1100281006();
+    BEGIN
+      GetUserSetup;
+      IF NOT GetUserSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      CASE UserSetup."Search Engine" OF
+        UserSetup."Search Engine"::First : BEGIN
+          FirstProvSearch.DownloadDebugFile;
+        END;
+        UserSetup."Search Engine"::Second : BEGIN
+          SecondProvSearch.DownloadDebugFile;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetDistance@1100281039(pProviderNo@1100281000 : Code[20];pGeoReferenceCode@1100281001 : Code[20]) rValue : Decimal;
+    VAR
+      lProviderContactAltAddr@1100281003 : Record 5051;
+      lProviderSearchMgt@1100281002 : Codeunit 50000;
+    BEGIN
+      // Retourne la distance entre un point de reference geo et le code geo de l'adresse op‚rationnelle du prestataire
+      rValue := 0;
+
+      IF pGeoReferenceCode = '' THEN BEGIN
+        EXIT;
+      END;
+
+      lProviderContactAltAddr.SETRANGE("Contact No.",pProviderNo);
+      lProviderContactAltAddr.SETRANGE("Geo. Reference Address",TRUE);
+      IF lProviderContactAltAddr.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      lProviderContactAltAddr.FINDFIRST;
+      IF (lProviderContactAltAddr."Geo. Reference Code" = '') THEN BEGIN
+        EXIT;
+      END;
+      rValue :=
+        GetDistanceKm(
+          lProviderContactAltAddr."Geo. Reference Code",
+          pGeoReferenceCode);
+    END;
+
+    PROCEDURE GetDistanceKm@1100281001(pInseeCodeFrom@1100281001 : Text[6];pInseeCodeTo@1100281000 : Text[6]) rValue : Decimal;
+    VAR
+      lADOConn@1100281008 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000514-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Connection";
+      lADORs@1100281007 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000535-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Recordset";
+      lConnexion@1100281006 : Text[200];
+      lPsSQL@1100281005 : Text[250];
+      lConnectionID@1100281004 : Integer;
+      lRecordsAffected@1100281003 : Integer;
+      lOptions@1100281002 : Integer;
+    BEGIN
+      // retourne la distance entre deux points Connexion ADO
+      IF NOT CREATE(lADOConn) THEN BEGIN
+        EXIT;
+      END;
+      IF NOT CREATE(lADORs) THEN BEGIN
+        EXIT;
+      END;
+
+      lConnexion := GetConnectionString();
+      lADOConn.Open(lConnexion);
+      lPsSQL := STRSUBSTNO('EXEC GetDistance ''%1'',''%2''', pInseeCodeFrom, pInseeCodeTo);
+      lADORs := lADOConn.Execute(lPsSQL,lRecordsAffected,lOptions);
+      IF NOT lADORs.EOF THEN BEGIN
+        lADORs.MoveFirst;
+        IF EVALUATE(rValue,FORMAT(lADORs.Fields.Item(1).Value)) THEN BEGIN
+          rValue /= 1000;
+        END;
+      END ELSE
+        rValue := 0;
+      lADORs.Close();
+      lADOConn.Close();
+      CLEAR(lADOConn);
+      CLEAR(lADORs);
+    END;
+
+    PROCEDURE GetConnectionString@1100281005() : Text[250];
+    BEGIN
+      GetProviderSetup;
+      ProviderSetup.TESTFIELD("Database Name");
+      ProviderSetup.TESTFIELD("Server Name");
+
+      EXIT(
+        'Provider=SQLOLEDB.1;Integrated Security=SSPI;Persist Security Info=False;Initial Catalog=' +
+        ProviderSetup."Database Name" + ';Data Source=' +
+        ProviderSetup."Server Name" );
+    END;
+
+    PROCEDURE GetProviderSpecialization@1100281038(pProviderNo@1100281000 : Code[20];pProviderSpecFilter@1100281001 : Text[1024]) lSpecialityFilter : Text[1024];
+    VAR
+      lProviderSpecialization@1100281002 : Record 50006;
+    BEGIN
+      lSpecialityFilter := '';
+      lProviderSpecialization.RESET;
+      lProviderSpecialization.SETRANGE("Provider No.",pProviderNo);
+      lProviderSpecialization.SETFILTER("Specialization Code",pProviderSpecFilter);
+      IF lProviderSpecialization.FINDFIRST THEN
+      BEGIN
+        REPEAT
+          IF lSpecialityFilter <> '' THEN BEGIN
+            lSpecialityFilter += '|';
+          END;
+          lSpecialityFilter += lProviderSpecialization."Specialization Code";
+        UNTIL(lProviderSpecialization.NEXT = 0);
+      END;
+    END;
+
+    PROCEDURE CheckAgreement@1100281030(VAR pErrorType@1100281015 : 'Total,Specialization,ServiceOrderType';pServiceHeaderNo@1100281007 : Code[20];pProviderNo@1100281000 : Code[20];pCorporateNo@1100281001 : Code[20];pSpecializationCode@1100281003 : Code[10];pServiceOrderTypeAgree@1000000001 : Code[10]) : Boolean;
+    VAR
+      lServiceHeader@1100281008 : Record 5900;
+      lServiceOrderType@1100281010 : Record 5903;
+      lProviderAgreement@1100281006 : Record 50012;
+      lSpecializationAgreement@1100281002 : Record 50023;
+      lSpecialization@1000000000 : Record 50005;
+      lProvider@1100281014 : Record 50000;
+      lCorporateRegionCode@1100281011 : Code[10];
+      lCustomer@1100281012 : Record 18;
+      lServiceOrderTypeAgree@1100281013 : Code[10];
+    BEGIN
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN
+        CLEAR(lServiceHeader);
+
+      lProvider.GET(pProviderNo);
+      IF lSpecialization.GET(pSpecializationCode) THEN;
+      IF pServiceOrderTypeAgree <> '' THEN
+        lServiceOrderTypeAgree := pServiceOrderTypeAgree
+      ELSE
+        lServiceOrderTypeAgree := lServiceHeader."Service Order Type";
+
+      lCorporateRegionCode := lServiceHeader."Corporate Region Code";
+      IF lCustomer.GET(pCorporateNo) THEN
+        IF lCustomer."Parent Customer No." <> '' THEN
+          lCorporateRegionCode := '';
+
+      IF GetProviderAgreementLine(lProviderAgreement, pProviderNo,pCorporateNo, lCorporateRegionCode,
+          lServiceOrderTypeAgree) THEN BEGIN
+
+        //Exclusion par d‚faut
+        IF lServiceOrderType.GET(lServiceOrderTypeAgree) THEN BEGIN
+          IF lServiceOrderType."Default Agreement Excluded" THEN BEGIN
+            IF lServiceOrderTypeAgree <> lProviderAgreement."Service Order Type" THEN BEGIN
+              pErrorType := pErrorType::ServiceOrderType;
+              EXIT(FALSE);
+            END ELSE BEGIN
+              IF lProviderAgreement."Exclusion Type" <> lProviderAgreement."Exclusion Type"::Agree THEN BEGIN
+                pErrorType := pErrorType::ServiceOrderType;
+                EXIT(FALSE);
+              END;
+            END;
+          END;
+        END;
+
+        IF lProviderAgreement."Exclusion Type" = lProviderAgreement."Exclusion Type"::Total THEN BEGIN
+          pErrorType := pErrorType::Total;
+          EXIT(FALSE);
+        END ELSE IF lProviderAgreement."Exclusion Type" = lProviderAgreement."Exclusion Type"::Partial  THEN BEGIN
+          IF lSpecializationAgreement.GET(
+               lProviderAgreement."Provider No.", lProviderAgreement."Corporate No.",
+               pSpecializationCode,lProviderAgreement."Service Order Type")
+          THEN BEGIN
+            pErrorType := pErrorType::Specialization;
+            EXIT(FALSE);
+          END;
+        END;
+      END ELSE BEGIN
+        //parametrage type service exclusion pour tous les prestataire par d‚faut
+        //si pas de agr‚ment parametr‚ pour le prestataire, exclu par d‚faut
+        IF lServiceOrderType.GET(lServiceOrderTypeAgree) THEN
+          IF lServiceOrderType."Default Agreement Excluded" THEN BEGIN
+            pErrorType := pErrorType::ServiceOrderType;
+            EXIT(FALSE);
+          END;
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetProviderAgreementLine@1100281043(VAR pProviderAgreement@1100281003 : Record 50012;pProviderNo@1100281000 : Code[20];pCorporateNo@1100281001 : Code[20];pCorporateRegionNo@1000000000 : Code[20];pServiceOrderTypeCode@1100281002 : Code[10]) : Boolean;
+    VAR
+      lCorporateRegion@1000000001 : Record 50058;
+    BEGIN
+      //obtenir ligne agr‚ment prestataire
+
+      IF NOT lCorporateRegion.GET(pCorporateNo, pCorporateRegionNo) THEN BEGIN
+        lCorporateRegion.SETRANGE("Sell-to Customer No.", pCorporateNo);
+        IF lCorporateRegion.FINDFIRST THEN BEGIN
+          pCorporateNo := lCorporateRegion."Corporate No.";
+          pCorporateRegionNo := lCorporateRegion."Region Code";
+        END;
+      END;
+
+      pProviderAgreement.RESET;
+      pProviderAgreement.SETRANGE("Provider No.",pProviderNo);
+      pProviderAgreement.SETFILTER("Corporate No.",'=%1|=%2|=%3', '', pCorporateNo, lCorporateRegion."Sell-to Customer No.");
+      pProviderAgreement.SETFILTER("Service Order Type", '=%1|=%2', '', pServiceOrderTypeCode);
+      IF NOT pProviderAgreement.FINDFIRST THEN
+        EXIT(FALSE);
+
+      pProviderAgreement.SETRANGE("Service Order Type",pServiceOrderTypeCode);
+      //Agrement r‚gion grand compte
+      IF lCorporateRegion."Sell-to Customer No." <> '' THEN BEGIN
+        pProviderAgreement.SETRANGE("Corporate No.",lCorporateRegion."Sell-to Customer No.");
+        IF pProviderAgreement.FINDFIRST THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+
+      //Agrement grand compte
+      pProviderAgreement.SETRANGE("Corporate No.",pCorporateNo);
+      IF pProviderAgreement.FINDFIRST THEN BEGIN
+        EXIT(TRUE);
+      END;
+
+      IF pServiceOrderTypeCode <> '' THEN BEGIN
+        pProviderAgreement.SETRANGE("Corporate No.", '');
+        pProviderAgreement.SETRANGE("Service Order Type",pServiceOrderTypeCode);
+        IF pProviderAgreement.FINDFIRST THEN
+          EXIT(TRUE);
+      END;
+
+      IF lCorporateRegion."Sell-to Customer No." <> '' THEN BEGIN
+        pProviderAgreement.SETRANGE("Corporate No.",lCorporateRegion."Sell-to Customer No.");
+        pProviderAgreement.SETRANGE("Service Order Type", '');
+        IF pProviderAgreement.FINDFIRST THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+
+      pProviderAgreement.SETRANGE("Corporate No.", pCorporateNo);
+      pProviderAgreement.SETRANGE("Service Order Type", '');
+      IF pProviderAgreement.FINDFIRST THEN
+        EXIT(TRUE);
+
+      pProviderAgreement.SETRANGE("Corporate No.", '');
+      pProviderAgreement.SETRANGE("Service Order Type", '');
+      IF pProviderAgreement.FINDFIRST THEN
+        EXIT(TRUE);
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE CheckCalendar@1100281014(VAR pPSRBuffer@1100281000 : Record 51000;VAR pIsConstrainte@1000000005 : Boolean;pProvider@1000000000 : Record 50000;pEmergency@1100281006 : ' ,Yes,No';pDate@1100281001 : Date;pUnvailableDay@1000000001 : Integer) rValue : Boolean;
+    VAR
+      lProviderCalMgt@1100281003 : Codeunit 50007;
+      lProviderSpec@1000000004 : Record 50006;
+    BEGIN
+      //Validation des disponibilit‚ Calandaire et Horaire
+
+      rValue := FALSE;
+
+      WITH pPSRBuffer DO BEGIN
+        IF pEmergency = pEmergency::" " THEN
+          IF lProviderSpec.GET("Provider No.", "Specialization Code") THEN
+            IF lProviderSpec.Emergency THEN
+              pEmergency := pEmergency::Yes;
+
+        rValue := lProviderCalMgt.IsProviderAvailable("Provider No.", "Specialization Code", pEmergency = pEmergency::Yes,
+               pDate, pDate + pUnvailableDay, "First Available Date", pIsConstrainte);
+
+        MODIFY;
+      END;
+    END;
+
+    PROCEDURE ProviderCheckBusinessHours@1100281002(VAR pProviderNo@1100281000 : Code[20];pDate@1100281001 : Date;pTime@1100281002 : Time;pEmergency@1100281007 : ' ,Yes,No') : Boolean;
+    VAR
+      lProviderBusinessHours@1100281003 : Record 50028;
+      lDayOfWeek@1100281004 : 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday';
+      lStartTime@1100281005 : Time;
+      lEndTime@1100281006 : Time;
+      lEmergency@1100281008 : Boolean;
+      lDefaultHours@1100281009 : Boolean;
+    BEGIN
+      // Si pas renseign‚ alors prendre les paramŠtres par defaut du provider setup
+
+      lDayOfWeek := DATE2DWY(pDate,1) - 1;
+      CASE pEmergency OF
+        pEmergency::Yes : lEmergency:= TRUE;
+        pEmergency::No : lEmergency:= FALSE
+        ELSE BEGIN
+          IF ProviderCheckBusinessHours(pProviderNo, pDate, pTime, 2) THEN BEGIN
+            EXIT(TRUE);
+          END;
+          IF ProviderCheckBusinessHours(pProviderNo, pDate, pTime, 1) THEN BEGIN
+            EXIT(TRUE);
+          END;
+          EXIT(FALSE);
+        END;
+      END;
+
+      lDefaultHours := TRUE;
+      IF lProviderBusinessHours.GET(pProviderNo,lEmergency,lDayOfWeek) THEN BEGIN
+        lDefaultHours := FALSE;
+        lStartTime := lProviderBusinessHours."Start Time";
+        lEndTime := lProviderBusinessHours."End Time";
+        IF (lStartTime = 0T) OR (lEndTime = 0T) THEN BEGIN
+          IF lEmergency THEN
+            EXIT(FALSE); // non dispo en urgence
+          lDefaultHours := TRUE;
+        END;
+      END;
+      IF lDefaultHours THEN BEGIN
+        CASE lDayOfWeek OF
+          lDayOfWeek::Monday : BEGIN
+            lStartTime := ProviderSetup."Start Monday Business Hours";
+            lEndTime := ProviderSetup."End Monday Business Hours";
+          END;
+          lDayOfWeek::Tuesday : BEGIN
+            lStartTime := ProviderSetup."Start Tuesday Business Hours";
+            lEndTime := ProviderSetup."End Tuesday Business Hours";
+          END;
+          lDayOfWeek::Wednesday : BEGIN
+            lStartTime := ProviderSetup."Start Wednes. Business Hours";
+            lEndTime := ProviderSetup."End Wednes. Business Hours";
+          END;
+          lDayOfWeek::Thursday : BEGIN
+            lStartTime := ProviderSetup."Start Thursday Business Hours";
+            lEndTime := ProviderSetup."End Thursday Business Hours";
+          END;
+          lDayOfWeek::Friday : BEGIN
+            lStartTime := ProviderSetup."Start Friday Business Hours";
+            lEndTime := ProviderSetup."End Friday Business Hours";
+          END;
+          lDayOfWeek::Saturday : BEGIN
+            lStartTime := ProviderSetup."Start Satur. Business Hours";
+            lEndTime := ProviderSetup."End Satur. Business Hours";
+          END;
+          lDayOfWeek::Sunday : BEGIN
+            lStartTime := ProviderSetup."Start Sunday Business Hours";
+            lEndTime := ProviderSetup."End Sunday Business Hours";
+          END;
+        END;
+      END;
+
+      IF (pTime < lStartTime) OR (pTime > lEndTime) THEN BEGIN
+        EXIT(FALSE);
+      END ELSE BEGIN
+        EXIT(TRUE);
+      END;
+    END;
+
+    PROCEDURE CreateRefuseTrayLine@1100281008(pProviderNo@1100281006 : Code[20];pComment@1100281005 : Text[120]);
+    VAR
+      lTrayLineManagement@1100281003 : Codeunit 50050;
+      lProvider@1100281001 : Record 50000;
+      lContact@1100281010 : Record 5050;
+      lTeam@1100281002 : Record 5083;
+      lTeamCode@1100281000 : Code[10];
+      lFilterTeamTrayTask@1000000000 : TEMPORARY Record 50129;
+      lTrayLine@1100281004 : Record 50048;
+    BEGIN
+      lContact.GET(pProviderNo);
+      lProvider.GET(pProviderNo);
+      GetProvSecSearchSetup;
+
+      CASE ProvSecSearchSetup."Refuse DPR Tray Line" OF
+        ProvSecSearchSetup."Refuse DPR Tray Line"::RC:
+          lTeamCode := lProvider.GetCoordinatorTrayLine;
+        ProvSecSearchSetup."Refuse DPR Tray Line"::NA:
+          lTeamCode := lProvider.GetNetworkAssistantTrayLine;
+        ProvSecSearchSetup."Refuse DPR Tray Line"::NF:
+          lTeamCode := lProvider.GetFacilitatorTrayLine;
+        ProvSecSearchSetup."Refuse DPR Tray Line"::"RC Territory":
+          lTeamCode := lProvider.GetTerritoryTrayLine(lTeam.Territory::"RC Territory");
+        ProvSecSearchSetup."Refuse DPR Tray Line"::"NA Territory":
+          lTeamCode := lProvider.GetTerritoryTrayLine(lTeam.Territory::"NA Territory");
+        ProvSecSearchSetup."Refuse DPR Tray Line"::"NF Territory":
+          lTeamCode := lProvider.GetTerritoryTrayLine(lTeam.Territory::"NF Territory");
+      END;
+      lTrayLineManagement.SetCallFrom(1);
+      IF lTeamCode = '' THEN
+        lTeamCode := ProvSecSearchSetup."Default Refuse Team Code";
+
+      IF lTeamCode = '' THEN BEGIN
+        lTeamCode := lTrayLineManagement.GetTeamByTask(ProvSecSearchSetup."Refuse Task Code", lFilterTeamTrayTask, '');
+      END;
+
+      IF lTeamCode = '' THEN
+        EXIT;
+
+      IF lTrayLineManagement.CreateTLFromContact(
+         lContact, lTeamCode, ProvSecSearchSetup."Refuse Task Code", FALSE) THEN BEGIN
+        lTrayLineManagement.GetResultLine(lTrayLine);
+        IF pComment <> '' THEN BEGIN
+          lTrayLine."Short Comment" := pComment;
+          lTrayLine.MODIFY(FALSE);
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetProviderSetup@1100281000();
+    BEGIN
+      IF GetProviderSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      ProviderSetup.GET;
+      GetProviderSetupOK := TRUE;
+    END;
+
+    LOCAL PROCEDURE GetProvSecSearchSetup@1100281010();
+    BEGIN
+      IF ProvSecSearchSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      ProvSecSearchSetup.GET;
+      ProvSecSearchSetupOK := TRUE;
+    END;
+
+    PROCEDURE GetUserSetup@1100281025();
+    BEGIN
+      IF GetUserSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      IF NOT UserSetup.GET(USERID) THEN BEGIN
+        GetUserSetupOK := FALSE;
+        CLEAR(UserSetup);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 16/05/14 @a ISAT.ST @v IMH6.01.P011 @s New Provider Search @h 5118 @c Fontion LoadPSRBuffer en global */
+      /** @r IMH02 @d 09/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search @c Finalisation */
+      /** @r IMH01 @d 18/02/14 @a ISAT.PC @v IMH6.01.P011 @s New Provider Search @c Creation */
+    }
+    END.
+  }
+}

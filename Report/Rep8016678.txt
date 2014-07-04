@@ -1,0 +1,2368 @@
+OBJECT Report 8016678 Complete Fixed Assets Report
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:23:21;
+    Modified=Yes;
+    Version List=ISA6.01.00,IMISAT6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Complete Fixed Assets Report;
+               FRA=Etat Complet des Immobilisations];
+    TopMargin=800;
+    BottomMargin=800;
+    LeftMargin=800;
+    OnPreReport=BEGIN
+                  FAFilter := "Fixed Asset".GETFILTERS;
+                  GenDeprBook.GET(GenDeprBookCode);
+                  GenDeprBookText := STRSUBSTNO(Text001,GenDeprBook.TABLECAPTION,GenDeprBookCode);
+                  FiscDeprBook.GET(GenDeprBookCode);
+                  FiscDeprBookText := STRSUBSTNO(Text002,FiscDeprBook.TABLECAPTION,FDeprBookCode);
+
+                  CompanyInfo.GET;
+                END;
+
+    Orientation=Landscape;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table5600;
+        DataItemTableView=SORTING(FA Posting Group);
+        PrintOnlyIfDetail=No;
+        OnPreDataItem=BEGIN
+                        FOR Col := 1 TO 12 DO BEGIN
+                          CurrReport.CREATETOTALS(GenValues[Col]);
+                          CurrReport.CREATETOTALS(FiscValues[Col]);
+                        END;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF Inactive THEN
+                             CurrReport.SKIP;
+
+                           CLEAR(GenValues);
+                           CLEAR(FiscValues);
+
+                           IF NOT FASubclass.GET("FA Subclass Code") THEN
+                             FASubclass.INIT;
+
+                           IF NOT FaPostingGroup.GET("FA Posting Group") THEN
+                             FaPostingGroup.INIT;
+
+                           IF NOT GLAccount.GET(FaPostingGroup."Acquisition Cost Account") THEN
+                             GLAccount.INIT;
+
+                           CLEAR(GenFADeprBook);
+                           GenFADeprBook.SETRANGE("FA No.","No.");
+                           GenFADeprBook.SETRANGE("Depreciation Book Code",GenDeprBookCode);
+                           IF NOT GenFADeprBook.FINDFIRST THEN
+                             CurrReport.SKIP;
+                           IF GenFADeprBook."Disposal Date" > 0D THEN
+                             CurrReport.SKIP;
+
+                           GenFADeprBook.SETFILTER("FA Posting Date Filter",'..%1',EndingDate);
+                           GenFADeprBook.CALCFIELDS("Acquisition Cost","Book Value");
+                           IF GenFADeprBook."Acquisition Cost" = 0 THEN
+                             CurrReport.SKIP;
+
+                           IF (rupture <> GenFADeprBook."FA Posting Group") AND
+                              (rupture <> '') THEN
+                              CurrReport.NEWPAGE;
+
+                           rupture := GenFADeprBook."FA Posting Group";
+
+                           CASE GenFADeprBook."Depreciation Method" OF
+                             GenFADeprBook."Depreciation Method"::"Straight-Line" :
+                             BEGIN
+                               GenDeprMethodText := Text010;
+                               IF GenFADeprBook."No. of Depreciation Years" <> 0 THEN
+                                 GenRate := 100 / GenFADeprBook."No. of Depreciation Years"
+                               ELSE
+                                 GenRate := 0;
+                             END;
+                             GenFADeprBook."Depreciation Method"::"DB1/SL" :
+                             BEGIN
+                               GenDeprMethodText := Text011;
+                               GenRate := GenFADeprBook."Declining-Balance %";
+                             END
+                             ELSE BEGIN
+                               GenDeprMethodText := FORMAT(GenFADeprBook."Depreciation Method");
+                               GenRate := 0;
+                             END;
+                           END;
+
+                           GenFADeprBook.SETFILTER("FA Posting Date Filter",'..%1',EndingDate);
+                           GenFADeprBook.CALCFIELDS("Acquisition Cost","Book Value");
+                           GenValues[1] := GenFADeprBook."Acquisition Cost";
+                           GenValues[12] := GenFADeprBook."Book Value";
+                           GenValues[2] := 1;
+
+                           GenFADeprBook.SETFILTER("FA Posting Date Filter",'..%1',StartingDate-1);
+                           GenFADeprBook.CALCFIELDS(Depreciation);
+                           GenValues[5] := GenFADeprBook.Depreciation * -1;
+
+                           GenFADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',StartingDate,EndingDate);
+                           GenFADeprBook.CALCFIELDS(Depreciation);
+                           CASE GenFADeprBook."Depreciation Method" OF
+                             GenFADeprBook."Depreciation Method"::"Straight-Line" :
+                               GenValues[6] := GenFADeprBook.Depreciation * -1;
+                             GenFADeprBook."Depreciation Method"::"DB1/SL" :
+                               GenValues[7] := GenFADeprBook.Depreciation * -1;
+                           END;
+                           GenValues[10] := GenValues[5] + GenValues[6] + GenValues[7];
+                           GenValues[11] := GenValues[10];
+
+                           FiscFADeprBook.SETRANGE("FA No.","No.");
+                           FiscFADeprBook.SETRANGE("Depreciation Book Code",FDeprBookCode);
+                           IF NOT FiscFADeprBook.FINDFIRST THEN BEGIN
+                             FiscFADeprBook.INIT;
+                             FiscFADeprBook."Depreciation Method" := GenFADeprBook."Depreciation Method";
+                             FiscValues[1] := GenFADeprBook."Acquisition Cost";
+                             FiscFADeprBook."No. of Depreciation Years" := GenFADeprBook."No. of Depreciation Years";
+                             FiscFADeprBook."Declining-Balance %" := GenFADeprBook."Declining-Balance %";
+                             FiscRate := GenRate;
+                           END ELSE BEGIN
+                             FiscFADeprBook.SETFILTER("FA Posting Date Filter",'..%1',EndingDate);
+                             FiscFADeprBook.CALCFIELDS("Acquisition Cost","Book Value");
+                             FiscValues[1] := FiscFADeprBook."Acquisition Cost";
+                             FiscValues[12] := FiscFADeprBook."Book Value";
+
+                             FiscFADeprBook.SETFILTER("FA Posting Date Filter",'..%1',StartingDate-1);
+                             FiscFADeprBook.CALCFIELDS(Depreciation);
+                             FiscValues[5] := (FiscFADeprBook.Depreciation * -1) - GenValues[5];
+                             FiscFADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',StartingDate,EndingDate);
+                             FiscFADeprBook.CALCFIELDS(Depreciation);
+                             CASE FiscFADeprBook."Depreciation Method" OF
+                               FiscFADeprBook."Depreciation Method"::"Straight-Line" :
+                                 FiscValues[6] := FiscFADeprBook.Depreciation * -1;
+                               FiscFADeprBook."Depreciation Method"::"DB1/SL" :
+                                 FiscValues[7] := FiscFADeprBook.Depreciation * -1;
+                             END;
+                             IF (GenValues[6] + GenValues[7]) < (FiscValues[6] + FiscValues[7]) THEN
+                               FiscValues[8] := (FiscValues[6] + FiscValues[7]) - (GenValues[6] + GenValues[7])
+                             ELSE
+                               FiscValues[9] := (GenValues[6] + GenValues[7]) - (FiscValues[6] + FiscValues[7]);
+                             IF FiscValues[8] <> 0 THEN
+                               FiscValues[10] := FiscValues[5] + FiscValues[8]
+                             ELSE
+                               FiscValues[10] := FiscValues[5] - FiscValues[9];
+                             FiscFADeprBook.SETFILTER("FA Posting Date Filter",'..%1',EndingDate);
+                             FiscFADeprBook.CALCFIELDS(Depreciation,"Acquisition Cost","Book Value");
+                           END;
+                           CASE FiscFADeprBook."Depreciation Method" OF
+                             FiscFADeprBook."Depreciation Method"::"Straight-Line" :
+                             BEGIN
+                               FiscDeprMethodText := Text010;
+                               IF FiscFADeprBook."No. of Depreciation Years" <> 0 THEN
+                                 FiscRate := 100 / FiscFADeprBook."No. of Depreciation Years"
+                               ELSE
+                                 FiscRate := 0;
+                             END;
+                             FiscFADeprBook."Depreciation Method"::"DB1/SL" :
+                             BEGIN
+                               FiscDeprMethodText := Text011;
+                               FiscRate := FiscFADeprBook."Declining-Balance %";
+                             END
+                             ELSE BEGIN
+                               FiscDeprMethodText := FORMAT(FiscFADeprBook."Depreciation Method");
+                               FiscRate := 0;
+                             END;
+                           END;
+                         END;
+
+        ReqFilterFields=No.,FA Posting Group,FA Class Code,FA Subclass Code;
+        GroupTotalFields=FA Posting Group;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=28275;
+            SectionHeight=2961;
+          }
+          CONTROLS
+          {
+            { 1100281069;TextBox;0    ;1692 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=GenDeprBookText }
+            { 1100481000;TextBox;0    ;1269 ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textenddate,EndingDate) }
+            { 1100481001;TextBox;0    ;846  ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textstartdate,StartingDate) }
+            { 1100481002;TextBox;0    ;0    ;5400 ;423  ;FontSize=11;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CompanyInfo.Name }
+            { 1100481003;TextBox;5550 ;0    ;19350;846  ;HorzAlign=Center;
+                                                         FontSize=16;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Title000 }
+            { 1100481004;TextBox;24900;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1100481005;TextBox;24900;423  ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TIME) }
+            { 1100481006;TextBox;25800;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=USERID }
+            { 1100481007;Label  ;26550;1269 ;1050 ;423  ;ParentControl=1100481008;
+                                                         HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Page :;
+                                                                    FRA="Page : "] }
+            { 1100481008;TextBox;27600;1269 ;450  ;423  ;FontSize=9;
+                                                         CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 1000000000;TextBox;0    ;2088 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=FiscDeprBookText }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=28275;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT((CurrReport.PAGENO = 1) AND (FAFilter <> ''));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 19  ;TextBox      ;0    ;0    ;19800;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr="Fixed Asset".TABLECAPTION + ': ' + FAFilter }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=28275;
+            SectionHeight=2142;
+          }
+          CONTROLS
+          {
+            { 1180044001;Shape  ;75   ;423  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044002;Label  ;150  ;846  ;5850 ;846  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontItalic=No;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=Identification] }
+            { 1180044003;Shape  ;6000 ;423  ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044004;Shape  ;8250 ;423  ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044005;Label  ;6150 ;423  ;2100 ;872  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Valeur actif] }
+            { 1180044006;Shape  ;10650;423  ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044007;Shape  ;12750;423  ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044008;Shape  ;15000;423  ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044009;Label  ;17250;423  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Exceptionnel] }
+            { 1180044010;Shape  ;19200;423  ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044011;Label  ;19350;423  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Substitutif] }
+            { 1180044012;Label  ;6150 ;1269 ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Base Amort.] }
+            { 1180044013;Label  ;17250;1269 ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Dot. D‚rog.] }
+            { 1180044014;Shape  ;23550;423  ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044015;Shape  ;75   ;2112 ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044016;Label  ;8400 ;1269 ;2250 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Depreciation Method;
+                                                                    FRA=Plan Fiscal] }
+            { 1180044017;Label  ;8400 ;423  ;2250 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Depreciation Method;
+                                                                    FRA=Plan Compt.] }
+            { 1180044018;Label  ;10800;423  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Ant‚rieurs] }
+            { 1180044019;Label  ;10800;1269 ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Ant‚r. D‚rog.] }
+            { 1180044020;Label  ;12900;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Gen. Acquisition Cost;
+                                                                    FRA=Lin‚aire] }
+            { 1180044021;Label  ;15150;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Gen. Acquisition Cost;
+                                                                    FRA=D‚gressif] }
+            { 1180044022;Shape  ;17100;423  ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044023;Label  ;21450;423  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Total Amort.] }
+            { 1180044024;Label  ;19350;1269 ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Rep. D‚rog.] }
+            { 1180044025;Shape  ;21300;423  ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044026;Label  ;21450;1269 ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Total D‚rog.] }
+            { 1180044027;Label  ;23700;423  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Mini. Legal] }
+            { 1180044028;Label  ;23700;1269 ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Dep. Cumul] }
+            { 1180044029;Label  ;25950;423  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=VNC] }
+            { 1180044030;Label  ;25950;1269 ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=VNF] }
+            { 1180044031;Shape  ;25800;423  ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044032;Shape  ;28050;423  ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044354;Shape  ;0    ;423  ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=28275;
+            SectionHeight=1719;
+            KeepWithNext=Yes;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT := FALSE;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1180044361;Shape  ;75   ;0    ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044362;Label  ;150  ;423  ;3750 ;846  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontItalic=No;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=Identification] }
+            { 1180044363;Shape  ;6000 ;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044364;Shape  ;8250 ;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044365;Label  ;6150 ;0    ;2100 ;872  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Valeur actif] }
+            { 1180044366;Shape  ;10650;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044367;Shape  ;12750;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044368;Shape  ;15000;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044369;Label  ;17250;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Exceptionnel] }
+            { 1180044370;Shape  ;19200;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044371;Label  ;19350;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Substitutif] }
+            { 1180044372;Label  ;6150 ;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Base Amort.] }
+            { 1180044373;Label  ;17250;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Dot. D‚rog.] }
+            { 1180044374;Shape  ;23550;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044375;Shape  ;75   ;1689 ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044376;Label  ;8400 ;846  ;2250 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Depreciation Method;
+                                                                    FRA=Plan Fiscal] }
+            { 1180044377;Label  ;8400 ;0    ;2250 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Depreciation Method;
+                                                                    FRA=Plan Compt.] }
+            { 1180044378;Label  ;10800;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Ant‚rieurs] }
+            { 1180044379;Label  ;10800;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Ant‚r. D‚rog.] }
+            { 1180044380;Label  ;12900;423  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Gen. Acquisition Cost;
+                                                                    FRA=Lin‚aire] }
+            { 1180044381;Label  ;15150;423  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Gen. Acquisition Cost;
+                                                                    FRA=D‚gressif] }
+            { 1180044382;Shape  ;17100;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044383;Label  ;21450;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Total Amort.] }
+            { 1180044384;Label  ;19350;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Rep. D‚rog.] }
+            { 1180044385;Shape  ;21300;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044386;Label  ;21450;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Total D‚rog.] }
+            { 1180044387;Label  ;23700;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Mini. Legal] }
+            { 1180044388;Label  ;23700;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Dep. Cumul] }
+            { 1180044389;Label  ;25950;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=VNC] }
+            { 1180044390;Label  ;25950;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=VNF] }
+            { 1180044391;Shape  ;25800;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044392;Shape  ;28050;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044393;Shape  ;0    ;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=28275;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1180044394;TextBox;300  ;0    ;26250;846  ;HorzAlign=Left;
+                                                         FontSize=10;
+                                                         SourceExpr=STRSUBSTNO('%1 %2 %3','Compte',FaPostingGroup."Acquisition Cost Account",GLAccount.Name) }
+            { 1180044395;Shape  ;0    ;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044396;Shape  ;28050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044397;Shape  ;75   ;846  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=28275;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1180044095;TextBox;150  ;0    ;1650 ;423  ;HorzAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr="Fixed Asset"."No." }
+            { 1180044097;TextBox;1950 ;0    ;4050 ;423  ;HorzAlign=Left;
+                                                         FontSize=7;
+                                                         FontBold=No;
+                                                         SourceExpr="Fixed Asset".Description }
+            { 1180044099;TextBox;150  ;423  ;1650 ;423  ;HorzAlign=Center;
+                                                         FontSize=9;
+                                                         SourceExpr=GenFADeprBook."Depreciation Starting Date" }
+            { 1180044108;TextBox;1950 ;423  ;4050 ;423  ;HorzAlign=Left;
+                                                         FontSize=7;
+                                                         FontBold=No;
+                                                         SourceExpr="Fixed Asset"."Vendor Name" }
+            { 1180044109;TextBox;8400 ;423  ;300  ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=FiscDeprMethodText }
+            { 1180044110;TextBox;8400 ;0    ;300  ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=GenDeprMethodText }
+            { 1180044111;TextBox;6150 ;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[1] }
+            { 1180044112;TextBox;6150 ;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[1] }
+            { 1180044124;TextBox;25950;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[12] }
+            { 1180044125;TextBox;25950;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[12] }
+            { 1180044128;Shape  ;75   ;846  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044113;TextBox;10050;0    ;600  ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         DecimalPlaces=0:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenFADeprBook."No. of Depreciation Years" }
+            { 1180044114;TextBox;8850 ;0    ;1050 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenRate }
+            { 1180044115;TextBox;10050;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         DecimalPlaces=0:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscFADeprBook."No. of Depreciation Years" }
+            { 1180044116;TextBox;8850 ;423  ;1050 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscRate }
+            { 1180044079;TextBox;10800;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[5] }
+            { 1180044117;TextBox;10800;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[5] }
+            { 1180044118;TextBox;12900;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[6] }
+            { 1180044120;TextBox;15150;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[7] }
+            { 1180044123;TextBox;17250;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[8] }
+            { 1180044129;TextBox;19350;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[9] }
+            { 1180044130;TextBox;21450;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[10] }
+            { 1180044131;TextBox;23700;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[11] }
+            { 1180044132;TextBox;12900;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[6] }
+            { 1180044133;TextBox;15150;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[7] }
+            { 1180044134;TextBox;17250;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[8] }
+            { 1180044135;TextBox;19350;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[9] }
+            { 1180044136;TextBox;21450;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] }
+            { 1180044137;TextBox;23700;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[11] }
+            { 1180044400;Shape  ;8250 ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044401;Shape  ;6000 ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044402;Shape  ;0    ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044403;Shape  ;10650;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044404;Shape  ;12750;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044405;Shape  ;15000;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044406;Shape  ;17100;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044407;Shape  ;19200;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044408;Shape  ;21300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044409;Shape  ;23550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044410;Shape  ;25800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044411;Shape  ;28050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=28275;
+            SectionHeight=876;
+            OnPostSection=BEGIN
+                            CalcTotalPerAcc;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 1180044091;Shape  ;75   ;846  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1000000022;TextBox;150  ;423  ;5850 ;423  ;HorzAlign=Left;
+                                                         FontSize=10;
+                                                         SourceExpr=GLAccount.Name }
+            { 1000000018;Label  ;150  ;0    ;1500 ;423  ;ParentControl=1000000022;
+                                                         FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=TOTAl;
+                                                                    FRA=Total] }
+            { 1180044412;TextBox;6150 ;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[1] }
+            { 1180044414;TextBox;6150 ;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[1] }
+            { 1180044438;Shape  ;8250 ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044442;Shape  ;6000 ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044444;TextBox;10800;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[5] }
+            { 1180044445;TextBox;10800;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[5] }
+            { 1180044446;Shape  ;10650;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044447;TextBox;12900;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[6] }
+            { 1180044448;TextBox;12900;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[6] }
+            { 1180044449;Shape  ;12750;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044450;TextBox;15150;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[7] }
+            { 1180044451;TextBox;15150;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[7] }
+            { 1180044452;Shape  ;15000;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044453;TextBox;17250;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[8] }
+            { 1180044454;TextBox;17250;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[8] }
+            { 1180044455;Shape  ;17100;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044456;TextBox;19350;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[9] }
+            { 1180044457;TextBox;19350;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[9] }
+            { 1180044458;Shape  ;19200;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044459;Shape  ;21300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044460;TextBox;21450;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[10] }
+            { 1180044461;TextBox;23700;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[11] }
+            { 1180044462;TextBox;21450;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] }
+            { 1180044463;TextBox;23700;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[11] }
+            { 1180044464;Shape  ;23550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044465;Shape  ;25800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044466;TextBox;25950;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[12] }
+            { 1180044467;TextBox;25950;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[12] }
+            { 1180044468;Shape  ;28050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044469;Shape  ;0    ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044144;TextBox;1650 ;0    ;4350 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=STRSUBSTNO('%1    %2 %3',FaPostingGroup."Acquisition Cost Account",GenValues[2], 'biens') }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransFooter;
+            SectionWidth=28275;
+            SectionHeight=0;
+          }
+          CONTROLS
+          {
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=28275;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1180044470;Shape  ;75   ;846  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044473;TextBox;6150 ;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[1] }
+            { 1180044474;TextBox;6150 ;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[1] }
+            { 1180044475;Shape  ;8250 ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044476;Shape  ;6000 ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044477;TextBox;10800;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[5] }
+            { 1180044478;TextBox;10800;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[5] }
+            { 1180044479;Shape  ;10650;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044480;TextBox;12900;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[6] }
+            { 1180044481;TextBox;12900;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[6] }
+            { 1180044482;Shape  ;12750;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044483;TextBox;15150;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[7] }
+            { 1180044484;TextBox;15150;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[7] }
+            { 1180044485;Shape  ;15000;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044486;TextBox;17250;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[8] }
+            { 1180044487;TextBox;17250;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[8] }
+            { 1180044488;Shape  ;17100;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044489;TextBox;19350;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[9] }
+            { 1180044490;TextBox;19350;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[9] }
+            { 1180044491;Shape  ;19200;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044492;Shape  ;21300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044493;TextBox;21450;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[10] }
+            { 1180044494;TextBox;23700;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[11] }
+            { 1180044495;TextBox;21450;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] }
+            { 1180044496;TextBox;23700;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[11] }
+            { 1180044497;Shape  ;23550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044498;Shape  ;25800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044499;TextBox;25950;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[12] }
+            { 1180044500;TextBox;25950;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[12] }
+            { 1180044501;Shape  ;28050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044502;Shape  ;0    ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1100281043;Label  ;150  ;0    ;5850 ;846  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=PERIOD ACQUISITIONS TOTAL;
+                                                                    FRA=TOTAL ACQUISITIONS PERIODE] }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=InvDerogSynth;
+        OnPreDataItem=BEGIN
+                        IF NOT PrintInvtDerogSynt THEN
+                          CurrReport.BREAK;
+                        GenPerAccount.RESET;
+                        FiscPerAccount.RESET;
+                        IF GenPerAccount.COUNT = 0 THEN
+                          CurrReport.BREAK;
+                        SETRANGE(Number,1,GenPerAccount.COUNT);
+                        FOR Col := 1 TO 12 DO BEGIN
+                          CurrReport.CREATETOTALS(GenValues[Col]);
+                          CurrReport.CREATETOTALS(FiscValues[Col]);
+                        END;
+                        CurrReport.NEWPAGE;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF Number = 1 THEN BEGIN
+                             GenPerAccount.FINDFIRST;
+                             FiscPerAccount.FINDFIRST;
+                             //CurrReport.NEWPAGE;
+                           END ELSE BEGIN
+                             GenPerAccount.NEXT;
+                             FiscPerAccount.NEXT;
+                           END;
+                           GetTotalPerAcc;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=28275;
+            SectionHeight=2961;
+          }
+          CONTROLS
+          {
+            { 1180044218;TextBox;0    ;1692 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=GenDeprBookText }
+            { 1180044220;TextBox;0    ;1269 ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textenddate,EndingDate) }
+            { 1180044227;TextBox;0    ;846  ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textstartdate,StartingDate) }
+            { 1180044417;TextBox;0    ;0    ;5400 ;423  ;FontSize=11;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CompanyInfo.Name }
+            { 1180044418;TextBox;5550 ;0    ;19350;846  ;HorzAlign=Center;
+                                                         FontSize=16;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Title001 }
+            { 1180044419;TextBox;24900;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1180044420;TextBox;24900;423  ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TIME) }
+            { 1180044421;TextBox;25800;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=USERID }
+            { 1180044422;Label  ;26550;1269 ;1050 ;423  ;ParentControl=1180044423;
+                                                         HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Page :;
+                                                                    FRA="Page : "] }
+            { 1180044423;TextBox;27600;1269 ;450  ;423  ;FontSize=9;
+                                                         CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 1180044424;TextBox;0    ;2088 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=FiscDeprBookText }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=No;
+            SectionWidth=28275;
+            SectionHeight=1719;
+          }
+          CONTROLS
+          {
+            { 1180044310;Shape  ;23550;846  ;150  ;873  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044319;Label  ;21450;0    ;6600 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Amortissements d‚rogatoires }
+            { 1180044321;Shape  ;21300;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044322;Label  ;21450;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Dotation;
+                                                                    FRA=Dotation] }
+            { 1180044324;Label  ;23700;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Reprise;
+                                                                    FRA=Reprise] }
+            { 1180044325;Label  ;25950;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Cumul‚s;
+                                                                    FRA=Cumul‚s] }
+            { 1180044327;Shape  ;25800;846  ;150  ;873  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044328;Shape  ;28050;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044297;Shape  ;16800;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044299;Label  ;16950;0    ;4350 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Amortissements comptables }
+            { 1180044302;Label  ;16950;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Reprise;
+                                                                    FRA=P‚riode] }
+            { 1180044303;Label  ;19200;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Cumul‚s;
+                                                                    FRA=Cumul‚s] }
+            { 1180044304;Shape  ;19050;846  ;150  ;873  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044305;Label  ;14700;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Cumul‚s;
+                                                                    FRA=Cumul‚s] }
+            { 1180044306;Shape  ;12300;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044307;Label  ;12450;0    ;4350 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Amortissements fiscaux }
+            { 1180044308;Label  ;12450;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Reprise;
+                                                                    FRA=P‚riode] }
+            { 1180044309;Shape  ;14550;846  ;150  ;873  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044349;Shape  ;75   ;0    ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044350;Shape  ;0    ;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044351;Shape  ;75   ;1689 ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=28275;
+            SectionHeight=2961;
+          }
+          CONTROLS
+          {
+            { 1180044033;TextBox;0    ;1692 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=GenDeprBookText }
+            { 1180044034;TextBox;0    ;1269 ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textenddate,EndingDate) }
+            { 1180044035;TextBox;0    ;846  ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textstartdate,StartingDate) }
+            { 1180044036;TextBox;0    ;0    ;5400 ;423  ;FontSize=11;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CompanyInfo.Name }
+            { 1180044037;TextBox;5550 ;0    ;19350;846  ;HorzAlign=Center;
+                                                         FontSize=16;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Title001 }
+            { 1180044038;TextBox;24900;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1180044039;TextBox;24900;423  ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TIME) }
+            { 1180044040;TextBox;25800;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=USERID }
+            { 1180044041;Label  ;26550;1269 ;1050 ;423  ;ParentControl=1180044042;
+                                                         HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Page :;
+                                                                    FRA="Page : "] }
+            { 1180044042;TextBox;27600;1269 ;450  ;423  ;FontSize=9;
+                                                         CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 1180044043;TextBox;0    ;2088 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=FiscDeprBookText }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=28275;
+            SectionHeight=1719;
+          }
+          CONTROLS
+          {
+            { 1180044044;Shape  ;23550;846  ;150  ;873  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044045;Label  ;21450;0    ;6600 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Amortissements d‚rogatoires }
+            { 1180044046;Shape  ;21300;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044047;Label  ;21450;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Dotation;
+                                                                    FRA=Dotation] }
+            { 1180044048;Label  ;23700;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Reprise;
+                                                                    FRA=Reprise] }
+            { 1180044049;Label  ;25950;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Cumul‚s;
+                                                                    FRA=Cumul‚s] }
+            { 1180044050;Shape  ;25800;846  ;150  ;873  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044051;Shape  ;28050;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044052;Shape  ;16800;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044053;Label  ;16950;0    ;4350 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Amortissements comptables }
+            { 1180044054;Label  ;16950;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Reprise;
+                                                                    FRA=P‚riode] }
+            { 1180044055;Label  ;19200;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Cumul‚s;
+                                                                    FRA=Cumul‚s] }
+            { 1180044056;Shape  ;19050;846  ;150  ;873  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044057;Label  ;14700;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Cumul‚s;
+                                                                    FRA=Cumul‚s] }
+            { 1180044058;Shape  ;12300;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044059;Label  ;12450;0    ;4350 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Amortissements fiscaux }
+            { 1180044060;Label  ;12450;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Reprise;
+                                                                    FRA=P‚riode] }
+            { 1180044061;Shape  ;14550;846  ;150  ;873  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044062;Shape  ;75   ;0    ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044063;Shape  ;0    ;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044064;Shape  ;75   ;1689 ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=28275;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1180044329;TextBox;150  ;0    ;12150;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=STRSUBSTNO('%1 %2 %3','Compte',GenPerAccount."Code 1",GenPerAccount."Code 2") }
+            { 1180044334;Shape  ;16800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044335;Shape  ;23550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044336;Shape  ;12300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044337;Shape  ;19050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044342;Shape  ;14550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044343;Shape  ;21300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044344;TextBox;25950;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] }
+            { 1180044346;Shape  ;25800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044347;Shape  ;28050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044348;Shape  ;75   ;846  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044355;TextBox;12450;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[6] + FiscValues[7] }
+            { 1180044356;TextBox;14550;0    ;2250 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] + GenValues[10] }
+            { 1180044357;TextBox;16950;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[6] + GenValues[7] }
+            { 1180044358;TextBox;19200;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[10] }
+            { 1180044359;TextBox;21450;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[8] }
+            { 1180044360;TextBox;23700;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[9] }
+            { 1180044352;Shape  ;0    ;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044143;TextBox;300  ;423  ;5850 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=STRSUBSTNO('%1 %2',GenValues[2], 'biens') }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=28275;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1180044313;Shape  ;16800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044314;Shape  ;23550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044315;Shape  ;12300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044316;Shape  ;19050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044317;Shape  ;14550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044318;Shape  ;21300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044323;Shape  ;25800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044326;Shape  ;28050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044331;Shape  ;75   ;846  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044345;Label  ;600  ;0    ;6150 ;846  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=TOTAL;
+                                                                    FRA=TOTAL] }
+            { 1180044353;Shape  ;0    ;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044126;TextBox;12450;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[6] + FiscValues[7] }
+            { 1180044127;TextBox;14550;0    ;2250 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] + GenValues[10] }
+            { 1180044138;TextBox;16950;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[6] + GenValues[7] }
+            { 1180044139;TextBox;19200;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[10] }
+            { 1180044140;TextBox;21450;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[8] }
+            { 1180044141;TextBox;23700;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[9] }
+            { 1180044142;TextBox;25950;0    ;2100 ;846  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=InvSynth;
+        OnPreDataItem=BEGIN
+                        IF NOT PrintInvtSynt THEN
+                          CurrReport.BREAK;
+                        GenPerAccount.RESET;
+                        FiscPerAccount.RESET;
+                        IF GenPerAccount.COUNT = 0 THEN
+                          CurrReport.BREAK;
+                        SETRANGE(Number,1,GenPerAccount.COUNT);
+                        FOR Col := 1 TO 12 DO BEGIN
+                          CurrReport.CREATETOTALS(GenValues[Col]);
+                          CurrReport.CREATETOTALS(FiscValues[Col]);
+                        END;
+                        CurrReport.NEWPAGE;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF Number = 1 THEN BEGIN
+                             GenPerAccount.FINDFIRST;
+                             FiscPerAccount.FINDFIRST;
+                             //CurrReport.NEWPAGE;
+                           END ELSE BEGIN
+                             GenPerAccount.NEXT;
+                             FiscPerAccount.NEXT;
+                           END;
+                           GetTotalPerAcc;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=No;
+            SectionWidth=28275;
+            SectionHeight=2961;
+          }
+          CONTROLS
+          {
+            { 1180044425;TextBox;0    ;1692 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=GenDeprBookText }
+            { 1180044426;TextBox;0    ;1269 ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textenddate,EndingDate) }
+            { 1180044427;TextBox;0    ;846  ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textstartdate,StartingDate) }
+            { 1180044428;TextBox;0    ;0    ;5400 ;423  ;FontSize=11;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CompanyInfo.Name }
+            { 1180044429;TextBox;5550 ;0    ;19350;846  ;HorzAlign=Center;
+                                                         FontSize=16;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Title002 }
+            { 1180044430;TextBox;24900;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1180044431;TextBox;24900;423  ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TIME) }
+            { 1180044432;TextBox;25800;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=USERID }
+            { 1180044433;Label  ;26550;1269 ;1050 ;423  ;ParentControl=1180044434;
+                                                         HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Page :;
+                                                                    FRA="Page : "] }
+            { 1180044434;TextBox;27600;1269 ;450  ;423  ;FontSize=9;
+                                                         CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 1180044435;TextBox;0    ;2088 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=FiscDeprBookText }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=No;
+            SectionWidth=28275;
+            SectionHeight=1719;
+          }
+          CONTROLS
+          {
+            { 1180044503;Shape  ;75   ;0    ;28200;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044504;Label  ;150  ;423  ;6000 ;846  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontItalic=No;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=Identification] }
+            { 1180044505;Shape  ;8400 ;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044507;Label  ;8550 ;0    ;2100 ;872  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Valeur actif] }
+            { 1180044508;Shape  ;10650;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044509;Shape  ;12750;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044510;Shape  ;15000;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044511;Label  ;17250;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Exceptionnel] }
+            { 1180044512;Shape  ;19200;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044513;Label  ;19350;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Substitutif] }
+            { 1180044514;Label  ;8550 ;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Base Amort.] }
+            { 1180044515;Label  ;17250;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Dot. D‚rog.] }
+            { 1180044516;Shape  ;23550;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044517;Shape  ;75   ;1689 ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044520;Label  ;10800;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Ant‚rieurs] }
+            { 1180044521;Label  ;10800;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Ant‚r. D‚rog.] }
+            { 1180044522;Label  ;12900;423  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Gen. Acquisition Cost;
+                                                                    FRA=Lin‚aire] }
+            { 1180044523;Label  ;15150;423  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Gen. Acquisition Cost;
+                                                                    FRA=D‚gressif] }
+            { 1180044524;Shape  ;17100;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044525;Label  ;21450;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Total Amort.] }
+            { 1180044526;Label  ;19350;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Rep. D‚rog.] }
+            { 1180044527;Shape  ;21300;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044528;Label  ;21450;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Total D‚rog.] }
+            { 1180044529;Label  ;23700;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Mini. Legal] }
+            { 1180044530;Label  ;23700;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Dep. Cumul] }
+            { 1180044531;Label  ;25950;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=VNC] }
+            { 1180044532;Label  ;25950;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=VNF] }
+            { 1180044533;Shape  ;25800;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044534;Shape  ;28050;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044535;Shape  ;0    ;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=28275;
+            SectionHeight=2961;
+          }
+          CONTROLS
+          {
+            { 1180044065;TextBox;0    ;1692 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=GenDeprBookText }
+            { 1180044066;TextBox;0    ;1269 ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textenddate,EndingDate) }
+            { 1180044067;TextBox;0    ;846  ;4800 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(textstartdate,StartingDate) }
+            { 1180044068;TextBox;0    ;0    ;5400 ;423  ;FontSize=11;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CompanyInfo.Name }
+            { 1180044069;TextBox;5550 ;0    ;19350;846  ;HorzAlign=Center;
+                                                         FontSize=16;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Title002 }
+            { 1180044070;TextBox;24900;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 1180044071;TextBox;24900;423  ;3150 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT(TIME) }
+            { 1180044072;TextBox;25800;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         SourceExpr=USERID }
+            { 1180044073;Label  ;26550;1269 ;1050 ;423  ;ParentControl=1180044074;
+                                                         HorzAlign=Right;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Page :;
+                                                                    FRA="Page : "] }
+            { 1180044074;TextBox;27600;1269 ;450  ;423  ;FontSize=9;
+                                                         CaptionML=[ENU=Page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 1180044075;TextBox;0    ;2088 ;8100 ;423  ;FontSize=9;
+                                                         SourceExpr=FiscDeprBookText }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=28275;
+            SectionHeight=1719;
+          }
+          CONTROLS
+          {
+            { 1180044076;Shape  ;75   ;0    ;28200;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044077;Label  ;150  ;423  ;6000 ;846  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontItalic=No;
+                                                         CaptionML=[ENU=Description;
+                                                                    FRA=Identification] }
+            { 1180044078;Shape  ;8400 ;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044080;Label  ;8550 ;0    ;2100 ;872  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Valeur actif] }
+            { 1180044081;Shape  ;10650;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044082;Shape  ;12750;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044083;Shape  ;15000;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044084;Label  ;17250;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Exceptionnel] }
+            { 1180044085;Shape  ;19200;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044086;Label  ;19350;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Substitutif] }
+            { 1180044087;Label  ;8550 ;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Base Amort.] }
+            { 1180044088;Label  ;17250;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Dot. D‚rog.] }
+            { 1180044089;Shape  ;23550;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044090;Shape  ;75   ;1689 ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044092;Label  ;10800;0    ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Ant‚rieurs] }
+            { 1180044093;Label  ;10800;846  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Period Depreciation;
+                                                                    FRA=Ant‚r. D‚rog.] }
+            { 1180044094;Label  ;12900;423  ;2100 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Gen. Acquisition Cost;
+                                                                    FRA=Lin‚aire] }
+            { 1180044096;Label  ;15150;423  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Gen. Acquisition Cost;
+                                                                    FRA=D‚gressif] }
+            { 1180044098;Shape  ;17100;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044100;Label  ;21450;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Total Amort.] }
+            { 1180044101;Label  ;19350;846  ;1950 ;846  ;HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Rep. D‚rog.] }
+            { 1180044102;Shape  ;21300;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044103;Label  ;21450;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Total D‚rog.] }
+            { 1180044104;Label  ;23700;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Mini. Legal] }
+            { 1180044105;Label  ;23700;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=Dep. Cumul] }
+            { 1180044106;Label  ;25950;0    ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=VNC] }
+            { 1180044107;Label  ;25950;846  ;2100 ;846  ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Book Value;
+                                                                    FRA=VNF] }
+            { 1180044119;Shape  ;25800;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044121;Shape  ;28050;0    ;150  ;1692 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044122;Shape  ;0    ;0    ;150  ;1719 ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=28275;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1180044536;Shape  ;75   ;846  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044539;TextBox;8550 ;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[1] }
+            { 1180044540;TextBox;8550 ;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[1] }
+            { 1180044542;Shape  ;8400 ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044543;TextBox;10800;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[5] }
+            { 1180044544;TextBox;10800;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[5] }
+            { 1180044545;Shape  ;10650;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044546;TextBox;12900;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[6] }
+            { 1180044547;TextBox;12900;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[6] }
+            { 1180044548;Shape  ;12750;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044549;TextBox;15150;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[7] }
+            { 1180044550;TextBox;15150;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[7] }
+            { 1180044551;Shape  ;15000;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044552;TextBox;17250;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[8] }
+            { 1180044553;TextBox;17250;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[8] }
+            { 1180044554;Shape  ;17100;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044555;TextBox;19350;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[9] }
+            { 1180044556;TextBox;19350;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[9] }
+            { 1180044557;Shape  ;19200;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044558;Shape  ;21300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044559;TextBox;21450;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[10] }
+            { 1180044560;TextBox;23700;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[11] }
+            { 1180044561;TextBox;21450;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] }
+            { 1180044562;TextBox;23700;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[11] }
+            { 1180044563;Shape  ;23550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044564;Shape  ;25800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044565;TextBox;25950;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[12] }
+            { 1180044566;TextBox;25950;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[12] }
+            { 1180044567;Shape  ;28050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044568;Shape  ;0    ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044000;TextBox;150  ;0    ;8250 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=STRSUBSTNO('%1 %2 %3','Compte',GenPerAccount."Code 1",GLAccount.Name) }
+            { 1180044145;TextBox;300  ;423  ;5850 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=STRSUBSTNO('%1 %2',GenValues[2], 'biens') }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=28275;
+            SectionHeight=876;
+          }
+          CONTROLS
+          {
+            { 1180044569;Shape  ;75   ;846  ;28050;30   ;BorderWidth=1pt;
+                                                         ShapeStyle=HorzLine }
+            { 1180044570;TextBox;8550 ;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[1] }
+            { 1180044571;TextBox;8550 ;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[1] }
+            { 1180044573;Shape  ;8400 ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044574;TextBox;10800;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[5] }
+            { 1180044575;TextBox;10800;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[5] }
+            { 1180044576;Shape  ;10650;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044577;TextBox;12900;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[6] }
+            { 1180044578;TextBox;12900;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[6] }
+            { 1180044579;Shape  ;12750;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044580;TextBox;15150;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[7] }
+            { 1180044581;TextBox;15150;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[7] }
+            { 1180044582;Shape  ;15000;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044583;TextBox;17250;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[8] }
+            { 1180044584;TextBox;17250;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[8] }
+            { 1180044585;Shape  ;17100;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044586;TextBox;19350;0    ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[9] }
+            { 1180044587;TextBox;19350;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[9] }
+            { 1180044588;Shape  ;19200;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044589;Shape  ;21300;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044590;TextBox;21450;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[10] }
+            { 1180044591;TextBox;23700;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[11] }
+            { 1180044592;TextBox;21450;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[10] }
+            { 1180044593;TextBox;23700;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[11] }
+            { 1180044594;Shape  ;23550;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044595;Shape  ;25800;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044596;TextBox;25950;0    ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=GenValues[12] }
+            { 1180044597;TextBox;25950;423  ;2100 ;423  ;HorzAlign=Right;
+                                                         FontSize=9;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=FiscValues[12] }
+            { 1180044598;Shape  ;28050;0    ;150  ;846  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044599;Shape  ;0    ;0    ;150  ;843  ;BorderWidth=1pt;
+                                                         ShapeStyle=VertLine }
+            { 1180044600;Label  ;2250 ;0    ;6150 ;846  ;FontSize=10;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=TOTAL;
+                                                                    FRA=TOTAL] }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=7040;
+      Height=3960;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   FASetup.GET;
+                   GenDeprBookCode := FASetup."Default Depr. Book";
+                   FDeprBookCode := FASetup."Fiscal Depr. Book";
+
+                   CompInfo.GET;
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1100281004;TextBox;3410 ;1760 ;1650 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=End Date;
+                                                              FRA=Date fin];
+                                                   SourceExpr=EndingDate }
+      { 1100281005;Label  ;0    ;1760 ;3300 ;440  ;ParentControl=1100281004;
+                                                   InPage=-1 }
+      { 1100281006;Label  ;0    ;1210 ;3300 ;440  ;ParentControl=1100281007;
+                                                   InPage=-1 }
+      { 1100281007;TextBox;3410 ;1210 ;1650 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Starting Date;
+                                                              FRA=Date d‚but];
+                                                   SourceExpr=StartingDate }
+      { 1100281000;TextBox;3410 ;0    ;2750 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Depreciation Book;
+                                                              FRA=Lois d'amortissement];
+                                                   SourceExpr=GenDeprBookCode;
+                                                   TableRelation="Depreciation Book" }
+      { 1100281001;Label  ;0    ;0    ;3300 ;440  ;ParentControl=1100281000;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=General Depreciation Book;
+                                                              FRA=Loi d'amortissement comptable] }
+      { 1000000000;TextBox;3410 ;550  ;2750 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=Depreciation Book;
+                                                              FRA=Lois d'amortissement];
+                                                   SourceExpr=FDeprBookCode;
+                                                   TableRelation="Depreciation Book" }
+      { 1000000001;Label  ;0    ;550  ;3300 ;440  ;ParentControl=1000000000;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=Fiscal depreciation book;
+                                                              FRA=Loi d'amortissement fiscale] }
+      { 1180044000;CheckBox;3410;2420 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=FRA=Inventaire d‚rogatoire en synthŠse;
+                                                   SourceExpr=PrintInvtDerogSynt }
+      { 1180044001;Label  ;0    ;2420 ;3300 ;440  ;ParentControl=1180044000 }
+      { 1180044002;CheckBox;3410;2970 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=FRA=Inventaire en synthŠse;
+                                                   SourceExpr=PrintInvtSynt }
+      { 1180044003;Label  ;0    ;2970 ;3300 ;440  ;ParentControl=1180044002 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      FASubclass@1100481002 : Record 5608;
+      FaPostingGroup@1100281015 : Record 5606;
+      GLAccount@1180044009 : Record 15;
+      CompanyInfo@1100481001 : Record 79;
+      FASetup@1000 : Record 5603;
+      GenDeprBook@1001 : Record 5611;
+      FiscDeprBook@1000000003 : Record 5611;
+      GenDeprBookText@1100281007 : Text[50];
+      FiscDeprBookText@1000000002 : Text[50];
+      GenDeprMethodText@1000000009 : Text[50];
+      FiscDeprMethodText@1000000012 : Text[50];
+      GenRate@1180044000 : Decimal;
+      FiscRate@1180044001 : Decimal;
+      GenFADeprBook@1100281005 : Record 5612;
+      FiscFADeprBook@1000000008 : Record 5612;
+      GenValues@1180044002 : ARRAY [12] OF Decimal;
+      FiscValues@1180044003 : ARRAY [12] OF Decimal;
+      GenPerAccount@1180044005 : TEMPORARY Record 8016755;
+      FiscPerAccount@1180044006 : TEMPORARY Record 8016755;
+      GenDeprBookCode@1100281006 : Code[10];
+      FDeprBookCode@1000000001 : Code[10];
+      PrintInvtDerogSynt@1180044010 : Boolean;
+      PrintInvtSynt@1180044011 : Boolean;
+      Vendor@1100281000 : Record 23;
+      FAFilter@1004 : Text[250];
+      Title000@1100481000 : TextConst 'ENU=Fixed Asset - Acquisitions List;FRA=INVENTAIRE EN DETAIL';
+      Title001@1180044008 : TextConst 'ENU=Fixed Asset - Acquisitions List;FRA=INVENTAIRE DEROGATOIRE EN SYNTHESE';
+      Title002@1180044007 : TextConst 'ENU=Fixed Asset - Acquisitions List;FRA=INVENTAIRE EN SYNTHESE';
+      Text001@1000000006 : TextConst 'ENU=General %1 : %2;FRA=%1 comptable : %2';
+      Text002@1000000007 : TextConst 'ENU=Fiscal %1 : %2;FRA=%1 fiscale : %2';
+      Text50151@1000000004 : TextConst 'FRA=an(s)';
+      Text50152@1000000005 : TextConst 'FRA=Mois';
+      DeprMethod@1100281002 : 'L,D1,D2,D1L,D2L,P,M';
+      StartingDate@1100281003 : Date;
+      EndingDate@1100281004 : Date;
+      textstartdate@1100281010 : TextConst 'ENU=Starting Date : %1;FRA=Date d‚but : %1';
+      textenddate@1100281011 : TextConst 'ENU=Ending Date : %1;FRA=Date fin : %1';
+      CreateHeader@1000000000 : Boolean;
+      Text010@1000000010 : TextConst 'ENU=L;FRA=L';
+      Text011@1000000011 : TextConst 'ENU=D;FRA=D';
+      DeprAmount@1100281001 : ARRAY [4] OF Decimal;
+      i@1100281008 : Integer;
+      AccountingPeriod@1100281009 : Record 50;
+      StartAccountingPeriod@1100281012 : Date;
+      StartingPeriodDate@1100281014 : Date;
+      EndingPeriodDate@1100281013 : Date;
+      CompInfo@1100281017 : Record 79;
+      rupture@1100281018 : Code[10];
+      Col@1180044004 : Integer;
+
+    PROCEDURE CalcDeprValue@1100281004();
+    BEGIN
+      GenFADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',StartingDate,EndingDate);
+      FiscFADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',StartingDate,EndingDate);
+
+      AccountingPeriod.RESET;
+      AccountingPeriod.SETRANGE("New Fiscal Year",TRUE);
+      AccountingPeriod.SETRANGE(AccountingPeriod."Starting Date",0D,StartingDate);
+      IF AccountingPeriod.FINDFIRST THEN
+        StartAccountingPeriod := AccountingPeriod."Starting Date";
+
+      AccountingPeriod.RESET;
+      AccountingPeriod.SETRANGE("New Fiscal Year",TRUE);
+      AccountingPeriod.SETRANGE(AccountingPeriod."Starting Date",StartAccountingPeriod,EndingDate);
+      IF AccountingPeriod.FINDFIRST THEN
+      BEGIN
+        StartingPeriodDate := AccountingPeriod."Starting Date";
+        IF (AccountingPeriod.NEXT = 0) THEN;
+        REPEAT
+          EndingPeriodDate := CALCDATE('-1J',AccountingPeriod."Starting Date");
+          GenFADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',
+          StartingPeriodDate,EndingPeriodDate);
+          FiscFADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',
+          StartingPeriodDate,EndingPeriodDate);
+          GenFADeprBook.CALCFIELDS(Depreciation);
+          FiscFADeprBook.CALCFIELDS(Depreciation);
+
+          IF (-GenFADeprBook.Depreciation > -FiscFADeprBook.Depreciation) THEN
+            DeprAmount[2] += - GenFADeprBook.Depreciation + FiscFADeprBook.Depreciation
+          ELSE
+            DeprAmount[1] += - FiscFADeprBook.Depreciation + GenFADeprBook.Depreciation;
+
+          StartingPeriodDate := AccountingPeriod."Starting Date";
+        UNTIL (AccountingPeriod.NEXT = 0);
+      END;
+
+      EndingPeriodDate := EndingDate;
+      GenFADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',
+      StartingPeriodDate,EndingPeriodDate);
+      FiscFADeprBook.SETFILTER("FA Posting Date Filter",'%1..%2',
+      StartingPeriodDate,EndingPeriodDate);
+      GenFADeprBook.CALCFIELDS(Depreciation);
+      FiscFADeprBook.CALCFIELDS(Depreciation);
+
+      IF (- GenFADeprBook.Depreciation > - FiscFADeprBook.Depreciation) THEN
+        DeprAmount[4] := - GenFADeprBook.Depreciation + FiscFADeprBook.Depreciation
+      ELSE
+        DeprAmount[3] := - FiscFADeprBook.Depreciation + GenFADeprBook.Depreciation;
+    END;
+
+    PROCEDURE CalcTotalPerAcc@1180044000();
+    BEGIN
+      //IF GenValues[2] = 0 THEN
+      //  EXIT;
+      IF NOT GLAccount.GET(FaPostingGroup."Acquisition Cost Account") THEN
+        EXIT;
+      GenPerAccount."Code 1" := FaPostingGroup."Acquisition Cost Account";
+      GenPerAccount."Code 2" := "Fixed Asset"."FA Posting Group";
+      GenPerAccount."Data Integer 1" := GenValues[2];
+      GenPerAccount."Data Amount 1" := GenValues[1];
+      GenPerAccount."Data Amount 2" := GenValues[5];
+      GenPerAccount."Data Amount 3" := GenValues[6];
+      GenPerAccount."Data Amount 4" := GenValues[7];
+      GenPerAccount."Data Amount 5" := GenValues[8];
+      GenPerAccount."Data Amount 6" := GenValues[9];
+      GenPerAccount."Data Amount 7" := GenValues[10];
+      GenPerAccount."Data Amount 8" := GenValues[11];
+      GenPerAccount."Data Text 1" := FORMAT(GenValues[12]);
+      GenPerAccount.INSERT;
+
+      FiscPerAccount."Code 1" := FaPostingGroup."Acquisition Cost Account";
+      FiscPerAccount."Code 2" := "Fixed Asset"."FA Posting Group";
+      FiscPerAccount."Data Amount 1" := FiscValues[1];
+      FiscPerAccount."Data Amount 2" := FiscValues[5];
+      FiscPerAccount."Data Amount 3" := FiscValues[6];
+      FiscPerAccount."Data Amount 4" := FiscValues[7];
+      FiscPerAccount."Data Amount 5" := FiscValues[8];
+      FiscPerAccount."Data Amount 6" := FiscValues[9];
+      FiscPerAccount."Data Amount 7" := FiscValues[10];
+      FiscPerAccount."Data Amount 8" := FiscValues[11];
+      FiscPerAccount."Data Text 1" := FORMAT(FiscValues[12]);
+      FiscPerAccount.INSERT;
+    END;
+
+    PROCEDURE GetTotalPerAcc@1180044002();
+    BEGIN
+      IF NOT GLAccount.GET(GenPerAccount."Code 1") THEN
+        GLAccount.INIT;
+      GenValues[2] := GenPerAccount."Data Integer 1";
+      GenValues[1] := GenPerAccount."Data Amount 1";
+      GenValues[5] := GenPerAccount."Data Amount 2";
+      GenValues[6] := GenPerAccount."Data Amount 3";
+      GenValues[7] := GenPerAccount."Data Amount 4";
+      GenValues[8] := GenPerAccount."Data Amount 5";
+      GenValues[9] := GenPerAccount."Data Amount 6";
+      GenValues[10] := GenPerAccount."Data Amount 7";
+      GenValues[11] := GenPerAccount."Data Amount 8";
+      EVALUATE(GenValues[12], GenPerAccount."Data Text 1");
+
+      FiscValues[1] := FiscPerAccount."Data Amount 1";
+      FiscValues[5] := FiscPerAccount."Data Amount 2";
+      FiscValues[6] := FiscPerAccount."Data Amount 3";
+      FiscValues[7] := FiscPerAccount."Data Amount 4";
+      FiscValues[8] := FiscPerAccount."Data Amount 5";
+      FiscValues[9] := FiscPerAccount."Data Amount 6";
+      FiscValues[10] := FiscPerAccount."Data Amount 7";
+      FiscValues[11] := FiscPerAccount."Data Amount 8";
+      EVALUATE(FiscValues[12], FiscPerAccount."Data Text 1");
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/07/11 @a ISAT.ST @v IMH6.01.151 @s Immobilisation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

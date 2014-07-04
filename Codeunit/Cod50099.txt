@@ -1,0 +1,225 @@
+OBJECT Codeunit 50099 Phone Standardization
+{
+  OBJECT-PROPERTIES
+  {
+    Date=06/08/11;
+    Time=13:01:18;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Incorrect lenght of %1;FRA=Le %1 a une longueur incorrecte';
+      Text002@1100281001 : TextConst 'ENU=Incorrect length of phone No %1.;FRA=Le nø de t‚l‚phone %1 a une longueur incorrecte';
+      Country@1100481000 : Record 9;
+      CompanyCountry@1100481001 : Code[10];
+      CompanyCountryRead@1100481002 : Boolean;
+      Text003@1100281002 : TextConst 'ENU=Phone No. format is not correct : %1.;FRA=Le format du nø de t‚l‚phone n''est pas correct : %1.';
+      HideMessage@1100281003 : Boolean;
+      CurrentPhone@1100281004 : Text[30];
+
+    PROCEDURE ValidatePhoneNo@1100281000(pTableID@1100281000 : Integer;pFieldID@1100281001 : Integer;pCountryCode@1100281002 : Code[10];VAR pText@1100281003 : Text[30]) rValue : Boolean;
+    VAR
+      lField@1100281006 : Record 2000000041;
+      lText@1100281005 : Text[30];
+      lBool@1100281004 : Boolean;
+    BEGIN
+      // IMH01 Mise en forme le nø de t‚l‚phone en fonction du param‚trage pays
+      //****************************************************************//
+      // A revoir en fonction du format qui sera fournit
+      // La longueur param‚tr‚e est la longueur hors pr‚fixe
+      //****************************************************************//
+      IF pText = '' THEN
+        EXIT(TRUE);
+
+      IF NOT GetCountry(pCountryCode) THEN
+        EXIT(TRUE);
+
+      IF (NOT Country."Phone Standardization")
+         OR (Country."Phone International Prefix No." = '') THEN
+        EXIT(TRUE);
+
+      lBool := FormatPhoneNo(pText);
+      EXIT(lBool);
+
+
+      // V‚rifie que le nø n'est pas d‚j… format‚
+      IF STRPOS(lText,Country."Phone International Prefix No.") = 1 THEN
+        EXIT(TRUE);
+
+      // Supprime les caractŠre avant formatage
+      lText := DELCHR(lText,'=',' .,');
+
+      // V‚rifie la longueur du num‚ro
+      IF STRLEN(lText) <> Country."Phone Local Nos" THEN
+        IF lField.GET(pTableID,pFieldID) THEN BEGIN
+          IF NOT HideMessage THEN  //IMH04
+            ERROR(STRSUBSTNO(Text001,lField."Field Caption"))
+          ELSE
+            EXIT(FALSE);
+        END ELSE
+          IF NOT HideMessage THEN  //IMH04
+            ERROR(Text002, pText)
+          ELSE
+            EXIT(FALSE);
+
+      lText := Country."Phone International Prefix No." + ' ' + lText;
+
+      pText := lText;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE GetCountry@1100481000(pCountryCode@1100481000 : Code[10]) : Boolean;
+    BEGIN
+      //IMH02.ST
+      IF pCountryCode = '' THEN BEGIN
+        IF NOT CompanyCountryRead THEN
+          GetCompanyCountry;
+        pCountryCode := CompanyCountry;
+      END;
+
+      IF pCountryCode = Country.Code THEN
+        EXIT(TRUE);
+      IF Country.GET(pCountryCode) THEN
+        EXIT(TRUE);
+      CLEAR(Country);
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE GetCompanyCountry@1100481002();
+    VAR
+      lCompanyInfo@1100481000 : Record 79;
+    BEGIN
+      //IMH02.ST
+      IF CompanyCountryRead THEN
+        EXIT;
+
+      lCompanyInfo.GET;
+      lCompanyInfo.TESTFIELD("Country/Region Code");
+      CompanyCountry := lCompanyInfo."Country/Region Code";
+      CompanyCountryRead := TRUE;
+    END;
+
+    LOCAL PROCEDURE FormatPhoneNo@1100281001(VAR pTextValue@1100281000 : Text[30]) : Boolean;
+    VAR
+      lInternPrefix@1100281001 : Text[30];
+      lPos@1100281003 : Integer;
+      lReplaceChar@1100281004 : Char;
+      lExitLoop@1100281005 : Boolean;
+      lTextValue@1100281006 : Text[30];
+      lReturnValue@1100281002 : Text[30];
+    BEGIN
+      lTextValue := pTextValue;  //IMH04
+      CurrentPhone := pTextValue;
+      IF (Country."Phone No. Format" = '') OR (lTextValue = '') THEN BEGIN
+        EXIT;
+      END;
+
+      // Suppression des blancs
+      lTextValue := DELCHR(lTextValue, '=', ' .,?');
+      //lText := DELCHR(lText,'=',' .,');
+      lPos := STRLEN(lTextValue);
+      IF lPos = 0 THEN BEGIN
+        pTextValue := lTextValue;
+        EXIT(TRUE);
+      END;
+
+      lReplaceChar := 'X';
+      lReturnValue := Country."Phone No. Format";
+      REPEAT
+        IF ReplaceLastChar(lReturnValue, lReplaceChar, lTextValue[lPos]) THEN
+          lPos := lPos - 1
+        ELSE
+          lExitLoop := TRUE;
+      UNTIL lExitLoop OR (lPos=0);
+      //<<IMH06.ST
+      IF lReturnValue[1] = lReplaceChar THEN
+        lReturnValue[1] := '0';
+      //>>IMH06.ST
+
+      IF STRPOS(lReturnValue, FORMAT(lReplaceChar)) > 0 THEN
+        //<<IMH04
+        IF NOT HideMessage THEN
+          ERROR(Text002, pTextValue)
+        ELSE
+          EXIT(FALSE);
+        //>>IMH04
+
+      // Contr“le du reste de lTextValue
+      IF lPos > 0 THEN BEGIN
+        IF Country."Phone International Prefix No." <> '' THEN BEGIN
+          IF COPYSTR(lTextValue, 1, lPos) = STRSUBSTNO('+%1', Country."Phone International Prefix No.") THEN BEGIN
+            pTextValue := lReturnValue;
+            EXIT(TRUE);
+          END;
+        END;
+
+        // Identique … l'indicatif ou ‚gal … 0 (pour la france)
+        IF (COPYSTR(lTextValue,1, lPos) = STRSUBSTNO('+%1',Country."Phone International Prefix No.")) OR
+           (COPYSTR(lTextValue,1, lPos) = '0') THEN BEGIN
+          pTextValue := lReturnValue;  //IMH04
+          EXIT(TRUE);
+        END ELSE
+          //<<IMH04
+          IF NOT HideMessage THEN
+            ERROR(Text002, pTextValue)
+          ELSE
+            EXIT(FALSE);
+          //>>IMH04
+      END;
+      pTextValue := lReturnValue;  //IMH04
+      EXIT(TRUE);          //IMH04
+    END;
+
+    PROCEDURE ReplaceLastChar@1100281005(VAR pString@1100281000 : Text[30];pCharToFind@1100281001 : Char;pCharToReplace@1100281002 : Char) rCharReplaced : Boolean;
+    VAR
+      lInt@1100281003 : Integer;
+      lInt2@1100281004 : Integer;
+    BEGIN
+      lInt := STRLEN(pString);
+      IF lInt = 0 THEN
+        EXIT(FALSE);
+
+      REPEAT
+        IF pString[lInt] = pCharToFind THEN BEGIN
+      //<<IMH04.ST
+          IF pCharToFind <> 'A' THEN
+            IF NOT EVALUATE(lInt2, FORMAT(pCharToReplace)) THEN
+              IF NOT HideMessage THEN
+                ERROR(STRSUBSTNO(Text003, CurrentPhone))
+              ELSE
+                EXIT(FALSE);
+      //>>IMH04.ST
+          pString[lInt] := pCharToReplace;
+          EXIT(TRUE);
+        END;
+        lInt -= 1;
+      UNTIL lInt <= 0;
+    END;
+
+    PROCEDURE SetHideMessage@1100281002(pHideMessage@1100281000 : Boolean);
+    BEGIN
+      //IMH04 isat.zw
+      HideMessage := pHideMessage;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH06 @d 19/07/11 @a ISAT.ST @v IMH6.01.001 @s Normalisation des donn‚es
+          @c Autoriser de ne pas saisir le premier nø (remplac‚ par 0) */
+      /** @r IMH05 @d 07/04/11 @a ISAT.ST @v IMH6.01.001 @s Normalisation des donn‚es @c Contr“le num‚rique */
+      /** @r IMH04 @d 01/03/11 @a ISAT.ZW @v IMH6.01.001 @s Normalisation des donn‚es @c HideMessage */
+      /** @r IMH03 @d 16/02/11 @a ISAT.ST @v IMH6.01.001 @s Normalisation des donn‚es @c Formatage t‚l‚phonie */
+      /** @r IMH02 @d 04/10/10 @a ISAT.ST @v IMH6.01.001 @s Normalisation des donn‚es @c Gestion du pays soci‚t‚ */
+      /** @r IMH01 @d 23/09/10 @a ISAT.LLT @v IMH6.01.001 @s Normalisation des donn‚es @c Cr‚ation Normalisation t‚l‚phonie */
+    }
+    END.
+  }
+}

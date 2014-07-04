@@ -1,0 +1,274 @@
+OBJECT Codeunit 50207 Campaign Export Excel Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=15/10/13;
+    Time=18:22:17;
+    Modified=Yes;
+    Version List=IMH6.01.08;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lCampaign@1000000000 : Record 5071;
+          BEGIN
+            //lCampaign.GET('AC0028134');
+            //ExportToExcel(lCampaign);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ExcelTemplatePath@1100281027 : Text[250];
+      ExcelSheetName@1100281026 : Text[50];
+      ExcelBuffer@1100281025 : TEMPORARY Record 370;
+      StartRowNo@1100281003 : Integer;
+      StartColNo@1100281002 : Integer;
+      RowNo@1100281001 : Integer;
+      ColNo@1100281000 : Integer;
+      Text001@1100281004 : TextConst 'ENU=Missions;FRA=Missions';
+      Text002@1100281005 : TextConst 'ENU=Providers;FRA=Prestataires';
+      Text003@1100281006 : TextConst 'ENU=Campaign Service Header;FRA=Ligne produit sur l''EVC';
+      Text004@1100281007 : TextConst 'ENU=Open Date;FRA=Date d''ouverture';
+      Text005@1100281008 : TextConst 'ENU=Specialization;FRA=Sp‚cialit‚';
+      Text006@1100281009 : TextConst 'ENU=Cause;FRA=Cause';
+      Text007@1100281010 : TextConst 'ENU=Urgent / No Urgent;FRA=Urgent / non urgent';
+      Text008@1100281011 : TextConst 'ENU=Assigned Date;FRA=Date d''assignation';
+      Text009@1100281012 : TextConst 'ENU=Intervention Status;FRA=Statut de l''intervention';
+      Text010@1100281013 : TextConst 'ENU=Provider;FRA=Prestataire';
+      Text011@1100281014 : TextConst 'ENU=IMH Territory Code;FRA=Zone IMH';
+      Text012@1100281015 : TextConst 'ENU=Department;FRA=D‚partement';
+      Text013@1100281016 : TextConst 'ENU=Post Code;FRA=Code postal';
+      Text014@1100281017 : TextConst 'ENU=Corporate;FRA=Grand compte';
+      Text015@1100281018 : TextConst 'ENU=Provider Code;FRA=Code prestataire';
+      Text016@1100281019 : TextConst 'ENU=Name;FRA=Nom';
+      Text017@1100281020 : TextConst 'ENU=Occupation Rate;FRA=Taux d''occupation';
+      Text018@1100281021 : TextConst 'ENU=Current Intervention Nb;FRA=Nombre d''interventions en cours';
+      Text019@1100281022 : TextConst 'ENU=Current Campaign Intervention Nb;FRA=Nombre d''interventions EVC en cours';
+      Text020@1100281024 : TextConst 'ENU=Cancelled Campaign Intervention Nb;FRA=Nombre d''interventions EVC annul‚es';
+      Text021@1100281023 : TextConst 'ENU=Closed Campaign Intervention Nb;FRA=Nombre d''interventions EVC cl“tur‚es';
+      TotalCpt@1100281030 : Integer;
+      Cpt@1100281029 : Integer;
+      CurrCpt@1100281028 : Integer;
+      Text030@1100281031 : TextConst;
+
+    PROCEDURE ExportToExcel@1100281001(VAR pCampaign@1100281006 : Record 5071);
+    VAR
+      lClaimRate@1100281000 : Decimal;
+      lEntryNo@1100281001 : Integer;
+      lDiff@1100281002 : Decimal;
+      lTotalInterv@1100281003 : Integer;
+      lTotalClaims@1100281004 : Integer;
+      lCode1Txt@1100281005 : Text[50];
+    BEGIN
+      InitValues;
+      IF ExcelTemplatePath <> '' THEN
+        ExcelBuffer.OpenBookWithoutSheet(ExcelTemplatePath)
+      ELSE
+        ExcelBuffer.CreateBook;
+
+      IF ExcelTemplatePath <> '' THEN
+        ExcelBuffer.GetSheet(Text002);
+
+      CreateProviderSheet(pCampaign);
+
+      IF ExcelTemplatePath <> '' THEN
+        ExcelBuffer.GetSheet(Text001);
+
+      CreateMissionSheet(pCampaign);
+
+      ViewExcel;
+    END;
+
+    PROCEDURE CreateMissionSheet@1100281006(VAR pCampaign@1100281000 : Record 5071);
+    VAR
+      lServiceHeader@1100281002 : Record 5900;
+      lIntervention@1100281001 : Record 50075;
+      lServiceCode@1100281003 : Record 50040;
+      lSpec@1100281005 : Record 50005;
+      lSpecializationText@1100281004 : Text[1024];
+      lFaultReasonCode@1100281006 : Record 5917;
+      lProvider@1100281007 : Record 50000;
+    BEGIN
+      ExcelBuffer.DELETEALL;
+      RowNo := StartRowNo;
+      ColNo := StartColNo;
+
+      lServiceHeader.SETCURRENTKEY("Campaign No.");
+      lServiceHeader.SETRANGE("Campaign No.", pCampaign."No.");
+      IF lServiceHeader.FINDFIRST THEN
+        REPEAT
+          lIntervention.SETRANGE("Service Header No.", lServiceHeader."No.");
+          IF lIntervention.FINDFIRST THEN
+            REPEAT
+              lSpecializationText := '';
+              RowNo := RowNo + 1;
+              InsertRow(RowNo,ColNo,lServiceHeader."No.",'','');
+              InsertRow(RowNo,ColNo + 1,FORMAT(DT2DATE(lServiceHeader."Creation Date")),'','');
+              lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+              lServiceCode.SETRANGE("Service No.", lIntervention."Service No.");
+              lServiceCode.SETRANGE("Service Header No.", lIntervention."Service Header No.");
+              lServiceCode.SETRANGE("Intervention Line No.", lIntervention."Line No.");
+              IF lServiceCode.FINDFIRST THEN
+                REPEAT
+                  IF lSpec.GET(lServiceCode.Code) THEN
+                    IF STRLEN(lSpecializationText) + STRLEN(lSpec.Description) < 1024 THEN
+                      IF lSpecializationText <> '' THEN
+                        lSpecializationText := lSpecializationText + '/' + lSpec.Description
+                      ELSE
+                        lSpecializationText := lSpec.Description;
+                UNTIL lServiceCode.NEXT = 0;
+              InsertRow(RowNo,ColNo + 2,lSpecializationText,'','');
+              IF lFaultReasonCode.GET(lServiceHeader."Service Cause") THEN
+                InsertRow(RowNo,ColNo + 3,lFaultReasonCode.Description,'','');
+              InsertRow(RowNo,ColNo + 4,FORMAT(lIntervention.Urgent),'','');
+              InsertRow(RowNo,ColNo + 5,FORMAT(lIntervention."Assigned Date"),'','');
+              InsertRow(RowNo,ColNo + 6,FORMAT(lIntervention."Intervention Status"),'','');
+              InsertRow(RowNo,ColNo + 7,lIntervention."Provider No.",'','');
+              //<<IMH03
+              InsertRow(RowNo,ColNo + 8,lIntervention."Provider Name",'','');
+              IF lProvider.GET(lIntervention."Provider No.") THEN BEGIN
+                InsertRow(RowNo,ColNo + 9,lProvider."IMH Territory Code",'','');
+                InsertRow(RowNo,ColNo + 10,lProvider."Area Code",'','');
+                //<<IMH02
+                //InsertRow(RowNo,ColNo + 10,lProvider."Post Code",'','');
+              END;
+              InsertRow(RowNo,ColNo + 11,lIntervention."Post Code",'','');
+              //>>IMH02
+              InsertRow(RowNo,ColNo + 12,lIntervention."Corporate No.",'','');
+              //>>IMH03
+            UNTIL lIntervention.NEXT = 0;
+        UNTIL lServiceHeader.NEXT = 0;
+
+      ExcelBuffer.CreateSheet(Text001,Text001,'','');
+    END;
+
+    PROCEDURE CreateProviderSheet@1100281007(VAR pCampaign@1100281000 : Record 5071);
+    VAR
+      lCampaignProviderSetup@1100281001 : Record 50034;
+      lProvider@1100281002 : Record 50000;
+      lOccupationRate@1100281003 : Decimal;
+      lCampaignManagement@1100281004 : Codeunit 50206;
+      lIntervention@1000000000 : Record 50075;
+    BEGIN
+      ExcelBuffer.DELETEALL;
+      RowNo := StartRowNo;
+      ColNo := StartColNo;
+
+      lCampaignProviderSetup.SETRANGE("Campaign No.", pCampaign."No.");
+      IF lCampaignProviderSetup.FINDFIRST THEN
+        REPEAT
+          IF lProvider.GET(lCampaignProviderSetup."No.") THEN BEGIN
+            RowNo := RowNo + 1;
+            InsertRow(RowNo,ColNo,lProvider."No.",'','');
+            InsertRow(RowNo,ColNo + 1,lProvider.Name,'','');
+            lProvider.CALCFIELDS("Current Service Interv. Nb");
+            IF lProvider."Current Interv. Limit Max." <> 0 THEN
+              //<<IMH02
+              //lOccupationRate := (lProvider."Current Service Interv. Nb" / lProvider."Current Interv. Limit Max.") * 100
+              lOccupationRate := ROUND((lProvider."Current Service Interv. Nb" / lProvider."Current Interv. Limit Max.") * 100, 0.1)
+              //>>IMH02
+            ELSE
+              lOccupationRate := 0;
+            InsertRow(RowNo,ColNo + 2,FORMAT(lOccupationRate),'','');
+            InsertRow(RowNo,ColNo + 3,FORMAT(lProvider."Current Service Interv. Nb"),'','');
+            InsertRow(RowNo,ColNo + 4,FORMAT(lCampaignManagement.GetProvidInProcCampIntervNb(lProvider."No.")),'','');
+            InsertRow(RowNo,ColNo + 5,FORMAT(lCampaignManagement.GetProvidCanceledCampIntervNb(lProvider."No.")),'','');
+            InsertRow(RowNo,ColNo + 6,FORMAT(lCampaignManagement.GetProvidClosedCampIntervNb(lProvider."No.")),'','');
+          END;
+        UNTIL lCampaignProviderSetup.NEXT = 0;
+      //<<IMH04
+      lIntervention.SETCURRENTKEY("Campaign No.");
+      lIntervention.SETRANGE("Campaign No.", pCampaign."No.");
+      IF lIntervention.FINDSET THEN
+        REPEAT
+          IF NOT lCampaignProviderSetup.GET(pCampaign."No.", lIntervention."Provider No.") THEN
+            IF lProvider.GET(lIntervention."Provider No.") THEN BEGIN
+              RowNo := RowNo + 1;
+              InsertRow(RowNo,ColNo,lProvider."No.",'','');
+              InsertRow(RowNo,ColNo + 1,lProvider.Name,'','');
+              lProvider.CALCFIELDS("Current Service Interv. Nb");
+              IF lProvider."Current Interv. Limit Max." <> 0 THEN
+                //<<IMH02
+                //lOccupationRate := (lProvider."Current Service Interv. Nb" / lProvider."Current Interv. Limit Max.") * 100
+                lOccupationRate := ROUND((lProvider."Current Service Interv. Nb" / lProvider."Current Interv. Limit Max.") * 100, 0.1)
+                //>>IMH02
+              ELSE
+                lOccupationRate := 0;
+              InsertRow(RowNo,ColNo + 2,FORMAT(lOccupationRate),'','');
+              InsertRow(RowNo,ColNo + 3,FORMAT(lProvider."Current Service Interv. Nb"),'','');
+              InsertRow(RowNo,ColNo + 4,FORMAT(lCampaignManagement.GetProvidInProcCampIntervNb(lProvider."No.")),'','');
+              InsertRow(RowNo,ColNo + 5,FORMAT(lCampaignManagement.GetProvidCanceledCampIntervNb(lProvider."No.")),'','');
+              InsertRow(RowNo,ColNo + 6,FORMAT(lCampaignManagement.GetProvidClosedCampIntervNb(lProvider."No.")),'','');
+            END;
+        UNTIL lIntervention.NEXT = 0;
+      //>>IMH04
+      ExcelBuffer.CreateSheet(Text002,Text002,'','');
+    END;
+
+    PROCEDURE InitValues@1100281005();
+    VAR
+      lReportSetup@1100281000 : Record 50115;
+      lFound@1100281001 : Boolean;
+      lReportID@1100281002 : Integer;
+    BEGIN
+      lReportID := 50207;
+      lFound := lReportSetup.GET(lReportSetup."Object Type"::Codeunit,lReportID,USERID);
+      IF NOT lFound THEN
+        lFound := lReportSetup.GET(lReportSetup."Object Type"::Codeunit,lReportID,'');
+
+      IF lFound THEN BEGIN
+        ExcelTemplatePath := lReportSetup."Excel Template Path";
+        StartRowNo := lReportSetup."First Line";
+        StartColNo := lReportSetup."First Column";
+      END ELSE BEGIN
+        ExcelTemplatePath := '';
+      END;
+
+      IF StartRowNo <= 0 THEN
+        StartRowNo := 2;
+
+      IF StartColNo <= 0 THEN
+        StartColNo := 1;
+    END;
+
+    PROCEDURE InsertRow@1100281004(RowNo@1000000000 : Integer;ColumnNo@1000000001 : Integer;CellValue@1000000002 : Text[250];CellFormula@1100281000 : Text[250];NbFormat@1000000003 : Text[30]);
+    BEGIN
+      ExcelBuffer.INIT;
+      ExcelBuffer.VALIDATE("Row No.",RowNo);
+      ExcelBuffer.VALIDATE("Column No.",ColumnNo);
+      ExcelBuffer."Cell Value as Text" := CellValue;
+      ExcelBuffer.NumberFormat := NbFormat;
+      ExcelBuffer.Formula := CellFormula; //'';
+      ExcelBuffer.INSERT;
+    END;
+
+    PROCEDURE GetCurrCellID@1100281000() : Text[20];
+    BEGIN
+      EXIT(ExcelBuffer.xlColID + ExcelBuffer.xlRowID);
+    END;
+
+    PROCEDURE ViewExcel@1000000002();
+    BEGIN
+      ExcelBuffer.GiveUserControl;
+      CLEAR(ExcelBuffer);
+    END;
+
+    PROCEDURE CreateExcelBuffer@1000000004();
+    BEGIN
+      ExcelBuffer.DELETEALL;
+      CLEAR(ExcelBuffer);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 14/10/13 @a ISAT.ST @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR / R‚gion */
+      /** @r IMH04 @d 15/05/12 @a ISAT.ZW @v IMH6.01.136 @s Ev‚nement climatique @h mantis 3468 @c correction */
+      /** @r IMH03 @d 14/05/12 @a ISAT.ZW @v IMH6.01.136 @s Ev‚nement climatique @h mantis 3464 @c Ajout champ raison sociale */
+      /** @r IMH02 @d 27/04/12 @a ISAT.ZW @v IMH6.01.136 @s Ev‚nement climatique @h mantis 3356 @c cr‚ation */
+      /** @r IMH01 @d 08/03/12 @a ISAT.ZW @v IMH6.01.136 @s Ev‚nement climatique @c cr‚ation */
+    }
+    END.
+  }
+}

@@ -1,0 +1,849 @@
+OBJECT Codeunit 50040 Process Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=07/02/13;
+    Time=13:39:46;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+            // Autoprocess de masse
+            REPORT.RUN(REPORT::"Process Batch - Intervention", FALSE);
+            REPORT.RUN(REPORT::"Process Batch - Service Header", FALSE);
+            REPORT.RUN(REPORT::"Process Batch - Service", FALSE);
+            REPORT.RUN(REPORT::"Process Batch - Completeness", FALSE);
+            REPORT.RUN(REPORT::"Process Batch - Provider", FALSE);
+            REPORT.RUN(REPORT::"Process Batch - Interv. Quote", FALSE); //IMH07.LLT
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Invalide data type : %1.;FRA=Type de donn‚e non valide : %1.';
+      ToolsMgt@1100481000 : Codeunit 8016602;
+      Text002@1100281001 : TextConst 'ENU=Process has been copied.;FRA=Le processus a ‚t‚ copi‚.';
+      Text003@1100281002 : TextConst 'ENU=Do you want to delete the status of this process?;FRA=Souhaitez-vous supprimer les statuts existants de cet processus?';
+      Text004@1100281003 : TextConst 'ENU=There is no next step.;FRA=Il n''existe pas d''‚tape suivante.';
+      Text005@1100281004 : TextConst 'ENU=Enforce time don''t let you change next step.;FRA=Le d‚lai impos‚ ne vous autorise pas de passer … cette ‚tape.';
+      Text006@1100281005 : TextConst 'ENU=Field %1 has not be updated.\Do you want to continue ?;FRA=Vous n''avez pas s‚lectionner de code pour le champ %1.\Ce ne sera donc pas mis … jour.\Souhaitez-vous continuer ?';
+      Text007@1100281006 : TextConst 'ENU=Action canceled;FRA=Action annul‚e';
+      Text008@1100281007 : TextConst 'FRA=%1 n''est pas renseign‚';
+
+    PROCEDURE SelectNextStep@1100281000(pProcessCode@1100281000 : Code[10];pStatus@1100281006 : Integer;VAR pProcessStep@1100281007 : Record 50043) : Boolean;
+    VAR
+      lProcessStep@1100281001 : Record 50043;
+      lTempProcessStep@1100281008 : TEMPORARY Record 50043;
+      lOk@1100281002 : Boolean;
+      lOptions@1100281003 : Text[400];
+      lChoice@1100281005 : Integer;
+      lInt@1100281004 : Integer;
+    BEGIN
+      // S‚lection ‚tape suivant (interface utilisateur)
+      lProcessStep.SETRANGE("Process Code", pProcessCode);
+      lProcessStep.SETRANGE("Previous Status", pStatus);
+      lProcessStep.SETRANGE(Active, TRUE);
+      lProcessStep.SETRANGE("Manual User Step", TRUE); //IMH04.ST
+      lInt := lProcessStep.COUNT;
+      lOk := FALSE;
+      CASE lInt OF
+        0 : BEGIN
+          MESSAGE(Text004);
+          EXIT(FALSE);
+        END;
+        1 : BEGIN
+          lProcessStep.FINDFIRST;
+          IF CONFIRM(lProcessStep.Description,TRUE) THEN BEGIN
+            pProcessStep := lProcessStep;
+            EXIT(TRUE);
+          END;
+        END;
+        ELSE BEGIN
+          lProcessStep.FINDFIRST;
+          lInt := 1;
+          REPEAT
+            IF lOptions = '' THEN
+              lOptions := lProcessStep.Description
+            ELSE
+              lOptions := lOptions + ',' + lProcessStep.Description;
+            lTempProcessStep := lProcessStep;
+            lTempProcessStep.Priority := lInt;
+            lTempProcessStep.INSERT(FALSE);
+            lInt += 1;
+          UNTIL lProcessStep.NEXT = 0;
+          lChoice := STRMENU(lOptions,1);
+          IF lChoice > 0 THEN BEGIN
+            lTempProcessStep.SETRANGE(Priority, lChoice);
+            lTempProcessStep.FINDFIRST;
+            pProcessStep := lTempProcessStep;
+            EXIT(TRUE);
+          END;
+        END; // Count > 1
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE SetAutoStepFilters@1100281002(pFromProcessCode@1100281000 : Code[10];pFromStatus@1100281001 : Integer;VAR pStepsToTest@1100281002 : Record 50043) : Boolean;
+    BEGIN
+      IF (pFromProcessCode = '') OR (pFromStatus = 0) THEN
+        EXIT(FALSE);
+      WITH pStepsToTest DO BEGIN
+        SETCURRENTKEY("Process Code","Previous Status",Active,Priority,"Auto Process Step");
+        SETRANGE("Process Code", pFromProcessCode);
+        SETRANGE("Previous Status", pFromStatus);
+        SETRANGE("Auto Process Step", TRUE);
+        SETRANGE(Active, TRUE);
+      //<<IMH20.ST
+        IF NOT GUIALLOWED THEN
+          SETRANGE("Disable System User", FALSE);
+      //>>IMH20.ST
+        EXIT(NOT ISEMPTY);
+      END;
+    END;
+
+    PROCEDURE StatusActionExist@1100281007(pProcessCode@1100281000 : Code[10];pStatus@1100281001 : Integer;VAR pAction@1100281002 : Record 50044) : Boolean;
+    BEGIN
+      WITH pAction DO BEGIN
+        RESET;
+        SETCURRENTKEY("Process Code", "Source Action", "Source Line No.", "Action Order");
+        SETRANGE("Process Code", pProcessCode);
+        SETRANGE("Source Action", "Source Action"::Status);
+        SETRANGE("Source Line No.", pStatus);
+        SETRANGE("Suspend Action", FALSE);
+        EXIT(NOT ISEMPTY);
+      END;
+    END;
+
+    PROCEDURE EvaluateFieldValue@1100481002(VAR pFieldRef@1100481000 : FieldRef;pReplaceValue@1100481001 : Text[1024];pReplaceIntValue@1100281001 : Integer);
+    VAR
+      lBool@1100481002 : Boolean;
+      lInt@1100481003 : Integer;
+      lDec@1100481004 : Decimal;
+      lText@1100481005 : Text[1024];
+      lCode@1100481006 : Code[1024];
+      lDate@1100481007 : Date;
+      lTime@1100481008 : Time;
+      lDateTime@1100481009 : DateTime;
+      lBigInt@1100281000 : BigInteger;
+    BEGIN
+      // obsolŠte
+      CASE UPPERCASE(FORMAT(pFieldRef.TYPE)) OF
+        'BOOLEAN', 'OPTION' : BEGIN
+          //EVALUATE(lBool, pReplaceValue);
+          pFieldRef.VALIDATE(pReplaceIntValue);
+        END;
+        'INTEGER', 'DURATION' : BEGIN
+          EVALUATE(lInt, pReplaceValue);
+          pFieldRef.VALIDATE(lInt);
+        END;
+        'BIGINTEGER' : BEGIN
+          EVALUATE(lBigInt, pReplaceValue);
+          pFieldRef.VALIDATE(lBigInt);
+        END;
+        'DECIMAL' : BEGIN
+          EVALUATE(lDec, pReplaceValue);
+          pFieldRef.VALIDATE(lDec);
+        END;
+        'CODE' : BEGIN
+          EVALUATE(lCode, pReplaceValue);
+          pFieldRef.VALIDATE(lCode);
+        END;
+        'DATE' : BEGIN
+          EVALUATE(lDate, pReplaceValue);
+          pFieldRef.VALIDATE(lDate);
+        END;
+        'TIME' : BEGIN
+          EVALUATE(lTime, pReplaceValue);
+          pFieldRef.VALIDATE(lTime);
+        END;
+        'DATETIME' : BEGIN
+          EVALUATE(lDateTime, pReplaceValue);
+          pFieldRef.VALIDATE(lDateTime);
+        END;
+        //'OPTION' : BEGIN
+          //GetFieldRefOptionIntByCaption(pFieldRef, pReplaceValue, lInt);
+          //pFieldRef.VALIDATE(pReplaceIntValue);
+        //END;
+        'TEXT' : BEGIN
+          pFieldRef.VALIDATE(pReplaceValue);
+        END;
+        ELSE
+          ERROR(Text001, UPPERCASE(FORMAT(pFieldRef.TYPE)));
+      END; //CASE
+    END;
+
+    PROCEDURE GetFieldRefOptionIntByCaption@1100281011(VAR pFieldRef@1100281001 : FieldRef;pOptionCaption@1100281000 : Text[1024];VAR pOptionValue@1100281006 : Integer) : Boolean;
+    VAR
+      lOptionCaptionList@1100281002 : Text[1024];
+      lOptionCaption@1100281004 : Text[1024];
+      lPos@1100281005 : Integer;
+    BEGIN
+      IF UPPERCASE(FORMAT(pFieldRef.TYPE)) <> 'OPTION' THEN
+        EXIT;
+
+      IF pOptionCaption = '' THEN
+        EXIT;
+
+      lOptionCaptionList := pFieldRef.OPTIONCAPTION;
+      pOptionValue := 0;
+
+      lPos := STRPOS(lOptionCaptionList, ',');
+      WHILE lPos > 0 DO BEGIN
+        lOptionCaption := COPYSTR(lOptionCaptionList, 1, STRPOS(lOptionCaptionList, ',') -1);
+        lOptionCaptionList := COPYSTR(lOptionCaptionList, lPos+1, STRLEN(lOptionCaptionList) - lPos-1);
+        lPos := STRPOS(lOptionCaptionList, ',');
+        IF pOptionCaption = lOptionCaption THEN
+          EXIT(TRUE);
+        pOptionValue += 1;
+      END;
+    END;
+
+    PROCEDURE InitTrayLine@1100281001(pProcesAction@1100281000 : Record 50044;VAR pTrayLine@1100281001 : Record 50048);
+    BEGIN
+      // Initialise la trayLine avec l'action
+    END;
+
+    PROCEDURE GetLastChangeDate@1100481000(pSourceTableID@1100481000 : Integer;pSourceCode1@1100481001 : Code[20];pSourceCode2@1100481002 : Code[20];pSourceInt@1100481003 : Integer;pSourceInt2@1100281000 : Integer) : DateTime;
+    VAR
+      lProcessStatusHistory@1100481004 : Record 50047;
+    BEGIN
+      WITH lProcessStatusHistory DO BEGIN
+        SETRANGE("Source Table ID", pSourceTableID);
+        SETRANGE("Source Key Code 1", pSourceCode1);
+        SETRANGE("Source Key Code 2", pSourceCode2);
+        SETRANGE("Source Key Integer 1", pSourceInt);
+        SETRANGE("Source Key Integer 2", pSourceInt2); //IMH07.LLT
+        IF ISEMPTY THEN
+          EXIT(0DT);
+        FINDLAST;
+        EXIT("Change Date")
+      END;
+    END;
+
+    PROCEDURE AllowStepChangeDelay@1100481001(pStepDateFormula@1100481006 : DateFormula;pStepHourFormula@1100481005 : Integer;pSourceTableID@1100481003 : Integer;pSourceCode1@1100481002 : Code[20];pSourceCode2@1100481001 : Code[20];pSourceInt@1100481000 : Integer;pSourceInt2@1100281000 : Integer;pCreationDate@1100281001 : DateTime;pCalendarCode@1100281003 : Code[10];pRaiseError@1100281002 : Boolean) : Boolean;
+    VAR
+      lDateTime@1100481004 : DateTime;
+    BEGIN
+      //IMH07
+      // Ajout paramŠre pSourceInt2 pour la gestion des devis
+      IF (FORMAT(pStepDateFormula) = '') AND (pStepHourFormula = 0) THEN
+        EXIT(TRUE);
+      lDateTime := GetLastChangeDate(pSourceTableID, pSourceCode1, pSourceCode2, pSourceInt, pSourceInt2);
+      IF lDateTime = 0DT THEN
+        lDateTime := pCreationDate;
+
+      //<<IMH13
+      //EXIT(AllowStepChangeDelay2(pStepDateFormula, pStepHourFormula, lDateTime, pRaiseError));
+      EXIT(AllowStepChangeDelay2(pStepDateFormula, pStepHourFormula, lDateTime, pCalendarCode, pRaiseError));
+      //>>IMH13
+    END;
+
+    PROCEDURE AllowStepChangeDelayFieldVal@1100281010(pStepDateFormula@1100481006 : DateFormula;pStepHourFormula@1100481005 : Integer;pRecRef@1100281001 : RecordRef;pFieldNo@1100281000 : Integer;pCalendarCode@1100281006 : Code[10];pRaiseError@1100281002 : Boolean) : Boolean;
+    VAR
+      lFieldRef@1100281003 : FieldRef;
+      lDateTime@1100281004 : DateTime;
+      lDate@1100281005 : Date;
+    BEGIN
+      //IMH12.ST
+      IF (FORMAT(pStepDateFormula) = '') AND (pStepHourFormula = 0) THEN
+        EXIT(TRUE);
+      IF pFieldNo = 0 THEN
+        EXIT(TRUE);
+
+      lFieldRef := pRecRef.FIELD(pFieldNo);
+      IF UPPERCASE(FORMAT(lFieldRef.CLASS)) = 'FLOWFIELD' THEN
+        lFieldRef.CALCFIELD;
+
+      IF UPPERCASE(FORMAT(lFieldRef.TYPE)) = 'DATE' THEN BEGIN
+        lDate := lFieldRef.VALUE;
+        //<<IMH22
+        IF lDate = 0D THEN
+          //<<IMH23
+          //ERROR(STRSUBSTNO(Text008,lFieldRef.CAPTION));
+          EXIT(FALSE);
+          //>>IMH23
+        //>>IMH22
+        lDateTime := CREATEDATETIME(lDate, 0T);
+      END
+      ELSE BEGIN
+        lDateTime := lFieldRef.VALUE;
+        //<<IMH22
+        IF lDateTime = 0DT THEN
+          //<<IMH23
+          //ERROR(STRSUBSTNO(Text008,lFieldRef.CAPTION));
+          EXIT(FALSE);
+          //>>IMH23
+        //>>IMH22
+
+      END;
+      //<<IMH13
+      //EXIT(AllowStepChangeDelay2(pStepDateFormula, pStepHourFormula, lDateTime, pRaiseError));
+      EXIT(AllowStepChangeDelay2(pStepDateFormula, pStepHourFormula, lDateTime, pCalendarCode, pRaiseError));
+      //>>IMH13
+    END;
+
+    LOCAL PROCEDURE AllowStepChangeDelay2@1100281013(pStepDateFormula@1100481006 : DateFormula;pStepHourFormula@1100481005 : Integer;pDateTime@1100281001 : DateTime;pCalendarCode@1100281000 : Code[10];pRaiseError@1100281002 : Boolean) : Boolean;
+    VAR
+      lCalendarManagement@1100281004 : Codeunit 7600;
+      lDate@1100281003 : Date;
+      lAvailableDateTime@1100281006 : DateTime;
+      lCurrDateTime@1100281005 : DateTime;
+    BEGIN
+      //IMH12.ST
+      IF (FORMAT(pStepDateFormula) = '') AND (pStepHourFormula = 0) THEN
+        EXIT(TRUE);
+
+      lCurrDateTime := CREATEDATETIME(WORKDATE, TIME); //IMH16.ST
+      //<<IMH13
+      IF pCalendarCode <> '' THEN BEGIN
+        IF lCalendarManagement.CalcFirstAvailableDate(
+              pCalendarCode, pDateTime, pStepDateFormula, pStepHourFormula, lAvailableDateTime) THEN
+          IF lCurrDateTime >= lAvailableDateTime THEN
+            EXIT(TRUE);
+        IF pRaiseError THEN
+          ERROR(Text005);
+        EXIT(FALSE);
+      END;
+      //>>IMH13
+
+      IF lCurrDateTime < ToolsMgt.CalcDateTmeByFormula(pDateTime, pStepDateFormula, pStepHourFormula) THEN BEGIN
+        IF pRaiseError THEN
+          ERROR(Text005);
+        EXIT(FALSE);
+      END;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE IsRecInRequirement@1100281003(VAR pRecRef@1100281000 : RecordRef;pReq@1100281001 : Record 50045) rValue : Boolean;
+    VAR
+      lRecRef@1100281002 : RecordRef;
+    BEGIN
+      IF pReq.GetRecFilters(FALSE) <> '' THEN BEGIN
+        // (TODO : possibilit‚ de conditionner la recherche de flowfield une fois le MCD stabilis‚ : pReq."Table Filter With Flowfields" )
+        IF NOT TestRecInFilters(pRecRef, pReq.GetRecFilters(FALSE), TRUE) THEN
+          EXIT(FALSE);
+      END;
+      IF pReq."Test Function No." <> 0 THEN BEGIN
+        IF NOT TestFunction(pRecRef, pReq) THEN
+          EXIT(FALSE);
+      END;
+      //<<IMH15.ST
+      IF pReq."Second Source Table No." <> 0 THEN
+        IF pReq.GetRecFilters2(FALSE) <> '' THEN BEGIN
+          // Retrieve second table recref
+          pReq.GetSecondRecRef(pRecRef, lRecRef);
+          IF NOT TestRecInFilters(lRecRef, pReq.GetRecFilters2(FALSE), TRUE) THEN
+            EXIT(FALSE);
+        END;
+      //>>IMH15.ST
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE TestRecInFilters@1100281008(VAR pRecRef@1100281000 : RecordRef;pTextFilter@1100281001 : Text[1024];pCheckFlowFields@1100281005 : Boolean) : Boolean;
+    VAR
+      lInt@1100281004 : Integer;
+      lFieldRef@1100281003 : FieldRef;
+      lField@1100281002 : Record 2000000041;
+    BEGIN
+      WITH pRecRef DO BEGIN
+        RESET;
+        SETVIEW(pTextFilter);
+        IF pCheckFlowFields THEN BEGIN
+          // Calcul des flowfields
+          FOR lInt := 1 TO FIELDCOUNT DO BEGIN
+            lFieldRef := FIELDINDEX(lInt);
+            IF lFieldRef.GETFILTER <> '' THEN BEGIN
+              lField.GET(NUMBER, lFieldRef.NUMBER);
+              IF lField.Class = lField.Class::FlowField THEN
+                lFieldRef.CALCFIELD;
+            END;
+          END;
+        END;
+        EXIT(NOT ISEMPTY);
+      END;
+    END;
+
+    LOCAL PROCEDURE TestFunction@1100281006(VAR pRecRef@1100281001 : RecordRef;pReq@1100281000 : Record 50045) : Boolean;
+    VAR
+      lTestFunction@1100281002 : Record 50085;
+    BEGIN
+      EXIT(lTestFunction.TestFunction(pRecRef, pReq)); //
+    END;
+
+    PROCEDURE DuplicatProcess@1100281004(pNewProcess@1100281001 : Record 50041);
+    VAR
+      lProcess@1100281000 : Record 50041;
+      lProcessStatus@1100281002 : Record 50042;
+      lProcessStep@1100281003 : Record 50043;
+      lProcessAction@1100281004 : Record 50044;
+      lProcessRequirement@1100281005 : Record 50045;
+      lProcessStatus2@1100281009 : Record 50042;
+      lProcessStep2@1100281008 : Record 50043;
+      lProcessAction2@1100281007 : Record 50044;
+      lProcessRequirement2@1100281006 : Record 50045;
+    BEGIN
+      //IMH03 isat.zw
+      lProcess.FILTERGROUP(2);
+      lProcess.SETRANGE("Source Table No.", pNewProcess."Source Table No.");
+      lProcess.FILTERGROUP(0);
+      IF NOT (FORM.RUNMODAL(0, lProcess) = ACTION::LookupOK) THEN
+        EXIT;
+
+      IF CONFIRM(Text003) THEN BEGIN
+        lProcessStatus.SETRANGE("Process Code", pNewProcess.Code);
+        IF NOT lProcessStatus.ISEMPTY THEN
+          lProcessStatus.DELETEALL(TRUE);
+      END;
+
+      lProcessStatus.SETRANGE("Process Code", lProcess.Code);
+      IF lProcessStatus.FINDFIRST THEN
+        REPEAT
+          lProcessStatus2 := lProcessStatus;
+          lProcessStatus2."Process Code" := pNewProcess.Code;
+          lProcessStatus2.INSERT(TRUE);
+        UNTIL lProcessStatus.NEXT = 0;
+
+      lProcessStep.SETRANGE("Process Code", lProcess.Code);
+      IF lProcessStep.FINDFIRST THEN
+        REPEAT
+          lProcessStep2 := lProcessStep;
+          lProcessStep2."Process Code" := pNewProcess.Code;
+          //<<IMH10
+          IF lProcessStep2."Next Process Code" = lProcess.Code THEN
+            lProcessStep2."Next Process Code" := pNewProcess.Code;
+          //>>IMH10
+          lProcessStep2.INSERT(TRUE);
+        UNTIL lProcessStep.NEXT = 0;
+
+      lProcessAction.SETRANGE("Process Code", lProcess.Code);
+      IF lProcessAction.FINDFIRST THEN
+        REPEAT
+          lProcessAction2 := lProcessAction;
+          lProcessAction2."Process Code" := pNewProcess.Code;
+          lProcessAction2.INSERT(TRUE);
+        UNTIL lProcessAction.NEXT = 0;
+
+      lProcessRequirement.SETRANGE("Process Code", lProcess.Code);
+      IF lProcessRequirement.FINDFIRST THEN
+        REPEAT
+          lProcessRequirement2 := lProcessRequirement;
+          lProcessRequirement2."Process Code" := pNewProcess.Code;
+          lProcessRequirement2.INSERT(TRUE);
+        UNTIL lProcessRequirement.NEXT = 0;
+
+      MESSAGE(Text002);
+    END;
+
+    PROCEDURE SetFieldValue@1100281005(pAction@1100281000 : Record 50044;VAR pRecRef@1100281001 : RecordRef);
+    VAR
+      lFieldRef@1100281002 : FieldRef;
+      lBool@1100281011 : Boolean;
+      lInt@1100281010 : Integer;
+      lDec@1100281009 : Decimal;
+      lText@1100281008 : Text[1024];
+      lCode@1100281007 : Code[1024];
+      lDate@1100281006 : Date;
+      lTime@1100281005 : Time;
+      lDateTime@1100281004 : DateTime;
+      lBigInt@1100281003 : BigInteger;
+    BEGIN
+      IF pAction."Field To Set" = 0 THEN
+        pAction.FIELDERROR("Field To Set");
+      lFieldRef := pRecRef.FIELD(pAction."Field To Set");
+      CASE UPPERCASE(FORMAT(lFieldRef.TYPE)) OF
+        'BOOLEAN', 'OPTION' : BEGIN
+          lFieldRef.VALIDATE(pAction."Value Int To Set");
+        END;
+        'INTEGER', 'DURATION' : BEGIN
+          EVALUATE(lInt, pAction."Value To Set");
+          lFieldRef.VALIDATE(lInt);
+        END;
+        'BIGINTEGER' : BEGIN
+          EVALUATE(lBigInt, pAction."Value To Set");
+          lFieldRef.VALIDATE(lBigInt);
+        END;
+        'DECIMAL' : BEGIN
+          EVALUATE(lDec, pAction."Value To Set");
+          lFieldRef.VALIDATE(lDec);
+        END;
+        'CODE' : BEGIN
+          //<<IMH14.isat.PC
+          IF pAction."Select Code" THEN BEGIN
+            IF NOT GetCodeDescription(pAction."Source Table",pAction."Field To Set",pAction."Value To Set") THEN
+              ERROR('');
+          END;
+          //>>IMH14.isat.PC
+          EVALUATE(lCode, pAction."Value To Set");
+          lFieldRef.VALIDATE(lCode);
+        END;
+        'DATE' : BEGIN
+          //<<IMH09
+          IF pAction."Fill Date" THEN
+            lDate := WORKDATE
+          ELSE
+          //>>IMH09
+            EVALUATE(lDate, pAction."Value To Set");
+          lFieldRef.VALIDATE(lDate);
+        END;
+        'TIME' : BEGIN
+          EVALUATE(lTime, pAction."Value To Set");
+          lFieldRef.VALIDATE(lTime);
+        END;
+        'DATETIME' : BEGIN
+          //<<IMH09
+          IF pAction."Fill Date" THEN
+            lDateTime := CURRENTDATETIME
+          ELSE
+          //>>IMH09
+            EVALUATE(lDateTime, pAction."Value To Set");
+          lFieldRef.VALIDATE(lDateTime);
+        END;
+        'TEXT' : BEGIN
+          lFieldRef.VALIDATE(pAction."Value To Set");
+        END;
+        ELSE
+          ERROR(Text001, UPPERCASE(FORMAT(lFieldRef.TYPE)));
+      END; //CASE
+    END;
+
+    PROCEDURE CheckRequirements@1100281009(VAR pRecRef@1100281000 : RecordRef;VAR pRequirement@1100281001 : Record 50045;pRaiseError@1100281005 : Boolean) rValue : Boolean;
+    VAR
+      lLastRequirement@1100281002 : Record 50045;
+      lCount@1100281003 : Integer;
+      lLineResult@1100281004 : Boolean;
+      lLastRecInReq@1100281006 : Boolean;
+    BEGIN
+      WITH pRequirement DO BEGIN
+        SETCURRENTKEY("Process Code","Source Requirement","Source Line No.","Source Action Line No.",Priority);
+        IF NOT FINDFIRST THEN
+          EXIT;
+        lLastRequirement := pRequirement;
+        REPEAT
+          lCount += 1;
+          IF lCount > 1 THEN BEGIN
+            IF (NOT lLineResult) AND (lLastRecInReq) AND (lLastRequirement.Priority <> pRequirement.Priority) THEN BEGIN
+              IF pRaiseError THEN
+                ERROR(lLastRequirement.GetUserReqError(FALSE));
+              EXIT(FALSE);
+            END;
+          END;
+          IF IsRecInRequirement(pRecRef, pRequirement) THEN BEGIN
+            CASE "Requirement Return" OF
+              "Requirement Return"::Accepted : lLineResult := TRUE;
+              "Requirement Return"::Refused : BEGIN
+                lLineResult := FALSE;
+                IF pRaiseError THEN
+                  ERROR(GetUserReqError(FALSE));
+              END;
+            END;
+            lLastRecInReq := TRUE;
+          END
+          ELSE
+            lLastRecInReq := FALSE;
+          CASE "Logical Operator" OF
+            "Logical Operator"::"Or" :
+              IF lLineResult THEN BEGIN
+      //<<IMH18.ST
+                IF pRequirement."User Error Return" <> '' THEN
+                  IF GUIALLOWED THEN
+                    MESSAGE(pRequirement."User Error Return");
+      //>>IMH18.ST
+                EXIT(TRUE);
+              END;
+            "Logical Operator"::"And" :
+              IF NOT lLineResult THEN BEGIN
+                IF pRaiseError THEN
+                  ERROR(GetUserReqError(FALSE));
+                EXIT(FALSE);
+              END;
+          END;
+          lLastRequirement := pRequirement;
+        UNTIL NEXT = 0;
+      END;
+      CASE lLastRequirement."Logical Operator" OF
+        lLastRequirement."Logical Operator"::"Or" : BEGIN
+          IF pRaiseError THEN
+            ERROR(lLastRequirement.GetUserReqError(lCount <> 1));
+          EXIT(FALSE);
+        END;
+        lLastRequirement."Logical Operator"::"And" : BEGIN
+      //<<IMH18.ST
+          IF pRequirement."User Error Return" <> '' THEN
+            MESSAGE(pRequirement."User Error Return");
+      //>>IMH18.ST
+          EXIT(TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE DeleteSourceRec@1100281012(pSourceTableID@1100281003 : Integer;pSourceCode1@1100281002 : Code[20];pSourceCode2@1100281001 : Code[20];pSourceInt1@1100281000 : Integer;pSourceInt2@1100281006 : Integer);
+    VAR
+      lProcessStatusHistory@1100281004 : Record 50047;
+      lProcessCurrentAction@1100281005 : Record 50046;
+    BEGIN
+      //IMH06.ST Fonction appel‚e sur la suppression d'un record master data
+      WITH lProcessStatusHistory DO BEGIN
+        SETRANGE("Source Table ID", pSourceTableID);
+        SETRANGE("Source Key Code 1", pSourceCode1);
+        SETRANGE("Source Key Code 2", pSourceCode2);
+        SETRANGE("Source Key Integer 1", pSourceInt1);
+        SETRANGE("Source Key Integer 2", pSourceInt2);
+        IF NOT ISEMPTY THEN
+          DELETEALL(TRUE);
+      END;
+      WITH lProcessCurrentAction DO BEGIN
+        SETRANGE("Source Table ID", pSourceTableID);
+        SETRANGE("Source Key Code 1", pSourceCode1);
+        SETRANGE("Source Key Code 2", pSourceCode2);
+        SETRANGE("Source Key Integer 1", pSourceInt1);
+        SETRANGE("Source Key Integer 2", pSourceInt2);
+        IF NOT ISEMPTY THEN
+          DELETEALL(TRUE);
+      END;
+    END;
+
+    PROCEDURE GetCodeDescription@1100281014(pTableID@1100281000 : Integer;pFieldID@1100281001 : Integer;VAR pText@1100281007 : Text[30]) rValue : Boolean;
+    VAR
+      lCodeRec@1100281002 : Record 50079;
+      lCodeBuffer@1100281004 : TEMPORARY Record 50079;
+      lText@1100281003 : Text[1024];
+      lSelect@1100281005 : Integer;
+      lCounter@1100281006 : Integer;
+    BEGIN
+      //<<IMH14.isat.PC
+      // fonction pour g‚rer la r‚cup‚ration d'un code issu de la table code
+
+      rValue := FALSE;
+      pText := '';
+      IF NOT GUIALLOWED THEN BEGIN
+        EXIT;
+      END;
+
+      lCodeRec.SETRANGE("Table ID",pTableID);
+      lCodeRec.SETRANGE("Field ID",pFieldID);
+      IF lCodeRec.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      lCounter := 0;
+      lCodeRec.FINDSET(FALSE,FALSE);
+      REPEAT
+        IF STRLEN(lText) + STRLEN(lCodeRec.Description) + 1 <= MAXSTRLEN(lText) THEN BEGIN
+          lCounter += 1;
+          lCodeBuffer := lCodeRec;
+          lCodeBuffer."Table ID" := lCounter;
+          lCodeBuffer.INSERT;
+          IF lCodeRec.Description = '' THEN BEGIN
+            lCodeRec.Description := lCodeRec.Code;
+          END;
+          IF STRLEN(lText) = 0 THEN BEGIN
+            lText := lCodeRec.Description;
+          END ELSE BEGIN
+            lText += ',' + lCodeRec.Description;
+          END;
+        END;
+      UNTIL lCodeRec.NEXT = 0;
+
+      lSelect := STRMENU(lText);
+      CASE lSelect OF
+        0 : BEGIN
+          IF NOT CONFIRM(STRSUBSTNO(Text006, lCodeRec.GetCaption)) THEN BEGIN
+            ERROR(Text007);
+          END;
+        END;
+        ELSE BEGIN
+          lCodeBuffer.SETRANGE("Table ID", lSelect);
+          lCodeBuffer.FINDFIRST;
+          pText := lCodeBuffer.Code;
+          EXIT(TRUE);
+        END;
+      END;
+      //>>IMH14.isat.PC
+    END;
+
+    PROCEDURE LoadFromStatusAuto@1100281015(pForTableID@1100281005 : Integer;VAR pTempProcStatus@1100281003 : Record 50042;pStepFilter@1000000000 : Text[1024]) : Boolean;
+    VAR
+      lProcess@1100281002 : Record 50041;
+      lProcessStep@1100281001 : Record 50043;
+      lProcStatus@1000000001 : Record 50042;
+      lInsertLine@1000000002 : Boolean;
+    BEGIN
+      lProcess.SETRANGE("Source Table No.", pForTableID);
+      IF lProcess.FINDSET THEN BEGIN
+        REPEAT
+          lProcessStep.SETRANGE("Process Code", lProcess.Code);
+          lProcessStep.SETRANGE("Auto Process Step", TRUE);
+          lProcessStep.SETRANGE(Active, TRUE);
+      //<<IMH20.ST
+          IF NOT GUIALLOWED THEN
+            lProcessStep.SETRANGE("Disable System User", FALSE);
+      //>>IMH20.ST
+          IF lProcessStep.FINDSET THEN
+            REPEAT
+              IF NOT pTempProcStatus.GET(lProcessStep."Process Code", lProcessStep."Previous Status") THEN BEGIN
+      //<<IMH20.ST
+                IF pStepFilter <> '' THEN BEGIN
+                  lProcStatus.SETRANGE("Process Code", lProcessStep."Process Code");
+                  lProcStatus.SETRANGE("Status No.", lProcessStep."Previous Status");
+                  lProcStatus.SETFILTER("Task Handler Code", pStepFilter);
+                  lInsertLine := NOT lProcStatus.ISEMPTY;
+                END
+                ELSE
+                  lInsertLine := TRUE;
+      //>>IMH20.ST
+                IF lInsertLine THEN BEGIN
+                  pTempProcStatus."Process Code" := lProcessStep."Process Code";
+                  pTempProcStatus."Status No." := lProcessStep."Previous Status";
+                  pTempProcStatus.INSERT(FALSE);
+                END;
+              END;
+            UNTIL lProcessStep.NEXT=0;
+        UNTIL lProcess.NEXT=0;
+      END;
+      EXIT(NOT pTempProcStatus.ISEMPTY);
+    END;
+
+    PROCEDURE AddCurrActionLine@1100281016(VAR pProcessCurrentAction@1100281002 : Record 50046;pTableID@1100281003 : Integer;pCode1@1100281004 : Code[20];pCode2@1100281005 : Code[20];pInt1@1100281006 : Integer;pInt2@1100281007 : Integer;pProcessAction@1100281000 : Record 50044);
+    BEGIN
+      //IMH21.ST
+      WITH pProcessCurrentAction DO BEGIN
+        RESET;
+      //<<IMH24.ST
+      //  SETCURRENTKEY("Source Table ID","Source Key Code 1","Source Key Code 2","Source Key Integer 1","Source Key Integer 2");
+      //>>IMH24.ST
+        SETRANGE("Source Table ID", pTableID);
+        SETRANGE("Source Key Code 1", pCode1);
+        SETRANGE("Source Key Code 2", pCode2);
+        SETRANGE("Source Key Integer 1", pInt1);
+        SETRANGE("Source Key Integer 2", pInt2);
+        SETRANGE("Process Code", pProcessAction."Process Code");
+        SETRANGE("Source Action", pProcessAction."Source Action");
+        SETRANGE("Source Line No.", pProcessAction."Source Line No.");
+        SETRANGE("Action Line No.", pProcessAction."Line No.");
+        IF FINDFIRST THEN BEGIN
+          IF "Action Status" < "Action Status"::Realized THEN BEGIN
+            // Mise … jour de l'action
+            IF "Action Order" <> pProcessAction."Action Order" THEN BEGIN
+              "Action Order" := pProcessAction."Action Order";
+              MODIFY;
+            END;
+          END;
+        END
+        ELSE BEGIN
+          INIT;
+          "Source Table ID" := pTableID;
+          "Source Key Code 1" := pCode1;
+          "Source Key Code 2" := pCode2;
+          "Source Key Integer 1" := pInt1;
+          "Source Key Integer 2" := pInt2;
+          "Entry No." := 0;
+          "Process Code" := pProcessAction."Process Code";
+          "Source Action" := pProcessAction."Source Action";
+          "Source Line No." := pProcessAction."Source Line No.";
+          "Action Line No." := pProcessAction."Line No.";
+          "Action Order" := pProcessAction."Action Order";
+          IF INSERT(TRUE) THEN;
+        END;
+        RESET;
+      END;
+    END;
+
+    PROCEDURE MakeProcFilter@1000000000(VAR pProcStatus@1000000000 : Record 50042;VAR pProcessFilter@1000000001 : Text[1024];VAR pStatusFilter@1000000002 : Text[1024]) : Boolean;
+    VAR
+      lTempProc@1000000003 : TEMPORARY Record 50042;
+      lTempStat@1000000004 : TEMPORARY Record 50042;
+      lTempProcStatus@1000000005 : TEMPORARY Record 50042;
+      lExitLoop@1000000006 : Boolean;
+    BEGIN
+      pProcessFilter := '';
+      pStatusFilter := '';
+      IF NOT pProcStatus.FINDSET THEN BEGIN
+        pProcessFilter := STRSUBSTNO('=%1&<>%1','');
+        pStatusFilter := STRSUBSTNO('=%1&<>%1',0);
+        EXIT(TRUE);
+      END;
+      REPEAT
+        IF NOT lTempProc.GET(pProcStatus."Process Code",0) THEN BEGIN
+          lTempProc := pProcStatus;
+          lTempProc."Status No." := 0;
+          lTempProc.INSERT;
+        END;
+        IF NOT lTempStat.GET('',pProcStatus."Status No.") THEN BEGIN
+          lTempStat := pProcStatus;
+          lTempStat."Process Code" := '';
+          lTempStat.INSERT;
+        END;
+      UNTIL pProcStatus.NEXT=0;
+      lTempProc.FINDSET;
+      REPEAT
+        lTempProcStatus.SETRANGE("Process Code", lTempProc."Process Code");
+        lExitLoop := NOT AddTextToFilter(pProcessFilter, lTempProcStatus.GETFILTER("Process Code"));
+      UNTIL (lTempProc.NEXT=0) OR lExitLoop;
+      lExitLoop := FALSE;
+      lTempStat.FINDSET;
+      REPEAT
+        lTempProcStatus.SETRANGE("Status No.", lTempStat."Status No.");
+        lExitLoop := NOT AddTextToFilter(pStatusFilter, lTempProcStatus.GETFILTER("Status No."));
+      UNTIL (lTempStat.NEXT=0) OR lExitLoop;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE AddTextToFilter@1000000002(VAR pTextFilter@1000000000 : Text[1024];pAddText@1000000001 : Text[30]) : Boolean;
+    BEGIN
+      IF pTextFilter = '' THEN BEGIN
+        pTextFilter := pAddText;
+        EXIT(TRUE);
+      END;
+      IF STRLEN(pTextFilter) + STRLEN(pAddText) + 1 > MAXSTRLEN(pTextFilter) THEN BEGIN
+        pTextFilter := '';
+        EXIT(FALSE);
+      END;
+      pTextFilter := pTextFilter + '|' + pAddText;
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH24 @d 06/06/12 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @h 3454 @c Changement index ProcCurrAction */
+      /** @r IMH23 @d 02/05/12 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Gestion date vide dans calcul d‚lai @h 3342 */
+      /** @r IMH22 @d 20/04/12 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts @c Gestion date vide dans calcul d‚lai @h 3342 */
+      /** @r IMH21 @d 23/12/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Ajout AddCurrActionLine */
+      /** @r IMH20 @d 22/12/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Suspension avancement planification */
+      /** @r IMH19 @d 16/12/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Suspension d'action */
+      /** @r IMH18 @d 13/07/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Message utilisateur */
+      /** @r IMH17 @d 19/05/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Erreur utilisateur */
+      /** @r IMH16 @d 30/03/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Controle d‚lai sur workdate et non today */
+      /** @r IMH15 @d 24/03/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Gestion table annexe */
+      /** @r IMH14 @d 19/03/11 @a ISAT.PC @v IMH6.01.102 @s Gestion des statuts
+          @c gestion de la s‚lection des codes de la table code */
+      /** @r IMH13 @d 14/03/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout gestion des celendriers pour le calcul de d‚lai processus */
+      /** @r IMH12 @d 08/03/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout AllowStepChangeDelay2 pour controle date directe */
+      /** @r IMH11 @d 21/02/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Suppression statut sur devis service  */
+      /** @r IMH10 @d 17/02/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c debug Copie d'un processus */
+      /** @r IMH09 @d 28/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts @c Gestion champ Remplir … Date */
+      /** @r IMH08 @d 21/01/11 @a ISAT.ST @v IMH6.01.102 @s D‚placement fonction TestFunction dans la table */
+      /** @r IMH07 @d 20/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts
+          @c Adaptations pour gestion des devis */
+      /** @r IMH06 @d 14/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction DeleteSourceRec */
+      /** @r IMH05 @d 11/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout gestion des erreurs */
+      /** @r IMH04 @d 07/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Masquer ‚tape utilisateur
+          @c Ajout SetFieldValue */
+      /** @r IMH03 @d 03/01/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Fonction DuplicatProcess */
+      /** @r IMH02 @d 31/12/10 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Finalisation */
+      /** @r IMH01 @d 08/11/10 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Creation Objet */
+    }
+    END.
+  }
+}

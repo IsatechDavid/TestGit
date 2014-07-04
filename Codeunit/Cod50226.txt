@@ -1,0 +1,88 @@
+OBJECT Codeunit 50226 SMS Status Update
+{
+  OBJECT-PROPERTIES
+  {
+    Date=10/06/13;
+    Time=17:02:11;
+    Modified=Yes;
+    Version List=IMH6.01,JUIN;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 50186=rimd;
+    OnRun=BEGIN
+            GetStatut
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE GetStatut@1000000001() rMessage : Text[30];
+    VAR
+      lSMSSendEntry@1000000002 : Record 50186;
+      lSMSSendEntryNew@1000000001 : Record 50186;
+      lSmsService@1100281000 : Automation "{AF052332-3351-4B35-8DAB-3C640BF28D5C} 1.1:{F8F13B49-3C54-4ADC-9044-8686491E8146}:'SmsSender'.SmsService";
+      lSmsMessage@1100281001 : Automation "{AF052332-3351-4B35-8DAB-3C640BF28D5C} 1.1:{1213A68D-4B5B-45BF-A15C-41937DC95861}:'SmsSender'.SmsSender_Message";
+      lServiceMgtSetup@1000000000 : Record 5911;
+    BEGIN
+      IF ISCLEAR(lSmsMessage) THEN
+        CREATE(lSmsMessage);
+      IF ISCLEAR(lSmsService) THEN
+        CREATE(lSmsService);
+      //<<IMH03
+      lServiceMgtSetup.GET;
+      lSmsService.SetBaseName(lServiceMgtSetup."SMS Base Name");
+      //>>IMH03
+
+      lSMSSendEntry.SETCURRENTKEY("Send Status", lSMSSendEntry."EAI Sent MQ valided");  //IMH02
+      lSMSSendEntry.SETFILTER("Send Status",'%1|%2', lSMSSendEntry."Send Status"::"To send", lSMSSendEntry."Send Status"::Issued);
+      lSMSSendEntry.SETRANGE("EAI Sent MQ valided", TRUE);  //IMH02
+      lSMSSendEntry.SETRANGE("Error Code",0);
+
+      IF lSMSSendEntry.FINDSET THEN
+        REPEAT
+          lSmsMessage := lSmsService.MessageState(FORMAT(lSMSSendEntry."Entry No."));
+          //<<IMH02
+          lSMSSendEntryNew := lSMSSendEntry;
+          IF lSmsMessage.AppId <> '' THEN BEGIN    //IMH02
+            CASE FORMAT(lSmsMessage.Statut)  OF
+              'NOT_YET':
+                lSMSSendEntryNew."Send Status" := lSMSSendEntryNew."Send Status"::"To send";
+              'PROCESSING':
+                lSMSSendEntryNew."Send Status" := lSMSSendEntryNew."Send Status"::Issued;
+              'RUNNING':
+                lSMSSendEntryNew."Send Status" := lSMSSendEntryNew."Send Status"::Issued;
+              'DONE':
+                lSMSSendEntryNew."Send Status" := lSMSSendEntryNew."Send Status"::Received;
+              'FAILED':
+                lSMSSendEntryNew."Send Status" := lSMSSendEntryNew."Send Status"::anomaly;
+            END;
+
+            lSMSSendEntryNew."Operator Id" := FORMAT(lSmsMessage.OperId);
+            lSMSSendEntryNew."Error Code" := lSmsMessage.ErrorCode;
+            lSMSSendEntryNew."Error Message" := FORMAT(lSmsMessage.ErrorCode);
+            lSMSSendEntryNew."Process Date" := CREATEDATETIME(lSmsMessage.ProcessDate,000000T);
+            lSMSSendEntryNew."Reset Date" := CREATEDATETIME(lSmsMessage.ResetDate,000000T);
+            lSMSSendEntryNew."Status Date" := CURRENTDATETIME;
+            //<<IMH02
+            IF lSMSSendEntryNew."Error Code" <> 0 THEN
+              lSMSSendEntryNew."Send Status" := lSMSSendEntryNew."Send Status"::anomaly;
+            //>>IMH02
+            lSMSSendEntryNew.MODIFY(TRUE);
+            COMMIT;  //IMH04
+          END;                                     //IMH02
+          //<<IMH02
+        UNTIL lSMSSendEntry.NEXT=0;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 10/06/13 @a ISAT.ZW @v IMH6.01.347 @s JUIN @c Ajout commit … la validation de ligne */
+      /** @r IMH03 @d 15/11/12 @a ISAT.ZW @v IMH6.01.330 @s Projet SMS V1.1 @c Ajout gestion de base SMS */
+      /** @r IMH02 @d 13/11/12 @a ISAT.ZW @v IMH6.01.213 @s Projet SMS @h 4056 @c Correction */
+      /** @r IMH01 @d 25/09/12 @a ISAT.ML @v IMH6.01.213 @s Projet SMS @c Cr‚ation Objet */
+    }
+    END.
+  }
+}

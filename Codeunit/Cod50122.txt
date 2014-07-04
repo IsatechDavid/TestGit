@@ -1,0 +1,514 @@
+OBJECT Codeunit 50122 ANSAAP Rcvd Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=03/02/12;
+    Time=16:27:33;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=50118;
+    OnRun=VAR
+            lRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+          BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ToolsMgt@1100281005 : Codeunit 8016602;
+      EAISetup@1100281008 : Record 8016700;
+      CRMSetup@1100281007 : Record 5079;
+      Salutation@1100281006 : Record 5068;
+      TempCrossRef@1100281004 : TEMPORARY Record 8016748;
+      EAIPartnerCrossRef@1100281003 : Record 8016748;
+      ANSAAPLimit@1100281000 : Integer;
+      ANSAAPCommit@1100281001 : Integer;
+      SetupRead@1100281002 : Boolean;
+
+    LOCAL PROCEDURE TreatANSAAP@1100281000(VAR pANSAAP@1100281000 : Record 50118);
+    VAR
+      lANSAAP2@1100281007 : Record 50118;
+      lANSRAP@1100281006 : Record 50119;
+      lANSRAP2@1100281005 : Record 50119;
+      lTempANSAAP@1100281004 : TEMPORARY Record 50118;
+      lTempANSRAP@1100281003 : TEMPORARY Record 50119;
+      lTotCnt@1100281001 : Integer;
+      lLoopCnt@1100281002 : Integer;
+    BEGIN
+      IF ANSAAPCommit = 0 THEN BEGIN
+        GetSetup;
+        ANSAAPCommit := EAISetup."ANSAAP Contact Allotment";
+      END;
+      IF ANSAAPCommit <= 0 THEN
+        ANSAAPCommit := 1;
+      IF ANSAAPLimit <= 0 THEN
+        ANSAAPLimit := 999999999;
+
+
+      WITH pANSAAP DO BEGIN
+        SETCURRENTKEY("Treatment Status");
+        SETRANGE("Treatment Status", "Treatment Status"::Pending);
+        IF ISEMPTY THEN
+          EXIT;
+        FINDSET;
+        REPEAT
+          lLoopCnt += 1;
+          lTotCnt += 1;
+          // Recherche de la derniŠre version contact
+          lANSAAP2.RESET;
+          lANSAAP2.SETCURRENTKEY("Treatment Status");
+          lANSAAP2.SETRANGE("Treatment Status", "Treatment Status"::Pending);
+          lANSAAP2.SETRANGE("Contact No.", "Contact No.");
+          lANSAAP2.SETRANGE("Customer No.", "Customer No.");
+          lANSAAP2.LOCKTABLE;
+          IF lANSAAP2.FINDLAST THEN BEGIN
+            lTempANSAAP := lANSAAP2;
+            lTempANSAAP.INSERT;
+            // Modification des lignes de contacts
+            lANSAAP2.MODIFYALL("Treatment Status", "Treatment Status"::Processed);
+          END;
+          // Recherche des contrats
+          lANSRAP.RESET;
+          lANSRAP.SETCURRENTKEY("Treatment Status");
+          lANSRAP.SETRANGE("Treatment Status", lANSRAP."Treatment Status"::Pending);
+          lANSRAP.SETRANGE("Contact No.", lTempANSAAP."Contact No.");
+          lANSRAP.SETRANGE("Customer No.", lTempANSAAP."Customer No.");
+          IF lANSRAP.FINDSET THEN BEGIN
+            REPEAT
+              lANSRAP2.RESET;
+              lANSRAP2.SETCURRENTKEY("Treatment Status");
+              lANSRAP2.SETRANGE("Treatment Status", lANSRAP2."Treatment Status"::Pending);
+              lANSRAP2.SETRANGE("Contact No.", lANSRAP."Contact No.");
+              lANSRAP2.SETRANGE("Customer No.", lANSRAP."Customer No.");
+              lANSRAP2.SETRANGE("Contract Code", lANSRAP."Contract Code");
+              lANSRAP2.SETRANGE("Warranty No.", lANSRAP."Warranty No.");
+              lANSRAP2.LOCKTABLE;
+              IF lANSRAP2.FINDLAST THEN BEGIN
+                lTempANSRAP := lANSRAP2;
+                lTempANSRAP.INSERT;
+                lANSRAP2.MODIFYALL("Treatment Status",lANSRAP2."Treatment Status"::Processed);
+              END;
+            UNTIL lANSRAP.NEXT = 0;
+          END;
+
+          IF (lLoopCnt >= ANSAAPCommit) OR (lTotCnt >= ANSAAPLimit) THEN BEGIN
+            UpdateData(lTempANSAAP,lTempANSRAP);
+            COMMIT;
+            lLoopCnt := 0;
+            lTempANSAAP.RESET;
+            lTempANSAAP.DELETEALL;
+            lTempANSRAP.RESET;
+            lTempANSRAP.DELETEALL;
+          END;
+          IF lTotCnt >= ANSAAPLimit THEN
+            EXIT;
+        UNTIL NEXT=0;
+      END; // WITH
+      IF NOT lTempANSAAP.ISEMPTY THEN BEGIN
+        UpdateData(lTempANSAAP,lTempANSRAP);
+        COMMIT;
+      END;
+    END;
+
+    PROCEDURE InitANSAAPValues@1100281007(pANSAAPLimit@1100281000 : Integer;pANSAAPCommit@1100281001 : Integer);
+    BEGIN
+      ANSAAPLimit := pANSAAPLimit;
+      ANSAAPCommit := ANSAAPCommit;
+    END;
+
+    PROCEDURE OnlyANSRAPManagement@1100281003(VAR pANSRAP@1100281000 : Record 50119;pMaxRec@1100281005 : Integer);
+    VAR
+      lANSAAP@1100281004 : Record 50118;
+      lANSRAP2@1100281003 : Record 50119;
+      lTempANSAAP@1100281002 : TEMPORARY Record 50118;
+      lTempANSRAP@1100281001 : TEMPORARY Record 50119;
+      lCont@1100281010 : Record 5050;
+      lANSAAPRcvdAct@1100281012 : Codeunit 50144;
+      lNbCont@1100281008 : Integer;
+      lMaxNbCont@1100281007 : Integer;
+      lCurrentContactTreated@1100281006 : Integer;
+      lCorporateNo@1100281011 : Code[20];
+    BEGIN
+      // IMH03.PC
+      // Gestion de la g‚n‚ration des ansrap seuls
+
+      //<<IMH04.ISAT.EBA
+      lANSAAP.SETCURRENTKEY("Treatment Status","Contact No.","Customer No.");
+      lANSAAP.SETRANGE("Treatment Status", lANSAAP."Treatment Status"::Pending);
+      IF NOT lANSAAP.ISEMPTY THEN
+        EXIT;
+      //>>IMH04.ISAT.EBA
+
+      GetSetup;
+      lMaxNbCont := EAISetup."ANSAAP Contact Allotment";
+      IF EAISetup."ANSAAP Contact Allotment" <= 0 THEN
+        lMaxNbCont := 1;
+
+      lCurrentContactTreated := 0;
+
+      WITH pANSRAP DO BEGIN
+        SETCURRENTKEY("Treatment Status");
+        SETRANGE("Treatment Status", "Treatment Status"::Pending);
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+        FINDSET;
+        REPEAT
+          //<<IMH04.ISAT.EBA
+          //lANSAAP.RESET;
+          //lANSAAP.SETCURRENTKEY("Contact No.");
+          //lANSAAP.SETRANGE("Contact No.","Contact No.");
+          //lANSAAP.SETRANGE("Customer No.","Customer No.");
+          //IF lANSAAP.FINDLAST THEN BEGIN
+          //  lTempANSAAP := lANSAAP;
+          //  lTempANSAAP.INSERT;
+          //END;
+
+          //lNbCont += 1;
+          //lCurrentContactTreated += 1;
+
+          lTempANSAAP.RESET;
+          lTempANSAAP.SETRANGE("Contact No.","Contact No.");
+          lTempANSAAP.SETRANGE("Customer No.","Customer No.");
+          IF lTempANSAAP.ISEMPTY THEN BEGIN
+
+            lCorporateNo :=
+              lANSAAPRcvdAct.GetCrossRefTemp(DATABASE::Customer,0,EAISetup."ANSAAP EAI Partner Code","Customer No.",'');
+
+            lCont.RESET;
+            lCont.SETCURRENTKEY("Member No.","Corporate No.");
+            lCont.SETRANGE("Member No.","Contact No.");
+            lCont.SETRANGE("Corporate No.",lCorporateNo);
+            IF lCont.FINDFIRST THEN BEGIN
+              lTempANSAAP."Customer No." := "Customer No.";
+              lTempANSAAP."Contact No." := "Contact No.";
+              lTempANSAAP."Address 1" := COPYSTR(lCont.Address,1,MAXSTRLEN(lTempANSAAP."Address 1"));
+              lTempANSAAP."Address 2" := COPYSTR(lCont."Address 2",1,MAXSTRLEN(lTempANSAAP."Address 2"));
+              lTempANSAAP."Address 3" := COPYSTR(lCont."Address 3",1,MAXSTRLEN(lTempANSAAP."Address 3"));
+              lTempANSAAP."Post Code" := COPYSTR(lCont."Post Code",1,MAXSTRLEN(lTempANSAAP."Post Code"));
+              lTempANSAAP.City := COPYSTR(lCont.City,1,MAXSTRLEN(lTempANSAAP.City));
+              IF lCont.Type = lCont.Type::Company THEN BEGIN
+                lTempANSAAP."Corporation ID" := COPYSTR(lCont."Salutation Code",1,MAXSTRLEN(lTempANSAAP."Corporation ID"));
+              END ELSE BEGIN
+                lTempANSAAP."Person ID" := COPYSTR(lCont."Salutation Code",1,MAXSTRLEN(lTempANSAAP."Person ID"));
+              END;
+              lTempANSAAP."Phone No. 1" := COPYSTR(lCont."Phone No.",1,MAXSTRLEN(lTempANSAAP."Phone No. 1"));
+              lTempANSAAP."Phone No. 2" := COPYSTR(lCont."Mobile Phone No.",1,MAXSTRLEN(lTempANSAAP."Phone No. 2"));
+              lTempANSAAP."Fax No." := COPYSTR(lCont."Fax No.",1,MAXSTRLEN(lTempANSAAP."Fax No."));
+              lTempANSAAP."E-Mail 1" := COPYSTR(lCont."E-Mail",1,MAXSTRLEN(lTempANSAAP."E-Mail 1"));
+              lTempANSAAP."E-Mail 2" := COPYSTR(lCont."E-Mail 2",1,MAXSTRLEN(lTempANSAAP."E-Mail 2"));
+              IF EVALUATE(
+                   lTempANSAAP."Birth Date",
+                   COPYSTR(ToolsMgt.DateToText2(lCont.Birthdate),1,MAXSTRLEN(lTempANSAAP."Birth Date")))
+              THEN;
+              IF EVALUATE(
+                   lTempANSAAP."Radiation Date",
+                   COPYSTR(ToolsMgt.DateToText2(lCont."Rayed Date"),1,MAXSTRLEN(lTempANSAAP."Radiation Date")))
+              THEN;
+              lTempANSAAP.INSERT;
+
+              lNbCont += 1;
+              lCurrentContactTreated += 1;
+            END;
+          END;
+          //>>IMH04.ISAT.EBA
+
+          lANSRAP2.RESET;
+          lANSRAP2.SETCURRENTKEY("Treatment Status");
+          lANSRAP2.SETRANGE("Treatment Status","Treatment Status"::Pending);
+          lANSRAP2.SETRANGE("Contact No.","Contact No.");
+          lANSRAP2.SETRANGE("Customer No.","Customer No.");
+          lANSRAP2.SETRANGE("Contract Code","Contract Code");
+          lANSRAP2.SETRANGE("Warranty No.","Warranty No.");
+          lANSRAP2.LOCKTABLE;
+          IF lANSRAP2.FINDLAST THEN BEGIN
+            lTempANSRAP := lANSRAP2;
+            lTempANSRAP.INSERT;
+            lANSRAP2.MODIFYALL("Treatment Status",lANSRAP2."Treatment Status"::Processed);
+          END;
+
+          IF (lNbCont >= lMaxNbCont) OR (lCurrentContactTreated >= pMaxRec) THEN BEGIN
+      //      CreateXMLdoc(lTempANSAAP,lTempANSRAP);
+            COMMIT;
+            lNbCont := 0;
+            lTempANSAAP.RESET;
+            lTempANSAAP.DELETEALL;
+            lTempANSRAP.RESET;
+            lTempANSRAP.DELETEALL;
+          END;
+          IF lCurrentContactTreated >= pMaxRec THEN BEGIN
+            EXIT;
+          END;
+        UNTIL NEXT = 0;
+      END; // WITH
+      IF NOT lTempANSAAP.ISEMPTY THEN BEGIN
+      //  CreateXMLdoc(lTempANSAAP,lTempANSRAP);
+        COMMIT;
+        lNbCont := 0;
+        lTempANSAAP.RESET;
+        lTempANSAAP.DELETEALL;
+        lTempANSRAP.RESET;
+        lTempANSRAP.DELETEALL;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetSetup@1100281004();
+    BEGIN
+      IF SetupRead THEN
+        EXIT;
+      EAISetup.GET;
+      EAISetup.TESTFIELD("ANSAAP EAI Partner Code");
+      CRMSetup.GET;
+
+      SetupRead := TRUE;
+    END;
+
+    LOCAL PROCEDURE UpdateData@1100281008(VAR pANSAAP@1100281001 : Record 50118;VAR pANSRAP@1100281000 : Record 50119);
+    VAR
+      lTempContact@1100281003 : Record 5050;
+      lTempContAltAddr@1100281004 : Record 5051;
+      lTempContContract@1100281005 : Record 50059;
+      ANSAAPRcvdAct@1100281007 : Codeunit 50144;
+      lContactCount@1100281002 : Integer;
+      lContractCount@1100281006 : Integer;
+    BEGIN
+      WITH pANSAAP DO BEGIN
+        RESET;
+        FINDSET;
+        REPEAT
+          lContactCount += 1;
+          TransferANSAAP(lContactCount, pANSAAP, lTempContact);
+
+          pANSRAP.SETCURRENTKEY("Contact No.");
+          pANSRAP.SETRANGE("Contact No.","Contact No.");
+          pANSRAP.SETRANGE("Customer No.","Customer No.");
+          IF pANSRAP.FINDSET THEN BEGIN
+            lContractCount := 0;
+            REPEAT
+              lContractCount += 1;
+              TransferANSRAP(pANSRAP, lTempContact, lContractCount, lTempContContract, lTempContAltAddr);
+            UNTIL pANSRAP.NEXT=0;
+            pANSRAP.DELETEALL;
+          END;
+          DELETE;
+        UNTIL NEXT = 0;
+      END;
+      WITH lTempContact DO BEGIN
+        RESET;
+        IF FINDSET THEN BEGIN
+          // Controle des donn‚es
+          REPEAT
+            ANSAAPRcvdAct.CheckData(lTempContact,lTempContContract,lTempContAltAddr);
+        //    lTempCont."No. Series" := lNoSeries;
+            MODIFY;
+          UNTIL NEXT = 0;
+          // Mise … jour des donn‚es
+          FINDSET;
+          REPEAT
+            ANSAAPRcvdAct.UpdateContact(lTempContact,lTempContContract,lTempContAltAddr);
+          UNTIL NEXT = 0;
+        END;
+      END;
+
+
+      WITH pANSRAP DO BEGIN
+        // Mise … jour des contrats seuls
+        RESET;
+        IF FINDSET THEN BEGIN
+          REPEAT
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE TransferANSAAP@1100281010(pLoopCount@1100281002 : Integer;pANSAAP@1100281000 : Record 50118;VAR pCOntact@1100281001 : Record 5050);
+    VAR
+      lIsCorporate@1100281003 : Boolean;
+    BEGIN
+      WITH pCOntact DO BEGIN
+        INIT;
+        Type := Type::Company;
+        "Corporate No." := GetCrossRefTemp(DATABASE::Customer,0,EAISetup."ANSAAP EAI Partner Code",
+                                           pANSAAP."Customer No.",'');
+        "Member No." := pANSAAP."Contact No.";
+
+        lIsCorporate := (pANSAAP."Person Code" = 'M');
+        IF NOT lIsCorporate THEN
+          lIsCorporate := pANSAAP."Person ID" = '';
+
+        IF lIsCorporate THEN BEGIN
+          "Salutation Code" := pANSAAP."Corporation ID";
+          Name := COPYSTR(pANSAAP.Name + ' ' + pANSAAP.FullName, 1, MAXSTRLEN(Name));
+          "First Name" := '';
+          Surname := Name;
+        END
+        ELSE BEGIN
+          "Salutation Code" := pANSAAP."Person ID";
+          Name := COPYSTR(pANSAAP.FullName + ' ' + pANSAAP.Name, 1, MAXSTRLEN(Name));
+          "First Name" := COPYSTR(pANSAAP.FullName, 1, MAXSTRLEN("First Name"));
+          Surname := COPYSTR(pANSAAP.Name, 1, MAXSTRLEN(Name)
+                                             - STRLEN("First Name") - 1);
+        END;
+        "Search Name" := UPPERCASE(Name);
+        IF "Salutation Code" <> '' THEN
+          "Salutation Code" := GetCrossRefTemp(DATABASE::Salutation,0,EAISetup."ANSAAP EAI Partner Code",
+                                               "Salutation Code",'');
+        IF NOT Salutation.GET("Salutation Code") THEN BEGIN
+          GetSetup;
+          IF lIsCorporate THEN
+            "Salutation Code" := CRMSetup."Def. Company Salutation Code"
+          ELSE
+            "Salutation Code" := CRMSetup."Def. Benef. Salutation Code";
+        END;
+
+        Address := pANSAAP."Address 1";
+        "Address 2" := pANSAAP."Address 2";
+        "Address 3" := pANSAAP."Address 3";
+        IF STRLEN(pANSAAP."Post Code") < 5 THEN
+          pANSAAP."Post Code" := '0' + pANSAAP."Post Code";
+        "Post Code" := pANSAAP."Post Code";
+        City := pANSAAP.City;
+        "Country/Region Code" := pANSAAP.Country;
+        IF "Corporate No." IN ['MB', 'MC', 'MCS'] THEN
+          "Corporate Region Code" := GetCrossRefTemp(DATABASE::"Corporate Region",0,EAISetup."ANSAAP EAI Partner Code",
+                                                     "Corporate No.",pANSAAP."Customer County");
+
+        IF pANSAAP."Phone No. 1" <> '0' THEN
+          "Phone No." := pANSAAP."Phone No. 1";
+        IF pANSAAP."Phone No. 2" <> '0' THEN
+          "Mobile Phone No." := pANSAAP."Phone No. 2";
+        IF pANSAAP."Fax No." <> '0' THEN
+          "Fax No." := pANSAAP."Fax No.";
+        "E-Mail" := pANSAAP."E-Mail 1";
+        "E-Mail 2" := pANSAAP."E-Mail 2";
+        Birthdate := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Birth Date"));
+        "Rayed Date" := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Radiation Date"));
+        "Last Date Modified" := ToolsMgt.TextToDate2(FORMAT(pANSAAP."Movement Date"));
+        "Beneficiary Interface" := TRUE;
+        "No." := 'C' + FORMAT(pLoopCount);
+        INSERT;
+      END;
+    END;
+
+    LOCAL PROCEDURE TransferANSRAP@1100281011(pANSRAP@1100281000 : Record 50119;pContact@1100281001 : Record 5050;pANSRAPNo@1100281005 : Integer;VAR pToContract@1100281002 : Record 50059;VAR pToAltAddr@1100281003 : Record 5051);
+    VAR
+      lDec@1100281004 : Decimal;
+    BEGIN
+      WITH pToAltAddr DO BEGIN
+        INIT;
+        "Contact No." := pContact."No.";
+        "Member No." := pContact."Member No.";
+        "Company Name" := pContact.Name;
+        "Company Name 2" := pContact."Name 2";
+
+        Address := COPYSTR(pANSRAP."Address 1",1,MAXSTRLEN(Address));
+        "Address 2" := COPYSTR(pANSRAP."Address 2",1,MAXSTRLEN("Address 2"));
+        "Address 3" := COPYSTR(pANSRAP."Address 3",1,MAXSTRLEN("Address 3"));
+        IF STRLEN(pANSRAP."Post Code") < 5 THEN
+          pANSRAP."Post Code" := '0' + pANSRAP."Post Code";
+        "Post Code" := pANSRAP."Post Code";
+        City := ToolsMgt.ReplaceControlCaracter(pANSRAP.City);
+        "Country/Region Code" := COPYSTR(pANSRAP.Country,1,MAXSTRLEN("Country/Region Code"));
+        "Phone No." := pANSRAP."Phone No. 1";
+        "Residence Type" := GetCrossRefTemp(DATABASE::"Contact Alt. Address",50071,EAISetup."ANSAAP EAI Partner Code",
+                                            pANSRAP."Residence Type", '');
+
+        IF (pANSRAP."Structure Code" = '00001') AND (pANSRAP."Customer No." = 'MB') THEN BEGIN
+          "Occupier Nature" := GetCrossRefTemp(DATABASE::"Contact Alt. Address",50070,EAISetup."ANSAAP EAI Partner Code",
+                                               COPYSTR(pANSRAP.Filler,1,1),'');
+          "Housing Type" := GetCrossRefTemp(DATABASE::"Contact Alt. Address",50072,EAISetup."ANSAAP EAI Partner Code",
+                                            COPYSTR(pANSRAP.Filler,2,1),'');
+        END;
+        // controle de l'adresse vis-…-vis du contact
+        IF (Address = pContact.Address) AND
+           ("Post Code" = pContact."Post Code") AND
+           (City = pContact.City) THEN
+          Code := '' // adresse principale du contact
+        ELSE
+          Code := FORMAT(pANSRAPNo);
+        IF NOT INSERT THEN
+          MODIFY;
+      END;
+
+      WITH pToContract DO BEGIN
+        INIT;
+        "Contact No." := pContact."No.";
+        "Corporate No." := pContact."Corporate No.";
+        "Member No." := pContact."Member No.";
+
+        "Contract Reference" := COPYSTR(pANSRAP."Warranty No.", 1, MAXSTRLEN("Contract Reference"));
+        "Contract Form Code" :=  GetCrossRefTemp(DATABASE::"Corporate Contract",0, "Corporate No.",
+                                                 pANSRAP."Contract Code",'');
+        "Start Date" := ToolsMgt.TextToDate2(FORMAT(pANSRAP."Contract Start Date"));
+        "Expiration Date" := ToolsMgt.TextToDate2(FORMAT(pANSRAP."Contract End Date"));
+        "Last Modification Date" := CREATEDATETIME(ToolsMgt.TextToDate2(FORMAT(pANSRAP."Movement Date")),0T);
+        IF (pANSRAP."Structure Code" = '00001') AND (pANSRAP."Customer No." = 'MB') THEN BEGIN
+          IF EVALUATE(lDec, COPYSTR(pANSRAP.Filler,3,13)) THEN
+            "Deductible 1 (LCY)" := lDec / 100;
+          IF EVALUATE(lDec, COPYSTR(pANSRAP.Filler,21,13)) THEN
+            "Deductible 2 (LCY)" := lDec / 100;
+        END;
+        "Occurence No." := pANSRAPNo;
+        "Default Address Code" := pToAltAddr.Code;
+        INSERT;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetCrossRefTemp@1100281012(pTableID@1100281001 : Integer;pFieldID@1100281004 : Integer;pEAIPartnerNo@1100281002 : Code[20];pReferenceNo@1100281003 : Code[30];pReferenceNo2@1100281005 : Code[30]) : Code[20];
+    BEGIN
+      WITH TempCrossRef DO BEGIN
+        SETRANGE("Table ID", pTableID);
+        SETRANGE("Source No.", pReferenceNo);
+        SETRANGE("Source No. 2", pReferenceNo2);
+        SETRANGE("Partner Code", pEAIPartnerNo);
+        SETRANGE("Field ID", pFieldID);
+        IF NOT FINDFIRST THEN BEGIN
+          // Calcul de la r‚f‚rence
+          "Table ID" := pTableID;
+          "Source No." := pReferenceNo;
+          "Source No. 2" := pReferenceNo2;
+          "Partner Code" := pEAIPartnerNo;
+          "Field ID" := pFieldID;
+          "Partner Reference" := GetCrossRef(pTableID,pFieldID,pEAIPartnerNo,pReferenceNo,pReferenceNo2);
+          INSERT(FALSE);
+        END;
+        EXIT("Partner Reference");
+      END;
+    END;
+
+    LOCAL PROCEDURE GetCrossRef@1100281001(pTableID@1100281001 : Integer;pFieldID@1100281004 : Integer;pEAIPartnerNo@1100281002 : Code[20];pReferenceNo@1100281003 : Code[30];pReferenceNo2@1100281005 : Code[30]) : Code[20];
+    BEGIN
+      WITH EAIPartnerCrossRef DO BEGIN
+        RESET;
+        IF pReferenceNo2 = '' THEN BEGIN
+          IF GetFromCrossRef2(pTableID,pFieldID,pEAIPartnerNo,pReferenceNo,EAIPartnerCrossRef) THEN
+            EXIT(EAIPartnerCrossRef."Source No.")
+          ELSE
+            EXIT(pReferenceNo);
+        END ELSE BEGIN
+          SETRANGE("Table ID",pTableID);
+          SETRANGE("Source No.",pReferenceNo);
+          SETRANGE("Partner Code",pEAIPartnerNo);
+          SETRANGE("Field ID",pFieldID);
+          SETRANGE("Partner Reference",pReferenceNo2);
+          IF ISEMPTY THEN BEGIN
+            EXIT(pReferenceNo2);
+          END ELSE BEGIN
+            FINDFIRST;
+            EXIT("Source No. 2")
+          END;
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 03/02/12 @a ISAT.ST @v IMH6.01.133 @s ANSAAP @c Cr‚ation  */
+    }
+    END.
+  }
+}

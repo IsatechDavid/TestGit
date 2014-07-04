@@ -1,0 +1,406 @@
+OBJECT Codeunit 50085 Text Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=04/12/13;
+    Time=16:39:20;
+    Modified=Yes;
+    Version List=IMH6.01,SysAgDarva,MATMUT01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Text %1 doesn''t contain enough word separator. Please correct your text.;FRA=Le texte %1 ne contient pas de s‚parateur de mot suffisant. Veuillez corriger votre texte.';
+      EAISentMQBuffer@1000000001 : TEMPORARY Record 8016720;
+      DARVAMgt@1100281001 : Codeunit 50150;
+      SkipNotif@1000000000 : Boolean;
+      SkipSendToDarva@1100281002 : Boolean;
+      UseXML@1000000002 : Boolean;
+
+    PROCEDURE NewComment@1100281003(VAR pAdvCommentLine@1100281001 : Record 50056);
+    VAR
+      lTempAdvCommentLine@1100281000 : TEMPORARY Record 50056;
+      lAdvCommentCard@1100281002 : Page 50231;
+      lService@1100281003 : Record 50066;
+      lServiceHeader@1000000003 : Record 5900;
+      lServiceInterventionLine@1000000002 : Record 50075;
+      lNoModal@1000000000 : Boolean;
+      lServMgtSetup@1000000001 : Record 5911;
+    BEGIN
+      WITH lTempAdvCommentLine DO BEGIN
+        COPY(pAdvCommentLine);
+        INIT;
+
+        //<<IMH12
+        "Source Table ID" := 0;
+        "Source No." := '';
+        "Source No. 2" := '';
+        "Source No. 3" := 0;
+        "Source No. 4" := '';
+        "Source No. 5" := 0;
+        "Line No." := 0;
+        //>>IMH12
+        IF GETFILTER("Source No.") <> '' THEN
+          "Source No." := GETRANGEMIN("Source No.");
+        IF GETFILTER("Source No. 2") <> '' THEN
+          "Source No. 2" := GETRANGEMIN("Source No. 2");
+        IF GETFILTER("Source No. 3") <> '' THEN
+          "Source No. 3" := GETRANGEMIN("Source No. 3");
+        IF GETFILTER("Source No. 4") <> '' THEN
+          "Source No. 4" := GETRANGEMIN("Source No. 4");
+        IF GETFILTER("Source No. 5") <> '' THEN
+          "Source No. 5" := GETRANGEMIN("Source No. 5");
+
+        IF "Source Table ID" = 0 THEN BEGIN
+          IF "Source No. 2" = '' THEN BEGIN
+            IF lService.GET("Source No.") THEN
+              "Source Table ID" := 50066;
+          END ELSE BEGIN
+            IF "Source No. 3" = 0 THEN BEGIN
+              IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Source No. 2") THEN
+                "Source Table ID" := 5900;
+            END ELSE BEGIN
+              IF lServiceInterventionLine.GET("Source No. 2","Source No. 3") THEN BEGIN
+                "Source Table ID" := 50075;
+              END;
+            END;
+          END;
+        END;
+        IF "Source Table ID" = 0 THEN BEGIN
+          FILTERGROUP(3);
+          IF GETFILTER("Called From Source Table ID") <> '' THEN
+            "Source Table ID" := GETRANGEMIN("Called From Source Table ID");
+          FILTERGROUP(0);
+          IF "Source Table ID" = 0 THEN
+            IF GETFILTER("Source Table ID") <> '' THEN
+              "Source Table ID" := GETRANGEMIN("Source Table ID");
+        END;
+
+        "Line No." := 1;
+        Date := 0D;
+      //  Code := '';
+        Comment := '';
+        Publication := 0;
+        Reception := 0;
+        INSERT;
+      END;
+      //<<IMH10.ST
+      CASE lTempAdvCommentLine."Source Table ID" OF
+        DATABASE::Service, DATABASE::"Service Header", DATABASE::"Service Intervention Line", DATABASE::"Service Intervention Minutes" :
+        BEGIN
+          lServMgtSetup.GET;
+          lNoModal := lServMgtSetup."New Comment NoModal";
+        END;
+      END;
+      //>>IMH10.ST
+      //lAdvCommentCard.SETTABLEVIEW(lTempAdvCommentLine);
+      //lAdvCommentCard.SETRECORD(lTempAdvCommentLine);
+      //lAdvCommentCard.SaveRec;
+      //lAdvCommentCard.RUNMODAL;
+      IF ISSERVICETIER THEN BEGIN
+      //<<IMH10.ST
+        IF lNoModal THEN
+          PAGE.RUN(PAGE::"Adv. Comment Card", lTempAdvCommentLine)
+        ELSE
+      //>>IMH10.ST
+          PAGE.RUNMODAL(PAGE::"Adv. Comment Card", lTempAdvCommentLine);
+        //PAGE.RUN(PAGE::"Adv. Comment Card", lTempAdvCommentLine)
+      END
+      ELSE BEGIN
+      //<<IMH10.ST
+        IF lNoModal THEN
+          FORM.RUN(FORM::"Adv. Comment Card", lTempAdvCommentLine)
+        ELSE
+      //>>IMH10.ST
+        FORM.RUNMODAL(FORM::"Adv. Comment Card", lTempAdvCommentLine);
+      END;
+    END;
+
+    PROCEDURE SaveText@1100281000(VAR pAdvLineTemplate@1100281002 : Record 50056;pCommentDate@1100281000 : Date;pText@1100281001 : Text[1024]) : Boolean;
+    VAR
+      lTempAdvCommentLine@1100281003 : TEMPORARY Record 50056;
+      lLineNo@1100281004 : Integer;
+    BEGIN
+      IF pText = '' THEN
+        EXIT(FALSE);
+
+      IF pCommentDate = 0D THEN
+        pCommentDate := WORKDATE;
+
+      // D‚composition / calcul du nombre de ligne
+      lLineNo := 0;
+      REPEAT
+        CLEAR(lTempAdvCommentLine);
+        lTempAdvCommentLine.COPY(pAdvLineTemplate);
+        lTempAdvCommentLine.Comment := RetrieveText(pText,MAXSTRLEN(lTempAdvCommentLine.Comment));
+        IF lLineNo = 0 THEN
+          lTempAdvCommentLine.Date := pCommentDate
+        ELSE
+          lTempAdvCommentLine.Date := 0D;
+        lLineNo += 1;
+        lTempAdvCommentLine."Line No." := lLineNo;
+        lTempAdvCommentLine."Attached To Line No." := 0;
+        lTempAdvCommentLine.INSERT(FALSE);
+      UNTIL pText = '';
+      //<<IMH05.ST
+      IF lTempAdvCommentLine.Comment <> '' THEN BEGIN
+        CLEAR(lTempAdvCommentLine);
+        lTempAdvCommentLine.COPY(pAdvLineTemplate);
+        lTempAdvCommentLine.Comment := '------------';
+      //<<IMH09.ST
+        lTempAdvCommentLine.Publication := 0;
+        lTempAdvCommentLine.Reception := 0;
+      //>>IMH09.ST
+        lTempAdvCommentLine.Date := 0D;
+        lLineNo += 1;
+        lTempAdvCommentLine."Line No." := lLineNo;
+        lTempAdvCommentLine."Attached To Line No." := 0;
+        lTempAdvCommentLine.INSERT(FALSE);
+      END;
+      //>>IMH05.ST
+
+      // Sauvegarde des lignes
+      SaveTempComment(pAdvLineTemplate, lTempAdvCommentLine,FALSE);
+      EXIT;
+    END;
+
+    LOCAL PROCEDURE RetrieveText@1100281001(VAR pText@1100281000 : Text[1024];pStrLenToRetrieve@1100281001 : Integer) rValue : Text[1024];
+    VAR
+      lInt@1100281002 : Integer;
+    BEGIN
+      IF pText = ' ' THEN
+        EXIT('');
+
+      lInt := STRPOS(pText, GetEOL);
+      IF (lInt > 0) AND (lInt < pStrLenToRetrieve) THEN BEGIN
+        IF lInt > 1 THEN
+          rValue := COPYSTR(pText, 1, lInt - 1);
+        IF STRLEN(pText) < lInt + 2 THEN
+          pText := ''
+        ELSE BEGIN
+          pText := COPYSTR(pText, lInt + 2);
+        END;
+        EXIT;
+      END;
+
+      lInt := STRPOS(pText, GetEOL2);
+      IF (lInt > 0) AND (lInt < pStrLenToRetrieve) THEN BEGIN
+        IF lInt > 1 THEN
+          rValue := COPYSTR(pText, 1, lInt - 1);
+        IF STRLEN(pText) < lInt + 1 THEN
+          pText := ''
+        ELSE BEGIN
+          pText := COPYSTR(pText, lInt + 1);
+        END;
+        EXIT;
+      END;
+
+      IF STRLEN(pText) <= pStrLenToRetrieve THEN BEGIN
+        rValue := pText;
+        pText := '';
+        EXIT;
+      END;
+
+      lInt := pStrLenToRetrieve;
+      IF pText[lInt] <> ' ' THEN
+        REPEAT
+          lInt-=1;
+        UNTIL (pText[lInt] = ' ') OR (lInt=1);
+      IF lInt <= 1 THEN
+        ERROR(Text001, pText);
+      rValue := COPYSTR(pText, 1, lInt-1);
+      pText := COPYSTR(pText, lInt+1);
+    END;
+
+    PROCEDURE GetEOL@1100281002() rValue : Text[2];
+    BEGIN
+      rValue[1] := 13;
+      rValue[2] := 10;
+    END;
+
+    LOCAL PROCEDURE GetEOL2@1100281005() rValue : Text[1];
+    BEGIN
+      rValue[1] := 10;
+    END;
+
+    PROCEDURE SaveBigText@1100281004(VAR pAdvLineTemplate@1100281005 : Record 50056;pCommentDate@1100281004 : Date;VAR pBigText@1100281003 : BigText) : Boolean;
+    VAR
+      lTempAdvCommentLine@1100281007 : TEMPORARY Record 50056;
+      lLineNo@1100281002 : Integer;
+      lLength@1100281000 : Integer;
+      lCurrPos@1100281001 : Integer;
+      lPosRead@1100281006 : Integer;
+      lReadText@1100281008 : Text[1024];
+      lTextToTreat@1100281009 : Text[1024];
+    BEGIN
+      lLength := pBigText.LENGTH;
+      IF lLength = 0 THEN
+        EXIT(FALSE);
+
+      IF pCommentDate = 0D THEN
+        pCommentDate := WORKDATE;
+
+      // D‚composition / calcul du nombre de ligne
+      lLineNo := 0;
+      lCurrPos := 1;
+      REPEAT
+        RetrieveBigText(pBigText, lLength, lCurrPos, lTextToTreat);
+        lTempAdvCommentLine.COPY(pAdvLineTemplate);
+        lTempAdvCommentLine.Comment := RetrieveText(lTextToTreat, MAXSTRLEN(lTempAdvCommentLine.Comment));
+        IF lLineNo = 0 THEN
+          lTempAdvCommentLine.Date := pCommentDate
+        ELSE
+          lTempAdvCommentLine.Date := 0D;
+        lLineNo += 1;
+        lTempAdvCommentLine."Line No." := lLineNo;
+        lTempAdvCommentLine."Attached To Line No." := 0;
+        lTempAdvCommentLine.SetDisableInterface(TRUE);
+        lTempAdvCommentLine.INSERT(FALSE);
+      UNTIL (lCurrPos >= lLength) AND (lTextToTreat = '');
+
+      //<<IMH05.ST
+      IF lTempAdvCommentLine.Comment <> '' THEN BEGIN
+        CLEAR(lTempAdvCommentLine);
+        lTempAdvCommentLine.COPY(pAdvLineTemplate);
+        lTempAdvCommentLine.Comment := '------------';
+        lTempAdvCommentLine.Date := 0D;
+        lLineNo += 1;
+        lTempAdvCommentLine."Line No." := lLineNo;
+        lTempAdvCommentLine."Attached To Line No." := 0;
+        lTempAdvCommentLine.INSERT(FALSE);
+      END;
+      //>>IMH05.ST
+      // Sauvegarde des lignes
+      lTempAdvCommentLine.RESET;
+      SaveTempComment(pAdvLineTemplate, lTempAdvCommentLine,FALSE);
+      EXIT;
+    END;
+
+    PROCEDURE SaveTempComment@1100281006(VAR pAdvLineTemplate@1100281001 : Record 50056;VAR pTempComment@1100281000 : Record 50056;pDisableInterface@1100281003 : Boolean);
+    VAR
+      lAdvCommentLine@1100281004 : Record 50056;
+      lServiceHeader@1100281007 : Record 5900;
+      lFirstLine@1100281002 : Integer;
+      lEAILogMgt@1100281005 : Codeunit 8016711;
+      lCommentNotificationMgt@1100281006 : Codeunit 50148;
+    BEGIN
+      IF NOT pTempComment.FINDLAST THEN
+        EXIT;
+
+      lFirstLine := ROUND(pAdvLineTemplate.GetNextLineNo, 10000, '>') + pTempComment.COUNT;
+      REPEAT
+        lAdvCommentLine := pTempComment;
+        lAdvCommentLine."Line No." := lFirstLine - pTempComment."Line No." + 1;
+        IF lAdvCommentLine."Line No." <> lFirstLine THEN
+          lAdvCommentLine."Attached To Line No." := lFirstLine;
+        //<<IMH03.isat.PC
+        lAdvCommentLine.SetDisableInterface(pDisableInterface);
+        //>>IMH03.isat.PC
+        lAdvCommentLine.INSERT(TRUE);
+        IF lAdvCommentLine."Line No." = lFirstLine THEN
+          pAdvLineTemplate := lAdvCommentLine;
+      UNTIL pTempComment.NEXT(-1) = 0;
+
+      //<<IMH07.PC
+      //<<IMH04.ISAT.MA
+      //IF pAdvLineTemplate.Publication = pAdvLineTemplate.Publication::Darva THEN
+      //  DARVAMgt.CreateSendMQByAdvComment(pAdvLineTemplate,0);
+      //>>IMH04.ISAT.MA
+
+      CASE pAdvLineTemplate.Publication OF
+        pAdvLineTemplate.Publication::Darva : BEGIN
+          IF NOT SkipSendToDarva THEN BEGIN  //IMH13
+            //<<IMH14.PC
+            //DARVAMgt.CreateSendMQByAdvComment(pAdvLineTemplate,0);
+            IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pAdvLineTemplate."Source No. 2") THEN BEGIN
+              //<<IMH15.ACO
+              IF UseXML THEN BEGIN
+                DARVAMgt.SetSpecificXMLToDARVA(EAISentMQBuffer);
+              END;
+              //>>IMH15.ACO
+              DARVAMgt.CreateSendMQByAdvComment(
+                pAdvLineTemplate,0,
+                lServiceHeader."Corporate No.",
+                lServiceHeader."Corporate Region Code",
+                lServiceHeader."Service Order Type");
+            END;
+            //>>IMH14.PC
+          END;
+        END;
+      END;
+      //>>IMH07.PC
+      pTempComment.DELETEALL(FALSE);
+    END;
+
+    LOCAL PROCEDURE RetrieveBigText@1100281009(VAR pBigText@1100281000 : BigText;pTextLen@1100281001 : Integer;VAR pCurrPos@1100281002 : Integer;VAR pAddToText@1100281003 : Text[1024]);
+    VAR
+      lPosRead@1100281004 : Integer;
+      lText@1100281005 : Text[1024];
+      lInt@1100281006 : Integer;
+      lInt2@1100281007 : Integer;
+    BEGIN
+      IF pCurrPos = pTextLen THEN
+        EXIT;
+
+      IF STRLEN(pAddToText) = MAXSTRLEN(pAddToText) THEN
+        EXIT;
+      lPosRead := MAXSTRLEN(pAddToText) - STRLEN(pAddToText);
+      lPosRead := pBigText.GETSUBTEXT(lText, pCurrPos, lPosRead);
+      // Suppression retour chariot d‚but
+      IF pCurrPos = 1 THEN BEGIN
+        IF COPYSTR(lText,1,2) = GetEOL THEN
+          lText := COPYSTR(lText,3)
+        ELSE
+          IF COPYSTR(lText,1,1) = GetEOL2 THEN
+            lText := COPYSTR(lText,2);
+      END;
+      pCurrPos += lPosRead;
+      pAddToText := pAddToText + lText;
+    END;
+
+    PROCEDURE SetSkipNotif@1000000000(pSkipNotif@1000000000 : Boolean);
+    BEGIN
+      SkipNotif := pSkipNotif; //IMH11.ST
+    END;
+
+    PROCEDURE SetSkipSendToDarva@1100281007(pSkipSendToDarva@1000000000 : Boolean);
+    BEGIN
+      SkipSendToDarva := pSkipSendToDarva; //IMH13
+    END;
+
+    PROCEDURE SetEAISentMQBuffer@1000000003(VAR pEAISentMQBuffer@1000000000 : TEMPORARY Record 8016720);
+    BEGIN
+      //IMH15
+      UseXML := TRUE;
+      pEAISentMQBuffer.CALCFIELDS("To Generate XML Source");
+      EAISentMQBuffer."To Generate XML Source" := pEAISentMQBuffer."To Generate XML Source";
+      EAISentMQBuffer.INSERT;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH15 @d 28/08/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA Matmut Lot1 @c Utilisation de XML pour passage de paramŠtres */
+      /** @r IMH14 @d 27/06/13 @a ISAT.PC @v IMH6.01.350 @s SystŠme d'aiguillage @c Modification */
+      /** @r IMH13 @d 16/05/12 @a ISAT.ZW @v IMH6.01.339 @h 3658 @s DARVA1.3 @c Mentionner l'envoi auto d'un SDR 64/99 en commentaire */
+      /** @r IMH12 @d 14/05/12 @a ISAT.ZW @v IMH6.01.345 @s MAI @h 4178 @c Gestion cl‚ commentaire */
+      /** @r IMH11 @d 11/04/12 @a ISAT.ST @v IMH6.01.122 @s Gestion des commentaires @h 1479 @c Notification prestataire */
+      /** @r IMH10 @d 06/04/12 @a ISAT.ST @v IMH6.01.122 @s Gestion des commentaires @h 2493 @c Param‚trage modal */
+      /** @r IMH09 @d 02/11/11 @a ISAT.ST @v IMH6.01.122 @s Gestion des commentaires @c Pas de publication pour les lignes vides */
+      /** @r IMH08 @d 16/09/11 @a ISAT.PC @v IMH6.01.122 @s Gestion des commentaires @c Gestion du premier commentaire */
+      /** @r IMH07 @d 16/09/11 @a ISAT.PC @v IMH6.01.165 @s Gestion des notifications @c Gestion notification  */
+      /** @r IMH06 @d 02/09/11 @a ISAT.ST @v IMH6.01.122 @s Gestion des commentaires @c Fonction GetEOL non locale  */
+      /** @r IMH05 @d 17/06/11 @a ISAT.ST @v IMH6.01.122 @s Gestion des commentaires @c Ajout ligne blanche en fin de commentaire */
+      /** @r IMH04 @d 19/05/11 @a ISAT.MA @v IMH6.01.134 @s Interface DARVA @c Emission des commentaires */
+      /** @r IMH03 @d 27/04/11 @a ISAT.PC @v IMH6.01.198 @s Reprise de donn‚es @c gestion de FUSION */
+      /** @r IMH02 @d 06/04/11 @a ISAT.ST @v IMH6.01.122 @s Gestion des commentaires @c Message d'erreur si pas de s‚parateur suffisant */
+      /** @r IMH01 @d 28/02/11 @a ISAT.ST @v IMH6.01.122 @s Gestion des commentaires @c Cr‚ation */
+    }
+    END.
+  }
+}

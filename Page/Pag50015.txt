@@ -1,0 +1,331 @@
+OBJECT Page 50015 Attachments List
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/06/13;
+    Time=17:25:58;
+    Modified=Yes;
+    Version List=IMH6.01,JUIN;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Attachments List;
+               FRA=Liste des documents joints];
+    InsertAllowed=No;
+    DeleteAllowed=No;
+    ModifyAllowed=No;
+    SourceTable=Table50021;
+    PageType=List;
+    OnOpenPage=VAR
+                 lUserSetup@1000000000 : Record 91;
+                 lServiceHeader@1000000001 : Record 5900;
+               BEGIN
+                 SETRANGE(Deleted, FALSE);  //IMH02
+
+                 //<<IMH03.PC
+                 IF lUserSetup.GET(USERID) THEN BEGIN
+                   ActionDeleteVisible :=
+                     (lUserSetup."User Type" = lUserSetup."User Type"::"Area Responsible") OR
+                     (lUserSetup."User Type" = lUserSetup."User Type"::"Network Assistant") OR
+                     (lUserSetup."User Type" = lUserSetup."User Type"::"Network Facilitator");
+                 END;
+                 //>>IMH03.PC
+
+                 //<<IMH06.PC
+                 ServiceTimeRegisterMgt.OpenObjectID(CurrPage.OBJECTID(FALSE));
+                 IF (GETFILTER("Service No.") <> '') AND (GETFILTER("Service Document No.") = '') THEN BEGIN
+                   lServiceHeader.SETCURRENTKEY("Service No.");
+                   lServiceHeader.SETFILTER("Service No.",GETFILTER("Service No."));
+                   lServiceHeader.SETFILTER(Status,'%1|%2',lServiceHeader.Status::"In Process",lServiceHeader.Status::Pending);
+                   IF lServiceHeader.FINDSET THEN BEGIN
+                     REPEAT
+                       ReportingBuffer."Code 1" := lServiceHeader."No.";
+                       ReportingBuffer."Date 1" := DT2DATE(lServiceHeader."Creation Date");
+                       IF ReportingBuffer.INSERT THEN;
+                     UNTIL lServiceHeader.NEXT = 0;
+                   END;
+                   ReportingBuffer.RESET;
+                   ReportingBuffer.SETCURRENTKEY("Date 1","Code 1");
+                   ServiceHeaderOK := ReportingBuffer.FINDLAST;
+                 END;
+                 //>>IMH06.PC
+               END;
+
+    OnClosePage=BEGIN
+                  //<<IMH06.PC
+                  ServiceTimeRegisterMgt.CloseObject;
+                  //>>IMH06.PC
+                END;
+
+    OnAfterGetRecord=VAR
+                       lServiceInterventionLine2@1000000001 : Record 50075;
+                       lServiceHeader@1000000000 : Record 5900;
+                     BEGIN
+                       //<<IMH06.PC
+                       IF "Referent Table No." IN
+                            [DATABASE::Service,
+                             DATABASE::"Service Header",
+                             DATABASE::"Service Intervention Line",
+                             DATABASE::"Interaction Log Entry"]
+                       THEN BEGIN
+                         IF (GETFILTER("Service Intervention Line No.") <> '') AND ("Service Document No." <> '') THEN BEGIN
+                           IF lServiceInterventionLine2.GET("Service Document No.","Service Intervention Line No.") THEN BEGIN
+                             ServiceTimeRegisterMgt.SetFromAttachment(TRUE);
+                             ServiceTimeRegisterMgt.OnAfterGetServiceIntervRecord(lServiceInterventionLine2);
+                           END;
+                         END ELSE BEGIN
+                           IF GETFILTER("Service Document No.") <> '' THEN BEGIN
+                             IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Document No.") THEN BEGIN
+                               ServiceTimeRegisterMgt.SetFromAttachment(TRUE);
+                               ServiceTimeRegisterMgt.OnAfterGetServiceHeaderRecord(lServiceHeader);
+                             END;
+                           END ELSE BEGIN
+                             IF GETFILTER("Service No.") <> '' THEN BEGIN
+                               IF ServiceHeaderOK THEN BEGIN
+                                 IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,ReportingBuffer."Code 1") THEN BEGIN
+                                   ServiceTimeRegisterMgt.SetFromAttachment(TRUE);
+                                   ServiceTimeRegisterMgt.OnAfterGetServiceHeaderRecord(lServiceHeader);
+                                 END;
+                               END;
+                             END;
+                           END;
+                         END;
+                       END;
+                       //>>IMH06.PC
+                     END;
+
+    ActionList=ACTIONS
+    {
+      { 1900000004;0 ;ActionContainer;
+                      ActionContainerType=ActionItems }
+      { 1100481001;1 ;ActionGroup;
+                      Name=Functions;
+                      CaptionML=[ENU=Functions;
+                                 FRA=Fonctions] }
+      { 1100481004;2 ;Action    ;
+                      CaptionML=[ENU=Delete;
+                                 FRA=Supprimer];
+                      Visible=FALSE;
+                      Enabled=FALSE;
+                      OnAction=BEGIN
+                                 AttachmentMgt.DeleteAttachment(Rec,TRUE);
+                               END;
+                                }
+      { 1100281001;2 ;Action    ;
+                      Name=<Action1100481004>;
+                      CaptionML=[ENU=Delete;
+                                 FRA=Supprimer];
+                      Visible=ActionDeleteVisible;
+                      OnAction=BEGIN
+                                 // IMH04.PC
+                                 AttachmentMgt.ChangeDeleteAttachment(Rec,TRUE);
+                               END;
+                                }
+      { 1100481027;2 ;Action    ;
+                      CaptionML=[ENU=Change Modify;
+                                 FRA=Changer Modifiable];
+                      OnAction=VAR
+                                 InteractLogEntry@1001 : Record 5065;
+                                 ResendAttachments@1002 : Report 5183;
+                               BEGIN
+                                 AttachmentMgt.ProtectAttachment(Rec);
+                               END;
+                                }
+      { 1100481028;2 ;Separator  }
+      { 1100481029;2 ;Action    ;
+                      CaptionML=[ENU=Export;
+                                 FRA=Exporter];
+                      OnAction=BEGIN
+                                 AttachmentMgt.ExportAttachment(Rec,'');
+                               END;
+                                }
+      { 1100481002;1 ;Action    ;
+                      Name=Show;
+                      CaptionML=[ENU=Show;
+                                 FRA=Afficher];
+                      Promoted=Yes;
+                      PromotedIsBig=Yes;
+                      Image=Links;
+                      PromotedCategory=Process;
+                      OnAction=BEGIN
+                                 AttachmentMgt.ShowAttachment(Rec);
+                               END;
+                                }
+      { 1000000002;1 ;Action    ;
+                      Name=ReaffectDocument;
+                      CaptionML=[ENU=Reaffect Documentr;
+                                 FRA=R‚affecter document];
+                      Promoted=Yes;
+                      Visible=ActionDeleteVisible;
+                      PromotedIsBig=Yes;
+                      Image=DocumentEdit;
+                      PromotedCategory=Process;
+                      OnAction=BEGIN
+                                 // IMH07.ACO
+                                 ProviderReaffectDocument(Rec);
+                                 CurrPage.UPDATE;
+                               END;
+                                }
+    }
+  }
+  CONTROLS
+  {
+    { 1900000001;0;Container;
+                ContainerType=ContentArea }
+
+    { 1100481000;1;Group  ;
+                Editable=FALSE;
+                GroupType=Repeater }
+
+    { 1000000000;2;Field  ;
+                Name=ServiceHeaderNoCtrl;
+                CaptionML=[ENU=Service Header No.;
+                           FRA=Nø ligne produit];
+                SourceExpr=GetServiceHeaderNo;
+                Editable=FALSE }
+
+    { 1000000001;2;Field  ;
+                Name=InterventionNoCtrl;
+                CaptionML=[ENU=Intervention No.;
+                           FRA=Nø intervention];
+                SourceExpr=GetInterventionNo;
+                Editable=FALSE }
+
+    { 1100481009;2;Field  ;
+                SourceExpr=Description;
+                Editable=FALSE;
+                OnAssistEdit=BEGIN
+                               AttachmentMgt.ShowAttachment(Rec);
+                             END;
+                              }
+
+    { 1100481033;2;Field  ;
+                SourceExpr="Creation Date";
+                Editable=FALSE }
+
+    { 1100481005;2;Field  ;
+                SourceExpr="Attach. Template Code";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100281000;2;Field  ;
+                CaptionML=[ENU=Interaction Template Code;
+                           FRA=Code modŠle interaction];
+                SourceExpr=GetInteractionTempCode;
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481011;2;Field  ;
+                SourceExpr="Description 2";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481013;2;Field  ;
+                SourceExpr=Modifiable;
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481017;2;Field  ;
+                SourceExpr="Delete Mode";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481021;2;Field  ;
+                SourceExpr=Deleted;
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481025;2;Field  ;
+                SourceExpr="File Extension";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481035;2;Field  ;
+                SourceExpr="Creation User ID";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481037;2;Field  ;
+                SourceExpr="Last Modification Date";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481039;2;Field  ;
+                SourceExpr="Last Modification User ID";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481041;2;Field  ;
+                SourceExpr="Delete Date";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481043;2;Field  ;
+                SourceExpr="Delete User ID";
+                Visible=FALSE;
+                Editable=FALSE }
+
+    { 1100481007;2;Field  ;
+                SourceExpr="Entry No.";
+                Visible=FALSE;
+                Editable=FALSE }
+
+  }
+  CODE
+  {
+    VAR
+      ReportingBuffer@1000000002 : TEMPORARY Record 50143;
+      AttachmentTemplate@1100481000 : Record 50020;
+      SourceAttachMgt@1100481002 : Codeunit 50003;
+      AttachmentMgt@1100481001 : Codeunit 50002;
+      ServiceTimeRegisterMgt@1000000003 : Codeunit 50070;
+      ActionDeleteVisible@1000000000 : Boolean INDATASET;
+      ServiceHeaderOK@1000000001 : Boolean;
+      DescriptionEditable@1000000004 : Boolean INDATASET;
+      EmptyField@1000000005 : TextConst 'FRA=''''';
+
+    LOCAL PROCEDURE GetServiceHeaderNo@1000000001() : Text[30];
+    VAR
+      lText001@1000000000 : TextConst 'ENU=Service;FRA=Service';
+    BEGIN
+      // IMH05.PC
+      IF "Service Document No." = '' THEN BEGIN
+        EXIT(lText001);
+      END ELSE BEGIN
+        EXIT("Service Document No.");
+      END;
+    END;
+
+    LOCAL PROCEDURE GetInterventionNo@1000000000() : Text[30];
+    VAR
+      lText001@1000000000 : TextConst 'ENU=Service Header;FRA=Ligne produit';
+    BEGIN
+      // IMH05.PC
+      CALCFIELDS("Intervention No.");
+      IF "Intervention No." = 0 THEN BEGIN
+        IF "Service Document No." = '' THEN BEGIN
+          EXIT('');
+        END ELSE BEGIN
+          EXIT(lText001);
+        END;
+      END ELSE BEGIN
+        EXIT(FORMAT("Intervention No."));
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH07 @d 13/06/13 @a ISAT.ACO @v IMH6.01.347 @s JUIN @h 3672 @c Fonction de reaffectation d'un document */
+      /** @r IHM06 @d 05/12/12 @a ISAT.PC @v IMH6.01.334 @s Mantis 4004 @h 4004 @c gestion temps */
+      /** @r IMH05 @d 11/09/12 @a ISAT.PC @v IMH6.01.226 @s version 1.4 @c Desing @h 3482
+          @c Ajout fonction GetInterventionNo
+          @c Ajout champ nø ligne produit, Nø intervention */
+      /** @r IMH04 @d 11/07/12 @a ISAT.PC @v IMH6.01.108 @s Gestion suppression @h 2552
+          @c Ajout fonction ChangeDeleteAttachment */
+      /** @r IMH03 @d 10/05/12 @a ISAT.PC @v IMH6.01.003 @s Attach. Management @h 2552 @c suppression possible pour DPR uniquement */
+      /** @r IMH02 @d 22/02/11 @a ISAT.ZW @v IMH6.01.003 @s Attach. Management @c Pas afficher doc joint supprim‚ par defaut */
+      /** @r IMH01 @d 23/09/10 @a ISAT.ZW @v IMH6.01.003 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

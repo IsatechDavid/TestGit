@@ -1,0 +1,275 @@
+OBJECT Codeunit 50061 Service InfoPane
+{
+  OBJECT-PROPERTIES
+  {
+    Date=06/05/14;
+    Time=12:28:50;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lService@1100281000 : Record 50066;
+          BEGIN
+            //IMH09
+            lService.SETCURRENTKEY("Creation Date");
+            IF lService.FINDLAST THEN;
+            PAGE.RUN(0, lService);
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE CalcNoOfServHeader@1100281003(pServiceNo@1100281001 : Code[20]) : Integer;
+    VAR
+      lServHeader@1100281000 : Record 5900;
+    BEGIN
+      IF pServiceNo = '' THEN
+        EXIT;
+
+      lServHeader.SETCURRENTKEY("Service No.");
+      lServHeader.SETRANGE("Service No.", pServiceNo);
+      EXIT(lServHeader.COUNT);
+    END;
+
+    PROCEDURE LookupServHeader@1100281002(pServiceNo@1100281000 : Code[20]);
+    VAR
+      lServHeader@1100281001 : Record 5900;
+    BEGIN
+      IF pServiceNo = '' THEN
+        EXIT;
+
+      lServHeader.SETCURRENTKEY("Service No.");
+      lServHeader.ASCENDING(FALSE); //IMH03
+      lServHeader.FILTERGROUP(2);
+      lServHeader.SETRANGE("Service No.", pServiceNo);
+      lServHeader.FILTERGROUP(0);
+      IF lServHeader.ISEMPTY THEN
+        EXIT;
+      IF lServHeader.COUNT = 1 THEN BEGIN
+        lServHeader.FINDFIRST;
+        lServHeader.ShowCard(FALSE);
+      END
+      ELSE
+        FORM.RUNMODAL(0,lServHeader)
+    END;
+
+    PROCEDURE CalcNoOfIntervention@1100281000(pServiceNo@1100281001 : Code[20]) : Integer;
+    VAR
+      lInterventionLine@1100281000 : Record 50075;
+    BEGIN
+      IF pServiceNo = '' THEN
+        EXIT;
+
+      lInterventionLine.SETCURRENTKEY("Service No.");
+      lInterventionLine.SETRANGE("Service No.", pServiceNo);
+      EXIT(lInterventionLine.COUNT);
+    END;
+
+    PROCEDURE LookupIntervention@1100281004(pServiceNo@1100281000 : Code[20]);
+    VAR
+      lInterventionLine@1100281002 : Record 50075;
+    BEGIN
+      IF pServiceNo = '' THEN
+        EXIT;
+
+      lInterventionLine.SETCURRENTKEY("Service No.","Service Header No.");
+      lInterventionLine.ASCENDING(FALSE);//IMH03
+      lInterventionLine.FILTERGROUP(2);
+      lInterventionLine.SETRANGE("Service No.", pServiceNo);
+      lInterventionLine.FILTERGROUP(0);
+      IF lInterventionLine.ISEMPTY THEN
+        EXIT;
+      IF lInterventionLine.COUNT = 1 THEN BEGIN
+        //<<IMH07
+        lInterventionLine.FINDFIRST;
+        lInterventionLine.FILTERGROUP(2);
+        lInterventionLine.SETRECFILTER;
+        lInterventionLine.FILTERGROUP(0);
+        //>>IMH07
+        FORM.RUNMODAL(FORM::"Intervention Line Card",lInterventionLine)
+      END
+      ELSE
+        FORM.RUNMODAL(0,lInterventionLine)
+    END;
+
+    PROCEDURE CalcNoOfTrayLines@1100281005(pServiceNo@1100281001 : Code[20];pUnclosed@1100281002 : Boolean) : Integer;
+    VAR
+      lTrayLine@1100281000 : Record 50048;
+    BEGIN
+      //IMH002 isat.zw
+      IF pServiceNo = '' THEN
+        EXIT;
+
+      lTrayLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lTrayLine.SETRANGE("Service No.", pServiceNo);
+      IF pUnclosed THEN
+        lTrayLine.SETRANGE(Closed, FALSE);
+      EXIT(lTrayLine.COUNT);
+    END;
+
+    PROCEDURE LookupTrayLines@1100281001(pServiceNo@1100281000 : Code[20];pUnclosed@1100281002 : Boolean);
+    VAR
+      lTrayLine@1100281001 : Record 50048;
+    BEGIN
+      //IMH002 isat.zw
+      IF pServiceNo = '' THEN
+        EXIT;
+
+      lTrayLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lTrayLine.FILTERGROUP(2);
+      lTrayLine.SETRANGE("Service No.", pServiceNo);
+      lTrayLine.FILTERGROUP(0);
+      IF pUnclosed THEN
+        lTrayLine.SETRANGE(Closed, FALSE);
+      IF lTrayLine.ISEMPTY THEN
+        EXIT;
+
+      FORM.RUNMODAL(0, lTrayLine);
+    END;
+
+    PROCEDURE LookupCustomerComment@1100281007(pCorporateNo@1100281001 : Code[20]);
+    VAR
+      lCommentLine@1100281000 : Record 97;
+    BEGIN
+      //IMH27
+      WITH lCommentLine DO BEGIN
+        SETRANGE("Table Name", lCommentLine."Table Name"::Customer);
+        SETRANGE("No.", pCorporateNo);
+        IF ISEMPTY THEN
+          EXIT;
+      END;
+      PAGE.RUNMODAL(0,lCommentLine);
+    END;
+
+    PROCEDURE GetServTimeRegister@1100281013(pServiceNo@1100281001 : Code[20]) rTimeInSec : Integer;
+    VAR
+      lServTimeReg@1100281000 : Record 50067;
+    BEGIN
+      //IMH22
+      lServTimeReg.SETRANGE("Service No.",pServiceNo);
+      lServTimeReg.SETRANGE("Timing Process", TRUE);
+      IF lServTimeReg.ISEMPTY THEN
+        EXIT(0);
+      lServTimeReg.FINDFIRST;
+      REPEAT
+        rTimeInSec += lServTimeReg."Corrected Time";
+      UNTIL lServTimeReg.NEXT = 0;
+      EXIT(rTimeInSec);
+    END;
+
+    PROCEDURE GetUserNb@1100281019(pServiceNo@1100281003 : Code[20]) : Integer;
+    VAR
+      lServTimeReg@1100281000 : Record 50067;
+      lUser@1100281001 : TEMPORARY Record 2000000002;
+      lUserNb@1100281002 : Integer;
+    BEGIN
+      //IMH05
+      lServTimeReg.SETRANGE("Service No.", pServiceNo);
+      IF lServTimeReg.ISEMPTY THEN
+        EXIT(0);
+      lServTimeReg.FINDFIRST;
+      REPEAT
+         lUser."User ID" := lServTimeReg."User ID";
+         IF lUser.INSERT THEN
+           lUserNb += 1;
+      UNTIL lServTimeReg.NEXT = 0;
+      EXIT(lUserNb);
+    END;
+
+    PROCEDURE GetTotalTreatmentDayDuration@1100281022(pServiceNo@1100281005 : Code[20]) : Decimal;
+    VAR
+      lServiceHeader@1100281003 : Record 5900;
+      lToolsMgt@1100281002 : Codeunit 8016602;
+      lStartingDateTime@1100281001 : DateTime;
+      lFinishDateTime@1100281000 : DateTime;
+      lDec@1100281004 : Decimal;
+    BEGIN
+      //IMH05
+      lServiceHeader.SETCURRENTKEY("Service No.");
+      lServiceHeader.SETRANGE("Service No.",pServiceNo);
+      lServiceHeader.SETRANGE("Document Type",lServiceHeader."Document Type"::Invoice);
+      lServiceHeader.SETRANGE(Status,lServiceHeader.Status::Finished);
+      lServiceHeader.SETFILTER("Finishing Date",'<>%1',0D);
+      IF lServiceHeader.ISEMPTY THEN
+        EXIT(0);
+      lServiceHeader.FINDFIRST;
+      REPEAT
+        IF lServiceHeader."Starting Date" <> 0D THEN
+          lStartingDateTime := CREATEDATETIME(lServiceHeader."Starting Date",lServiceHeader."Starting Time")
+        ELSE
+          lStartingDateTime := CREATEDATETIME(lServiceHeader."Order Date",lServiceHeader."Order Time");
+        lFinishDateTime := CREATEDATETIME(lServiceHeader."Finishing Date",lServiceHeader."Finishing Time");
+        lDec += lToolsMgt.GetDayDuration(lStartingDateTime,lFinishDateTime);
+      UNTIL lServiceHeader.NEXT = 0;
+      EXIT(lDec);
+    END;
+
+    PROCEDURE GetTreatmentDayDuration@1100281026(pServiceNo@1100281005 : Code[20]) : Decimal;
+    VAR
+      lServiceHeader@1100281003 : Record 5900;
+      lToolsMgt@1100281002 : Codeunit 8016602;
+      lStartingDateTime@1100281001 : DateTime;
+      lFinishDateTime@1100281000 : DateTime;
+      lDec@1100281004 : Decimal;
+    BEGIN
+      //IMH05
+      lServiceHeader.SETCURRENTKEY("Service No.");
+      lServiceHeader.SETRANGE("Service No.",pServiceNo);
+      lServiceHeader.SETRANGE("Document Type",lServiceHeader."Document Type"::Invoice);
+      IF lServiceHeader.ISEMPTY THEN
+        EXIT(0);
+      lServiceHeader.FINDFIRST;
+      REPEAT
+        IF lServiceHeader."Starting Date" <> 0D THEN
+          lStartingDateTime := CREATEDATETIME(lServiceHeader."Starting Date",lServiceHeader."Starting Time")
+        ELSE
+          lStartingDateTime := CREATEDATETIME(lServiceHeader."Order Date",lServiceHeader."Order Time");
+        IF lServiceHeader.Status = lServiceHeader.Status::Finished THEN
+          lFinishDateTime := CREATEDATETIME(lServiceHeader."Finishing Date",lServiceHeader."Finishing Time")
+        ELSE
+          lFinishDateTime := CURRENTDATETIME;
+        lDec += lToolsMgt.GetDayDuration(lStartingDateTime,lFinishDateTime);
+      UNTIL lServiceHeader.NEXT = 0;
+      EXIT(lDec);
+    END;
+
+    PROCEDURE LookupTrayLineHist@1100281006(pServiceNo@1100281000 : Code[20]);
+    VAR
+      lTrayLine@1100281001 : Record 50049;
+    BEGIN
+      //IMH06.ST
+      IF pServiceNo = '' THEN
+        EXIT;
+
+      lTrayLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lTrayLine.FILTERGROUP(2);
+      lTrayLine.SETRANGE("Service No.", pServiceNo);
+      lTrayLine.FILTERGROUP(0);
+      FORM.RUNMODAL(0, lTrayLine);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH09 @d 05/05/14 @a ISAT.ZW @v IMH6.01.5071 @s Tri Service @h 5071
+          @c Affichage liste des services dans la trigger OnRun */
+      /** @r IMH08 @d 04/04/2012 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Appel ShowCard sur intervention */
+      /** @r IMH07 @d 03/03/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Modif. pour ouvrir en mode edition l'intervention */
+      /** @r IMH06 @d 04/02/11 @a ISAT.ST @v IMH6.01.013 @s Ajout accŠs Tray Line History */
+      /** @r IMH05 @d 27/01/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Ajout fonctions pour stats *
+      /** @r IMH04 @d 10/12/2010 @a ISAT.ST @v IMH6.01.002 @s Gestion du service
+          @c Affichage de fiche en non modal */
+      /** @r IMH03 @d 09/11/2010 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Passage du nø service de integer … code(20) */
+      /** @r IMH03 @d 24/01/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Modif tri lookup */
+      /** @r IMH02 @d 27/10/2010 @a ISAT.ZW @v IMH6.01.013 @s Gestion des corbeilles @c table TODO --> table Tray Line */
+      /** @r IMH01 @d 14/10/2010 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Cr‚ation objet pour info pane / factbox service */
+    }
+    END.
+  }
+}

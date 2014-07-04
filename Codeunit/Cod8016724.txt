@@ -1,0 +1,459 @@
+OBJECT Codeunit 8016724 EAI Sent Validation Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=28/03/14;
+    Time=11:21:27;
+    Modified=Yes;
+    Version List=ISAEAI1.00,MATMUT01,5005;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lSentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            CALCFIELDS("XML Source");
+            IF NOT "XML Source".HASVALUE THEN BEGIN
+              EXIT;
+            END ELSE BEGIN
+              lSentMQBuffer := Rec;
+              lSentMQBuffer."XML Source" := "XML Source";
+              lSentMQBuffer.INSERT;
+
+              Code(lSentMQBuffer);
+
+              Rec := lSentMQBuffer;
+            END;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      lEAIMQBufferMgt@1100281005 : Codeunit 8016708;
+      EAIExchangeTypeMgt@1100281000 : Codeunit 8016712;
+      Error001@1100281001 : TextConst 'ENU=No %1 found.;FRA=Aucun %1 trouv‚.';
+      Error002@1100281002 : TextConst 'ENU=XML Stream empty.;FRA=Stream XML vide.';
+      RBAutoMgt@1100281003 : Codeunit 419;
+      Error003@1100281004 : TextConst 'ENU=HTTP Error %1 :;FRA=Erreur HTTP %1 :';
+      Error004@1100281006 : TextConst 'ENU=Return CU : %1;FRA=CU retour : %1';
+
+    LOCAL PROCEDURE Code@1100281000(VAR pSentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lEAIMQBufferMgt@1100281003 : Codeunit 8016708;
+      lReturnExchangeType@1100281001 : Record 8016719;
+      lExchangeType@1100281002 : Record 8016717;
+    BEGIN
+      IF NOT EAIExchangeTypeMgt.GetExchangeTypePerSendMQ(pSentMQBuffer,lReturnExchangeType) THEN
+        ERROR(Error001,lReturnExchangeType.TABLECAPTION);
+
+      lExchangeType.GET(lExchangeType.Type::Outbound,lReturnExchangeType."EAI Exchange Type Code");
+
+      CASE lExchangeType."Bus Type" OF
+        lExchangeType."Bus Type"::File : SendToFile(pSentMQBuffer,lReturnExchangeType);
+        lExchangeType."Bus Type"::Database: SendToDatabase(pSentMQBuffer,lReturnExchangeType);
+        lExchangeType."Bus Type"::"Web service": SendToWebService(pSentMQBuffer,lReturnExchangeType);
+      END;
+    END;
+
+    LOCAL PROCEDURE SendToFile@202(VAR pSentMQBuffer@1100281000 : Record 8016720;pMQExchangeType@1100281003 : Record 8016719);
+    VAR
+      lExchangeType@1100281004 : Record 8016717;
+      lAct@1100281002 : Record 8016706;
+      lInStream@1100281001 : InStream;
+      lFileName@1100281007 : Text[1024];
+      lFileExt@1100281005 : Text[5];
+      lBLOBRef@1100281006 : TEMPORARY Record 99008535;
+    BEGIN
+      //SendToXMLFile : on cr‚e le fichier XML dans le r‚pertoire sp‚cifi‚
+
+      lExchangeType.GET(lExchangeType.Type::Outbound,pMQExchangeType."EAI Exchange Type Code");
+      lExchangeType.TESTFIELD("Bus Type",lExchangeType."Bus Type"::File);
+
+      lAct.GET(pSentMQBuffer."EAI Act Type Code",pSentMQBuffer."EAI Act Code");
+
+      lFileExt := lAct."Emission Extension Value";
+
+      IF lFileExt = '' THEN
+        lFileExt := 'xml';
+
+      CASE lAct."Emission Name Definition" OF
+
+        lAct."Emission Name Definition"::"Entry No.":
+          lFileName := GetUniqueFileName(lExchangeType."Outgoing Queue Label" + '\' + pSentMQBuffer."Entry No.",lFileExt);
+
+        lAct."Emission Name Definition"::"Prefix + DateTime":
+          lFileName := GetUniqueFileName(lExchangeType."Outgoing Queue Label" + '\' + lAct."Emission Name Value"
+                         + FORMAT(TODAY,0,'<Year4><Month,2><Day,2>')
+                         + FORMAT(TIME,0,'<Hours24,2><Filler Character,0><Minutes,2><Seconds,2>'),lFileExt);
+
+        lAct."Emission Name Definition"::"Prefix + Entry No.":
+          lFileName := GetUniqueFileName(lExchangeType."Outgoing Queue Label" + '\' + lAct."Emission Name Value"
+                         + pSentMQBuffer."Entry No.",lFileExt);
+
+        lAct."Emission Name Definition"::"Doc. ID + DateTime":
+          lFileName := GetUniqueFileName(lExchangeType."Outgoing Queue Label" + '\' + lAct."Document ID Code"
+                         + FORMAT(TODAY,0,'<Year4><Month,2><Day,2>')
+                         + FORMAT(TIME,0,'<Hours24,2><Filler Character,0><Minutes,2><Seconds,2>'),lFileExt);
+
+        lAct."Emission Name Definition"::"Doc. ID + Entry No.":
+          lFileName := GetUniqueFileName(lExchangeType."Outgoing Queue Label" + '\' + lAct."Document ID Code"
+                         + pSentMQBuffer."Entry No.",lFileExt);
+
+        ELSE
+          lFileName := GetUniqueFileName(lExchangeType."Outgoing Queue Label" + '\' + lAct."Emission Name Value"
+                         + FORMAT(TODAY,0,'<Year4><Month,2><Day,2>')
+                         + FORMAT(TIME,0,'<Hours24,2><Filler Character,0><Minutes,2><Seconds,2>'),lFileExt);
+      END;
+
+      //Nom du fichier
+      lFileName := COPYSTR(lFileName,STRLEN(lExchangeType."Outgoing Queue Label") + 1);
+
+      pSentMQBuffer."File Name" := lFileName;
+      pSentMQBuffer.CALCFIELDS("XML Source");
+      //Ecriture fichier en emission
+      //<<IMH01 isat.zw
+      //pSentMQBuffer."XML Source".EXPORT(lExchangeType."Outgoing Queue Label" + '\' + pSentMQBuffer."File Name",FALSE);
+      lBLOBRef.Blob := pSentMQBuffer."XML Source";
+      RBAutoMgt.BLOBExport(lBLOBRef, lExchangeType."Outgoing Queue Label" + '\' + pSentMQBuffer."File Name",FALSE);
+
+      //Ecriture fichier en historique
+      IF lExchangeType."Histo Folder" <> '' THEN
+        //pSentMQBuffer."XML Source".EXPORT(lExchangeType."Histo Folder" + '\' + pSentMQBuffer."File Name",FALSE);
+        RBAutoMgt.BLOBExport(lBLOBRef, lExchangeType."Histo Folder" + '\' + pSentMQBuffer."File Name",FALSE);
+      //>>IMH01 isat.zw
+    END;
+
+    LOCAL PROCEDURE SendToDatabase@1000000002(VAR pSentMQBuffer@1100281001 : Record 8016720;pMQExchangeType@1100281000 : Record 8016719);
+    VAR
+      lExchangeType@1100281004 : Record 8016717;
+      lPartner@1100281005 : Record 8016707;
+    BEGIN
+      //SendToDatabase : on cr‚e directement l'enregistrement dans la soci‚t‚ param‚tr‚e
+
+      lExchangeType.GET(lExchangeType.Type::Outbound,pMQExchangeType."EAI Exchange Type Code");
+      lExchangeType.TESTFIELD("Bus Type",lExchangeType."Bus Type"::Database);
+
+      lPartner.GET(pMQExchangeType."EAI Partner Code");
+      lPartner.CALCFIELDS("Internal Company");
+      lPartner.TESTFIELD("Internal Company",TRUE);
+
+      ERROR('TO DO');
+    END;
+
+    PROCEDURE SendToWebService@1100281001(VAR pSentMQBuffer@1100281001 : Record 8016720;pMQExchangeType@1100281000 : Record 8016719);
+    VAR
+      lSentMQBuffer@1100281031 : Record 8016720;
+      lInterfaceSetup@1100281014 : Record 50139;
+      lExchangeType@1100281008 : Record 8016717;
+      lEAIAct@1100281011 : Record 8016706;
+      lServHeader@1100281012 : Record 5900;
+      lServInterventionLine@1100281018 : Record 50075;
+      lServInterventionLine2@1100281017 : Record 50075;
+      lAdvCommentLine@1100281016 : Record 50056;
+      lSegLine@1100281015 : Record 5077;
+      lInteractionLogEntry@1100281004 : Record 5065;
+      lNASHandler@1100281009 : Codeunit 8016720;
+      lDARVAMgt@1100281007 : Codeunit 50150;
+      lTrayLineMgt@1100281019 : Codeunit 50050;
+      lwinHTTPService@1100281003 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lReturnXmlDoc@1100281032 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDoc@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDom@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDom2@1100281030 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXMLNewChild1@1100281027 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNode@1100281029 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIXMLDocMgt@1100281026 : Codeunit 8016713;
+      lInStream@1100281005 : InStream;
+      lRecID@1100281013 : RecordID;
+      lRecRef@1100281010 : RecordRef;
+      lOutStream@1100281020 : OutStream;
+      lErrorType@1100281023 : Text[30];
+      lErrorDescription@1100281022 : Text[80];
+      lWebServiceUnavailable@1100281024 : Boolean;
+      lWarning@1100281028 : Boolean;
+      lTeamCode@1100281021 : Code[10];
+      lTaskCode@1100281025 : Code[10];
+      lDARVASetup@1000000000 : Record 50126;
+      lSDR64Managment@1000000001 : Codeunit 50210;
+      lInterfaceReference@1000000002 : Record 50164;
+      lType@1000000003 : ' ,SD64,SD99';
+      lFilterTeamTrayTask@1000000004 : Record 50129;
+    BEGIN
+      //IMH02 isat.zw
+      //SendToWebService : on envoie le source XML par Web service externe
+      lExchangeType.GET(lExchangeType.Type::Outbound,pMQExchangeType."EAI Exchange Type Code");
+      lExchangeType.TESTFIELD("Bus Type",lExchangeType."Bus Type"::"Web service");
+
+      IF ISCLEAR(lwinHTTPService) THEN
+          CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',lExchangeType."Outgoing Queue Label",0);
+      //lwinHTTPService.Open('POST','https://services-vabf.darva.com/irdwssrreparateur/ws/',0);
+
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      //<<IMH02.ST
+      //lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('Content-type','application/soap+xml');
+      //>>IMH02.ST
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      CREATE(lXmlDoc);
+      pSentMQBuffer.CALCFIELDS("XML Source");
+      pSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXmlDoc.load(lInStream);
+      lwinHTTPService.Send(lXmlDoc);
+      CLEAR(lInStream);
+      CLEAR(lXmlDoc);
+
+      //<<IMH02.ST
+      IF NOT lwinHTTPService.WaitForResponse(120) THEN
+        ERROR('Request timed out.');
+
+      //<<IMH10.ACO
+      CLEAR(pSentMQBuffer."Response XML Source");
+      //>>IMH10.ACO
+
+      IF lwinHTTPService.Status = 200 THEN BEGIN
+        //<<IMH09.PC
+        // Code sorti des balises IMH06.PC
+        //<<IMH07.ACO
+        //<<IMH08.ACO
+        //lDARVAMgt.GetEAIActSendDARVAType(pSentMQBuffer,lType,lRecRef);
+        lDARVAMgt.GetEAIActSendDARVAType(pSentMQBuffer,lType);
+        //>>IMH08.ACO
+        IF lType = lType::SD64 THEN BEGIN
+          //<<IMH08.ACO
+          //lSDR64Managment.ChangeSendStatusIntervention(lRecRef,lInterfaceReference."Send Status"::Validated);
+          lSDR64Managment.ChangeSendStatusIntervention(lInterfaceReference."Send Status"::Validated, pSentMQBuffer);
+          //>>IMH08.ACO
+         END;
+        //>>IMH07.ACO
+        //>>IMH09.PC
+        //<<IMH06.PC
+        COMMIT;
+        lEAIAct.GET(pSentMQBuffer."EAI Act Type Code",pSentMQBuffer."EAI Act Code");
+        IF lEAIAct."Return Codeunit No." <> 0 THEN BEGIN
+          CREATE(lReturnXmlDoc);
+          lReturnXmlDoc.load(lwinHTTPService.ResponseStream);
+          //<<IMH10.ACO
+          //lSentMQBuffer := pSentMQBuffer;
+          //lSentMQBuffer."Response XML Source".CREATEOUTSTREAM(lOutStream);
+          pSentMQBuffer."Response XML Source".CREATEOUTSTREAM(lOutStream);
+          //>>IMH10.ACO
+          lReturnXmlDoc.save(lOutStream);
+          //<<IMH10.ACO
+          lSentMQBuffer := pSentMQBuffer;
+          //>>IMH10.ACO
+          IF NOT CODEUNIT.RUN(lEAIAct."Return Codeunit No.",lSentMQBuffer) THEN BEGIN
+            pSentMQBuffer."Comment Status" := COPYSTR(STRSUBSTNO(Error004,GETLASTERRORTEXT),1,250);
+            pSentMQBuffer.Status := pSentMQBuffer.Status::Error;
+            pSentMQBuffer.MODIFY;
+            CLEARLASTERROR;
+          END;
+        END;
+        //>>IMH06.PC
+        //<<IMH04 isat.zw
+        COMMIT;
+        IF NOT CODEUNIT.RUN(CODEUNIT::"EAI Sent Waring Mgt", pSentMQBuffer) THEN BEGIN
+          pSentMQBuffer."Comment Status" := COPYSTR(GETLASTERRORTEXT,1,250);
+          pSentMQBuffer.Status := pSentMQBuffer.Status::Warning;
+          pSentMQBuffer.MODIFY;
+          CLEARLASTERROR;
+        END;
+        //>>IMH04 isat.zw
+
+        EXIT;
+      END ELSE BEGIN
+        //<<IMH03.PC
+        lEAIAct.GET(pSentMQBuffer."EAI Act Type Code",pSentMQBuffer."EAI Act Code");
+
+        //<<IMH11.ACO
+        lDARVAMgt.GetEAIActSendDARVAType(pSentMQBuffer,lType); // Acte SD64
+        IF lType = lType::SD64 THEN BEGIN
+          lSDR64Managment.ChangeSendStatusIntervention(lInterfaceReference."Send Status"::"Validation Error",pSentMQBuffer);
+        END;
+        //>>IMH11.ACO
+
+        IF lEAIAct."Gen. Tray Line On Sent Error" THEN BEGIN
+          lEAIAct.TESTFIELD("Tray Line Task Code On Error");
+          lRecID := pSentMQBuffer.RecordId;
+          lRecRef := lRecID.GETRECORD;
+          CASE lRecID.TABLENO OF
+            DATABASE::"Service Intervention Line" : BEGIN
+              lRecRef.LOCKTABLE;
+              lRecRef.SETTABLE(lServInterventionLine);
+              lTeamCode := lEAIAct."Team Code On Error";
+              //<<IMH12
+              IF lTeamCode = '' THEN BEGIN
+                lTeamCode := lTrayLineMgt.GetTeamByTask(lEAIAct."Tray Line Task Code On Error",
+                                lFilterTeamTrayTask, lServHeader."No.");
+              END;
+              //>>IMH12
+              lTaskCode := lEAIAct."Tray Line Task Code On Error";
+              IF (lTaskCode <> '') AND (lTeamCode <> '') THEN BEGIN
+                lTrayLineMgt.CreateTLFromServHeader(lServHeader,lTeamCode,lTaskCode,FALSE);
+              END;
+
+              //<<IMH07.ACO
+              //<<IMH08.ACO
+              //lDARVAMgt.GetEAIActSendDARVAType(pSentMQBuffer,lType,lRecRef);
+              //<<IMH11.ACO
+              //lDARVAMgt.GetEAIActSendDARVAType(pSentMQBuffer,lType);
+              //>>IMH11.ACO
+              //>>IMH08.ACO
+              //<<IMH11.ACO
+             // IF lType = lType::SD64 THEN BEGIN
+                //<<IMH08.ACO
+                //lSDR64Managment.ChangeSendStatusIntervention(lRecRef,lInterfaceReference."Send Status"::"Validation Error");
+                //lSDR64Managment.ChangeSendStatusIntervention(lInterfaceReference."Send Status"::"Validation Error",pSentMQBuffer);
+                //>>IMH08.ACO
+              //END;
+              //>>IMH07.ACO
+
+            END;
+            DATABASE::"Adv. Comment Line" : BEGIN
+              lRecRef.LOCKTABLE;
+              lRecRef.SETTABLE(lAdvCommentLine);
+              lTeamCode := lEAIAct."Team Code On Error";
+              //<<IMH12
+              IF lTeamCode = '' THEN BEGIN
+                lTeamCode := lTrayLineMgt.GetTeamByTask(lEAIAct."Tray Line Task Code On Error",
+                                lFilterTeamTrayTask, lServHeader."No.");
+              END;
+              //>>IMH12
+              lTaskCode := lEAIAct."Tray Line Task Code On Error";
+              IF (lTaskCode <> '') AND (lTeamCode <> '') THEN BEGIN
+                lTrayLineMgt.CreateTLFromServHeader(lServHeader,lTeamCode,lTaskCode,FALSE);
+              END;
+            END;
+          END;
+        END;
+        CREATE(lXmlDom);
+        lXmlDom.load(lwinHTTPService.ResponseStream);
+        GetError(lXmlDom,lErrorType,lErrorDescription,lWebServiceUnavailable, lWarning); //IMH04
+        IF lWebServiceUnavailable THEN BEGIN
+          lInterfaceSetup.GET;
+          pSentMQBuffer."Set To Sleep" := pSentMQBuffer."Set To Sleep"::Yes;
+          pSentMQBuffer."Sleep Time" := lInterfaceSetup."DARVA Unavailable Waiting Time";
+          pSentMQBuffer.Status := pSentMQBuffer.Status::Unprocessed;
+        END;
+        //<<IMH04
+        IF lWarning THEN BEGIN
+          pSentMQBuffer.Status := pSentMQBuffer.Status::Warning;
+          pSentMQBuffer.MODIFY(FALSE);
+        END;
+        //>>IMH04
+        CLEAR(lOutStream);
+        pSentMQBuffer."Response XML Source".CREATEOUTSTREAM(lOutStream);
+        //<<IMH05.PC
+        //lXmlDom.save(lOutStream);
+        CREATE(lXmlDom2);
+        lEAIXMLDocMgt.CreateXmlByRootNodeName2(lXmlDom2,'Retour_WS',lXMLNewChild1);
+        lXMLNode := lXmlDom.documentElement;
+        IF NOT ISCLEAR(lXMLNode) THEN BEGIN
+          lXMLNewChild1.appendChild(lXMLNode);
+        END;
+        lXmlDom2.save(lOutStream);
+        //>>IMH05.PC
+
+        lEAIMQBufferMgt.TransferSendMQBufferToSendMQ(pSentMQBuffer);
+        COMMIT;
+        CLEAR(lXmlDom);
+        //<<IMH05.PC
+        CLEAR(lXmlDom2);
+        CLEAR(lXMLNode);
+        CLEAR(lXMLNewChild1);
+        //>>IMH05.PC
+        //>>IMH03.PC
+      END;
+
+      IF (lErrorType <> '') OR (lErrorDescription <> '') THEN BEGIN
+        ERROR(lErrorType + ' ' + lErrorDescription);
+      END ELSE BEGIN
+        ERROR(STRSUBSTNO(Error003, lwinHTTPService.Status) + lwinHTTPService.StatusText);
+      END;
+    END;
+
+    LOCAL PROCEDURE GetUniqueFileName@9(FileName@1000000000 : Text[250];Ext@1000000001 : Text[5]) ReturnFileName : Text[250];
+    VAR
+      I@1001 : Integer;
+      DocNo@1002 : Text[30];
+    BEGIN
+      I := 0;
+
+      REPEAT
+        IF I <> 0 THEN
+          DocNo := '_'+FORMAT(I);
+
+        ReturnFileName :=  FileName
+                         + DocNo
+                         + '.'+Ext;
+
+        IF NOT EXISTS(ReturnFileName) THEN
+          EXIT;
+
+        I := I +1;
+      UNTIL I=9999;
+    END;
+
+    PROCEDURE GetError@1100281003(pXmlDoc@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";VAR pErrorType@1100281007 : Text[30];VAR pErrorDescription@1100281004 : Text[80];VAR pErrorUnavailable@1100281005 : Boolean;VAR pWarning@1100281008 : Boolean);
+    VAR
+      lInterfaceSetup@1100281001 : Record 50139;
+      lXmlNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlNode2@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lXmlNode3@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+    BEGIN
+      // Si le flux de retour contient le code erreur d'indisponibilit‚ alors on sort … vrai
+
+      pErrorDescription := '';
+      pErrorType := '';
+      pErrorUnavailable := FALSE;
+
+      lXmlNode := pXmlDoc.getElementsByTagName('ns3:ErreurTraitement').item(0);
+      IF ISCLEAR(lXmlNode) THEN BEGIN
+        EXIT;
+      END;
+      lXmlNode2 := lXmlNode.selectSingleNode('ns2:code');
+      IF NOT ISCLEAR(lXmlNode2) THEN BEGIN
+        lInterfaceSetup.GET;
+        pErrorUnavailable := lInterfaceSetup."DARVA Unavailable Code" = lXmlNode2.text;
+        pErrorType := lXmlNode2.text;
+        //<<IMH04
+        IF pErrorType IN ['E0000', 'E0001', 'E0002', 'E0003', 'E0100', 'E0102', 'E0200', 'E0201', 'E0202', 'E0203', 'E0900'] THEN
+          pWarning := TRUE;
+        //>>IMH04
+      END;
+      lXmlNode3 := lXmlNode.selectSingleNode('ns2:libelle');
+      IF NOT ISCLEAR(lXmlNode3) THEN BEGIN
+        pErrorDescription := COPYSTR(lXmlNode3.text,1,MAXSTRLEN(pErrorDescription));
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH12 @d 26/03/14 @a ISAT.ZW @v IMH6.01.5005 @s Reorganisation DPS @h 5005
+          @c Ajout la gestion de team code par defaut */
+      /** @r IMH11 @d 04/02/14 @a ISAT.ACO @v IM6.01.4978 @s DARVA MATMUT Lot 1 @h 4978
+          @c D‚placement du code pour mettre l'intervention en statut "Erreur validation" */
+      /** @r IMH10 @d 31/12/13 @a ISAT.ACO @v IMH6.01.4920 @s DARVA MATMUT Lot 1 @h 4920
+          @c Suppression du flux retour quand succŠs au cas o— tomb‚ en erreur pr‚c‚demment
+          @c Sauvegarde du flux SDR64 dans le flux r‚ponse */
+      /** @r IMH09 @d 25/10/13 @a ISAT.PC @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4847 @c Correction */
+      /** @r IMH08 @d 23/10/13 @a ISAT.ACO @v IMH6.01.348 @h 4804 @s DARVA MATMUT Lot 1
+          @c Modification test sur type flux */
+      /** @r IMH07 @d 22/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @s Gestion statut ‚mission SDR64 */
+      /** @r IHM06 @d 15/10/13 @a ISAT.PC @v IMH6.01.348 @s DARVA MATMUT Lot 1 @s Gestion du retour pour le SDR64 */
+      /** @r IHM05 @d 30/03/12 @a ISAT.PC @v IMH6.01.132 @s DARVA @s EAI @c Catchage du retour du WS Darva */
+      /** @r IHM04 @d 12/03/12 @a ISAT.ZW @v IMH6.01.132 @s DARVA @h Mantis 2543 @c gestion de Statut warning */
+      /** @r IMH03 @d 14/09/11 @a ISAT.PC @v IMH6.01.132 @s DARVA @c Gestion de la g‚n‚ration d'une activit‚ corbeille sur erreur envoi */
+      /** @r IMH02 @d 06/06/11 @a ISAT.ST @v IMH6.01.131 @s Finalisation des dev web service */
+      /** @r IMH01 @d 04/01/11 @a ISAT.ZW @v IMH6.01.131 @s Ajout traitement web service + Export fichier Serveur 2009 */
+      /** @r EAI00 @d 01/02/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Cr‚ation de l'objet */
+    }
+    END.
+  }
+}

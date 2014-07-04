@@ -1,0 +1,219 @@
+OBJECT Dataport 50081 Mantis5005 Updt TrayTeamTask
+{
+  OBJECT-PROPERTIES
+  {
+    Date=10/04/14;
+    Time=14:12:32;
+    Modified=Yes;
+    Version List=IMH6.01,5005;
+  }
+  PROPERTIES
+  {
+    Import=Yes;
+    FieldSeparator=[;];
+    OnPostDataport=BEGIN
+                     UpdateTrayLine;
+                   END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50048;
+        AutoSave=No;
+        AutoUpdate=No;
+        AutoReplace=No;
+        DataItemTableView=SORTING(Team Code,Entry No.);
+        OnBeforeImportRecord=BEGIN
+                               OldTEamCode := '';
+                               OldTaskCode := '';
+                               ServOrderType := '';
+                               NewTaskCode := '';
+                             END;
+
+        OnAfterImportRecord=BEGIN
+                              Buffer."Code 1" := OldTEamCode;
+                              Buffer."Code 2" := OldTaskCode;
+                              Buffer."Code 3" := ServOrderType;
+                              Buffer."Data Code 1" := NewTaskCode;
+                              Buffer.INSERT;
+                            END;
+
+      }
+      FIELDS
+      {
+        {      ;     ;OldTEamCode          }
+        {      ;     ;OldTaskCode          }
+        {      ;     ;ServOrderType        }
+        {      ;     ;NewTaskCode          }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      TotalCounter@1000000010 : Integer;
+      CurrentCounter@1000000009 : Integer;
+      ModuloCounter@1000000008 : Integer;
+      WDialog@1000000007 : Dialog;
+      StartDate@1000000006 : DateTime;
+      EndDate@1000000005 : DateTime;
+      OldTEamCode@1000000000 : Code[10];
+      OldTaskCode@1000000001 : Code[10];
+      ServOrderType@1000000002 : Code[10];
+      NewTaskCode@1000000003 : Code[10];
+      Buffer@1000000004 : TEMPORARY Record 50143;
+      Text001@1000000011 : TextConst 'ENU=Processing @1@@@@@@@@@@@@@@@@@@@@;FRA=Traitement @1@@@@@@@@@@@@@@@@@@@@';
+      Text005@1000000013 : TextConst 'ENU=Starting Date;FRA=Date de d‚but';
+      Text006@1000000012 : TextConst 'ENU=Ending Date;FRA=Date de fin';
+      TrayLineMgt@1000000014 : Codeunit 50050;
+
+    PROCEDURE UpdateTrayLine@1000000007();
+    VAR
+      lTrayLine@1000000000 : Record 50048;
+      lTrayLine2@1000000005 : Record 50048;
+      lTeam@1000000006 : Record 5083;
+      lNewTaskCode@1000000001 : Code[10];
+      lNewTeamCode@1000000003 : Code[10];
+      lFilterTeamTrayTask@1000000002 : TEMPORARY Record 50129;
+      lService@1000000004 : Record 50066;
+      lTrayLineProvSearchEntry@1000000007 : Record 50144;
+      lTrayLineProvSearchEntry2@1000000008 : Record 50144;
+      lCount@1000000009 : Integer;
+    BEGIN
+      StartDate := CURRENTDATETIME;
+      TotalCounter := lTrayLine.COUNT;
+      CurrentCounter := 0;
+      ModuloCounter := ROUND(TotalCounter * 5 / 100,1,'>');
+
+      WDialog.OPEN(Text001);
+
+      IF lTrayLine.FINDSET THEN
+        REPEAT
+          CurrentCounter += 1;
+          IF CurrentCounter MOD ModuloCounter =  1 THEN BEGIN
+            WDialog.UPDATE(1,ROUND(CurrentCounter / TotalCounter * 9999,1));
+          END;
+          lNewTaskCode := GetNewTaskCode(lTrayLine);
+
+          IF lNewTaskCode = '' THEN BEGIN
+            lNewTaskCode := lTrayLine."Task Code";
+          END;
+          IF lTrayLine."Service Header No." <> '' THEN
+            lNewTeamCode := TrayLineMgt.GetTeamByTask(lNewTaskCode, lFilterTeamTrayTask, lTrayLine."Service Header No.")
+          ELSE BEGIN
+            IF lService.GET(lTrayLine."Service No.") THEN BEGIN
+              lFilterTeamTrayTask."Corporate No." := lService."Corporate No.";
+              lFilterTeamTrayTask."Corporate Region Code" := lService."Corporate Region Code";
+            END;
+            lNewTeamCode := TrayLineMgt.GetTeamByTask(lNewTaskCode, lFilterTeamTrayTask, '');
+          END;
+
+          IF lNewTeamCode = '' THEN
+            lNewTeamCode := lTrayLine."Team Code";
+
+          IF lTrayLine."Team Code" <> lNewTeamCode THEN BEGIN
+            lTrayLine2 := lTrayLine;
+            lTrayLine2."Team Code" := lNewTeamCode;
+            lTrayLine2."Entry No." := lTrayLine2.GetNextEntryNo;
+            lTrayLine2."Task Code" := lNewTaskCode;
+            lTeam.GET(lTrayLine2."Team Code");
+            lTrayLine2."Team Group Code" := lTeam."Team Group Code";
+            lTrayLine2.INSERT(FALSE);
+
+            lTrayLineProvSearchEntry.SETRANGE("Team Code", lTrayLine."Team Code");
+            lTrayLineProvSearchEntry.SETRANGE("Tray Line Entry No.", lTrayLine."Entry No.");
+            IF lTrayLineProvSearchEntry.FINDFIRST THEN BEGIN
+              REPEAT
+                lTrayLineProvSearchEntry2 := lTrayLineProvSearchEntry;
+                lTrayLineProvSearchEntry2."Team Code" := lTrayLine2."Team Code";
+                lTrayLineProvSearchEntry2."Tray Line Entry No." := lTrayLine2."Entry No.";
+                lTrayLineProvSearchEntry2.INSERT;
+              UNTIL lTrayLineProvSearchEntry.NEXT = 0;
+              lTrayLineProvSearchEntry.DELETEALL;
+            END;
+
+            CreateHisto(lTrayLine, lTrayLine2);
+            lTrayLine.DELETE(FALSE);
+          END ELSE BEGIN
+            IF lNewTaskCode <> lTrayLine."Task Code" THEN BEGIN
+              lTrayLine2 := lTrayLine;
+              lTrayLine2."Task Code" := lNewTaskCode;
+              lTrayLine2.MODIFY(FALSE);
+              CreateHisto(lTrayLine, lTrayLine2);
+            END;
+          END;
+
+          lCount += 1;
+          IF lCount = 100 THEN BEGIN
+            COMMIT;
+            lCount := 0;
+          END;
+        UNTIL lTrayLine.NEXT = 0;
+
+      WDialog.CLOSE;
+      MESSAGE(Text005 + ' ' + FORMAT(StartDate) + ' ' + Text006 + ' ' + FORMAT(CURRENTDATETIME));
+    END;
+
+    PROCEDURE GetNewTaskCode@1000000001(pTrayLine@1000000000 : Record 50048) : Code[10];
+    VAR
+      lServOrderType@1000000001 : Code[10];
+    BEGIN
+      pTrayLine.CALCFIELDS("Service Order Type");
+      lServOrderType := pTrayLine."Service Order Type";
+
+      Buffer.SETRANGE("Code 1", pTrayLine."Team Code");
+      Buffer.SETRANGE("Code 2", pTrayLine."Task Code");
+      Buffer.SETRANGE("Code 3", lServOrderType);
+
+      IF Buffer.FINDFIRST THEN
+        EXIT(Buffer."Data Code 1");
+
+      Buffer.SETRANGE("Code 3", '');
+      IF Buffer.FINDFIRST THEN
+        EXIT(Buffer."Data Code 1");
+
+      Buffer.SETRANGE("Code 1", '');
+      Buffer.SETRANGE("Code 3", lServOrderType);
+      IF Buffer.FINDFIRST THEN
+        EXIT(Buffer."Data Code 1");
+
+      Buffer.SETRANGE("Code 1", '');
+      Buffer.SETRANGE("Code 3", '');
+      IF Buffer.FINDFIRST THEN
+        EXIT(Buffer."Data Code 1");
+    END;
+
+    PROCEDURE CreateHisto@1000000000(pOldTrayLine@1000000000 : Record 50048;pNewTrayLine@1000000001 : Record 50048);
+    VAR
+      lHisto@1000000002 : Record 50130;
+    BEGIN
+      lHisto."Old Team Code" := pOldTrayLine."Team Code";
+      lHisto."Old Entry No." := pOldTrayLine."Entry No.";
+      lHisto."Old Task Code" := pOldTrayLine."Task Code";
+      lHisto."New Team Code" := pNewTrayLine."Team Code";
+      lHisto."New Entry No." := pNewTrayLine."Entry No.";
+      lHisto."New Task Code" := pNewTrayLine."Task Code";
+      lHisto."Type produit" := pNewTrayLine."Service Order Type";
+      lHisto.INSERT;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 26/03/14 @a ISAT.ZW @v IMH6.01.5005 @s Reorganisation DPS @h 5005 @c Cr‚ation */
+    }
+    END.
+  }
+}

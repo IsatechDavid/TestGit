@@ -1,0 +1,138 @@
+OBJECT Codeunit 50192 FUSION Sent Comment Val. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=17/09/12;
+    Time=10:02:02;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=BEGIN
+            EAISentMQBuffer := Rec;
+            //<<IMH02.ST
+            CALCFIELDS("XML Source");
+            EAISentMQBuffer."XML Source" := Rec."XML Source";
+            //>>IMH02.ST
+            Code;
+            Rec := EAISentMQBuffer;
+            EAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := EAISentMQBuffer."XML Source";
+            "Response XML Source" := EAISentMQBuffer."Response XML Source"; //IMH02.ST
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAISentMQBuffer@1100281000 : Record 8016720;
+
+    PROCEDURE Code@1100281000();
+    VAR
+      lInterfaceSetup@1100281000 : Record 50139;
+      lwinHTTPService@1100281006 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDoc@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlDom@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lIXMLDOMProcessingInstruction@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF89-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMProcessingInstruction";
+      lInStream@1100281002 : InStream;
+      lOutStream@1100281004 : OutStream;
+      lXMLNewNode@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      lInterfaceSetup.GET;
+      lInterfaceSetup.TESTFIELD(lInterfaceSetup."Fusion Comment Create WS Url");
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',lInterfaceSetup."Fusion Comment Create WS Url",0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','"http://tempuri.org/IEdiService/AddSuivi"');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      CREATE(lXmlDoc);
+      EAISentMQBuffer.CALCFIELDS("XML Source");
+      EAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lwinHTTPService.Send(lInStream);
+      CLEAR(lInStream);
+      CLEAR(lXmlDoc);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+      CLEAR(lXmlDom);
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      //<<IMH02.ST
+      CLEAR(EAISentMQBuffer."Response XML Source");
+      EAISentMQBuffer."Response XML Source".CREATEOUTSTREAM(lOutStream);
+      lXmlDom.save(lOutStream);
+      //>>IMH02.ST
+      TreateAcquittal(lXmlDom);
+    END;
+
+    PROCEDURE TreateAcquittal@1100281001(VAR pXmlDomResponse@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument");
+    VAR
+      lXmlNodeList@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lAttributeNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lAdvCommentLine@1100281005 : Record 50056;
+      lFUSIONInterfaceMgt@1100281006 : Codeunit 50181;
+      lErrorText009@1100281007 : TextConst 'ENU="The comment %1 is not a beneficiary. ";FRA=L''identifiant suivi SiTiers %1 n''est pas valide.';
+      lRecRef@1100281008 : RecordRef;
+      lRecID@1100281004 : RecordID;
+      lFusionReference@1100281009 : Record 50164;
+    BEGIN
+      {
+      <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+      <s:Body>
+      <AddSuiviResponse xmlns="http://tempuri.org/">
+      <AddSuiviResult xmlns:a="http://schemas.datacontract.org/2004/07/Fusion.EDI" xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+        <a:CodeErreurFusion>ErreurAutre</a:CodeErreurFusion>
+        <a:IdentifiantElementSiTiersOrigineErreur i:nil="true" />
+        <a:IdentifiantSystŠmeFusion i:nil="true" />
+        <a:Int‚grationSuccŠs>false</a:Int‚grationSuccŠs>
+        <a:MessageErreurInt‚gration>ParamŠtre manquant [suiviService]</a:MessageErreurInt‚gration>
+        </AddSuiviResult>
+        </AddSuiviResponse>
+        </s:Body>
+        </s:Envelope>
+      }
+
+      lXmlNodeList := pXmlDomResponse.getElementsByTagName('AddSuiviResult');
+      lXmlDomElement := lXmlNodeList.item(0);
+      lAttributeNode := lXmlDomElement.selectSingleNode('a:Int‚grationSuccŠs');
+      IF lAttributeNode.text = 'false' THEN BEGIN
+        lAttributeNode := lXmlDomElement.selectSingleNode('a:MessageErreurInt‚gration');
+        ERROR(lAttributeNode.text);
+      END;
+      IF lAttributeNode.text = 'true' THEN BEGIN
+        lRecID := EAISentMQBuffer.RecordId;
+        lRecRef := lRecID.GETRECORD;
+        lRecRef.LOCKTABLE;
+        IF lRecRef.FIND('=') THEN;
+        lRecRef.SETTABLE(lAdvCommentLine);
+        {
+        lAttributeNode := lXmlDomElement.selectSingleNode('a:IdentifiantElementSiTiersOrigineErreur');
+        IF NOT lFUSIONInterfaceMgt.GetAdvServCommentByKey(lAttributeNode.text, lAdvCommentLine) THEN BEGIN
+          ERROR(STRSUBSTNO(lErrorText009, lAttributeNode.text));
+        END ELSE BEGIN
+        }
+          lAttributeNode := lXmlDomElement.selectSingleNode('a:IdentifiantSystŠmeFusion');
+          lFusionReference.CreateByAdvCommentLine(lAdvCommentLine, lAttributeNode.text);
+          //lAdvCommentLine."GUID Fusion Code" := lAttributeNode.text;
+          //lAdvCommentLine."Fusion Sent" := TRUE;
+          //lAdvCommentLine.MODIFY(FALSE);
+        //END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 26/08/11 @a ISAT.ST @v IMH6.01.134 @s DARVA Management @c Ajout Response XML Source */
+      /** @r IMH01 @d 12/04/11 @a ISAT.ZW @v IMH6.01.136 @s Interface Fusion @c cr‚ation */
+    }
+    END.
+  }
+}

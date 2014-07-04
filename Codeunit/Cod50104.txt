@@ -1,0 +1,124 @@
+OBJECT Codeunit 50104 EXT Out. FLG DEVIS
+{
+  OBJECT-PROPERTIES
+  {
+    Date=11/01/11;
+    Time=14:53:48;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            lEAISentMQBuffer := Rec;
+            Code(lEAISentMQBuffer);
+            lEAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+            Rec := lEAISentMQBuffer;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIXmlDocMgt@1100281001 : Codeunit 8016713;
+
+    LOCAL PROCEDURE Code@1008844003(VAR pEAISentMQBuffer@1008844001 : Record 8016720);
+    VAR
+      lEAIDocEntryMgt@1108844009 : Codeunit 8016707;
+      lXMLDocument@1008844005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewChild@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIAct@1108844004 : Record 8016706;
+      lRecID@1108844003 : RecordID;
+      lRecRef@1108844002 : RecordRef;
+      lInStream@1100281000 : InStream;
+      lNameSpace@1108844001 : Text[30];
+      lInterventionLine@1100281001 : Record 50075;
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      lNameSpace := '';
+
+      lEAIAct.GET(pEAISentMQBuffer."EAI Act Type Code",pEAISentMQBuffer."EAI Act Code");
+
+      //On r‚cup‚re la facture vente enregistr‚e
+      lRecID := pEAISentMQBuffer.RecordId;
+      lRecRef := lRecID.GETRECORD;
+      lRecRef.SETTABLE(lInterventionLine);
+      lInterventionLine.SETRECFILTER;
+      lInterventionLine.LOCKTABLE;
+      lInterventionLine.FINDFIRST;
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'FLG-DEVIS', lXMLNewChild);
+
+      WriteXMLService(lXMLNewChild, lNameSpace, lInterventionLine);
+
+      WriteXMLInterventionLine(lXMLNewChild, lNameSpace, lInterventionLine);
+
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXMLDocument.save(lInStream);
+
+      //Enregistrement dans la table "‚riture document EDI"
+      lEAIDocEntryMgt.AddEntryFromSentBuffer(
+         DATABASE::"Service Intervention Quote",0,
+         lInterventionLine."Service Header No.",'',lInterventionLine."Line No.", pEAISentMQBuffer);
+    END;
+
+    PROCEDURE WriteXMLService@1100281000(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pInterventionLine@1100281006 : Record 50075);
+    VAR
+      lXMLServiceNode@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        AddElement(pXMLParNode,'Service','',pNameSpace,lXMLServiceNode);
+        //Nø de service dans GSH
+        AddElement(lXMLServiceNode,'referenceServiceGSH',pInterventionLine."Service Header No.",pNameSpace,lXMLNewNode);
+        //TODO --- Nø du service dans l'extranet ---
+        AddElement(lXMLServiceNode,'referenceServiceExtranet','',pNameSpace,lXMLNewNode);
+        //TODO  --montantTTCFranchiseVetuste--
+        AddElement(lXMLServiceNode,'montantTTCFranchiseVetuste',
+              FORMAT(pInterventionLine."Deductible 1 (LCY)" + pInterventionLine."Deductible 2 (LCY)"),
+              pNameSpace,lXMLNewNode);
+
+      END;
+    END;
+
+    PROCEDURE WriteXMLInterventionLine@1100281001(VAR pXMLParNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1100281000 : Text[30];pInterventionLine@1100281003 : Record 50075);
+    VAR
+      lEXTOutFunctions@1100281006 : Codeunit 50101;
+      lXMLInterventionNode@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lIntervQuote@1100281007 : Record 50076;
+    BEGIN
+      WITH EAIXmlDocMgt DO BEGIN
+        //Balise SERVICE
+        AddElement(pXMLParNode,'Intervention','',pNameSpace,lXMLInterventionNode);
+        //Nø de service dans GSH
+        AddElement(lXMLInterventionNode,'referenceInterventionGSH',FORMAT(pInterventionLine."Intervention No."),pNameSpace,lXMLNewNode);
+        //TODO --- Nø du service dans l'extranet ---
+        AddElement(lXMLInterventionNode,'referenceInterventionExtranet','',pNameSpace,lXMLNewNode);
+
+        //Devis
+        lIntervQuote.SETRANGE("Service Header No.", pInterventionLine."Service Header No.");
+        lIntervQuote.SETRANGE("Intervention Line No.", pInterventionLine."Line No.");
+        IF lIntervQuote.FINDFIRST THEN
+          REPEAT
+            lEXTOutFunctions.WriteXMLIntervQuote(lXMLInterventionNode, pNameSpace, lIntervQuote, TRUE)
+          UNTIL lIntervQuote.NEXT = 0;
+
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IHM01 @d 06/01/11 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Creation */
+    }
+    END.
+  }
+}

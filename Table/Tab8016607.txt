@@ -1,0 +1,195 @@
+OBJECT Table 8016607 Linked Document
+{
+  OBJECT-PROPERTIES
+  {
+    Date=08/07/09;
+    Time=11:19:14;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    OnInsert=BEGIN
+               UpdateBasicInfo(TRUE);
+             END;
+
+    OnModify=BEGIN
+               UpdateBasicInfo(FALSE);
+             END;
+
+    OnDelete=BEGIN
+               IF "Attachment No." <> 0 THEN BEGIN
+                 RemoveAttachment(FALSE);
+               END;
+             END;
+
+    OnRename=BEGIN
+               UpdateBasicInfo(FALSE);
+             END;
+
+    CaptionML=[ENU=Linked Document;
+               FRA=Document joint];
+    LookupFormID=Form50005;
+  }
+  FIELDS
+  {
+    { 1   ;   ;Source Type         ;Integer       ;CaptionML=[ENU=Source Type;
+                                                              FRA=Type origine] }
+    { 2   ;   ;Source Subtype      ;Option        ;CaptionML=[ENU=Source Subtype;
+                                                              FRA=Sous-type origine];
+                                                   OptionCaptionML=[ENU=0,1,2,3,4,5,6,7,8,9,10;
+                                                                    FRA=0,1,2,3,4,5,6,7,8,9,10];
+                                                   OptionString=0,1,2,3,4,5,6,7,8,9,10 }
+    { 3   ;   ;Source ID           ;Code20        ;CaptionML=[ENU=Source ID;
+                                                              FRA=ID origine] }
+    { 4   ;   ;Source Batch Name   ;Code20        ;CaptionML=[ENU=Source Batch Name;
+                                                              FRA=Nom feuille origine] }
+    { 5   ;   ;Source Prod. Order Line;Integer    ;CaptionML=[ENU=Source Prod. Order Line;
+                                                              FRA=Ligne O.F. origine] }
+    { 6   ;   ;Source Ref. No.     ;Integer       ;CaptionML=[ENU=Source Ref. No.;
+                                                              FRA=Nø r‚f. origine] }
+    { 7   ;   ;Entry No.           ;Integer       ;CaptionML=[ENU=Entry No.;
+                                                              FRA=Nø s‚quence];
+                                                   NotBlank=Yes }
+    { 10  ;   ;Attachment No.      ;Integer       ;CaptionML=[ENU=Attachment No.;
+                                                              FRA=Nø document joint];
+                                                   Editable=Yes }
+    { 50  ;   ;Description         ;Text50        ;CaptionML=[ENU=Description;
+                                                              FRA=D‚signation] }
+    { 1000;   ;Creation Date       ;Date          ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date cr‚ation];
+                                                   Editable=No }
+    { 1001;   ;Creation User       ;Text30        ;CaptionML=[ENU=Creation User;
+                                                              FRA=Util. cr‚ation];
+                                                   Editable=No }
+    { 1003;   ;Modification Date   ;Date          ;CaptionML=[ENU=Modification Date;
+                                                              FRA=Date modification];
+                                                   Editable=No }
+    { 1004;   ;Modification User   ;Text30        ;CaptionML=[ENU=Modification User;
+                                                              FRA=Util. cr‚ation];
+                                                   Editable=No }
+  }
+  KEYS
+  {
+    {    ;Source Type,Source Subtype,Source ID,Source Batch Name,Source Prod. Order Line,Source Ref. No.,Entry No.;
+                                                   Clustered=Yes }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      Text000@1000 : TextConst 'ENU=Creation canceled;FRA=Cr‚ation annul‚e';
+      Text001@1001 : TextConst 'ENU=Do you want to replace current linked document ?;FRA=Souhaitez-vous remplacer le document joint existant ?';
+      Text002@1002 : TextConst 'ENU=Import canceled;FRA=Import annul‚';
+      Text003@1000000001 : TextConst 'ENU=Description must be fill;FRA=La d‚signation est obligatoire';
+      Attachment@1000000003 : Record 5062;
+      TempAttachment@1000000005 : TEMPORARY Record 5062;
+      InteractionTemplate@1000000004 : Record 5064;
+      AttachmentMgt@1000000002 : Codeunit 5052;
+      WordMgt@1000000000 : Codeunit 5054;
+
+    PROCEDURE OpenAttachment@5();
+    VAR
+      Attachment@1000 : Record 5062;
+    BEGIN
+      IF "Attachment No." = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      CLEAR(Attachment);
+
+      IF Attachment.GET("Attachment No.") THEN BEGIN
+        Attachment.OpenAttachment(FORMAT("Entry No.") + ' ' + Description,FALSE);
+      END;
+    END;
+
+    PROCEDURE ImportAttachment@3();
+    BEGIN
+      CLEAR(Attachment);
+
+      IF "Attachment No." <> 0 THEN BEGIN
+        IF Attachment.GET("Attachment No.") THEN BEGIN
+          Attachment.TESTFIELD("Read Only",FALSE);
+        END;
+        IF NOT CONFIRM(Text001,FALSE) THEN BEGIN
+          EXIT;
+        END;
+      END;
+
+      CLEAR(TempAttachment);
+      IF TempAttachment.ImportAttachment('',TRUE,FALSE) THEN BEGIN
+        IF "Attachment No." = 0 THEN BEGIN
+          Attachment.GET(AttachmentMgt.InsertAttachment(0));
+        END ELSE BEGIN
+          Attachment.GET("Attachment No.");
+        END;
+        TempAttachment."No." := Attachment."No.";
+        TempAttachment."Storage Pointer" :=  Attachment."Storage Pointer";
+        TempAttachment.WizSaveAttachment;
+        Attachment."Storage Type" := TempAttachment."Storage Type";
+        Attachment."Storage Pointer" := TempAttachment."Storage Pointer";
+        Attachment.Attachment := TempAttachment.Attachment;
+        Attachment."File Extension" := TempAttachment."File Extension";
+        Attachment.MODIFY;
+        "Attachment No." := Attachment."No.";
+        MODIFY;
+      END ELSE BEGIN
+        ERROR(Text002);
+      END;
+    END;
+
+    PROCEDURE ExportAttachment@4();
+    VAR
+      lFilePath@1100481000 : Text[250];
+    BEGIN
+      CLEAR(Attachment);
+
+      IF Attachment.GET("Attachment No.") THEN BEGIN
+        Attachment.ExportAttachment(lFilePath);
+      END;
+    END;
+
+    PROCEDURE RemoveAttachment@7(Prompt@1000 : Boolean);
+    BEGIN
+      CLEAR(Attachment);
+
+      IF Attachment.GET("Attachment No.") THEN BEGIN
+        IF Attachment.RemoveAttachment(Prompt) THEN BEGIN
+          "Attachment No." := 0;
+          MODIFY;
+        END;
+      END;
+    END;
+
+    PROCEDURE UpdateBasicInfo@1000000004(pCreation@1000000000 : Boolean);
+    VAR
+      lUser@1000000001 : Record 2000000002;
+    BEGIN
+      IF pCreation THEN BEGIN
+        VALIDATE("Creation Date",TODAY);
+        "Creation User" := STRSUBSTNO('%1',USERID);
+
+        IF lUser.GET(USERID) THEN BEGIN
+          IF lUser.Name <> '' THEN BEGIN
+            "Creation User" := lUser.Name;
+          END;
+        END;
+      END;
+
+      VALIDATE("Modification Date",TODAY);
+      "Modification User" := STRSUBSTNO('%1',USERID);
+      IF lUser.GET(USERID) THEN BEGIN
+        IF lUser.Name <> '' THEN BEGIN
+          "Modification User" := lUser.Name;
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r ISA01 @d 07/07/09 @a ISAT.MA @v ISA6.00.00.01 @s Migration v6 **/
+    }
+    END.
+  }
+}

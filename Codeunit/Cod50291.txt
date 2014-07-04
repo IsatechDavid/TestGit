@@ -1,0 +1,789 @@
+OBJECT Codeunit 50291 Test PMU WS
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/06/14;
+    Time=16:31:02;
+    Modified=Yes;
+    Version List=IMH6.01.P010;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lReponseFilePath@1000000000 : Text[1024];
+          BEGIN
+            WebServiceAddress := 'http://simhns07:7061/NST2009R2_Dev_IMH/WS/IMH - Dev/Codeunit/PMUWS';
+            lReponseFilePath := 'C:\Temp\Test PMU\Reponse\';
+            EnableSendMessage := TRUE;
+
+            //Test Service
+            //TestGetService(lReponseFilePath);
+            //TestCreateService(lReponseFilePath);
+            //TestCreateServiceByCU;
+
+            //Test beneficiaire
+            //TestGetBeneficiary(lReponseFilePath);
+            //TestCreateBeneficiary(lReponseFilePath);
+            //TestCreateBeneficiaryByCU;
+
+            //LP
+            //TestGetServiceHeader(lReponseFilePath);
+            //TestCreateServiceHeader(lReponseFilePath);
+            //TestCreateServiceHeaderByCU;
+
+            //Activit‚
+            //TestCreateTrayLine(lReponseFilePath);
+            //TestCreateTrayLineByCU;
+
+            //Activit‚
+            //TestCreateAttachment(lReponseFilePath);
+            //TestCreateAttachmentByCU;
+
+            //TestUpdateService;
+
+            TestCreateInterventionByCU;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ToolsMgt@1000000001 : Codeunit 8016602;
+      CommonDialogMgt@1000000000 : Codeunit 412;
+      Text001@1000000005 : TextConst 'FRA=Veuilllez s‚lectionner une sortie';
+      Text005@1000000004 : TextConst 'ENU=Export Attachment;FRA=Rep document';
+      Text008@1000000003 : TextConst 'ENU=Files XML (*.XML)|*.XML;FRA=Fichiers XML (*.XML)|*.XML';
+      Text009@1000000002 : TextConst 'ENU=Files XML (*.XML)|*.XML;FRA=Tous Fichiers (*.*)|*.*';
+      WebServiceAddress@1000000006 : Text[1024];
+      EnableSendMessage@1000000007 : Boolean;
+      PMUWS@1000000008 : Codeunit 50254;
+
+    PROCEDURE TestGetService@1000000007(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      {
+      pOwnerCode
+      pFluxType
+      pCorporateNo
+      pBeneficiaryNo
+      pReferenceNo
+      pServiceNo
+      pServiceXMLData
+
+      }
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<GetService xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      lOutStream.WRITETEXT('<pOwnerCode>' + 'MAIF' + '</pOwnerCode>');
+      lOutStream.WRITETEXT('<pFluxType>' + 'FM1' + '</pFluxType>');
+      lOutStream.WRITETEXT('<pCorporateNo>' + 'MAIF' + '</pCorporateNo>');
+      lOutStream.WRITETEXT('<pBeneficiaryNo>' + '1721372T' + '</pBeneficiaryNo>');
+      lOutStream.WRITETEXT('<pReferenceNo>' + '1234567' + '</pReferenceNo>');
+      lOutStream.WRITETEXT('<pServiceNo/>');
+      lOutStream.WRITETEXT('<pServiceXMLData/>');
+      lOutStream.WRITETEXT('</GetService>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'CreateBeneficiary_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'GetService_Response.xml');
+    END;
+
+    PROCEDURE TestGetServiceByCU@1100281001();
+    VAR
+      lServiceNo@1100281005 : Code[20];
+      lBigText@1100281004 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+    BEGIN
+      PMUWS.GetService('MAIF', 'FM1', 'MAIF', '1721372T', '1234567', lServiceNo, lBigText);
+    END;
+
+    PROCEDURE TestCreateService@1000000002(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<CreateService xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      lOutStream.WRITETEXT('<pServiceXMLData>');
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      COPYSTREAM(lOutStream,lInStreamToAdd);
+      lOutStream.WRITETEXT('</pServiceXMLData>');
+      lOutStream.WRITETEXT('<pCreatedServiceNo/>');
+      lOutStream.WRITETEXT('<pCreatedServiceXMLData/>');
+      lOutStream.WRITETEXT('<pErrorCode/>');
+      lOutStream.WRITETEXT('<pErrorDescription/>');
+      lOutStream.WRITETEXT('</CreateService>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'CreateService_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'CreateService_Response.xml');
+    END;
+
+    PROCEDURE TestCreateServiceByCU@1000000001();
+    VAR
+      lBoolean@1100281005 : Boolean;
+      lBigText@1100281004 : BigText;
+      lBigText2@1000000000 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+      lpCreatedServiceNo@1000000004 : Code[20];
+      lErrorCode@1000000002 : Code[10];
+      lErrorDescription@1000000001 : Text[100];
+    BEGIN
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      lBigText.READ(lInStreamToAdd);
+      lTest := lBigText.LENGTH;
+      PMUWS.CreateService(lBigText, lpCreatedServiceNo, lBigText2, lErrorCode, lErrorDescription);
+    END;
+
+    PROCEDURE TestGetBeneficiary@1000000003(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<GetBeneficiary xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      lOutStream.WRITETEXT('<pCorporateNo>' + 'MAIF' + '</pCorporateNo>');
+      lOutStream.WRITETEXT('<pBeneficiaryNo>' + '1721372T' + '</pBeneficiaryNo>');
+      lOutStream.WRITETEXT('<pContactNo/>');
+      lOutStream.WRITETEXT('<pBenefXMLData/>');
+      lOutStream.WRITETEXT('</GetBeneficiary>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'GetBeneficiary_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'GetBeneficiary_Response.xml');
+    END;
+
+    PROCEDURE TestGetBeneficiaryByCU@1000000000();
+    VAR
+      lBigText@1100281004 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+    BEGIN
+      PMUWS.GetBeneficiary('MAIF', '1721372T', lContactNo, lBigText);
+    END;
+
+    PROCEDURE TestCreateBeneficiary@1000000005(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<CreateBeneficiary xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      lOutStream.WRITETEXT('<pBeneficiaryXMLData>');
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      COPYSTREAM(lOutStream,lInStreamToAdd);
+      lOutStream.WRITETEXT('</pBeneficiaryXMLData>');
+      lOutStream.WRITETEXT('<pCreatedContactNo/>');
+      lOutStream.WRITETEXT('<pCreatedBenefXMLData/>');
+      lOutStream.WRITETEXT('<pErrorCode/>');
+      lOutStream.WRITETEXT('<pErrorDescription/>');
+      lOutStream.WRITETEXT('</CreateBeneficiary>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'CreateBeneficiary_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'CreateBeneficiary_Response.xml');
+    END;
+
+    PROCEDURE TestCreateBeneficiaryByCU@1000000004();
+    VAR
+      lBoolean@1100281005 : Boolean;
+      lBigText@1100281004 : BigText;
+      lBigText2@1000000000 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+      lCreatedNo@1000000004 : Code[20];
+      lErrorCode@1000000002 : Code[10];
+      lErrorDescription@1000000001 : Text[100];
+    BEGIN
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      lBigText.READ(lInStreamToAdd);
+      lTest := lBigText.LENGTH;
+      PMUWS.CreateBeneficiary(lBigText, lCreatedNo, lBigText2, lErrorCode, lErrorDescription);
+    END;
+
+    PROCEDURE TestGetServiceHeader@1000000008(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      {
+      pOwnerCode
+      pFluxType
+      pCorporateNo
+      pBeneficiaryNo
+      pReferenceNo
+      pServiceNo
+      pServiceXMLData
+
+      }
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<GetServiceHeader xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      lOutStream.WRITETEXT('<pServiceNo>' + '1006511' + '</pServiceNo>');
+      lOutStream.WRITETEXT('<pServiceHeaderNo/>');
+      lOutStream.WRITETEXT('<pServiceHeaderXMLData/>');
+      lOutStream.WRITETEXT('</GetServiceHeader>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'GetServiceHeader_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'GetServiceHeader_Response.xml');
+    END;
+
+    PROCEDURE TestGetServiceHeaderByCU@1000000006();
+    VAR
+      lNo@1100281005 : Code[20];
+      lBigText@1100281004 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+    BEGIN
+      PMUWS.GetServiceHeader('1006511', lNo, lBigText);
+    END;
+
+    PROCEDURE TestCreateServiceHeader@1000000010(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<CreateServiceHeader xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      lOutStream.WRITETEXT('<pServiceHeaderXMLData>');
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      COPYSTREAM(lOutStream,lInStreamToAdd);
+      lOutStream.WRITETEXT('</pServiceHeaderXMLData>');
+      lOutStream.WRITETEXT('<pCreatedServiceHeaderNo/>');
+      lOutStream.WRITETEXT('<pCreatedServHeaderXMLData/>');
+      lOutStream.WRITETEXT('<pAllowToCreateInterv>FALSE</pAllowToCreateInterv>');
+      lOutStream.WRITETEXT('<pErrorCode/>');
+      lOutStream.WRITETEXT('<pErrorDescription/>');
+      lOutStream.WRITETEXT('</CreateServiceHeader>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'CreateServiceHeader_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'CreateServiceHeader_Response.xml');
+    END;
+
+    PROCEDURE TestCreateServiceHeaderByCU@1000000009();
+    VAR
+      lBoolean@1100281005 : Boolean;
+      lBigText@1100281004 : BigText;
+      lBigText2@1000000000 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+      lCreatedNo@1000000004 : Code[20];
+      lBool@1000000003 : Boolean;
+      lErrorCode@1000000002 : Code[10];
+      lErrorDescription@1000000001 : Text[100];
+    BEGIN
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      lBigText.READ(lInStreamToAdd);
+      lTest := lBigText.LENGTH;
+      PMUWS.CreateServiceHeader(lBigText, lCreatedNo, lBigText2, lBool, lErrorCode, lErrorDescription);
+    END;
+
+    PROCEDURE TestCreateTrayLine@1000000012(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<AddTrayLine xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      lOutStream.WRITETEXT('<pType>' + '2' + '</pType>');
+      lOutStream.WRITETEXT('<pTrayLineType>' + '03' + '</pTrayLineType>');
+      lOutStream.WRITETEXT('<pTrayLineXML>');
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      COPYSTREAM(lOutStream,lInStreamToAdd);
+      lOutStream.WRITETEXT('</pTrayLineXML>');
+      lOutStream.WRITETEXT('<pErrorCode/>');
+      lOutStream.WRITETEXT('<pErrorDescription/>');
+      lOutStream.WRITETEXT('</AddTrayLine>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'AddTrayLine_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'AddTrayLine_Response.xml');
+    END;
+
+    PROCEDURE TestCreateTrayLineByCU@1000000011();
+    VAR
+      lBoolean@1100281005 : Boolean;
+      lBigText@1100281004 : BigText;
+      lBigText2@1000000000 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+      lCreatedNo@1000000004 : Code[20];
+      lBool@1000000003 : Boolean;
+      lErrorCode@1000000002 : Code[10];
+      lErrorDescription@1000000001 : Text[100];
+    BEGIN
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      lBigText.READ(lInStreamToAdd);
+      lTest := lBigText.LENGTH;
+      PMUWS.AddTrayLine(2, '02', lBigText, lErrorCode, lErrorDescription);
+    END;
+
+    PROCEDURE TestCreateAttachment@1000000014(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<AddAttachment xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      //lOutStream.WRITETEXT('<pType>' + '2' + '</pType>');
+      lOutStream.WRITETEXT('<pInteractionCode>' + '01' + '</pInteractionCode>');
+      lOutStream.WRITETEXT('<pAttachmentXML>');
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      COPYSTREAM(lOutStream,lInStreamToAdd);
+      lOutStream.WRITETEXT('</pAttachmentXML>');
+      lOutStream.WRITETEXT('<pErrorCode/>');
+      lOutStream.WRITETEXT('<pErrorDescription/>');
+      lOutStream.WRITETEXT('</AddAttachment>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'AddAttachment_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'AddAttachment_Response.xml');
+    END;
+
+    PROCEDURE TestCreateAttachmentByCU@1000000013();
+    VAR
+      lBoolean@1100281005 : Boolean;
+      lBigText@1100281004 : BigText;
+      lBigText2@1000000000 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+      lCreatedNo@1000000004 : Code[20];
+      lBool@1000000003 : Boolean;
+      lErrorCode@1000000002 : Code[10];
+      lErrorDescription@1000000001 : Text[100];
+    BEGIN
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      lBigText.READ(lInStreamToAdd);
+      lTest := lBigText.LENGTH;
+      PMUWS.AddAttachment(2, '01', lBigText, lErrorCode, lErrorDescription);
+    END;
+
+    PROCEDURE TestUpdateService@1000000015();
+    BEGIN
+      PMUWS.UpdateService('MAIF', 'FIMA2', '1006529', 'sinistre', 'IMA123456789');
+    END;
+
+    PROCEDURE TestCreateIntervention@1000000017(pFileNameToExport@1000000006 : Text[1024]);
+    VAR
+      lSentMQBuffer@1000000007 : Record 8016720;
+      lwinHTTPService@1000000005 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lXmlDom@1000000004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lInStream@1000000003 : InStream;
+      lInStreamToAdd@1100281001 : InStream;
+      lOutStream@1000000008 : OutStream;
+      lFilePathToAdd@1100281000 : Text[1024];
+      lFileToAdd@1100281002 : File;
+    BEGIN
+      lSentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+
+      lOutStream.WRITETEXT('<?xml version="1.0"  encoding="utf-8"?>');
+      lOutStream.WRITETEXT('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lOutStream.WRITETEXT('xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance" ');
+      lOutStream.WRITETEXT('xmlns:xsd="http://www.w3.org/1999/XMLSchema"> ');
+      lOutStream.WRITETEXT('<soap:Body>');
+      lOutStream.WRITETEXT('<CreateInterventions xmlns="urn:microsoft-dynamics-schemas/codeunit/PMUWS">');
+      lOutStream.WRITETEXT('<pInterventionXMLData>');
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      COPYSTREAM(lOutStream,lInStreamToAdd);
+      lOutStream.WRITETEXT('<pInterventionXMLData/>');
+      lOutStream.WRITETEXT('<pServiceExisting>FALSE</pServiceExisting>');
+      lOutStream.WRITETEXT('</pCreatedInterventionXMLData>');
+      lOutStream.WRITETEXT('<pIMAIntervCreated>FALSE</pIMAIntervCreated>');
+      lOutStream.WRITETEXT('<pProvIntervCreated>FALSE</pProvIntervCreated>');
+      lOutStream.WRITETEXT('<pErrorCode/>');
+      lOutStream.WRITETEXT('<pErrorDescription/>');
+      lOutStream.WRITETEXT('</CreateInterventions>');
+      lOutStream.WRITETEXT('</soap:Body>');
+      lOutStream.WRITETEXT('</soap:Envelope>');
+
+      IF ISCLEAR(lwinHTTPService) THEN
+        CREATE(lwinHTTPService);
+
+      lwinHTTPService.Open('POST',WebServiceAddress,0);
+      lwinHTTPService.SetAutoLogonPolicy(0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=UTF-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','""');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lSentMQBuffer.CALCFIELDS("XML Source");
+      IF EnableSendMessage THEN BEGIN
+        lSentMQBuffer."XML Source".EXPORT(pFileNameToExport + 'CreateInterventions_Send.xml');
+      END;
+      lSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+
+      // Envoi de la demande au webservice
+      lwinHTTPService.Send(lInStream);
+
+      IF NOT lwinHTTPService.WaitForResponse(600) THEN ERROR('Request timed out.');
+
+      CREATE(lXmlDom);
+      lXmlDom.load(lwinHTTPService.ResponseStream);
+      lXmlDom.save(pFileNameToExport + 'CreateInterventions_Response.xml');
+    END;
+
+    PROCEDURE TestCreateInterventionByCU@1000000016();
+    VAR
+      lBoolean@1100281005 : Boolean;
+      lBigText@1100281004 : BigText;
+      lBigText2@1000000000 : BigText;
+      lInStreamToAdd@1100281002 : InStream;
+      lFilePathToAdd@1100281001 : Text[1024];
+      lErrorText@1100281003 : Text[1024];
+      lFileToAdd@1100281000 : File;
+      lContactNo@1100281006 : Code[20];
+      lTest@1100281007 : Integer;
+      lCreatedNo@1000000004 : Code[20];
+      lBool@1000000003 : Boolean;
+      lBool2@1000000005 : Boolean;
+      lErrorCode@1000000002 : Code[10];
+      lErrorDescription@1000000001 : Text[100];
+    BEGIN
+      lFilePathToAdd := CommonDialogMgt.OpenFile(Text005,'',4,Text009,1);
+      lFileToAdd.OPEN(lFilePathToAdd);
+      lFileToAdd.CREATEINSTREAM(lInStreamToAdd);
+      lBigText.READ(lInStreamToAdd);
+      lTest := lBigText.LENGTH;
+      PMUWS.CreateInterventions(lBigText, FALSE, lBigText2, lBool, lBool2, lErrorCode, lErrorDescription);
+    END;
+
+    BEGIN
+    END.
+  }
+}

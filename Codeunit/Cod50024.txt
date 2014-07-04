@@ -1,0 +1,1948 @@
+OBJECT Codeunit 50024 Provider Scoring Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=27/04/12;
+    Time=13:56:35;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+            LaunchScoringAllProvider;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProviderSetup@1100281002 : Record 50011;
+      ProviderScoringCalcHistoryTmp@1000000000 : TEMPORARY Record 50155;
+      ProviderManagement@1000000001 : Codeunit 50018;
+
+    PROCEDURE LaunchScoringAllProvider@1100281012();
+    VAR
+      lProvider@1100281000 : Record 50000;
+      lGlobalNote@1100281001 : Decimal;
+      lAllScoringBuffer@1100281003 : TEMPORARY Record 51005;
+      lBeginDate@1100281004 : Date;
+      lEndDate@1100281005 : Date;
+      lCostAllScoringBuffer@1100281007 : TEMPORARY Record 51005;
+      lTimeAllScoringBuffer@1100281008 : TEMPORARY Record 51005;
+      lProviderScoringBuffer@1100281006 : TEMPORARY Record 51005;
+      lSpecializationBuildingTrade@1100281002 : Record 50031;
+      i@1100281009 : Integer;
+      lCount@1100281010 : Integer;
+      lSpecialization@1100281011 : Record 50005;
+    BEGIN
+      //lBeginDate := CALCDATE('<-1Y>', WORKDATE) + 1;
+      //lEndDate := WORKDATE;
+      //date 12 mois glissants
+      //CreateMonthlScoring('0',0,0,0, 0, 0D, 0D, 0);
+      GetCurrYearBeginEndDate(WORKDATE, lBeginDate, lEndDate);
+      //AvrgCustSpecProvScoringBuffer.DELETEALL;
+      LoadPrScoringCalcHis(lBeginDate, lEndDate);
+      //CreateMonthlScoring('1',0,0,0, 0, 0D, 0D, 0);
+      COMMIT;
+
+      //cout moyen d‚lai moyen sp‚cialit‚
+      CalcSpecAverageCostTime(lBeginDate, lEndDate);
+
+      LoadPrScoringBuf('', lBeginDate, lEndDate, lSpecializationBuildingTrade, 2,
+        FALSE, 0, lProviderScoringBuffer, lCostAllScoringBuffer);
+      LoadPrScoringBuf('', lBeginDate, lEndDate, lSpecializationBuildingTrade, 3,
+        FALSE, 0, lProviderScoringBuffer, lTimeAllScoringBuffer);
+
+
+      lProvider.SETCURRENTKEY(Enable,"Black List");
+      //lProvider.SETFILTER("No.", '295206B');
+      //lProvider.SETRANGE("Black List", FALSE);
+      //lProvider.SETRANGE(Exclusion, FALSE);
+      lProvider.SETRANGE(Enable, TRUE);
+      //lProvider.SETFILTER(Status, '>=%1', lProvider.Status::Integration);
+      IF lProvider.FINDFIRST THEN
+        REPEAT
+          lGlobalNote := LaunchScoringProvider(lProvider."No.", TRUE, lCostAllScoringBuffer, lTimeAllScoringBuffer);
+          ProviderScoringCalcHistoryTmp.SETRANGE("Provider No.", lProvider."No.");
+          ProviderScoringCalcHistoryTmp.DELETEALL(FALSE);
+          lProvider."Provider Scoring" := lGlobalNote;
+          lProvider."Theorical Interv. Limit Max." := ProviderManagement.CalcIntervMaximum(lProvider);
+          lProvider.MODIFY(FALSE);
+          //i+=1;
+          //IF i = 10 THEN
+          //  EXIT;
+          lCount += 1;
+          IF lCount = 10 THEN BEGIN
+            COMMIT;
+            lCount := 0;
+          END;
+        UNTIL lProvider.NEXT = 0;
+
+      //CreateMonthlScoring('2',0,0,0, 0, 0D, 0D, 0);
+    END;
+
+    PROCEDURE LaunchScoringProvider@1100281020(pProviderNo@1100281000 : Code[20];pOnlyYearNote@1100281014 : Boolean;VAR pCostAllScoringBuffer@1100281017 : TEMPORARY Record 51005;VAR pTimeAllScoringBuffer@1100281016 : TEMPORARY Record 51005) rGlobalNote : Decimal;
+    VAR
+      lProviderMonthlyScoring@1100281013 : Record 50112;
+      lDisponibilityNote@1100281008 : Decimal;
+      lAverageCostScore@1100281007 : Decimal;
+      lAverageTimeScore@1100281006 : Decimal;
+      lTimeScore@1100281005 : Decimal;
+      lQualityControlScore@1100281004 : Decimal;
+      lClaimScore@1100281003 : Decimal;
+      lBeginDate@1100281002 : Date;
+      lEndDate@1100281011 : Date;
+      lNoteByMonthArray@1100281001 : ARRAY [12] OF Decimal;
+      lIntervNbByMonthArray@1100281010 : ARRAY [12] OF Decimal;
+      lMainSpecTempTable@1100281009 : TEMPORARY Record 50031;
+      lYearNoteEntryNo@1100281015 : Integer;
+      i@1100281012 : Integer;
+      lLastYear@1100281018 : Integer;
+      lLastMonth@1100281019 : Integer;
+      lCurrentYear@1100281020 : Integer;
+      lCurrentMonth@1100281021 : Integer;
+      lCostAllScoringBuffer@1100281023 : TEMPORARY Record 51005;
+      lTimeAllScoringBuffer@1100281022 : TEMPORARY Record 51005;
+      lProviderSpecialization@1100281025 : Record 50006;
+      lSpecializationBuildingTrade@1100281024 : Record 50031;
+    BEGIN
+      //IMH02 isat.zw
+      //Calcul scoring prestataire
+
+      //Note ann‚e
+      //lBeginDate := CALCDATE('<-1Y>', WORKDATE) + 1;
+      //lEndDate := WORKDATE;
+      GetCurrYearBeginEndDate(WORKDATE, lBeginDate, lEndDate);
+
+      {
+      lProviderSpecialization.SETRANGE("Provider No.", pProviderNo);
+      lProviderSpecialization.SETRANGE("Main Specialization", TRUE);
+      IF lProviderSpecialization.FINDFIRST THEN
+        IF lSpecializationBuildingTrade.GET(
+             lProviderSpecialization."Building Trade No.",
+             lProviderSpecialization."Specialization Code") THEN BEGIN
+          lMainSpecTempTable := lSpecializationBuildingTrade;
+          lMainSpecTempTable.INSERT;
+        END;
+      }
+
+      lDisponibilityNote := CalcDisponibilityNote(pProviderNo, lBeginDate, lEndDate);
+      lTimeScore := CalcTimeNote(pProviderNo, WORKDATE, lNoteByMonthArray, lIntervNbByMonthArray);
+      //---- TODO --- note controle qualite
+      lQualityControlScore := CalcQualityNote(pProviderNo, lBeginDate, lEndDate);   //IMH03
+      lClaimScore := CalcClaimNote(pProviderNo, lBeginDate, lEndDate);
+      lAverageCostScore := CalcAverageCostNote(pProviderNo, lBeginDate, lEndDate, lMainSpecTempTable, pCostAllScoringBuffer);
+      lAverageTimeScore := CalcAverageTimeNote(pProviderNo, lBeginDate, lEndDate, lMainSpecTempTable, pTimeAllScoringBuffer);
+
+      rGlobalNote := CalcProviderScore(
+        lDisponibilityNote,lAverageCostScore,lAverageTimeScore,lTimeScore,lQualityControlScore,lClaimScore);
+
+
+      CreateScoringLedgerEntry(lYearNoteEntryNo, pProviderNo, rGlobalNote,
+          lDisponibilityNote, lAverageCostScore, lAverageTimeScore,
+          lTimeScore, lQualityControlScore, lClaimScore, lBeginDate, lEndDate);
+
+      IF pOnlyYearNote THEN
+        EXIT;
+      lProviderMonthlyScoring.SETRANGE("Provider No.", pProviderNo);
+      IF lProviderMonthlyScoring.FINDLAST THEN BEGIN
+        lLastYear := lProviderMonthlyScoring.Year;
+        lLastMonth := lProviderMonthlyScoring."Month No.";
+      END ELSE BEGIN
+        lLastYear := DATE2DMY(lBeginDate, 3);
+        lLastMonth := DATE2DMY(lBeginDate, 2);
+      END;
+
+      lCurrentYear := DATE2DMY(WORKDATE, 3);
+      lCurrentMonth := DATE2DMY(WORKDATE, 2);
+      IF lCurrentYear > lLastYear THEN BEGIN
+        //IF lLastMonth < 12 THEN begin
+          FOR i := lLastMonth TO 12 DO BEGIN
+            lBeginDate := DMY2DATE(1, i, lLastYear);
+            IF i = 12 THEN
+              lEndDate := DMY2DATE(1, i, lLastYear+1)-1
+            ELSE
+              lEndDate := DMY2DATE(1, i+1, lLastYear)-1;
+            lCostAllScoringBuffer.DELETEALL;
+            lTimeAllScoringBuffer.DELETEALL;
+            lAverageCostScore := CalcAverageCostNote(pProviderNo, lBeginDate, lEndDate, lMainSpecTempTable, lCostAllScoringBuffer);
+            lAverageTimeScore := CalcAverageTimeNote(pProviderNo, lBeginDate, lEndDate, lMainSpecTempTable, lTimeAllScoringBuffer);
+            CreateMonthlScoring(pProviderNo,lLastYear,i,lAverageCostScore, lAverageTimeScore, lBeginDate, lEndDate, lYearNoteEntryNo);
+          END;
+        //end;
+        lLastMonth := 1;
+      END;
+
+      IF lLastYear <= lCurrentYear THEN
+        IF lLastMonth <= lCurrentMonth THEN
+          FOR i := lLastMonth TO lCurrentMonth DO BEGIN
+            lBeginDate := DMY2DATE(1, i, lCurrentYear);
+            IF i = 12 THEN
+              lEndDate := DMY2DATE(1, i, lCurrentYear+1)-1
+            ELSE
+              lEndDate := DMY2DATE(1, i+1, lCurrentYear)-1;
+            lCostAllScoringBuffer.DELETEALL;
+            lTimeAllScoringBuffer.DELETEALL;
+            lAverageCostScore := CalcAverageCostNote(pProviderNo, lBeginDate, lEndDate, lMainSpecTempTable, lCostAllScoringBuffer);
+            lAverageTimeScore := CalcAverageTimeNote(pProviderNo, lBeginDate, lEndDate, lMainSpecTempTable, lTimeAllScoringBuffer);
+            CreateMonthlScoring(pProviderNo,lCurrentYear,i,lAverageCostScore, lAverageTimeScore, lBeginDate, lEndDate, lYearNoteEntryNo)
+      ;
+          END;
+    END;
+
+    PROCEDURE CalcProviderScore@1100281016(pDisponibilityNote@1100281000 : Decimal;pAverageCostScore@1100281001 : Decimal;pAverageTimeScore@1100281002 : Decimal;pTimeScore@1100281003 : Decimal;pQualityControlScore@1100281004 : Decimal;pClaimScore@1100281005 : Decimal) rNoteGlobal : Decimal;
+    VAR
+      lTotalCoef@1100281006 : Decimal;
+    BEGIN
+      //IMH02 isat.zw
+      //Calcul note globale scoring prestataire
+
+      ProviderSetup.GET;
+      lTotalCoef := ProviderSetup."Scoring Disponibility Coef." +
+                    ProviderSetup."Scoring Average Cost Coef." +
+                    ProviderSetup."Scoring Average Time Coef." +
+                    ProviderSetup."Scoring Time Coefficient" +
+                    ProviderSetup."Scoring Quality Control Coef." +
+                    ProviderSetup."Scoring Claim Coef.";
+
+      IF lTotalCoef <> 0 THEN
+        rNoteGlobal := ((pDisponibilityNote * ProviderSetup."Scoring Disponibility Coef.") +
+                        (pAverageCostScore * ProviderSetup."Scoring Average Cost Coef.") +
+                        (pAverageTimeScore * ProviderSetup."Scoring Average Time Coef.") +
+                        (pTimeScore * ProviderSetup."Scoring Time Coefficient") +
+                        (pQualityControlScore * ProviderSetup."Scoring Quality Control Coef.") +
+                        (pClaimScore * ProviderSetup."Scoring Claim Coef.")) / lTotalCoef;
+    END;
+
+    PROCEDURE CalcAllProvLastAvgCostTimeNote@1100281013(pEndDate@1100281001 : Date;VAR pCostNoteByMonthArray@1100281003 : ARRAY [12] OF Decimal;VAR pTimeNoteByMonthArray@1100281007 : ARRAY [12] OF Decimal);
+    VAR
+      lProviderMonthlyScoring@1100281000 : Record 50112;
+      lCostNoteArray@1100281005 : ARRAY [13] OF Decimal;
+      lTimeNoteArray@1100281008 : ARRAY [13] OF Decimal;
+      lNbProviderArray@1100281006 : ARRAY [13] OF Integer;
+      i@1100281004 : Integer;
+      lBeginYear@1100281002 : Integer;
+      lBeginMonth@1100281009 : Integer;
+      lEndYear@1100281010 : Integer;
+      lEndMonth@1100281011 : Integer;
+      lBeginMonthSave@1100281013 : Integer;
+    BEGIN
+      lEndYear := DATE2DMY(pEndDate, 3);
+      lEndMonth := DATE2DMY(pEndDate, 2);
+      IF lEndMonth = 0 THEN BEGIN
+        lEndYear := lEndYear - 1;
+        lEndMonth := 12;
+      END;
+      IF lEndMonth = 12 THEN
+        lBeginMonth := 1
+      ELSE BEGIN
+        lBeginYear := lEndYear - 1;
+        lBeginMonth := lEndMonth + 1;
+      END;
+
+      lProviderMonthlyScoring.SETCURRENTKEY(Year, "Month No.");
+      IF lBeginYear <> lEndYear THEN BEGIN
+        lProviderMonthlyScoring.SETRANGE(Year, lBeginYear);
+        lProviderMonthlyScoring.SETRANGE("Month No.", lBeginMonth, 12);
+        IF lProviderMonthlyScoring.FINDFIRST THEN
+          REPEAT
+            i := lProviderMonthlyScoring."Month No." - lBeginMonth + 1;
+            lCostNoteArray[i] += lProviderMonthlyScoring."Average Cost Note";
+            lTimeNoteArray[i] += lProviderMonthlyScoring."Average Time Note";
+            lNbProviderArray[i] += 1;
+          UNTIL lProviderMonthlyScoring.NEXT = 0;
+        lBeginMonthSave := lBeginMonth;
+        lBeginMonth := 1;
+      END;
+
+      lProviderMonthlyScoring.SETRANGE(Year, lEndYear);
+      lProviderMonthlyScoring.SETRANGE("Month No.", lBeginMonth, lEndMonth);
+      IF lProviderMonthlyScoring.FINDFIRST THEN
+        REPEAT
+          i := lProviderMonthlyScoring."Month No." + (12 - lBeginMonthSave + 1);
+          lCostNoteArray[i] += lProviderMonthlyScoring."Average Cost Note";
+          lTimeNoteArray[i] += lProviderMonthlyScoring."Average Time Note";
+          lNbProviderArray[i] += 1;
+        UNTIL lProviderMonthlyScoring.NEXT = 0;
+
+      FOR i := 1 TO 12 DO BEGIN
+        IF lNbProviderArray[i] <> 0 THEN BEGIN
+          pCostNoteByMonthArray[i] := lCostNoteArray[i] / lNbProviderArray[i];
+          pTimeNoteByMonthArray[i] := lTimeNoteArray[i] / lNbProviderArray[i];
+        END;
+      END;
+    END;
+
+    PROCEDURE GetMonoSpecInProgressIntervNb@1100281000(pProviderNo@1100281000 : Code[20];pPeriodEndDate@1100281008 : Date;VAR pResultByMonthArray@1100281005 : ARRAY [13] OF Integer);
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lBeginDate@1100281002 : Date;
+      lEndDate@1100281007 : Date;
+      lCount@1100281003 : Integer;
+      i@1100281006 : Integer;
+      lCode@1100281004 : Code[20];
+    BEGIN
+      //IMH02 isat.zw
+      //retour nb d'intervention en cours mono corps d'‚tat d'un prestataire sur 12 mois glissants
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      //lInterventionLine.SETRANGE(Closed, FALSE);
+      lInterventionLine.SETFILTER("Intervention Status", '%1|%2|%3',
+                                 lInterventionLine."Intervention Status"::InProgress,
+                                 lInterventionLine."Intervention Status"::" ",
+                                 lInterventionLine."Intervention Status"::Suspended);
+      lInterventionLine.SETRANGE("Multi specialities", FALSE);
+      i := 1;
+      WHILE i < 14 DO BEGIN
+        lCount := 0;
+        GetBeginEndDate(i, pPeriodEndDate, lBeginDate, lEndDate);
+        lInterventionLine.SETRANGE(
+          "Assigned Date",
+          lBeginDate, lEndDate);
+        {
+        IF lInterventionLine.FINDFIRST THEN
+          REPEAT
+            IF MonoBuildingTrade(lInterventionLine) THEN
+              lCount += 1;
+          UNTIL lInterventionLine.NEXT = 0;
+        }
+        lCount := lInterventionLine.COUNT;
+        IF lInterventionLine.FINDSET THEN
+          REPEAT
+            lCode := lInterventionLine."Service Header No.";
+          UNTIL lInterventionLine.NEXT = 0;
+        pResultByMonthArray[i] := lCount;
+        i += 1;
+      END;
+    END;
+
+    PROCEDURE GetMonoSpecClosedIntervNb@1100281009(pProviderNo@1100281000 : Code[20];pPeriodEndDate@1100281007 : Date;VAR pResultByMonthArray@1100281006 : ARRAY [13] OF Integer;VAR pInvoicedAmountArray@1100281003 : ARRAY [13] OF Decimal) : Integer;
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lBeginDate@1100281002 : Date;
+      lEndDate@1100281010 : Date;
+      lCount@1100281009 : Integer;
+      lInvoiceAmount@1100281004 : Decimal;
+      i@1100281008 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //retour nb d'interventions clos mono corps d'‚tat d'un prestataire sur 12 mois glissants + Montant imput‚ en param
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETFILTER("Provider No.", pProviderNo);
+      //lInterventionLine.SETRANGE(Closed, TRUE);
+      lInterventionLine.SETRANGE("Intervention Status", lInterventionLine."Intervention Status"::Closed);
+      lInterventionLine.SETRANGE("Multi specialities", FALSE);
+      i := 1;
+      WHILE i < 14 DO BEGIN
+        lCount := 0;
+        lInvoiceAmount := 0;
+        GetBeginEndDate(i, pPeriodEndDate, lBeginDate, lEndDate);
+        lInterventionLine.SETRANGE(
+          "Assigned Date",
+          lBeginDate, lEndDate);
+        IF lInterventionLine.FINDFIRST THEN
+          REPEAT
+            //IF MonoBuildingTrade(lInterventionLine) THEN BEGIN
+              //lCount += 1;
+              //Montant factur‚ intervention
+            lInvoiceAmount += GetInvoiceAmountInterv(lInterventionLine);
+            //END;
+          UNTIL lInterventionLine.NEXT = 0;
+        pResultByMonthArray[i] := lInterventionLine.COUNT;
+        pInvoicedAmountArray[i] := lInvoiceAmount;
+        i += 1;
+      END;
+    END;
+
+    PROCEDURE GetCancelledlIntervNb@1100281024(pProviderNo@1100281000 : Code[20];pPeriodEndDate@1100281007 : Date;VAR pResultByMonthArray@1100281006 : ARRAY [13] OF Integer) : Integer;
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lBeginDate@1100281002 : Date;
+      lEndDate@1100281010 : Date;
+      i@1100281008 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //retour nb d'interventions annul‚es d'un prestataire sur 12 mois glissants
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      //lInterventionLine.SETRANGE(Closed, TRUE);
+      lInterventionLine.SETRANGE("Intervention Status", lInterventionLine."Intervention Status"::Cancel);
+      i := 1;
+      WHILE i < 14 DO BEGIN
+        GetBeginEndDate(i, pPeriodEndDate, lBeginDate, lEndDate);
+        lInterventionLine.SETRANGE(
+          "Assigned Date",
+          lBeginDate, lEndDate);
+        pResultByMonthArray[i] := lInterventionLine.COUNT;
+        i += 1;
+      END;
+    END;
+
+    PROCEDURE GetInProgressMultiSpecIntervNb@1100281026(pProviderNo@1100281000 : Code[20];pPeriodEndDate@1100281007 : Date;VAR pResultByMonthArray@1100281006 : ARRAY [13] OF Integer) : Integer;
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lBeginDate@1100281002 : Date;
+      lEndDate@1100281010 : Date;
+      lCount@1100281009 : Integer;
+      i@1100281008 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //retour nb d'intervention multi corps d'‚tat d'un prestataire sur 12 mois glissants
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      //lInterventionLine.SETRANGE(Closed, FALSE);
+      lInterventionLine.SETFILTER("Intervention Status", '%1|%2|%3',
+                                 lInterventionLine."Intervention Status"::InProgress,
+                                 lInterventionLine."Intervention Status"::" ",
+                                 lInterventionLine."Intervention Status"::Suspended);
+      lInterventionLine.SETRANGE("Multi specialities", TRUE);
+      i := 1;
+      WHILE i < 14 DO BEGIN
+        lCount := 0;
+        GetBeginEndDate(i, pPeriodEndDate, lBeginDate, lEndDate);
+        lInterventionLine.SETRANGE("Assigned Date");
+        lInterventionLine.SETRANGE("Assigned Date",
+                lBeginDate, lEndDate);
+        lCount := lInterventionLine.COUNT;
+        pResultByMonthArray[i] := lCount;
+        i += 1;
+      END;
+    END;
+
+    PROCEDURE GetClosedMultiSpecIntervNb@1100281025(pProviderNo@1100281000 : Code[20];pPeriodEndDate@1100281007 : Date;VAR pResultByMonthArray@1100281006 : ARRAY [13] OF Integer) : Integer;
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lBeginDate@1100281002 : Date;
+      lEndDate@1100281010 : Date;
+      lCount@1100281009 : Integer;
+      i@1100281008 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //retour nb d'intervention multi corps d'‚tat d'un prestataire sur 12 mois glissants
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      //lInterventionLine.SETRANGE(Closed, TRUE);
+      lInterventionLine.SETRANGE("Intervention Status", lInterventionLine."Intervention Status"::Closed);
+      lInterventionLine.SETRANGE("Multi specialities", TRUE);
+      i := 1;
+      WHILE i < 14 DO BEGIN
+        lCount := 0;
+        GetBeginEndDate(i, pPeriodEndDate, lBeginDate, lEndDate);
+        lInterventionLine.SETRANGE("Assigned Date");
+        lInterventionLine.SETRANGE("Assigned Date",
+                lBeginDate, lEndDate);
+        lCount := lInterventionLine.COUNT;
+        pResultByMonthArray[i] := lCount;
+        i += 1;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetCurrYearBeginEndDate@1100281029(pPeriodEndDate@1100281003 : Date;VAR pBeginDate@1100281001 : Date;VAR pEndDate@1100281000 : Date);
+    VAR
+      lCurrentMonth@1100281004 : Integer;
+      lCurrentYear@1100281006 : Integer;
+    BEGIN
+      //1-12 : periode d'un mois, 13  : periode ann‚e N-1
+      lCurrentMonth := DATE2DMY(pPeriodEndDate, 2);
+      lCurrentYear := DATE2DMY(pPeriodEndDate, 3);
+
+      IF lCurrentMonth = 12 THEN BEGIN
+        pBeginDate := DMY2DATE(1, 1, lCurrentYear);
+        pEndDate := DMY2DATE(31, 12, lCurrentYear);
+      END ELSE BEGIN
+        pBeginDate := DMY2DATE(1, lCurrentMonth + 1, lCurrentYear - 1);
+        pEndDate := DMY2DATE(1, lCurrentMonth+1, lCurrentYear)-1;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetBeginEndDate@1100281067(i@1100281002 : Integer;pPeriodEndDate@1100281003 : Date;VAR pBeginDate@1100281001 : Date;VAR pEndDate@1100281000 : Date);
+    VAR
+      lCurrentMonth@1100281004 : Integer;
+      lCurrentYear@1100281006 : Integer;
+      lLastDate@1100281005 : Integer;
+      lBeginYear@1100281007 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //1-12 : periode d'un mois, 13  : periode ann‚e N-1
+      lCurrentMonth := DATE2DMY(pPeriodEndDate, 2);
+      lCurrentYear := DATE2DMY(pPeriodEndDate, 3);
+
+      IF i = 13 THEN BEGIN
+        IF lCurrentMonth = 12 THEN BEGIN
+          pBeginDate := DMY2DATE(1, 1, lCurrentYear - 1);
+          pEndDate := DMY2DATE(31, 12, lCurrentYear - 1);
+        END ELSE BEGIN
+          pBeginDate := DMY2DATE(1, lCurrentMonth + 1, lCurrentYear - 2);
+          pEndDate := DMY2DATE(1, lCurrentMonth+1, lCurrentYear - 1)-1;
+        END;
+      END ELSE BEGIN
+        //i := 13 - i;
+        lCurrentMonth := lCurrentMonth - 12 + i;
+        IF lCurrentMonth <= 0 THEN BEGIN
+          lCurrentMonth := lCurrentMonth + 12;
+          lCurrentYear := lCurrentYear - 1;
+        END;
+
+        IF lCurrentMonth = 12 THEN BEGIN
+          pBeginDate := DMY2DATE(1, 12, lCurrentYear);
+          pEndDate := DMY2DATE(31, 12, lCurrentYear);
+        END ELSE BEGIN
+          pBeginDate := DMY2DATE(1, lCurrentMonth, lCurrentYear);
+          pEndDate := DMY2DATE(1, lCurrentMonth+1, lCurrentYear)-1;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetBeginEndDate2_@1100281023(i@1100281002 : Integer;pPeriodEndDate@1100281003 : Date;VAR pBeginDate@1100281001 : Date;VAR pEndDate@1100281000 : Date);
+    BEGIN
+      //IMH02 isat.zw
+      //1-12 : periode d'un mois, 13  : periode ann‚e N-1
+      IF i = 13 THEN BEGIN
+        pBeginDate := CALCDATE('<-2Y>', pPeriodEndDate);
+        pEndDate := CALCDATE('<-1Y>', pPeriodEndDate);
+      END ELSE BEGIN
+        i := 13 - i;
+        pBeginDate := CALCDATE('<-' + FORMAT(i) + 'M>', pPeriodEndDate);
+        IF i = 1 THEN
+          pEndDate := pPeriodEndDate
+        ELSE BEGIN
+          pEndDate := CALCDATE('<-' + FORMAT(i-1) + 'M>', pPeriodEndDate);
+        END;
+        IF i <> 12 THEN
+          pBeginDate := pBeginDate + 1;
+      END;
+    END;
+
+    PROCEDURE GetWeekListByPeriod@1100281053(pBeginDate@1100281001 : Date;pEndDate@1100281000 : Date;VAR pWeekListTemp@1100281002 : Record 50155);
+    VAR
+      lLastDate@1100281003 : Date;
+      lWeekNo@1100281004 : Integer;
+    BEGIN
+      lLastDate := pBeginDate;
+      WHILE lLastDate < pEndDate DO BEGIN
+        lWeekNo := DATE2DWY(lLastDate, 2);
+        lLastDate := lLastDate + 7;
+      END;
+    END;
+
+    LOCAL PROCEDURE MonoBuildingTrade@1100281010(pInterventionLine@1100281002 : Record 50075) : Boolean;
+    VAR
+      lServiceCode@1100281000 : Record 50040;
+      lBuildingTradeCode@1100281001 : Code[20];
+    BEGIN
+      //IMH02 isat.zw
+      //retourner un boolean: oui, si intervention mono corps d'etat, non sinon.
+
+      lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+      lServiceCode.SETRANGE("Service No.", pInterventionLine."Service No.");
+      lServiceCode.SETRANGE("Service Header No.", pInterventionLine."Service Header No.");
+      lServiceCode.SETRANGE("Intervention Line No.", pInterventionLine."Line No.");
+      lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+
+      IF lServiceCode.FINDFIRST THEN BEGIN
+        lBuildingTradeCode := lServiceCode."Building Trade No.";
+        REPEAT
+          IF lBuildingTradeCode <> lServiceCode."Building Trade No." THEN
+            EXIT(FALSE);
+        UNTIL lServiceCode.NEXT = 0;
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE GetInvoiceAmountInterv@1100281008(lInterventionLine@1100281000 : Record 50075) rValue : Decimal;
+    VAR
+      lItemLedgerEntry@1100281001 : Record 32;
+    BEGIN
+      //IMH02 isat.zw
+      // calcule le cout d'un intervention close
+
+      rValue := 0;
+      lItemLedgerEntry.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+      lItemLedgerEntry.SETRANGE("Service No.",lInterventionLine."Service No.");
+      lItemLedgerEntry.SETRANGE("Service Header No.",lInterventionLine."Service Header No.");
+      lItemLedgerEntry.SETRANGE("Intervention Line No.",lInterventionLine."Line No.");
+      lItemLedgerEntry.SETRANGE("Entry Type", lItemLedgerEntry."Entry Type"::Purchase);
+      IF lItemLedgerEntry.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+      lItemLedgerEntry.FINDSET(FALSE,FALSE);
+      REPEAT
+        lItemLedgerEntry.CALCFIELDS("Cost Amount (Actual)");
+        rValue += lItemLedgerEntry."Cost Amount (Actual)";
+      UNTIL lItemLedgerEntry.NEXT = 0;
+    END;
+
+    PROCEDURE CalcDisponibilityNote@1100281001(pProviderNo@1100281000 : Code[20];pPeriodBeginDate@1100281007 : Date;pPeriodEndDate@1100281006 : Date) rNote : Decimal;
+    VAR
+      lInterventionLine@1100281001 : Record 50075;
+      lServiceSearchLedgerEntry@1100281002 : Record 50027;
+      lNote@1100281003 : Integer;
+      lIntervCount@1100281004 : Integer;
+      lServSearchEntryCount@1100281005 : Decimal;
+      lScoringDispoCalcSetup@1100281008 : Record 50111;
+    BEGIN
+      //IMH02 isat.zw
+      //Note dispo : 20 * (1 - (Nb refus(Nb ecritures table 50027) / Nb solicitations))
+      //Nb Solicitations = Nb refus + nb interventions
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      lInterventionLine.SETRANGE("Assigned Date",
+              pPeriodBeginDate, pPeriodEndDate);
+      lIntervCount := lInterventionLine.COUNT;
+
+      lServiceSearchLedgerEntry.SETCURRENTKEY("Provider No.");
+      lServiceSearchLedgerEntry.SETRANGE("Provider No.", pProviderNo);
+      lServiceSearchLedgerEntry.SETRANGE("Creation Date",
+              CREATEDATETIME(pPeriodBeginDate, 0T), CREATEDATETIME(pPeriodEndDate+1, 0T));
+      {
+      lServiceSearchLedgerEntry.SETFILTER(
+        "Current Search Status",
+        '<>%1&<>%2',
+        lServiceSearchLedgerEntry."Current Search Status"::DPR,
+        lServiceSearchLedgerEntry."Current Search Status"::Campaign);
+      }
+      //Mantis 2141
+      lServiceSearchLedgerEntry.SETRANGE("First Search Status", lServiceSearchLedgerEntry."First Search Status"::Standard);
+      IF lServiceSearchLedgerEntry.FINDFIRST THEN
+        REPEAT
+          IF lScoringDispoCalcSetup.GET(lServiceSearchLedgerEntry."Non-acceptance Reason Code") THEN
+            lServSearchEntryCount += lScoringDispoCalcSetup.Coefficient
+          ELSE
+            lServSearchEntryCount += 1;
+        UNTIL lServiceSearchLedgerEntry.NEXT = 0;
+
+      IF lIntervCount > 0 THEN
+        rNote := 20 * (1 - lServSearchEntryCount / (lIntervCount + lServSearchEntryCount));
+    END;
+
+    PROCEDURE CalcAverageCostNote@1100281035(pProviderNo@1100281000 : Code[20];pPeriodBeginDate@1100281012 : Date;pPeriodEndDate@1100281003 : Date;VAR pMainSpecTempTable@1100281013 : Record 50031;VAR pAllScoringBuffer@1100281014 : Record 51005) rNote : Decimal;
+    VAR
+      l3MainSpecTempTable@1100281006 : TEMPORARY Record 50031;
+      lProviderScoringBuffer@1100281005 : TEMPORARY Record 51005;
+      lAverageCostProvider@1100281001 : Decimal;
+      lAverageCostGlobal@1100281004 : Decimal;
+      lScoreTotal@1100281007 : ARRAY [3] OF Decimal;
+      "lDiff%"@1100281008 : Decimal;
+      lNbIntervenvProv@1100281009 : Integer;
+      lBeginDate@1100281010 : Date;
+      lEndDate@1100281011 : Date;
+      lScoringCalculationSetup@1100281002 : Record 50092;
+      lNbIntervSpec@1100281015 : ARRAY [3] OF Integer;
+      i@1100281016 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //Calculer Note du cout moyen prestataire par tuple sp‚cialit‚, d‚partement, cat‚gorie scoring.
+      //calcul l'‚cart en % entre le cout moyen du prestataire et le co–t moyen global
+      //pour chaque sp‚cialit‚, d‚partement, cat‚gorie scoring : cout moyen global / cout moyen prestataire
+      //Si l'‚cart est inf‚rieur ou ‚gal … 100 % alors note de 20
+      //Si sup‚rieur alors on enlŠve le param‚trage de point perdu (voir param‚trage) pour chaque point de % de diff‚rence.
+
+      ProviderSetup.GET;
+      IF pMainSpecTempTable.FINDFIRST THEN BEGIN
+        REPEAT
+          l3MainSpecTempTable := pMainSpecTempTable;
+          l3MainSpecTempTable.INSERT;
+        UNTIL pMainSpecTempTable.NEXT = 0;
+      END ELSE
+        GetProvider3MainSpec(pProviderNo, l3MainSpecTempTable);
+
+      //GetProvider3MainSpec(pProviderNo, l3MainSpecTempTable);
+      //lBeginDate := CALCDATE('-1' + TextYear, pPeriodEndDate) + 1;
+      LoadPrScoringBuf(pProviderNo, pPeriodBeginDate, pPeriodEndDate, l3MainSpecTempTable, 2,
+        FALSE, 2, lProviderScoringBuffer, pAllScoringBuffer);
+      lProviderScoringBuffer.RESET;
+      i := 1;
+      IF l3MainSpecTempTable.FINDSET THEN
+        REPEAT
+          lProviderScoringBuffer.SETRANGE("Building Trade No.", l3MainSpecTempTable."Building Trade No.");
+          lProviderScoringBuffer.SETRANGE("Specialization Code", l3MainSpecTempTable."Specialization Code");
+          IF lProviderScoringBuffer.FINDFIRST THEN
+            REPEAT
+              "lDiff%" := 0;
+              pAllScoringBuffer.GET('',
+                lProviderScoringBuffer."Building Trade No.", lProviderScoringBuffer."Specialization Code",
+                lProviderScoringBuffer."Area Code", lProviderScoringBuffer."Scoring Category Code",
+                lProviderScoringBuffer."Service Order Type", 0);
+              IF lProviderScoringBuffer."Intervention Nb" <> 0 THEN
+                lAverageCostProvider := lProviderScoringBuffer."Intervention Amount" / lProviderScoringBuffer."Intervention Nb";
+              IF pAllScoringBuffer."Intervention Nb" <> 0 THEN
+                lAverageCostGlobal := pAllScoringBuffer."Intervention Amount" / pAllScoringBuffer."Intervention Nb";
+              IF lAverageCostGlobal <> 0 THEN
+                "lDiff%" := ((lAverageCostProvider - lAverageCostGlobal) / lAverageCostGlobal) * 100;
+              IF GetCalcClaimSetup(lScoringCalculationSetup, 2, '', "lDiff%") THEN
+                lProviderScoringBuffer.Score := lScoringCalculationSetup.Score
+              ELSE
+                lProviderScoringBuffer.Score := 20;
+              {
+              IF lAverageCostProvider > lAverageCostGlobal THEN BEGIN
+                "lDiff%" := (1 - lAverageCostGlobal / lAverageCostGlobal) * 100;
+                IF lAverageCostProvider > 0 THEN
+                  lProviderScoringBuffer.Score := 20 -
+                    (("lDiff%" / ProviderSetup."Scoring Avrg Cost Ref Value %") * ProviderSetup."Scoring Avrg Cost Calc Base");
+                IF lProviderScoringBuffer.Score < 0 THEN
+                  lProviderScoringBuffer.Score := 0;
+              END ELSE
+                IF lAverageCostProvider <> 0 THEN
+                  lProviderScoringBuffer.Score := 20;
+              }
+              lProviderScoringBuffer.MODIFY(FALSE);
+              //lScoreTotal += lProviderScoringBuffer.Score;
+              lNbIntervenvProv += lProviderScoringBuffer."Intervention Nb";
+              lNbIntervSpec[i] += lProviderScoringBuffer."Intervention Nb";
+            UNTIL lProviderScoringBuffer.NEXT = 0;
+          IF lProviderScoringBuffer.FINDFIRST THEN
+            REPEAT
+              IF lNbIntervSpec[i] <> 0 THEN
+                lScoreTotal[i] += (lProviderScoringBuffer.Score * (lProviderScoringBuffer."Intervention Nb" / lNbIntervSpec[i]));
+            UNTIL lProviderScoringBuffer.NEXT = 0;
+          i += 1;
+        UNTIL l3MainSpecTempTable.NEXT = 0;
+
+      IF lNbIntervenvProv > 0 THEN
+        FOR i := 1 TO 3 DO
+          rNote += lScoreTotal[i] * (lNbIntervSpec[i] / lNbIntervenvProv);
+    END;
+
+    PROCEDURE CalcAverageTimeNote@1100281014(pProviderNo@1100281000 : Code[20];pPeriodBeginDate@1100281011 : Date;pPeriodEndDate@1100281003 : Date;VAR pMainSpecTempTable@1100281006 : Record 50031;VAR pAllScoringBuffer@1100281013 : Record 51005) rNote : Decimal;
+    VAR
+      l3MainSpecTempTable@1100281012 : TEMPORARY Record 50031;
+      lProviderScoringBuffer@1100281005 : TEMPORARY Record 51005;
+      lAverageTimeProvider@1100281001 : Decimal;
+      lAverageTimeGlobal@1100281004 : Decimal;
+      lScoreTotal@1100281007 : ARRAY [3] OF Decimal;
+      lNbIntervenvProv@1100281009 : Integer;
+      lBeginDate@1100281010 : Date;
+      lEndDate@1100281008 : Date;
+      lNbIntervSpec@1100281014 : ARRAY [3] OF Integer;
+      i@1100281002 : Integer;
+      "lDiff%"@1100281015 : Decimal;
+      lScoringCalculationSetup@1100281016 : Record 50092;
+    BEGIN
+      //IMH02 isat.zw
+      //Calculer Note du cout moyen prestataire par tuple sp‚cialit‚, d‚partement, cat‚gorie scoring.
+      //calcul l'‚cart en % entre le cout moyen du prestataire et le co–t moyen global
+      //pour chaque sp‚cialit‚, d‚partement, cat‚gorie scoring : cout moyen global / cout moyen prestataire
+      //Note := 20 - (((Nombre intervention prestataire / cumul des d‚lais prestataire) / d‚lai moyen globale) * 100) - 100)
+      //Note globale du prestataire = somme (Note * nombre intervention) du prestataire / nombre total interv. du prestataire
+      //Si l'‚cart est inf‚rieur ou ‚gal … 100 % alors note de 20
+      //Si sup‚rieur alors on enlŠve le param‚trage de point perdu (voir param‚trage) pour chaque point de % de diff‚rence.
+
+      ProviderSetup.GET;
+      IF pMainSpecTempTable.FINDFIRST THEN BEGIN
+        REPEAT
+          l3MainSpecTempTable := pMainSpecTempTable;
+          l3MainSpecTempTable.INSERT;
+        UNTIL pMainSpecTempTable.NEXT = 0;
+      END ELSE
+        GetProvider3MainSpec(pProviderNo, l3MainSpecTempTable);
+      //lBeginDate := CALCDATE('-1' + TextYear, pPeriodEndDate) + 1;
+      LoadPrScoringBuf(pProviderNo, pPeriodBeginDate, pPeriodEndDate,
+        l3MainSpecTempTable, 3, FALSE, 2, lProviderScoringBuffer, pAllScoringBuffer);
+      lProviderScoringBuffer.RESET;
+      i := 1;
+      IF l3MainSpecTempTable.FINDSET THEN
+        REPEAT
+          lProviderScoringBuffer.SETRANGE("Building Trade No.", l3MainSpecTempTable."Building Trade No.");
+          lProviderScoringBuffer.SETRANGE("Specialization Code", l3MainSpecTempTable."Specialization Code");
+          IF lProviderScoringBuffer.FINDFIRST THEN
+            REPEAT
+              "lDiff%" := 0;
+              pAllScoringBuffer.GET('',
+                lProviderScoringBuffer."Building Trade No.", lProviderScoringBuffer."Specialization Code",
+                lProviderScoringBuffer."Area Code", lProviderScoringBuffer."Scoring Category Code",
+                lProviderScoringBuffer."Service Order Type", 0);
+              IF lProviderScoringBuffer."Intervention Nb" <> 0 THEN
+                lAverageTimeProvider := lProviderScoringBuffer."Interv. Period Total" / lProviderScoringBuffer."Intervention Nb";
+              IF pAllScoringBuffer."Intervention Nb" <> 0 THEN
+                lAverageTimeGlobal := pAllScoringBuffer."Interv. Period Total" / pAllScoringBuffer."Intervention Nb";
+              IF lAverageTimeGlobal <> 0 THEN
+                "lDiff%" := ((lAverageTimeProvider - lAverageTimeGlobal) / lAverageTimeGlobal) * 100;
+              IF GetCalcClaimSetup(lScoringCalculationSetup, 3, '', "lDiff%") THEN
+                lProviderScoringBuffer.Score := lScoringCalculationSetup.Score
+              ELSE
+                lProviderScoringBuffer.Score := 20;
+
+              lProviderScoringBuffer.MODIFY(FALSE);
+              //lScoreTotal += lProviderScoringBuffer.Score;
+              lNbIntervenvProv += lProviderScoringBuffer."Intervention Nb";
+              lNbIntervSpec[i] += lProviderScoringBuffer."Intervention Nb";
+            UNTIL lProviderScoringBuffer.NEXT = 0;
+          IF lProviderScoringBuffer.FINDFIRST THEN
+            REPEAT
+              IF lNbIntervSpec[i] <> 0 THEN
+                lScoreTotal[i] += (lProviderScoringBuffer.Score * (lProviderScoringBuffer."Intervention Nb" / lNbIntervSpec[i]));
+            UNTIL lProviderScoringBuffer.NEXT = 0;
+          i += 1;
+        UNTIL l3MainSpecTempTable.NEXT = 0;
+
+      IF lNbIntervenvProv <> 0 THEN
+        FOR i := 1 TO 3 DO
+          rNote += lScoreTotal[i] * (lNbIntervSpec[i] / lNbIntervenvProv);
+    END;
+
+    PROCEDURE LoadPrScoringCalcHis@1100281018(pBeginDate@1100281001 : Date;pEndDate@1100281002 : Date);
+    VAR
+      lBeginMonth@1100281003 : Integer;
+      lBeginYear@1100281004 : Integer;
+      lEndMonth@1100281006 : Integer;
+      lEndYear@1100281005 : Integer;
+      i@1100281000 : Integer;
+    BEGIN
+      IF pBeginDate > pEndDate THEN
+        EXIT;
+      ProviderSetup.GET;
+
+      lBeginMonth := DATE2DMY(pBeginDate, 2);
+      lBeginYear := DATE2DMY(pBeginDate, 3);
+      lEndMonth := DATE2DMY(pEndDate, 2);
+      lEndYear := DATE2DMY(pEndDate, 3);
+      {
+      IF ProviderSetup."Scoring Last Calc. Year" > lEndYear THEN
+        EXIT;
+      IF ProviderSetup."Scoring Last Calc. Year" = lEndYear THEN BEGIN
+        IF ProviderSetup."Scoring Last Calc. Month" > lEndMonth THEN
+          EXIT;
+      END;
+
+
+      IF (ProviderSetup."Scoring Last Calc. Year" = lEndYear)
+         AND (ProviderSetup."Scoring Last Calc. Month" = lEndMonth) THEN BEGIN
+        lBeginMonth := ProviderSetup."Scoring Last Calc. Month";
+        lBeginYear := ProviderSetup."Scoring Last Calc. Year";
+      END ELSE BEGIN
+        IF ProviderSetup."Scoring Last Calc. Year" < lBeginYear THEN BEGIN
+          lBeginMonth := lBeginMonth;
+          lBeginYear := lBeginYear;
+        END ELSE
+          IF ProviderSetup."Scoring Last Calc. Year" = lBeginYear THEN BEGIN
+            IF lBeginMonth <= ProviderSetup."Scoring Last Calc. Month" THEN
+              lBeginMonth := ProviderSetup."Scoring Last Calc. Month";
+          END ELSE BEGIN
+            lBeginMonth := ProviderSetup."Scoring Last Calc. Month";
+          END;
+      END;
+      }
+
+      IF lBeginYear < lEndYear THEN BEGIN
+        FOR i := lBeginMonth TO 12 DO
+          LoadPrScoringMonthHis('', lBeginYear, i);
+        FOR i := 1 TO lEndMonth DO
+          LoadPrScoringMonthHis('', lEndYear, i);
+      END ELSE
+        FOR i := lBeginMonth TO lEndMonth DO
+          LoadPrScoringMonthHis('', lBeginYear, i);
+
+      //ProviderSetup."Scoring Last Calc. Year" := lEndYear;
+      //ProviderSetup."Scoring Last Calc. Month" := lEndMonth;
+      //ProviderSetup.MODIFY;
+      //COMMIT;
+    END;
+
+    PROCEDURE LoadPrScoringMonthHis@1100281022(pProviderNo@1100281000 : Code[20];pYear@1100281006 : Integer;pMonth@1100281014 : Integer);
+    VAR
+      lInterventionLine@1100281003 : Record 50075;
+      lServiceCode@1100281008 : Record 50040;
+      lPostCode@1100281007 : Record 225;
+      lScoringCategory@1100281011 : Record 50089;
+      lProviderScoringCalcHistory@1000000000 : Record 50155;
+      lNote@1100281005 : Integer;
+      lSpecFilterText@1100281009 : Integer;
+      lAmount@1100281010 : Decimal;
+      lIntervPeriod@1100281013 : Decimal;
+      lSpecTemp@1100281017 : TEMPORARY Record 50031;
+      lBeginDate@1100281001 : Date;
+      lEndDate@1100281002 : Date;
+      lScoringCategoryCode@1100281004 : Code[20];
+      lCalculationType@1100281012 : ' ,Disponibility,Average Cost,Average Time,Time,Quality Control,Claim,Average Cost/Time';
+      lServiceCodeNb@1100281016 : Integer;
+      lMain@1100281015 : Boolean;
+      lBeginDateTime@1100281018 : DateTime;
+      lEndDateTime@1100281019 : DateTime;
+    BEGIN
+      //IMH02 isat.zw
+      //1Pour chaque prestataire calculer :
+      //par Prestataire/sp‚cialit‚/D‚partement de l'intervention/cat‚gorie scoring : nombre intervention + montant TTC intervention
+
+      lProviderScoringCalcHistory.SETCURRENTKEY(Year,Month,"Calculation Type","Building Trade No.","Specialization Code");
+      lProviderScoringCalcHistory.SETRANGE(Year, pYear);
+      lProviderScoringCalcHistory.SETRANGE(Month, pMonth);
+      IF pProviderNo <> '' THEN
+        lProviderScoringCalcHistory.SETRANGE("Provider No.", pProviderNo);
+      lProviderScoringCalcHistory.DELETEALL(FALSE);
+
+      //<<IMH03
+      //lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETCURRENTKEY("Closed DateTime","Provider No.","Intervention Status",Closed,"Multi specialities");
+      //>>IMH03
+      IF pProviderNo <> '' THEN
+        lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+
+      //lInterventionLine.SETRANGE(Closed, TRUE);
+      lInterventionLine.SETRANGE("Intervention Status", lInterventionLine."Intervention Status"::Closed);
+      lBeginDate := DMY2DATE(1, pMonth, pYear);
+      IF pMonth = 12 THEN
+        lEndDate := DMY2DATE(31, pMonth, pYear)
+      ELSE
+        lEndDate := DMY2DATE(1, pMonth + 1, pYear) - 1;
+      lMain := TRUE;
+      //<<IMH03
+      //lInterventionLine.SETRANGE("Assigned Date",
+      //        lBeginDate, lEndDate);
+      lBeginDateTime := CREATEDATETIME(lBeginDate, 0T);
+      lEndDateTime := CREATEDATETIME(lEndDate + 1, 0T);
+      lInterventionLine.SETRANGE("Closed DateTime",
+              lBeginDateTime, lEndDateTime);
+      //>>IMH03
+
+      IF lInterventionLine.FINDSET THEN
+        REPEAT
+          lAmount := GetInvoiceAmountInterv(lInterventionLine);
+          IF (lAmount > ProviderSetup."Scoring Amount Max.") AND (ProviderSetup."Scoring Amount Max." <> 0) THEN
+            lAmount := ProviderSetup."Scoring Amount Max.";
+          lIntervPeriod := 0;
+          lInterventionLine.CALCFIELDS("Minutes Receipt Date");
+          IF lInterventionLine."Minutes Receipt Date" <> 0D THEN
+            lIntervPeriod := lInterventionLine."Minutes Receipt Date" - lInterventionLine."Assigned Date";
+          IF NOT lPostCode.GET(lInterventionLine."Post Code", lInterventionLine.City) THEN
+            CLEAR(lPostCode);
+          lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+          lServiceCode.SETRANGE("Service No.", lInterventionLine."Service No.");
+          lServiceCode.SETRANGE("Service Header No.", lInterventionLine."Service Header No.");
+          lServiceCode.SETRANGE("Intervention Line No.", lInterventionLine."Line No.");
+          lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+          lServiceCodeNb := lServiceCode.COUNT;
+          IF lServiceCodeNb <> 0 THEN BEGIN
+            lAmount := ROUND(lAmount/lServiceCodeNb, 1/100);
+            lIntervPeriod := lIntervPeriod/lServiceCodeNb;
+          END;
+          IF lServiceCode.FINDSET THEN
+            REPEAT
+              {
+              AvrgCustSpecProvScoringBuffer.SETRANGE("Specialization Code", lServiceCode.Code);
+              IF NOT AvrgCustSpecProvScoringBuffer.FINDFIRST THEN BEGIN
+                AvrgCustSpecProvScoringBuffer."Specialization Code" := lServiceCode.Code;
+                AvrgCustSpecProvScoringBuffer."Intervention Nb" := 1;
+                AvrgCustSpecProvScoringBuffer."Intervention Amount" := lAmount;
+                AvrgCustSpecProvScoringBuffer."Interv. Period Total" := lIntervPeriod;
+                AvrgCustSpecProvScoringBuffer.INSERT;
+              END ELSE BEGIN
+                AvrgCustSpecProvScoringBuffer."Intervention Nb" += 1;
+                AvrgCustSpecProvScoringBuffer."Intervention Amount" += lAmount;
+                AvrgCustSpecProvScoringBuffer."Interv. Period Total" += lIntervPeriod;
+                AvrgCustSpecProvScoringBuffer.MODIFY;
+              END;
+              }
+              //lMain := TRUE;
+              lCalculationType := lCalculationType::"Average Cost";
+              IF GetCategoryScoring(lScoringCategory,lCalculationType,
+                lInterventionLine."Service Order Type",lInterventionLine.Urgent) THEN BEGIN
+                //IF NOT lScoringCategory."Scoring Exclusion" THEN BEGIN
+                  UpdtPrScoringMonthHisLine(lInterventionLine."Provider No.", lCalculationType, lServiceCode."Building Trade No.",
+                    lServiceCode.Code, lPostCode."Area Code",
+                    lScoringCategory."Scoring Category Code", lScoringCategory."Service Order Type",
+                    lMain, lInterventionLine.Urgent, pYear, pMonth, lAmount, lIntervPeriod);
+                  IF pProviderNo = '' THEN
+                    UpdtPrScoringMonthHisLine('', lCalculationType, lServiceCode."Building Trade No.",
+                      lServiceCode.Code, lPostCode."Area Code",
+                      lScoringCategory."Scoring Category Code", lScoringCategory."Service Order Type",
+                      lMain, lInterventionLine.Urgent, pYear, pMonth, lAmount, lIntervPeriod);
+                  //lMain := FALSE;
+                //END;
+              END ELSE BEGIN
+                UpdtPrScoringMonthHisLine(lInterventionLine."Provider No.", lCalculationType, lServiceCode."Building Trade No.",
+                  lServiceCode.Code, lPostCode."Area Code",
+                  '', lInterventionLine."Service Order Type",
+                  lMain, lInterventionLine.Urgent, pYear, pMonth, lAmount, lIntervPeriod);
+                IF pProviderNo = '' THEN
+                  UpdtPrScoringMonthHisLine('', lCalculationType, lServiceCode."Building Trade No.",
+                    lServiceCode.Code, lPostCode."Area Code",
+                    '', lInterventionLine."Service Order Type",
+                    lMain, lInterventionLine.Urgent, pYear, pMonth, lAmount, lIntervPeriod);
+              END;
+              lCalculationType := lCalculationType::"Average Time";
+              IF GetCategoryScoring(lScoringCategory,lCalculationType,
+                lInterventionLine."Service Order Type",lInterventionLine.Urgent) THEN BEGIN
+                //IF NOT lScoringCategory."Scoring Exclusion" THEN BEGIN
+                  UpdtPrScoringMonthHisLine(lInterventionLine."Provider No.", lCalculationType, lServiceCode."Building Trade No.",
+                    lServiceCode.Code, lPostCode."Area Code",
+                    lScoringCategory."Scoring Category Code", lScoringCategory."Service Order Type",
+                    lMain, lInterventionLine.Urgent, pYear, pMonth, lAmount, lIntervPeriod);
+                  IF pProviderNo = '' THEN
+                    UpdtPrScoringMonthHisLine('', lCalculationType, lServiceCode."Building Trade No.",
+                      lServiceCode.Code, lPostCode."Area Code",
+                      lScoringCategory."Scoring Category Code", lScoringCategory."Service Order Type",
+                      lMain, lInterventionLine.Urgent, pYear, pMonth, lAmount, lIntervPeriod);
+                  //lMain := FALSE;
+                //END;
+              END ELSE BEGIN
+                UpdtPrScoringMonthHisLine(lInterventionLine."Provider No.", lCalculationType, lServiceCode."Building Trade No.",
+                  lServiceCode.Code, lPostCode."Area Code",
+                  '', lInterventionLine."Service Order Type",
+                  lMain, lInterventionLine.Urgent, pYear, pMonth, lAmount, lIntervPeriod);
+                IF pProviderNo = '' THEN
+                  UpdtPrScoringMonthHisLine('', lCalculationType, lServiceCode."Building Trade No.",
+                    lServiceCode.Code, lPostCode."Area Code",
+                    '', lInterventionLine."Service Order Type",
+                    lMain, lInterventionLine.Urgent, pYear, pMonth, lAmount, lIntervPeriod);
+              END;
+            UNTIL lServiceCode.NEXT = 0;
+        UNTIL lInterventionLine.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE UpdtPrScoringMonthHisLine@1100281021(pProviderNo@1100281003 : Code[20];pCalculationType@1100281009 : ' ,Disponibility,Average Cost,Average Time,Time,Quality Control,Claim,Average Cost/Time';pBuildingTradeNo@1100281001 : Code[20];pSpecializationCode@1100281007 : Code[10];pAreaCode@1100281004 : Code[10];pScoringCategoryCode@1100281008 : Code[20];pServiceOrderType@1100281002 : Code[10];pMain@1100281012 : Boolean;pUrgent@1100281013 : Boolean;pYear@1100281010 : Integer;pMonth@1100281011 : Integer;pAmount@1100281005 : Decimal;pIntervPeriod@1100281006 : Decimal);
+    VAR
+      lProviderScoringCalcHistory@1100281000 : Record 50155;
+    BEGIN
+      //IMH02 isat.zw
+      //Creer une ligne de buffer Scoring prestataire
+
+      IF lProviderScoringCalcHistory.GET(pProviderNo, pCalculationType, pBuildingTradeNo,
+            pSpecializationCode, pAreaCode,
+            pScoringCategoryCode, pServiceOrderType, pUrgent, pYear, pMonth)
+      THEN BEGIN
+        IF ProviderScoringCalcHistoryTmp.GET(pProviderNo, pCalculationType, pBuildingTradeNo,
+              pSpecializationCode, pAreaCode,
+              pScoringCategoryCode, pServiceOrderType, pUrgent, pYear, pMonth)
+        THEN BEGIN
+          lProviderScoringCalcHistory."Intervention Nb" += 1;
+          lProviderScoringCalcHistory."Intervention Amount" += pAmount;
+          lProviderScoringCalcHistory."Interv. Period Total" += pIntervPeriod;
+          lProviderScoringCalcHistory.Main := pMain;
+          lProviderScoringCalcHistory.MODIFY(TRUE);
+        END ELSE BEGIN
+          lProviderScoringCalcHistory."Intervention Nb" := 1;
+          lProviderScoringCalcHistory."Intervention Amount" := pAmount;
+          lProviderScoringCalcHistory."Interv. Period Total" := pIntervPeriod;
+          lProviderScoringCalcHistory.MODIFY(TRUE);
+          ProviderScoringCalcHistoryTmp := lProviderScoringCalcHistory;
+          ProviderScoringCalcHistoryTmp.INSERT(FALSE);
+        END;
+      END ELSE BEGIN
+        lProviderScoringCalcHistory."Provider No." := pProviderNo;
+        lProviderScoringCalcHistory."Calculation Type" := pCalculationType;
+        lProviderScoringCalcHistory."Building Trade No." := pBuildingTradeNo;
+        lProviderScoringCalcHistory."Specialization Code" := pSpecializationCode;
+        lProviderScoringCalcHistory."Area Code" := pAreaCode;
+        lProviderScoringCalcHistory."Scoring Category Code" := pScoringCategoryCode;
+        lProviderScoringCalcHistory."Service Order Type" := pServiceOrderType;
+        lProviderScoringCalcHistory.Urgent := pUrgent;
+        lProviderScoringCalcHistory.Year := pYear;
+        lProviderScoringCalcHistory.Month := pMonth;
+
+        lProviderScoringCalcHistory.Main := pMain;
+        lProviderScoringCalcHistory."Intervention Nb" := 1;
+        lProviderScoringCalcHistory."Intervention Amount" := pAmount;
+        lProviderScoringCalcHistory."Interv. Period Total" := pIntervPeriod;
+        lProviderScoringCalcHistory.INSERT(TRUE);
+        ProviderScoringCalcHistoryTmp := lProviderScoringCalcHistory;
+        ProviderScoringCalcHistoryTmp.INSERT(FALSE);
+      END;
+    END;
+
+    PROCEDURE LoadPrScoringBuf@1100281064(pProviderNo@1100281000 : Code[20];pPeriodBeginDate@1100281014 : Date;pPeriodEndDate@1100281006 : Date;VAR p3MainSpecTempTable@1100281001 : Record 50031;pCalculationType@1100281004 : ' ,Disponibility,Average Cost,Average Time,Time,Quality Control,Claim,Average Cost/Time';pBySpec@1100281015 : Boolean;pLoadType@1100281013 : 'Provider,AllProvider,All';VAR pProviderScoringBuffer@1100281002 : Record 51005;VAR pAllScoringBuffer@1100281012 : Record 51005);
+    VAR
+      lProviderScoringCalcHistory@1100281003 : Record 50155;
+      lBeginYear@1100281005 : Integer;
+      lBeginMonth@1100281007 : Integer;
+      lEndYear@1100281009 : Integer;
+      lEndMonth@1100281008 : Integer;
+      lDate@1100281010 : Date;
+      lLastWeekOfYear@1100281011 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      lBeginYear := DATE2DMY(pPeriodBeginDate, 3);
+      lBeginMonth := DATE2DMY(pPeriodBeginDate, 2);
+      lEndYear := DATE2DMY(pPeriodEndDate, 3);
+      lEndMonth := DATE2DMY(pPeriodEndDate, 2);
+      IF pAllScoringBuffer.COUNT <> 0 THEN BEGIN
+        lProviderScoringCalcHistory.SETRANGE("Provider No.", pProviderNo);
+      END;
+
+      IF pLoadType = pLoadType::Provider THEN BEGIN
+        lProviderScoringCalcHistory.SETRANGE("Provider No.", pProviderNo);
+      END ELSE
+        lProviderScoringCalcHistory.SETFILTER("Provider No.", '%1|%2', '', pProviderNo);
+        //lProviderScoringCalcHistory.SETCURRENTKEY(Year,Month,"Calculation Type", "Building Trade No.","Specialization Code");
+
+      CASE pCalculationType OF
+        pCalculationType::"Average Cost" :
+          lProviderScoringCalcHistory.SETFILTER("Calculation Type", '%1|%2',
+              pCalculationType::"Average Cost", pCalculationType::"Average Cost/Time");
+        pCalculationType::"Average Time" :
+          lProviderScoringCalcHistory.SETFILTER("Calculation Type", '%1|%2',
+              pCalculationType::"Average Time", pCalculationType::"Average Cost/Time");
+        pCalculationType::"Average Cost/Time" :
+          lProviderScoringCalcHistory.SETFILTER("Calculation Type", '%1|%2|%3', pCalculationType::"Average Cost",
+              pCalculationType::"Average Time", pCalculationType::"Average Cost/Time");
+      END;
+
+      IF NOT pBySpec THEN BEGIN
+        IF p3MainSpecTempTable.FINDSET THEN
+          REPEAT
+            lProviderScoringCalcHistory.SETRANGE("Building Trade No.", p3MainSpecTempTable."Building Trade No.");
+            lProviderScoringCalcHistory.SETRANGE("Specialization Code", p3MainSpecTempTable."Specialization Code");
+            IF lBeginYear < lEndYear THEN BEGIN
+              lProviderScoringCalcHistory.SETRANGE(Year, lBeginYear);
+              lProviderScoringCalcHistory.SETRANGE(Month, lBeginMonth, 12);
+              IF lProviderScoringCalcHistory.FINDSET THEN
+                REPEAT
+                  IF pLoadType <> pLoadType::AllProvider THEN
+                    IF lProviderScoringCalcHistory."Provider No." = pProviderNo THEN
+                      IF CheckCategoryExclu(pCalculationType,
+                          lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                          lProviderScoringCalcHistory.Urgent) THEN
+                        LoadPrScoringBufLine(pProviderNo, pCalculationType, p3MainSpecTempTable."Building Trade No.",
+                          p3MainSpecTempTable."Specialization Code", lProviderScoringCalcHistory."Area Code",
+                          lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                          lProviderScoringCalcHistory.Urgent,
+                          lProviderScoringCalcHistory."Intervention Nb",
+                          lProviderScoringCalcHistory."Intervention Amount",
+                          lProviderScoringCalcHistory."Interv. Period Total", pProviderScoringBuffer);
+                  IF pLoadType <> pLoadType::Provider THEN
+                    IF lProviderScoringCalcHistory."Provider No." = '' THEN
+                      IF CheckCategoryExclu(pCalculationType,
+                          lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                          lProviderScoringCalcHistory.Urgent) THEN
+                        LoadPrScoringBufLine('', pCalculationType, p3MainSpecTempTable."Building Trade No.",
+                          p3MainSpecTempTable."Specialization Code", lProviderScoringCalcHistory."Area Code",
+                          lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                          lProviderScoringCalcHistory.Urgent,
+                          lProviderScoringCalcHistory."Intervention Nb",
+                          lProviderScoringCalcHistory."Intervention Amount",
+                          lProviderScoringCalcHistory."Interv. Period Total", pAllScoringBuffer);
+                UNTIL lProviderScoringCalcHistory.NEXT = 0;
+              lBeginMonth := 1;
+            END;
+            lProviderScoringCalcHistory.SETRANGE(Year, lEndYear);
+            lProviderScoringCalcHistory.SETRANGE(Month, lBeginMonth, lEndMonth);
+
+            IF lProviderScoringCalcHistory.FINDSET THEN
+              REPEAT
+                IF pLoadType <> pLoadType::AllProvider THEN
+                  IF lProviderScoringCalcHistory."Provider No." = pProviderNo THEN
+                    IF CheckCategoryExclu(pCalculationType,
+                        lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                        lProviderScoringCalcHistory.Urgent) THEN
+                      LoadPrScoringBufLine(pProviderNo, pCalculationType, p3MainSpecTempTable."Building Trade No.",
+                        p3MainSpecTempTable."Specialization Code", lProviderScoringCalcHistory."Area Code",
+                        lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                        lProviderScoringCalcHistory.Urgent,
+                        lProviderScoringCalcHistory."Intervention Nb",
+                        lProviderScoringCalcHistory."Intervention Amount",
+                        lProviderScoringCalcHistory."Interv. Period Total", pProviderScoringBuffer);
+                IF pLoadType <> pLoadType::Provider THEN
+                  IF lProviderScoringCalcHistory."Provider No." = '' THEN
+                    IF CheckCategoryExclu(pCalculationType,
+                        lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                        lProviderScoringCalcHistory.Urgent) THEN
+                      LoadPrScoringBufLine('', pCalculationType, p3MainSpecTempTable."Building Trade No.",
+                        p3MainSpecTempTable."Specialization Code", lProviderScoringCalcHistory."Area Code",
+                        lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                        lProviderScoringCalcHistory.Urgent,
+                        lProviderScoringCalcHistory."Intervention Nb",
+                        lProviderScoringCalcHistory."Intervention Amount",
+                        lProviderScoringCalcHistory."Interv. Period Total", pAllScoringBuffer);
+              UNTIL lProviderScoringCalcHistory.NEXT = 0;
+          UNTIL p3MainSpecTempTable.NEXT = 0;
+      END ELSE BEGIN
+        //lProviderScoringCalcHistory.SETRANGE(Main, TRUE);
+        IF lBeginYear < lEndYear THEN BEGIN
+          lProviderScoringCalcHistory.SETRANGE(Year, lBeginYear);
+          lProviderScoringCalcHistory.SETRANGE(Month, lBeginMonth, 12);
+          IF lProviderScoringCalcHistory.FINDSET THEN
+            REPEAT
+              IF pLoadType <> pLoadType::AllProvider THEN
+                IF lProviderScoringCalcHistory."Provider No." = pProviderNo THEN BEGIN
+                  IF p3MainSpecTempTable.GET(lProviderScoringCalcHistory."Building Trade No.",
+                      lProviderScoringCalcHistory."Specialization Code") THEN BEGIN
+                    IF CheckCategoryExclu(pCalculationType,
+                        lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                        lProviderScoringCalcHistory.Urgent) THEN BEGIN
+                      LoadPrScoringBufLine(pProviderNo, pCalculationType, p3MainSpecTempTable."Building Trade No.",
+                        p3MainSpecTempTable."Specialization Code", '','', '',
+                        lProviderScoringCalcHistory.Urgent,
+                        lProviderScoringCalcHistory."Intervention Nb",
+                        lProviderScoringCalcHistory."Intervention Amount",
+                        lProviderScoringCalcHistory."Interv. Period Total", pProviderScoringBuffer);
+                      LoadPrScoringBufLine(pProviderNo, pCalculationType, '','', '','', '',
+                        lProviderScoringCalcHistory.Urgent,
+                        lProviderScoringCalcHistory."Intervention Nb",
+                        lProviderScoringCalcHistory."Intervention Amount",
+                        lProviderScoringCalcHistory."Interv. Period Total", pProviderScoringBuffer);
+                    END;
+                  END;
+                END;
+              IF pLoadType <> pLoadType::Provider THEN BEGIN
+                IF p3MainSpecTempTable.GET(lProviderScoringCalcHistory."Building Trade No.",
+                    lProviderScoringCalcHistory."Specialization Code") THEN BEGIN
+                  IF lProviderScoringCalcHistory."Provider No." = '' THEN
+                    IF CheckCategoryExclu(pCalculationType,
+                        lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                        lProviderScoringCalcHistory.Urgent) THEN BEGIN
+                      LoadPrScoringBufLine('', pCalculationType, p3MainSpecTempTable."Building Trade No.",
+                        p3MainSpecTempTable."Specialization Code", '','', '',
+                        lProviderScoringCalcHistory.Urgent,
+                        lProviderScoringCalcHistory."Intervention Nb",
+                        lProviderScoringCalcHistory."Intervention Amount",
+                        lProviderScoringCalcHistory."Interv. Period Total", pAllScoringBuffer);
+                      LoadPrScoringBufLine('', pCalculationType, '','', '','', '',
+                        lProviderScoringCalcHistory.Urgent,
+                        lProviderScoringCalcHistory."Intervention Nb",
+                        lProviderScoringCalcHistory."Intervention Amount",
+                        lProviderScoringCalcHistory."Interv. Period Total", pAllScoringBuffer);
+                    END;
+                END;
+              END;
+            UNTIL lProviderScoringCalcHistory.NEXT = 0;
+          lBeginMonth := 1;
+        END;
+        lProviderScoringCalcHistory.SETRANGE(Year, lEndYear);
+        lProviderScoringCalcHistory.SETRANGE(Month, lBeginMonth, lEndMonth);
+
+        IF lProviderScoringCalcHistory.FINDSET THEN
+          REPEAT
+            IF pLoadType <> pLoadType::AllProvider THEN
+              IF lProviderScoringCalcHistory."Provider No." = pProviderNo THEN BEGIN
+                IF p3MainSpecTempTable.GET(lProviderScoringCalcHistory."Building Trade No.",
+                    lProviderScoringCalcHistory."Specialization Code") THEN
+                  IF CheckCategoryExclu(pCalculationType,
+                      lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                      lProviderScoringCalcHistory.Urgent) THEN BEGIN
+                    LoadPrScoringBufLine(pProviderNo, pCalculationType, p3MainSpecTempTable."Building Trade No.",
+                      p3MainSpecTempTable."Specialization Code", '','', '',
+                      lProviderScoringCalcHistory.Urgent,
+                      lProviderScoringCalcHistory."Intervention Nb",
+                      lProviderScoringCalcHistory."Intervention Amount",
+                      lProviderScoringCalcHistory."Interv. Period Total", pProviderScoringBuffer);
+                    LoadPrScoringBufLine(pProviderNo, pCalculationType, '','', '','', '',
+                      lProviderScoringCalcHistory.Urgent,
+                      lProviderScoringCalcHistory."Intervention Nb",
+                      lProviderScoringCalcHistory."Intervention Amount",
+                      lProviderScoringCalcHistory."Interv. Period Total", pProviderScoringBuffer);
+                  END;
+              END;
+            IF pLoadType <> pLoadType::Provider THEN BEGIN
+              IF p3MainSpecTempTable.GET(lProviderScoringCalcHistory."Building Trade No.",
+                  lProviderScoringCalcHistory."Specialization Code") THEN
+                IF lProviderScoringCalcHistory."Provider No." = '' THEN
+                  IF CheckCategoryExclu(pCalculationType,
+                      lProviderScoringCalcHistory."Scoring Category Code", lProviderScoringCalcHistory."Service Order Type",
+                      lProviderScoringCalcHistory.Urgent) THEN BEGIN
+                    LoadPrScoringBufLine('', pCalculationType, p3MainSpecTempTable."Building Trade No.",
+                      p3MainSpecTempTable."Specialization Code", '','', '',
+                      lProviderScoringCalcHistory.Urgent,
+                      lProviderScoringCalcHistory."Intervention Nb",
+                      lProviderScoringCalcHistory."Intervention Amount",
+                      lProviderScoringCalcHistory."Interv. Period Total", pAllScoringBuffer);
+                    LoadPrScoringBufLine('', pCalculationType, '','', '','', '',
+                      lProviderScoringCalcHistory.Urgent,
+                      lProviderScoringCalcHistory."Intervention Nb",
+                      lProviderScoringCalcHistory."Intervention Amount",
+                      lProviderScoringCalcHistory."Interv. Period Total", pAllScoringBuffer);
+                  END;
+            END;
+          UNTIL lProviderScoringCalcHistory.NEXT = 0;
+      END;
+    END;
+
+    LOCAL PROCEDURE LoadPrScoringBufLine@1100281028(pProviderNo@1100281003 : Code[20];pCalculationType@1100281011 : ' ,Disponibility,Average Cost,Average Time,Time,Quality Control,Claim,Average Cost/Time';pBuildingTradeNo@1100281001 : Code[20];pSpecializationCode@1100281007 : Code[10];pAreaCode@1100281004 : Code[10];pScoringCategoryCode@1100281008 : Code[20];pServiceOrderType@1100281002 : Code[10];pUrgent@1100281012 : Boolean;pIntervtionNb@1100281009 : Integer;pAmount@1100281005 : Decimal;pIntervPeriod@1100281006 : Decimal;VAR pProviderScoringBuffer@1100281000 : Record 51005);
+    BEGIN
+      //IMH02 isat.zw
+      //Creer une ligne de buffer Scoring prestataire
+      IF pProviderScoringBuffer.GET(pProviderNo, pBuildingTradeNo,
+            pSpecializationCode, pAreaCode,
+            pScoringCategoryCode, pServiceOrderType, 0)
+      THEN BEGIN
+        pProviderScoringBuffer."Intervention Nb" += pIntervtionNb;
+        pProviderScoringBuffer."Intervention Amount" += pAmount;
+        pProviderScoringBuffer."Interv. Period Total" += pIntervPeriod;
+        pProviderScoringBuffer.MODIFY(FALSE);
+      END ELSE BEGIN
+        pProviderScoringBuffer."Provider No." := pProviderNo;
+        pProviderScoringBuffer."Building Trade No." := pBuildingTradeNo;
+        pProviderScoringBuffer."Specialization Code" := pSpecializationCode;
+        pProviderScoringBuffer."Area Code" := pAreaCode;
+        pProviderScoringBuffer."Scoring Category Code" := pScoringCategoryCode;
+        pProviderScoringBuffer."Service Order Type" := pServiceOrderType;
+
+        pProviderScoringBuffer."Intervention Nb" := pIntervtionNb;
+        pProviderScoringBuffer."Intervention Amount" := pAmount;
+        pProviderScoringBuffer."Interv. Period Total" := pIntervPeriod;
+        pProviderScoringBuffer.INSERT(FALSE);
+      END;
+    END;
+
+    PROCEDURE CheckCategoryExclu@1000000001(pCalculationType@1000000006 : ' ,Disponibility,Average Cost,Average Time,Time,Quality Control,Claim,Average Cost/Time';pScoringCategoryCode@1000000002 : Code[20];pServiceOrderType@1000000001 : Code[10];pUrgent@1000000000 : Boolean) : Boolean;
+    VAR
+      lScoringCategory@1000000008 : Record 50089;
+    BEGIN
+      IF lScoringCategory.GET(pScoringCategoryCode, pCalculationType, pServiceOrderType, pUrgent) THEN BEGIN
+        EXIT(NOT lScoringCategory."Scoring Exclusion");
+      END ELSE BEGIN
+        IF lScoringCategory.GET(pScoringCategoryCode, 0, pServiceOrderType, pUrgent) THEN
+          EXIT(NOT lScoringCategory."Scoring Exclusion");
+        IF lScoringCategory.GET('', 0, pServiceOrderType, pUrgent) THEN
+          EXIT(NOT lScoringCategory."Scoring Exclusion");
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CalcClaimNote@1100281006(pProviderNo@1100281000 : Code[20];pPeriodBeginDate@1100281013 : Date;pPeriodEndDate@1100281003 : Date) rNote : Decimal;
+    VAR
+      lInterventionLine@1100281002 : Record 50075;
+      lCalculationClaimSetup@1100281012 : Record 50092;
+      lBeginDate@1100281005 : Date;
+      lClaimRateProvider@1100281001 : Decimal;
+      lClaimRateGlobal@1100281004 : Decimal;
+      lScoreTotal@1100281007 : Integer;
+      lNbIntervenvProv@1100281009 : Integer;
+      lNbIntervenv@1100281006 : Integer;
+      lNbIntervenvClaimedProv@1100281010 : Integer;
+      lNbIntervenvClaimed@1100281011 : Integer;
+      "lDiff%"@1100281008 : Decimal;
+    BEGIN
+      //IMH02 isat.zw
+      //La note est calcul‚e en rapprochant l'‚cart, entre le Taux de  r‚clamations du prestataire et
+      //le taux de r‚clamation moyen, et la table de param‚trage
+
+      ProviderSetup.GET;
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      //lInterventionLine.SETRANGE(Closed, FALSE);
+      lInterventionLine.SETFILTER("Intervention Status", '<>%1', lInterventionLine."Intervention Status"::Cancel);
+      //lBeginDate := CALCDATE('-1' + TextYear, pPeriodEndDate) + 1;
+      lInterventionLine.SETRANGE("Assigned Date",
+              pPeriodBeginDate, pPeriodEndDate);
+
+      //Nb interventions Prestataire
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      lNbIntervenvProv := lInterventionLine.COUNT;
+      lInterventionLine.SETRANGE(Claim, TRUE);
+      lNbIntervenvClaimedProv := lInterventionLine.COUNT;
+
+      //Nb interventions globales
+      lInterventionLine.SETRANGE("Provider No.");
+      lNbIntervenvClaimed := lInterventionLine.COUNT;
+      lInterventionLine.SETRANGE(Claim);
+      lNbIntervenv := lInterventionLine.COUNT;
+
+      IF lNbIntervenvProv > 0 THEN
+        lClaimRateProvider := lNbIntervenvClaimedProv / lNbIntervenvProv
+      ELSE
+        lClaimRateProvider := 0;
+      IF lNbIntervenv > 0 THEN
+        lClaimRateGlobal := lNbIntervenvClaimed / lNbIntervenv
+      ELSE
+        lClaimRateGlobal := 0;
+
+      IF lClaimRateGlobal > 0 THEN BEGIN
+        "lDiff%" := ((lClaimRateProvider - lClaimRateGlobal) / lClaimRateGlobal) * 100;
+        IF GetCalcClaimSetup(lCalculationClaimSetup, 0, '', "lDiff%") THEN
+          rNote := lCalculationClaimSetup.Score
+        ELSE
+          rNote := 20;
+      END ELSE
+        rNote := 20;
+    END;
+
+    PROCEDURE CalcTimeNote@1100281007(pProviderNo@1100281001 : Code[20];pPeriodEndDate@1100281000 : Date;VAR pNoteByMonthArray@1100281002 : ARRAY [12] OF Decimal;VAR pIntervNbByMonthArray@1100281004 : ARRAY [12] OF Decimal) rNoteGlobal : Decimal;
+    VAR
+      lInterventionLine@1100281008 : Record 50075;
+      lProcessStatusHistory@1100281010 : Record 50047;
+      lProcessStatus@1100281011 : Record 50042;
+      lProviderScoringBuffer@1100281012 : TEMPORARY Record 51005;
+      lScoringCalculationSetup@1100281013 : Record 50092;
+      lProcessTmp@1100281015 : TEMPORARY Record 50041;
+      lProcessCode@1100281005 : Code[20];
+      lBeginDate@1100281007 : Date;
+      lEndDate@1100281006 : Date;
+      lScoreTotal@1100281009 : Decimal;
+      lInterventionNb@1100281014 : Integer;
+      i@1100281003 : Integer;
+      lProviderScoringBuffer2@1100281016 : TEMPORARY Record 51005;
+      l@1100281017 : Integer;
+      lCountLine@1100281018 : Integer;
+      lCountMonth@1100281019 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //retour nb d'interventions clos mono corps d'‚tat d'un prestataire sur 12 mois glissants + Montant imput‚ en param
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETFILTER("Provider No.", pProviderNo);
+      //lInterventionLine.SETRANGE(Closed, TRUE);
+      lInterventionLine.SETRANGE("Intervention Status", lInterventionLine."Intervention Status"::Closed);
+      i := 1;
+      WHILE i < 13 DO BEGIN
+        lProviderScoringBuffer.DELETEALL;
+        lCountLine := 0;
+        CLEAR(lProviderScoringBuffer);
+        lScoreTotal := 0;
+        lInterventionNb := 0;
+        GetBeginEndDate(i, pPeriodEndDate, lBeginDate, lEndDate);
+        lInterventionLine.SETRANGE(
+          "Assigned Date",
+          lBeginDate, lEndDate);
+
+        IF lInterventionLine.FINDFIRST THEN
+          REPEAT
+            lProcessCode := '';
+            lProcessTmp.DELETEALL;
+            lProviderScoringBuffer2.RESET;
+            lProviderScoringBuffer2.DELETEALL;
+            lProcessStatusHistory.SETCURRENTKEY(
+              "Source Table ID","Source Key Code 1","Source Key Code 2",
+              "Source Key Integer 1","Source Key Integer 2","To Process Code","To Status No.");
+            lProcessStatusHistory.SETRANGE("Source Table ID", DATABASE::"Service Intervention Line");
+            lProcessStatusHistory.SETRANGE("Source Key Code 1", lInterventionLine."Service Header No.");
+            lProcessStatusHistory.SETRANGE("Source Key Integer 1", lInterventionLine."Line No.");
+
+            IF lProcessStatusHistory.FINDFIRST THEN BEGIN
+              REPEAT
+                IF lProcessStatus.GET(lProcessStatusHistory."To Process Code", lProcessStatusHistory."To Status No.") THEN BEGIN
+                  IF lProviderScoringBuffer.GET(pProviderNo, lProcessStatus."Process Code",
+                        '', '', '', '', 0) THEN BEGIN
+                    IF lProcessStatus.Reminder THEN
+                      lProviderScoringBuffer."Reminder Nb" += 1;
+                    lProviderScoringBuffer.MODIFY(TRUE);
+                  END ELSE BEGIN
+                    lProviderScoringBuffer.INIT;
+                    lProviderScoringBuffer."Provider No." := pProviderNo;
+                    lProviderScoringBuffer."Building Trade No." := lProcessStatus."Process Code";
+                    IF lProcessStatus.Reminder THEN
+                      lProviderScoringBuffer."Reminder Nb" := 1;
+                    lProviderScoringBuffer.INSERT(TRUE);
+                  END;
+                  IF lProviderScoringBuffer2.GET(pProviderNo, lProcessStatus."Process Code",
+                        '', '', '', '', 0) THEN BEGIN
+                    IF lProcessStatus.Reminder THEN
+                      lProviderScoringBuffer2."Reminder Nb" += 1;
+                    lProviderScoringBuffer2.MODIFY(TRUE);
+                  END ELSE BEGIN
+                    lProviderScoringBuffer2.INIT;
+                    lProviderScoringBuffer2."Provider No." := pProviderNo;
+                    lProviderScoringBuffer2."Building Trade No." := lProcessStatus."Process Code";
+                    IF lProcessStatus.Reminder THEN
+                      lProviderScoringBuffer2."Reminder Nb" := 1;
+                    lProviderScoringBuffer2.INSERT;
+                  END;
+                END;
+              UNTIL lProcessStatusHistory.NEXT = 0;
+            END;
+            IF lProviderScoringBuffer2.FINDFIRST THEN BEGIN
+              REPEAT
+                IF GetCalcClaimSetup(lScoringCalculationSetup, 1, lProviderScoringBuffer2."Building Trade No.",
+                    lProviderScoringBuffer2."Reminder Nb") THEN BEGIN
+                  lProviderScoringBuffer2.Score := lScoringCalculationSetup.Score;
+                  IF lProviderScoringBuffer.GET(lProviderScoringBuffer2."Provider No.", lProviderScoringBuffer2."Building Trade No.",
+                        '', '', '', '', 0) THEN BEGIN
+                    lProviderScoringBuffer.Score += lProviderScoringBuffer2.Score;
+                    lProviderScoringBuffer."Intervention Nb" += 1;
+                    lProviderScoringBuffer.MODIFY;
+                  END;
+                END;
+              UNTIL lProviderScoringBuffer2.NEXT = 0;
+            END;
+          UNTIL lInterventionLine.NEXT = 0;
+        IF lProviderScoringBuffer.FINDFIRST THEN
+          REPEAT
+            IF lProviderScoringBuffer."Intervention Nb" > 0 THEN BEGIN
+              lScoreTotal += (lProviderScoringBuffer.Score / lProviderScoringBuffer."Intervention Nb");
+              lCountLine += 1;
+            END;
+            lInterventionNb += lProviderScoringBuffer."Intervention Nb";
+          UNTIL lProviderScoringBuffer.NEXT = 0;
+        IF lCountLine > 0 THEN
+          pNoteByMonthArray[i] := lScoreTotal / lCountLine;
+        pIntervNbByMonthArray[i] := lInterventionLine.COUNT;
+        rNoteGlobal += pNoteByMonthArray[i];
+        i += 1;
+      END;
+      rNoteGlobal := rNoteGlobal / 12;
+    END;
+
+    PROCEDURE CalcQualityNote@1100281019(pProviderNo@1100281000 : Code[20];pPeriodBeginDate@1100281013 : Date;pPeriodEndDate@1100281003 : Date) rNote : Decimal;
+    VAR
+      lInterventionLine@1100281002 : Record 50075;
+      lNbInterv@1100281001 : Integer;
+      lScoringTotal@1100281004 : Decimal;
+    BEGIN
+      //IMH03 isat.zw
+      //Il s'agit de la moyenne des notes obtenues lors des diff‚rents contr“les effectu‚s sur la p‚riode s‚lectionn‚e.
+
+      ProviderSetup.GET;
+      lInterventionLine.SETCURRENTKEY("Provider No.",Claim,"Assigned Date","Service Header Claims No.");
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      lInterventionLine.SETRANGE("Assigned Date",
+              pPeriodBeginDate, pPeriodEndDate);
+      lInterventionLine.SETRANGE("Report Line Exist", TRUE);
+
+      //Nb interventions Prestataire
+      lNbInterv := lInterventionLine.COUNT;
+      IF lInterventionLine.FINDSET THEN
+        REPEAT
+          lScoringTotal += lInterventionLine."Quality Control Score";
+        UNTIL lInterventionLine.NEXT = 0;
+      IF lNbInterv <> 0 THEN
+        rNote := lScoringTotal / lNbInterv;
+    END;
+
+    LOCAL PROCEDURE GetCalcClaimSetup@1100281015(VAR pCalculationClaimSetup@1100281000 : Record 50092;pScoringType@1100281003 : 'Claim,Time';pProcessCode@1100281002 : Code[20];pValue@1100281001 : Decimal) : Boolean;
+    BEGIN
+      //IMH02 isat.zw
+      //obtenir le parametrage taux reclamation
+      //Les deux bornes incluent la valeur, le mini est en sup‚rieur ou ‚gal et le maxi en inf‚rieur ou ‚gal.
+      //La demande est de mettre le mini en sup‚rieur ou ‚gal et le maxi en inf‚rieur strictement.
+
+      pCalculationClaimSetup.SETRANGE("Scoring Type", pScoringType);
+      IF pScoringType = pScoringType::Time THEN
+        pCalculationClaimSetup.SETRANGE("Process Code", pProcessCode);
+
+      //pCalculationClaimSetup.SETFILTER("Min Value",'=%1|<=%2', 0, pValue);
+      //pCalculationClaimSetup.SETFILTER("Max Value", '=%1|>=%2', 0, pValue);
+      //IF pCalculationClaimSetup.FINDFIRST THEN;
+
+      pCalculationClaimSetup.SETFILTER("Min Value",'<=%1', pValue);
+      pCalculationClaimSetup.SETFILTER("Max Value", '>%1', pValue);
+      IF pCalculationClaimSetup.FINDFIRST THEN
+        EXIT(TRUE);
+      {
+      //D‚sactiv‚ mantis 2837
+      pCalculationClaimSetup.SETRANGE("Max Value", 0);
+      pCalculationClaimSetup.SETFILTER("Min Value",'<=%1', pValue);
+      IF pCalculationClaimSetup.FINDLAST THEN
+        EXIT(TRUE);
+
+      pCalculationClaimSetup.SETRANGE("Min Value",0);
+      pCalculationClaimSetup.SETFILTER("Max Value",'>=%1', pValue);
+      IF pCalculationClaimSetup.FINDFIRST THEN
+        EXIT(TRUE);
+      }
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE GetCategoryScoring@1100281046(VAR pScoringCategory@1100281000 : Record 50089;pCalculationType@1100281004 : ' ,Disponibility,Average Cost,Average Time,Time,Quality Control,Claim';pServOrderType@1100281002 : Code[20];pUrgent@1100281001 : Boolean) : Boolean;
+    BEGIN
+      //IMH02 isat.zw
+      //obtenir le parametrage taux reclamation
+      pScoringCategory.SETRANGE(Urgent, pUrgent);
+      pScoringCategory.SETFILTER(Type,'=%1|=%2', 0, pCalculationType);
+      pScoringCategory.SETFILTER("Service Order Type", '=%1|=%2', '', pServOrderType);
+      IF pScoringCategory.ISEMPTY THEN
+        EXIT(FALSE);
+
+      pScoringCategory.SETRANGE(Type, pCalculationType);
+      pScoringCategory.SETRANGE("Service Order Type", pServOrderType);
+      IF pScoringCategory.FINDFIRST THEN
+        EXIT(TRUE);
+
+      pScoringCategory.SETRANGE(Type, pCalculationType);
+      pScoringCategory.SETRANGE("Service Order Type", '');
+      IF pScoringCategory.FINDLAST THEN
+        EXIT(TRUE);
+
+      pScoringCategory.SETRANGE(Type, 0);
+      pScoringCategory.SETRANGE("Service Order Type", pServOrderType);
+      IF pScoringCategory.FINDFIRST THEN
+        EXIT(TRUE);
+      pScoringCategory.SETRANGE(Type, 0);
+      pScoringCategory.SETRANGE("Service Order Type", '');
+      IF pScoringCategory.FINDFIRST THEN
+        EXIT(TRUE);
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE CalcIntervNbByCorporate@1100281002(pProviderNo@1100281000 : Code[20];pCorporateNo@1100281001 : Code[20];pCorporateRegionCode@1000000000 : Code[10];pPeriodEndDate@1100281004 : Date;VAR pServOrderTypeArray@1100281002 : ARRAY [5] OF Code[10];VAR pResultByServOrderArray@1100281003 : ARRAY [6] OF Integer);
+    VAR
+      lInterventionLine@1100281007 : Record 50075;
+      lServOrderType@1100281006 : Record 5903;
+      lBeginDate@1100281008 : Date;
+      lEndDate@1100281010 : Date;
+      lCount@1100281009 : Integer;
+      i@1100281005 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //ventiler par grands comptes et par type produit(5 +important) l'ensemble des interventions
+      //tous statuts non annul‚ d'un prestataire
+
+      //recuperer 5 +impotants types produit d'un prestataire
+      //Get5ImportServOrderType(pProviderNo, pPeriodEndDate, pServOrderTypeArray);
+
+      lInterventionLine.SETCURRENTKEY("Provider No.");
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      lInterventionLine.SETRANGE("Corporate No.", pCorporateNo);
+      lInterventionLine.SETRANGE("Corporate Region Code", pCorporateRegionCode);
+
+      lInterventionLine.SETFILTER("Intervention Status", '<>%1', lInterventionLine."Intervention Status"::Cancel);
+      //lBeginDate := CALCDATE('<-1Y>', pPeriodEndDate) + 1;
+      GetCurrYearBeginEndDate(pPeriodEndDate, lBeginDate, lEndDate);
+
+      lInterventionLine.SETRANGE(
+        "Assigned Date",
+        lBeginDate, lEndDate);
+
+      FOR i := 1 TO 5 DO BEGIN
+        IF pServOrderTypeArray[i] <> '' THEN BEGIN
+          lInterventionLine.SETRANGE("Service Order Type", pServOrderTypeArray[i]);
+          pResultByServOrderArray[i] := lInterventionLine.COUNT;
+          lCount += pResultByServOrderArray[i];
+        END;
+      END;
+
+      //nb interventions des Autres types produit
+      lInterventionLine.SETRANGE("Service Order Type");
+      pResultByServOrderArray[6] := lInterventionLine.COUNT - lCount;
+    END;
+
+    PROCEDURE Get5ImportServOrderType@1100281003(pProviderNo@1100281001 : Code[20];pPeriodEndDate@1100281004 : Date;VAR pServOrderTypeArray@1100281000 : ARRAY [5] OF Code[10]);
+    VAR
+      lInterventionLine@1100281003 : Record 50075;
+      lServOrderType@1100281002 : Record 5903;
+      lBeginDate@1100281005 : Date;
+      lEndDate@1100281006 : Date;
+      lProviderScoringBuffer@1100281008 : TEMPORARY Record 51005;
+      i@1100281007 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //retourner les 5 types produit +importants pour un prestataire
+
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETRANGE("Provider No.", pProviderNo);
+      //lBeginDate := CALCDATE('<-1Y>', pPeriodEndDate) + 1;
+      GetCurrYearBeginEndDate(WORKDATE, lBeginDate, lEndDate);
+      lInterventionLine.SETRANGE(
+        "Assigned Date",
+        lBeginDate, lEndDate);
+
+      IF lServOrderType.FINDFIRST THEN
+        REPEAT
+          lInterventionLine.SETRANGE("Service Order Type", lServOrderType.Code);
+          lProviderScoringBuffer."Service Order Type" := lServOrderType.Code;
+          lProviderScoringBuffer.Score := lInterventionLine.COUNT;
+          IF lProviderScoringBuffer.Score <> 0 THEN
+            lProviderScoringBuffer.INSERT(FALSE);
+        UNTIL lServOrderType.NEXT = 0;
+
+      lProviderScoringBuffer.SETCURRENTKEY(Score);
+      lProviderScoringBuffer.ASCENDING(FALSE);
+      i := 1;
+      IF lProviderScoringBuffer.FINDFIRST THEN
+        REPEAT
+          pServOrderTypeArray[i] := lProviderScoringBuffer."Service Order Type";
+          i += 1;
+        UNTIL (lProviderScoringBuffer.NEXT = 0) OR (i > 5)
+    END;
+
+    PROCEDURE GetProvider3MainSpec@1100281004(pProviderNo@1100281000 : Code[20];VAR p3MainSpecTempTable@1100281001 : Record 50031);
+    VAR
+      lInterventionLine@1100281002 : Record 50075;
+      lServiceCode@1100281003 : Record 50040;
+      lSpecializationBuildingTrade@1100281006 : Record 50031;
+      lProviderScoringBuffer@1100281007 : TEMPORARY Record 51005;
+      i@1100281004 : Integer;
+      lBeginDate@1100281005 : Date;
+      lEndDate@1100281008 : Date;
+    BEGIN
+      //IMH02 isat.zw
+      //Fonction pour d‚terminer les 3 sp‚cialit‚s principales du prestataire
+      //retourner une table temporaire de 3 sp‚cialit‚s trouv‚
+
+      lInterventionLine.SETCURRENTKEY("Assigned Date","Provider No.","Intervention Status",Closed,"Multi specialities");
+      lInterventionLine.SETFILTER("Provider No.", pProviderNo);
+      //lInterventionLine.SETRANGE(Closed, TRUE);
+      lInterventionLine.SETRANGE("Intervention Status", lInterventionLine."Intervention Status"::Closed);
+      GetCurrYearBeginEndDate(WORKDATE, lBeginDate, lEndDate);
+      lInterventionLine.SETRANGE(
+        "Assigned Date",
+        lBeginDate, lEndDate);
+
+      IF lInterventionLine.FINDFIRST THEN
+        REPEAT
+          lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+          lServiceCode.SETRANGE("Service No.", lInterventionLine."Service No.");
+          lServiceCode.SETRANGE("Service Header No.", lInterventionLine."Service Header No.");
+          lServiceCode.SETRANGE("Intervention Line No.", lInterventionLine."Line No.");
+          lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+          IF lServiceCode.FINDFIRST THEN
+            REPEAT
+              IF lProviderScoringBuffer.GET(pProviderNo, lServiceCode."Building Trade No.",
+                    lServiceCode.Code, '', '', '', 0)
+              THEN BEGIN
+                lProviderScoringBuffer.Score += 1;
+                lProviderScoringBuffer.MODIFY(FALSE);
+              END ELSE BEGIN
+                lProviderScoringBuffer."Provider No." := pProviderNo;
+                lProviderScoringBuffer."Building Trade No." := lServiceCode."Building Trade No.";
+                lProviderScoringBuffer."Specialization Code" := lServiceCode.Code;
+                lProviderScoringBuffer.Score := 1;
+                lProviderScoringBuffer.INSERT(FALSE);
+              END;
+            UNTIL lServiceCode.NEXT = 0;
+        UNTIL lInterventionLine.NEXT = 0;
+
+      lProviderScoringBuffer.SETCURRENTKEY(Score);
+      lProviderScoringBuffer.ASCENDING(FALSE);
+      i := 1;
+      IF lProviderScoringBuffer.FINDFIRST THEN
+        REPEAT
+          IF lSpecializationBuildingTrade.GET(
+               lProviderScoringBuffer."Building Trade No.",
+               lProviderScoringBuffer."Specialization Code")
+          THEN BEGIN
+            p3MainSpecTempTable := lSpecializationBuildingTrade;
+            p3MainSpecTempTable.INSERT;
+            i += 1;
+          END;
+        UNTIL (lProviderScoringBuffer.NEXT = 0) OR (i > 3)
+    END;
+
+    PROCEDURE GetHistoryScoreByPeriod@1100281041(pProviderNo@1100281011 : Code[20];pBeginDate@1100281007 : Date;pEndDate@1100281008 : Date;VAR pGlobalNote@1100281006 : Decimal;VAR pDisponibilityNote@1100281005 : Decimal;VAR pAverageCostScore@1100281004 : Decimal;VAR pAverageTimeScore@1100281003 : Decimal;VAR pTimeScore@1100281002 : Decimal;VAR pQualityControlScore@1100281001 : Decimal;VAR pClaimScore@1100281000 : Decimal);
+    VAR
+      lProviderScoringLedgerEntry@1100281009 : Record 50088;
+      lCount@1100281010 : Integer;
+    BEGIN
+      //IMH02 isat.zw
+      //Calculer notes moyennes historique d'une p‚riode donn‚es
+
+      pGlobalNote := 0;
+      pDisponibilityNote := 0;
+      pAverageCostScore := 0;
+      pAverageTimeScore := 0;
+      pTimeScore := 0;
+      pQualityControlScore := 0;
+      pClaimScore := 0;
+
+      lProviderScoringLedgerEntry.SETRANGE("Provider No.", pProviderNo);
+      lProviderScoringLedgerEntry.SETRANGE("Creation Date",
+          CREATEDATETIME(pBeginDate, 0T), CREATEDATETIME(pEndDate + 1, 0T));
+      IF lProviderScoringLedgerEntry.FINDFIRST THEN
+        REPEAT
+          pGlobalNote += lProviderScoringLedgerEntry."Global Note";
+          pDisponibilityNote += lProviderScoringLedgerEntry."Disponibility Note";
+          pAverageCostScore += lProviderScoringLedgerEntry."Average Cost Note";
+          pAverageTimeScore += lProviderScoringLedgerEntry."Average Time Note";
+          pTimeScore += lProviderScoringLedgerEntry."Time Note";
+          pQualityControlScore += lProviderScoringLedgerEntry."Quality Control Note";
+          pClaimScore += lProviderScoringLedgerEntry."Claim Note";
+          lCount += 1;
+        UNTIL lProviderScoringLedgerEntry.NEXT = 0;
+      IF lCount > 0 THEN BEGIN
+        pGlobalNote := pGlobalNote / lCount;
+        pDisponibilityNote := pDisponibilityNote / lCount;
+        pAverageCostScore := pAverageCostScore / lCount;
+        pAverageTimeScore := pAverageTimeScore / lCount;
+        pTimeScore := pTimeScore / lCount;
+        pQualityControlScore := pQualityControlScore / lCount;
+        pClaimScore := pClaimScore / lCount;
+      END;
+    END;
+
+    PROCEDURE CreateScoringLedgerEntry@1100281011(VAR pCreatedEntryNo@1100281011 : Integer;pProviderNo@1100281008 : Code[20];pGlobalNote@1100281007 : Decimal;pDisponibilityNote@1100281006 : Decimal;pAverageCostScore@1100281005 : Decimal;pAverageTimeScore@1100281004 : Decimal;pTimeScore@1100281003 : Decimal;pQualityControlScore@1100281002 : Decimal;pClaimScore@1100281001 : Decimal;pBeginDate@1100281010 : Date;pEndDate@1100281009 : Date);
+    VAR
+      lProviderScoringLedgerEntry@1100281000 : Record 50088;
+    BEGIN
+      //IMH02 isat.zw
+      //Historique scoring prestataire
+
+      lProviderScoringLedgerEntry."Provider No." := pProviderNo;
+      lProviderScoringLedgerEntry."Global Note" := pGlobalNote;
+      lProviderScoringLedgerEntry."Disponibility Note" := pDisponibilityNote;
+      lProviderScoringLedgerEntry."Average Cost Note" := pAverageCostScore;
+      lProviderScoringLedgerEntry."Average Time Note" := pAverageTimeScore;
+      lProviderScoringLedgerEntry."Time Note" := pTimeScore;
+      lProviderScoringLedgerEntry."Quality Control Note" := pQualityControlScore;
+      lProviderScoringLedgerEntry."Claim Note" := pClaimScore;
+
+      lProviderScoringLedgerEntry."Disponibility Coefficient" := ProviderSetup."Scoring Disponibility Coef.";
+      lProviderScoringLedgerEntry."Average Cost Coefficient" := ProviderSetup."Scoring Average Cost Coef.";
+      lProviderScoringLedgerEntry."Average Time Coefficient" := ProviderSetup."Scoring Average Time Coef.";
+      lProviderScoringLedgerEntry."Time Coefficient" := ProviderSetup."Scoring Time Coefficient";
+      lProviderScoringLedgerEntry."Quality Control Coefficient" := ProviderSetup."Scoring Quality Control Coef.";
+      lProviderScoringLedgerEntry."Claim Coefficient" := ProviderSetup."Scoring Claim Coef.";
+
+      lProviderScoringLedgerEntry."Period Begin Date" := pBeginDate;
+      lProviderScoringLedgerEntry."Period End Date" := pEndDate;
+
+      lProviderScoringLedgerEntry.INSERT(TRUE);
+      pCreatedEntryNo := lProviderScoringLedgerEntry."Entry No.";
+    END;
+
+    PROCEDURE CreateMonthlScoring@1100281036(pProviderNo@1100281008 : Code[20];pYear@1100281001 : Integer;pMonth@1100281003 : Integer;pAverageCostScore@1100281005 : Decimal;pAverageTimeScore@1100281004 : Decimal;pBeginDate@1100281010 : Date;pEndDate@1100281009 : Date;pYearNoteEntryNo@1100281002 : Integer);
+    VAR
+      lProviderMonthlyScoring@1100281000 : Record 50112;
+    BEGIN
+      //IMH02 isat.zw
+      //Historique scoring prestataire par mois
+      WITH lProviderMonthlyScoring DO BEGIN
+        "Provider No." := pProviderNo;
+        Year := pYear;
+        "Month No." := pMonth;
+        "Average Cost Note" := pAverageCostScore;
+        "Average Time Note" := pAverageTimeScore;
+
+        "Period Begin Date" := pBeginDate;
+        "Period End Date" := pEndDate;
+        "Year Note Entry No." := pYearNoteEntryNo;
+
+        IF NOT INSERT(TRUE) THEN
+          MODIFY(TRUE);
+      END;
+    END;
+
+    PROCEDURE GetInvoicedAmount@1100281017(pProviderNo@1100281002 : Code[20];pPeriodEndDate@1100281000 : Date;VAR pInvoicedAmountArray@1100281004 : ARRAY [13] OF Decimal) : Decimal;
+    VAR
+      lProvider@1100281008 : Record 50000;
+      lVendorLedgerEntry@1100281003 : Record 25;
+      i@1100281001 : Integer;
+      lBeginDate@1100281007 : Date;
+      lEndDate@1100281006 : Date;
+      lCount@1100281005 : Integer;
+      lInvoiceAmount@1100281009 : Decimal;
+    BEGIN
+      lVendorLedgerEntry.SETCURRENTKEY("Vendor No.","Posting Date","Currency Code");
+      lProvider.GET(pProviderNo);
+      lVendorLedgerEntry.SETRANGE("Vendor No.", lProvider.GetVendorNo(pProviderNo));
+      lVendorLedgerEntry.SETRANGE(Open, FALSE);
+      lVendorLedgerEntry.SETFILTER("Document Type", '%1|%2',
+          lVendorLedgerEntry."Document Type"::Invoice, lVendorLedgerEntry."Document Type"::"Credit Memo");
+
+      i := 1;
+      WHILE i < 14 DO BEGIN
+        lInvoiceAmount := 0;
+        lCount := 0;
+        GetBeginEndDate(i, pPeriodEndDate, lBeginDate, lEndDate);
+        lVendorLedgerEntry.SETRANGE("Posting Date",
+          lBeginDate, lEndDate);
+
+        IF lVendorLedgerEntry.FINDFIRST THEN
+          REPEAT
+            lVendorLedgerEntry.CALCFIELDS("Amount (LCY)");
+            lInvoiceAmount += lVendorLedgerEntry."Amount (LCY)";
+          UNTIL lVendorLedgerEntry.NEXT = 0;
+        pInvoicedAmountArray[i] := -lInvoiceAmount;
+        i += 1;
+      END;
+    END;
+
+    PROCEDURE RecalcGlobalScoring@1100281027();
+    VAR
+      lProviderScoringLedgerEntry@1100281000 : Record 50088;
+      lProviderScoringLedgerEntry2@1100281002 : Record 50088;
+      lProvider@1100281001 : Record 50000;
+      lGlobalNote@1100281003 : Decimal;
+      lYearNoteEntryNo@1100281004 : Integer;
+    BEGIN
+      lProvider.SETCURRENTKEY(Enable,"Black List");
+      lProvider.SETRANGE("Black List", FALSE);
+      lProvider.SETRANGE(Exclusion, FALSE);
+      lProvider.SETRANGE(Enable, TRUE);
+      lProvider.SETFILTER(Status, '>=%1', lProvider.Status::Integration);
+      IF lProvider.FINDFIRST THEN
+        REPEAT
+          lProviderScoringLedgerEntry.SETRANGE("Provider No.", lProvider."No.");
+          IF lProviderScoringLedgerEntry.FINDLAST THEN BEGIN
+            lGlobalNote := CalcProviderScore(
+              lProviderScoringLedgerEntry."Disponibility Note",
+              lProviderScoringLedgerEntry."Average Cost Note",
+              lProviderScoringLedgerEntry."Average Time Note",
+              lProviderScoringLedgerEntry."Time Note",
+              lProviderScoringLedgerEntry."Quality Control Note",
+              lProviderScoringLedgerEntry."Claim Note");
+            CreateScoringLedgerEntry(lYearNoteEntryNo, lProvider."No.", lGlobalNote,
+              lProviderScoringLedgerEntry."Disponibility Note",
+              lProviderScoringLedgerEntry."Average Cost Note",
+              lProviderScoringLedgerEntry."Average Time Note",
+              lProviderScoringLedgerEntry."Time Note",
+              lProviderScoringLedgerEntry."Quality Control Note",
+              lProviderScoringLedgerEntry."Claim Note",
+              lProviderScoringLedgerEntry."Period Begin Date",
+              lProviderScoringLedgerEntry."Period End Date");
+            lProvider."Provider Scoring" := lGlobalNote;
+            lProvider.MODIFY(FALSE);
+          END;
+        UNTIL lProvider.NEXT = 0;
+    END;
+
+    PROCEDURE CalcSpecAverageCostTime@1000000000(pBeginDate@1000000004 : Date;pEndDate@1000000003 : Date);
+    VAR
+      lAvrgCustSpecProvScoringBuffer@1000000002 : TEMPORARY Record 51005;
+      lSpecialization@1000000000 : Record 50005;
+      lProviderScoringCalcHistory@1000000001 : Record 50155;
+      lBeginYear@1000000005 : Integer;
+      lEndYear@1000000006 : Integer;
+      lBeginMonth@1000000008 : Integer;
+      lEndMonth@1000000007 : Integer;
+      lInPeriod@1000000009 : Boolean;
+    BEGIN
+      lBeginYear := DATE2DMY(pBeginDate, 3);
+      lEndYear := DATE2DMY(pEndDate, 3);
+      lBeginMonth := DATE2DMY(pBeginDate, 2);
+      lEndMonth := DATE2DMY(pEndDate, 2);
+
+
+      lProviderScoringCalcHistory.SETRANGE("Provider No.", '');
+      lProviderScoringCalcHistory.SETFILTER("Specialization Code", '<>%1', '');
+      lProviderScoringCalcHistory.SETRANGE(Year, lBeginYear, lEndYear);
+      IF lProviderScoringCalcHistory.FINDSET THEN
+        REPEAT
+          lInPeriod := FALSE;
+          IF lProviderScoringCalcHistory.Year = lBeginYear THEN
+            IF lProviderScoringCalcHistory.Month >= lBeginMonth THEN
+              IF lProviderScoringCalcHistory.Year <> lEndYear THEN
+                lInPeriod := TRUE
+              ELSE
+                IF lProviderScoringCalcHistory.Month <= lEndMonth THEN
+                  lInPeriod := TRUE;
+          IF lProviderScoringCalcHistory.Year = lEndYear THEN
+            IF lProviderScoringCalcHistory.Month <= lEndMonth THEN
+              IF lProviderScoringCalcHistory.Year <> lBeginYear THEN
+                lInPeriod := TRUE
+              ELSE
+                IF lProviderScoringCalcHistory.Month >= lBeginMonth THEN
+                  lInPeriod := TRUE;
+          IF lInPeriod THEN BEGIN
+            lAvrgCustSpecProvScoringBuffer.SETRANGE("Specialization Code", lProviderScoringCalcHistory."Specialization Code");
+            IF NOT lAvrgCustSpecProvScoringBuffer.FINDFIRST THEN BEGIN
+              lAvrgCustSpecProvScoringBuffer."Specialization Code" := lProviderScoringCalcHistory."Specialization Code";
+              lAvrgCustSpecProvScoringBuffer."Intervention Nb" := lProviderScoringCalcHistory."Intervention Nb";
+              lAvrgCustSpecProvScoringBuffer."Intervention Amount" := lProviderScoringCalcHistory."Intervention Amount";
+              lAvrgCustSpecProvScoringBuffer."Interv. Period Total" := lProviderScoringCalcHistory."Interv. Period Total";
+              lAvrgCustSpecProvScoringBuffer.INSERT;
+            END ELSE BEGIN
+              lAvrgCustSpecProvScoringBuffer."Intervention Nb" += lProviderScoringCalcHistory."Intervention Nb";
+              lAvrgCustSpecProvScoringBuffer."Intervention Amount" += lProviderScoringCalcHistory."Intervention Amount";
+              lAvrgCustSpecProvScoringBuffer."Interv. Period Total" += lProviderScoringCalcHistory."Interv. Period Total";
+              lAvrgCustSpecProvScoringBuffer.MODIFY;
+            END;
+          END;
+        UNTIL lProviderScoringCalcHistory.NEXT = 0;
+
+      lAvrgCustSpecProvScoringBuffer.RESET;
+      IF lAvrgCustSpecProvScoringBuffer.FINDSET THEN
+        REPEAT
+          IF lSpecialization.GET(lAvrgCustSpecProvScoringBuffer."Specialization Code") THEN BEGIN
+            IF lAvrgCustSpecProvScoringBuffer."Intervention Nb" <> 0 THEN BEGIN
+              lSpecialization."Average Cost" :=
+                ROUND(lAvrgCustSpecProvScoringBuffer."Intervention Amount"/lAvrgCustSpecProvScoringBuffer."Intervention Nb", 1/100);
+              lSpecialization."Average Time" :=
+                lAvrgCustSpecProvScoringBuffer."Interv. Period Total"/lAvrgCustSpecProvScoringBuffer."Intervention Nb";
+              lSpecialization.MODIFY(FALSE);
+            END;
+          END;
+        UNTIL lAvrgCustSpecProvScoringBuffer.NEXT = 0;
+    END;
+
+    PROCEDURE PrintScoringProvider@1100281032();
+    BEGIN
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 06/04/12 @a ISAT.ZW @v IMH6.01.105 @s Scoring @h mantis 3304
+          @c Calcul cout/d‚lai moyen, base de calcul : Date d'assignation --> date de cloture */
+      /** @r IMH03 @d 06/04/12 @a ISAT.ZW @v IMH6.01.105 @s Scoring @c Note Qualit‚ */
+      /** @r IMH02 @d 20/01/11 @a ISAT.ZW @v IMH6.01.105 @s Scoring @c Fonctions de gestion scoring */
+      /** @r IMH01 @d 06/12/10 @a ISAT.PC @v IMH6.01.105 @s Scoring @c Creation Objet
+          @c Pour la gestion de la mise … jour du score prestataire */
+    }
+    END.
+  }
+}

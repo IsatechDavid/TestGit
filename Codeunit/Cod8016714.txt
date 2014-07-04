@@ -1,0 +1,573 @@
+OBJECT Codeunit 8016714 EAI Task Process Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=22/02/13;
+    Time=11:53:52;
+    Modified=Yes;
+    Version List=ISAEAI1.00,IMH6.01,OPTIM;
+  }
+  PROPERTIES
+  {
+    TableNo=8016702;
+    OnRun=BEGIN
+            Process := Rec;
+            RunCode;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Process@1100481000 : Record 8016702;
+      ProcessTask@1100481007 : Record 8016716;
+      ProcessPlan@1100481001 : Record 8016750;
+      ProcessPlanDetail@1100481002 : Record 8016751;
+      UpdateProcess@1100481003 : Boolean;
+      UpdateProcessTask@1100481004 : Boolean;
+      CurrDate@1100481005 : Date;
+      CurrTime@1100481006 : Time;
+
+    LOCAL PROCEDURE RunCode@1100481002();
+    BEGIN
+      CurrDate := TODAY;
+      CurrTime := TIME;
+
+      IF Process.Type <> Process.Type::Task THEN
+        EXIT;
+
+      IF NOT IsProcessToExecute THEN
+        EXIT;
+
+      UpdateProcess := FALSE;
+      UpdateProcessTask := FALSE;
+
+      ExecuteAllTasks;
+    END;
+
+    LOCAL PROCEDURE CheckExecuteAllTasks@1100481000();
+    VAR
+      lProcessTask@1100481000 : Record 8016716;
+    BEGIN
+      // Fonction de test d'ex‚cution de toutes les tƒches
+
+      MESSAGE('Processus %1 ok',Process.Code);
+
+      IF NOT UpdateProcessMaxDuration THEN
+        EXIT;
+
+      lProcessTask.SETCURRENTKEY("EAI Process Code","Execution Order No.");
+      lProcessTask.SETRANGE("EAI Process Code",Process.Code);
+      lProcessTask.SETRANGE(Activated,TRUE);
+      // << EAI04 ISAT.EB
+      IF lProcessTask.ISEMPTY THEN
+        EXIT;
+
+      lProcessTask.FINDSET(TRUE);
+      REPEAT
+        ProcessTask := lProcessTask;
+        IF IsTaskToExecute THEN BEGIN
+          IF NOT UpdateProcessTaskMaxDuration THEN
+            EXIT;
+
+          MESSAGE('Tƒche %1 ok',ProcessTask."EAI Process Task Code");
+
+          UpdateProcess := TRUE;
+          UpdateProcessTask := TRUE;
+
+          IF UpdateProcessTask THEN
+            DeleteProcessTaskMaxDuration;
+        END;
+      UNTIL lProcessTask.NEXT = 0;
+      // >> EAI04 ISAT.EB
+
+      IF UpdateProcess THEN
+        DeleteProcessMaxDuration;
+    END;
+
+    LOCAL PROCEDURE ExecuteAllTasks@1100481001();
+    VAR
+      lProcessTask@1100481000 : Record 8016716;
+      lNASHandler@1100481001 : Codeunit 8016720;
+      lEAILogMgt@1180044000 : Codeunit 8016711;
+      ltext000@1180044001 : TextConst 'ENU=Start Process %1 at %2 %3;FRA=D‚but processus %1 … %2 %3';
+      ltext001@1180044002 : TextConst 'ENU=End Process %1 at %2 %3;FRA=Fin processus %1 … %2 %3';
+    BEGIN
+      // Fonction d'ex‚cution de toutes les tƒches
+
+      IF NOT UpdateProcessMaxDuration THEN
+        EXIT;
+
+      lProcessTask.SETCURRENTKEY("EAI Process Code","Execution Order No.");
+      lProcessTask.SETRANGE("EAI Process Code",Process.Code);
+      lProcessTask.SETRANGE(Activated,TRUE);
+      // << EAI04 ISAT.EB
+      IF lProcessTask.ISEMPTY THEN
+        EXIT;
+
+      lProcessTask.FINDSET(TRUE);
+      lEAILogMgt.AddInfoToTaskProcessLog(
+                 lProcessTask."EAI Process Code",'',STRSUBSTNO(ltext000,lProcessTask."EAI Process Code",TODAY,TIME));
+
+      REPEAT
+        ProcessTask := lProcessTask;
+        IF lNASHandler.IsProcessExpired(Process) THEN
+          EXIT;
+
+        ExecuteTask;
+      UNTIL lProcessTask.NEXT = 0;
+
+      lEAILogMgt.AddInfoToTaskProcessLog(
+                 lProcessTask."EAI Process Code",'',STRSUBSTNO(ltext001,lProcessTask."EAI Process Code",TODAY,TIME));
+      // >> EAI04 ISAT.EB
+
+      IF UpdateProcess THEN
+        DeleteProcessMaxDuration;
+    END;
+
+    LOCAL PROCEDURE ExecuteTask@1100481005();
+    VAR
+      lEAILogMgt@1100481000 : Codeunit 8016711;
+      ltext000@1180044001 : TextConst 'ENU=Start Task %1 at %2 %3;FRA=D‚but tƒche %1 … %2 %3';
+      ltext001@1180044000 : TextConst 'ENU=End Task %1 at %2 %3;FRA=Fin tƒche %1 … %2 %3';
+      lNASHandler@1100281000 : Codeunit 8016720;
+    BEGIN
+      // Fonction d'ex‚cution de la tƒche
+
+      IF NOT IsTaskToExecute THEN
+        EXIT;
+
+      IF NOT UpdateProcessTaskMaxDuration THEN
+        EXIT;
+
+      UpdateProcessTask := FALSE;
+
+      // << EAI04 ISAT.EB
+      lEAILogMgt.AddInfoToTaskProcessLog(
+                 ProcessTask."EAI Process Code",ProcessTask."EAI Process Task Code",
+                 STRSUBSTNO(ltext000,ProcessTask."EAI Process Task Code",TODAY,TIME));
+
+      COMMIT;
+      // >> EAI04 ISAT.EB
+      CASE ProcessTask."Object Type" OF
+        ProcessTask."Object Type"::" " : BEGIN
+          EXIT;
+        END;
+
+        ProcessTask."Object Type"::Report : BEGIN
+          UpdateProcess := TRUE;
+          UpdateProcessTask := TRUE;
+          SetTaskTimeOut(TRUE); //EAI05.ST
+      //<<EAI06.ST
+      //    REPORT.RUNMODAL(ProcessTask."Object ID",FALSE);
+          CLEARLASTERROR;
+          IF NOT CODEUNIT.RUN(CODEUNIT::"EAI Task Launcher", ProcessTask) THEN
+            lEAILogMgt.AddErrorToTaskProcessLog(
+               ProcessTask."EAI Process Code",ProcessTask."EAI Process Task Code",GETLASTERRORTEXT)
+          ELSE
+      //>>EAI06.ST
+          lEAILogMgt.AddInfoToTaskProcessLog(ProcessTask."EAI Process Code",ProcessTask."EAI Process Task Code",
+                                              ProcessTask.Description); // EAI03 isat.sf
+        END;
+
+        ProcessTask."Object Type"::Codeunit : BEGIN
+          UpdateProcess := TRUE;
+          UpdateProcessTask := TRUE;
+          SetTaskTimeOut(TRUE); //EAI05.ST
+      //<<EAI06.ST
+      //    IF NOT CODEUNIT.RUN(ProcessTask."Object ID") THEN
+          CLEARLASTERROR;
+          IF NOT CODEUNIT.RUN(CODEUNIT::"EAI Task Launcher", ProcessTask) THEN
+      //>>EAI06.ST
+            lEAILogMgt.AddErrorToTaskProcessLog(
+               ProcessTask."EAI Process Code",ProcessTask."EAI Process Task Code",GETLASTERRORTEXT)
+          ELSE
+            lEAILogMgt.AddInfoToTaskProcessLog(ProcessTask."EAI Process Code",ProcessTask."EAI Process Task Code",
+                                              ProcessTask.Description); // EAI03 isat.sf
+        END;
+      END;
+      SetTaskTimeOut(FALSE); //EAI05.ST
+      // << EAI04 ISAT.EB
+      COMMIT;
+
+      lEAILogMgt.AddInfoToTaskProcessLog(
+                 ProcessTask."EAI Process Code",ProcessTask."EAI Process Task Code",
+                 STRSUBSTNO(ltext001,ProcessTask."EAI Process Task Code",TODAY,TIME));
+      // >> EAI04 ISAT.EB
+
+      IF UpdateProcessTask THEN
+        DeleteProcessTaskMaxDuration;
+    END;
+
+    LOCAL PROCEDURE IsProcessToExecute@1100481003() ReturnValue : Boolean;
+    VAR
+      lProcessPlan@1100481000 : Record 8016750;
+      lText000@1100481001 : TextConst 'FRA=%1:%2:%3T';
+    BEGIN
+      // Contr“le que le processus est … ex‚cuter
+
+      ReturnValue := FALSE;
+
+      // << EAI04 ISAT.EB
+      COMMIT;
+      SELECTLATESTVERSION;
+      // >> EAI04 ISAT.EB
+
+      WITH lProcessPlan DO BEGIN
+        SETRANGE("EAI Process Code",Process.Code);
+        SETRANGE(Activated,TRUE);
+        IF ISEMPTY THEN
+          EXIT;
+
+        // Selon jour actuel heure fixe
+        SETRANGE("Planification Day",DATE2DWY(CurrDate,1));
+        SETRANGE("Planification Type","Planification Type"::"Fixed Time");
+        SETRANGE("Begin Time",ConvertTimeStr(CurrTime,1),ConvertTimeStr(CurrTime,2));
+        IF FINDFIRST THEN BEGIN
+          ProcessPlan := lProcessPlan;
+          ReturnValue := TRUE;
+          EXIT;
+        END;
+
+        // Selon jour actuel p‚riodique
+        SETRANGE("Planification Day",DATE2DWY(CurrDate,1));
+        SETRANGE("Planification Type","Planification Type"::Periodic);
+        SETFILTER("Begin Time",'<=%1',CurrTime);
+        SETFILTER("End Time",'>=%1',CurrTime);
+        IF FINDFIRST THEN BEGIN
+          REPEAT
+            IF CheckTime(CurrTime,"Begin Time",Frequency) THEN BEGIN
+              ProcessPlan := lProcessPlan;
+              ReturnValue := TRUE;
+              EXIT;
+            END;
+          UNTIL NEXT = 0;
+        END;
+
+        // Chaque jour heure fixe
+        SETRANGE("Planification Day","Planification Day"::"Every day");
+        SETRANGE("Planification Type","Planification Type"::"Fixed Time");
+        SETRANGE("Begin Time",ConvertTimeStr(CurrTime,1),ConvertTimeStr(CurrTime,2));
+        SETRANGE("End Time");
+        IF FINDFIRST THEN BEGIN
+          ProcessPlan := lProcessPlan;
+          ReturnValue := TRUE;
+          EXIT;
+        END;
+
+        // Chaque jour p‚riodique
+        SETRANGE("Planification Day","Planification Day"::"Every day");
+        SETRANGE("Planification Type","Planification Type"::Periodic);
+        SETFILTER("Begin Time",'<=%1',CurrTime);
+        SETFILTER("End Time",'>=%1',CurrTime);
+        IF FINDFIRST THEN BEGIN
+          REPEAT
+            IF CheckTime(CurrTime,"Begin Time",Frequency) THEN BEGIN
+              ProcessPlan := lProcessPlan;
+              ReturnValue := TRUE;
+              EXIT;
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE IsTaskToExecute@1100481004() ReturnValue : Boolean;
+    BEGIN
+      // Contr“le que la tƒche est … ex‚cuter
+
+      ReturnValue := FALSE;
+
+      ProcessPlanDetail.SETRANGE("EAI Process Code",ProcessTask."EAI Process Code");
+      ProcessPlanDetail.SETRANGE("Line No.",ProcessPlan."Line No.");
+      ProcessPlanDetail.SETRANGE("EAI Process Task Code",ProcessTask."EAI Process Task Code");
+      ProcessPlanDetail.SETRANGE(Activated,TRUE);
+      IF ProcessPlanDetail.ISEMPTY THEN
+        EXIT;
+      ProcessPlanDetail.FINDFIRST;
+
+      ReturnValue := TRUE;
+    END;
+
+    LOCAL PROCEDURE ConvertTimeStr@1100481015(pTime@1100481000 : Time;pOption@1100481001 : ' ,MinuteBegin,MinuteEnd') ReturnValue : Time;
+    VAR
+      lTimeText@1100481002 : Text[12];
+    BEGIN
+      // Fonction de conversion d'une heure en date
+
+      ReturnValue := pTime;
+
+      CASE pOption OF
+        pOption::" " : EXIT;
+
+        pOption::MinuteBegin : BEGIN
+          lTimeText := STRSUBSTNO('%1:%2:00,000',FORMAT(CurrTime,0,'<Hours24>'),FORMAT(CurrTime,0,'<Minute,2>'));
+        END;
+
+        pOption::MinuteEnd : BEGIN
+          lTimeText := STRSUBSTNO('%1:%2:59,999',FORMAT(CurrTime,0,'<Hours24>'),FORMAT(CurrTime,0,'<Minute,2>'));
+        END;
+      END;
+
+      IF EVALUATE(ReturnValue,lTimeText) THEN;
+    END;
+
+    LOCAL PROCEDURE CheckTime@1100481016(pTime@1100481000 : Time;pBeginTime@1100481001 : Time;pFrequency@1100481002 : Integer) ReturnValue : Boolean;
+    VAR
+      lTimeMinute@1100481003 : Integer;
+      lBeginTimeMinute@1100481004 : Integer;
+      lInteger@1100481005 : Integer;
+    BEGIN
+      // Contr“le heure pour planification p‚riodique
+
+      ReturnValue := FALSE;
+
+      IF pFrequency <= 0 THEN
+        EXIT;
+
+      EVALUATE(lInteger,FORMAT(pTime,0,'<Hours24>'));
+      lTimeMinute := lInteger*60;
+      EVALUATE(lInteger,FORMAT(pTime,0,'<Minute,2>'));
+      lTimeMinute := lTimeMinute + lInteger;
+
+      EVALUATE(lInteger,FORMAT(pBeginTime,0,'<Hours24>'));
+      lBeginTimeMinute := lInteger*60;
+      EVALUATE(lInteger,FORMAT(pBeginTime,0,'<Minute,2>'));
+      lBeginTimeMinute := lBeginTimeMinute + lInteger;
+
+      //IF lTimeMinute > lBeginTimeMinute THEN
+      //  EXIT;
+
+      ReturnValue := (((lTimeMinute - lBeginTimeMinute) MOD pFrequency) = 0);
+    END;
+
+    LOCAL PROCEDURE CalcEndDateTime@1100481007(pBeginDate@1100481000 : Date;pBeginTime@1100481001 : Time;pMaxDuration@1100481002 : Integer;VAR pEndDate@1100481003 : Date;VAR pEndTime@1100481004 : Time);
+    VAR
+      lBeginHour@1100481011 : Integer;
+      lBeginMinute@1100481010 : Integer;
+      lBeginMinuteNb@1100481009 : Integer;
+      lEndMinuteNb@1100481008 : Integer;
+      lEndHour@1100481007 : Integer;
+      lEndMinute@1100481006 : Integer;
+      lEndTimeText@1100481005 : Text[8];
+    BEGIN
+      // Calcul date et heure fin … partir date et heure d‚but plus dur‚e max
+
+      IF pMaxDuration = 0 THEN BEGIN
+      //EVALUATE(pEndDate,'31/12/9999');
+      //pEndTime := 235959T;
+        pEndDate := 0D;
+        pEndTime := 0T;
+        EXIT;
+      END;
+
+      EVALUATE(lBeginHour,FORMAT(pBeginTime,0,'<Hours24>'));
+      EVALUATE(lBeginMinute,FORMAT(pBeginTime,0,'<Minutes,2>'));
+
+      lBeginMinuteNb := lBeginHour * 60 + lBeginMinute;
+      lEndMinuteNb := lBeginMinuteNb + pMaxDuration;
+
+      IF lEndMinuteNb >= 1440 THEN BEGIN
+        pEndDate := pBeginDate + 1;
+        lEndMinuteNb := lEndMinuteNb - 1440;
+      END ELSE BEGIN
+        pEndDate := pBeginDate;
+      END;
+
+      lEndMinute := lEndMinuteNb MOD 60;
+      lEndHour := (lEndMinuteNb - lEndMinute) / 60;
+
+      CASE lEndHour OF
+        0..9 : BEGIN
+          lEndTimeText := STRSUBSTNO('0%1',lEndHour);
+        END;
+
+        ELSE BEGIN
+          lEndTimeText := STRSUBSTNO('%1',lEndHour);
+        END;
+      END;
+
+      CASE lEndMinute OF
+        0..9 : BEGIN
+          lEndTimeText := STRSUBSTNO('%1:0%2:00',lEndTimeText,lEndMinute);
+        END;
+
+        ELSE BEGIN
+          lEndTimeText := STRSUBSTNO('%1:%2:00',lEndTimeText,lEndMinute);
+        END;
+      END;
+
+      EVALUATE(pEndTime,lEndTimeText);
+    END;
+
+    LOCAL PROCEDURE UpdateProcessMaxDuration@1100481027() ReturnValue : Boolean;
+    VAR
+      lProcessPlan@1100481001 : Record 8016750;
+      lNASHandler@1100481000 : Codeunit 8016720;
+    BEGIN
+      ReturnValue := FALSE;
+
+      COMMIT;
+      SELECTLATESTVERSION;
+
+      WITH ProcessPlan DO BEGIN
+        lProcessPlan := ProcessPlan;
+
+        "Last User Name" := USERID;
+        "Last Begin Date" := TODAY;
+        "Last Begin Time" := TIME;
+        CalcEndDateTime("Last Begin Date","Last Begin Time","Max Duration","Last End Date","Last End Time");
+      END;
+
+      WITH Process DO BEGIN
+        "Current Max Date" := ProcessPlan."Last End Date";
+        "Current Max Time" := ProcessPlan."Last End Time";
+        "Current User Name" := USERID;
+        //<<IMH01.PC
+        "Last Max. Date" := "Current Max Date";
+        "Last Max. Time" := "Current Max Time";
+        "Last User Name" := "Current User Name";
+        //>>IMH01.PC
+        ReturnValue := lNASHandler.AddProcessTemp(Process);
+      END;
+
+      WITH ProcessPlan DO BEGIN
+        IF ReturnValue THEN BEGIN
+          "Last End Date" := 0D;
+          "Last End Time" := 0T;
+          MODIFY;
+        END ELSE BEGIN
+          ProcessPlan := lProcessPlan;
+        END;
+      END;
+
+      COMMIT;
+    END;
+
+    LOCAL PROCEDURE UpdateProcessTaskMaxDuration@1100481028() ReturnValue : Boolean;
+    VAR
+      lProcessPlanDetail@1100481001 : Record 8016751;
+      lNASHandler@1100481000 : Codeunit 8016720;
+    BEGIN
+      ReturnValue := FALSE;
+
+      COMMIT;
+      SELECTLATESTVERSION;
+
+      WITH ProcessPlanDetail DO BEGIN
+        lProcessPlanDetail := ProcessPlanDetail;
+
+        "Last User Name" := USERID;
+        "Last Begin Date" := TODAY;
+        "Last Begin Time" := TIME;
+        CalcEndDateTime("Last Begin Date","Last Begin Time","Max Duration","Last End Date","Last End Time");
+      END;
+
+      WITH ProcessTask DO BEGIN
+        "Current Max Date" := ProcessPlanDetail."Last End Date";
+        "Current Max Time" := ProcessPlanDetail."Last End Time";
+        "Current User Name" := USERID;
+        //<<IMH01.PC
+        "Last Max. Date" := "Current Max Date";
+        "Last Max. Time" := "Current Max Time";
+        "Last User Name" := "Current User Name";
+        //>>IMH01.PC
+        ReturnValue := lNASHandler.AddProcessTaskTemp(ProcessTask);
+      END;
+
+      WITH ProcessPlanDetail DO BEGIN
+        IF ReturnValue THEN BEGIN
+          "Last End Date" := 0D;
+          "Last End Time" := 0T;
+          MODIFY;
+        END ELSE BEGIN
+          ProcessPlanDetail := lProcessPlanDetail;
+        END;
+      END;
+
+      COMMIT;
+    END;
+
+    LOCAL PROCEDURE DeleteProcessMaxDuration@1100481013();
+    VAR
+      lNASHandler@1100481000 : Codeunit 8016720;
+    BEGIN
+      COMMIT;
+      SELECTLATESTVERSION;
+
+      WITH ProcessPlan DO BEGIN
+        "Last End Date" := TODAY;
+        "Last End Time" := TIME;
+        MODIFY;
+      END;
+
+      WITH Process DO BEGIN
+        "Current Max Date" := 0D;
+        "Current Max Time" := 0T;
+        "Current User Name" := '';
+        lNASHandler.DeleteProcessTemp(Process);
+      END;
+
+      COMMIT;
+    END;
+
+    LOCAL PROCEDURE DeleteProcessTaskMaxDuration@1100481012();
+    VAR
+      lNASHandler@1100481000 : Codeunit 8016720;
+    BEGIN
+      COMMIT;
+      SELECTLATESTVERSION;
+
+      WITH ProcessPlanDetail DO BEGIN
+        "Last End Date" := TODAY;
+        "Last End Time" := TIME;
+        MODIFY;
+      END;
+
+      WITH ProcessTask DO BEGIN
+        "Current Max Date" := 0D;
+        "Current Max Time" := 0T;
+        "Current User Name" := '';
+        lNASHandler.DeleteProcessTaskTemp(ProcessTask);
+      END;
+
+      COMMIT;
+    END;
+
+    PROCEDURE SetTaskTimeOut@1100281000(pSetTimeOut@1100281003 : Boolean);
+    VAR
+      lProcDateTime@1100281000 : DateTime;
+      lTaskDateTime@1100281001 : DateTime;
+      lNASHandler@1100281002 : Codeunit 8016720;
+    BEGIN
+      //EAI05.ST
+      IF pSetTimeOut THEN BEGIN
+        lProcDateTime := CREATEDATETIME(Process."Current Max Date", Process."Current Max Time");
+        lTaskDateTime := CREATEDATETIME(ProcessTask."Current Max Date", ProcessTask."Current Max Time");
+        IF lProcDateTime < lTaskDateTime THEN
+          lNASHandler.SetTaskTimeOut(ProcessTask, lProcDateTime)
+        ELSE
+          lNASHandler.SetTaskTimeOut(ProcessTask, lTaskDateTime)
+      END
+      ELSE BEGIN
+        lNASHandler.SetTaskTimeOut(ProcessTask, 0DT);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 22/02/13 @a ISAT.PC @v IMH6.01.P008 @s Pour suivre les process @c Sauvegarde des dur‚es max. */
+      /** @r EAI06 @d 05/12/11 @a ISAT.ST @v ISAEAI5.01.00.00 @s Stabilisation processus … tƒches
+          @c Appel codeunit TaskLauncher */
+      /** @r EAI05 @d 27/01/11 @a ISAT.ST @v ISAEAI5.01.00.00 @s Stabilisation processus … tƒches
+          @c Gestion des TimeOuts */
+      /** @r EAI04 @d 10/08/10 @a ISAT.EB @v ISAEAI5.01.00.00 @s Stabilisation processus … tƒches */
+      /** @r EAI03 @d 04/08/10 @a ISAT.SF @v ISAEAI5.01.00.00 @s Gestion du journal - infos */
+      /** @r EAI02 @d 27/05/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Gestion des erreurs (cas utilisation Codeunit) */
+      /** @r EAI01 @d 06/04/09 @a ISAT.EB @v ISAEAI5.01.00.00 @s Finalisation processus … tƒches */
+      /** @r EAI00 @d 16/03/09 @a ISAT.EB @v ISAEAI5.01.00.00 @s Cr‚ation de l'objet
+          @c Codeunit de gestion des processus … tƒches */
+    }
+    END.
+  }
+}

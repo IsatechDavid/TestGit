@@ -1,0 +1,492 @@
+OBJECT Report 50033 Governement Header
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/09/13;
+    Time=16:12:55;
+    Modified=Yes;
+    Version List=IMH6.01,AOUT;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Governement Header;
+               FRA=Bon … payer];
+    TopMargin=1500;
+    BottomMargin=1500;
+    LeftMargin=1500;
+    OnPreReport=BEGIN
+                  CompanyInfo.GET;
+                  CompanyInfo.CALCFIELDS(Picture);
+                END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50145;
+        OnAfterGetRecord=VAR
+                           lRecRef@1100281000 : RecordRef;
+                         BEGIN
+                           PDFManagement.SetParameters(lRecRef, 50033);
+                           ToFilePath := PDFManagement.GetDirectory;
+                           ToFilePath := ToFilePath +
+                             "No." + '_' + FORMAT(CURRENTDATETIME, 0, '<Day,2>_<Month,2>_<Year>_<Hours24>_<Minutes,2>') + '\';
+                         END;
+
+        ReqFilterFields=No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18660;
+            SectionHeight=0;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table25;
+        DataItemTableView=SORTING(Transmission No.);
+        NewPagePerRecord=Yes;
+        OnAfterGetRecord=VAR
+                           lContact@1100281001 : Record 5050;
+                           lServiceHeader@1100281003 : Record 5900;
+                           lProviderAgreement@1100281002 : Record 50012;
+                           lServiceFormMgt@1100281000 : Codeunit 50086;
+                           lCorporateRegion@1100281004 : Record 50058;
+                           lVend@1100281005 : Record 23;
+                         BEGIN
+                           IF "Corporate No." = '' THEN
+                             CurrReport.SKIP;
+
+                           IF NOT GrandCompte.GET("Corporate No.") THEN
+                             CurrReport.SKIP;
+
+                           IF NOT Service.GET("Service No.") THEN
+                             CurrReport.SKIP;
+
+                           IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.") THEN
+                             CurrReport.SKIP;
+
+                           IF Provider.GET("Vendor No.") THEN BEGIN
+                             //<<IMH04.ISAT.EBA
+                             //Provider.INIT;
+                             AgreementCode := Provider.GetAgreement(
+                               "Corporate No.",
+                               "Corporate Region Code",
+                               lServiceHeader."Service Order Type");
+                           END ELSE BEGIN
+                             AgreementCode := '';
+
+                             lVend.GET("Vendor No.");
+                             CLEAR(Provider);
+
+                             Provider.Name := lVend.Name;
+                             Provider.Address := lVend.Address;
+                             Provider."Address 2" := lVend."Address 2";
+                             Provider."Post Code" := lVend."Post Code";
+                             Provider.City := lVend.City;
+                             //>>IMH04.ISAT.EBA
+                           END;
+
+                           OrgLevelDesc := '';
+                           IF lContact.GET(Service."Corporate Contact No.") THEN BEGIN
+                             OrgLevelDesc := lServiceFormMgt.OrgLevel_Desc(lContact."Organizational Level Code");
+                           END;
+
+                           IF lCorporateRegion.GET("Corporate No.","Corporate Region Code") THEN
+                             IF NOT CorporateRegion.GET(lCorporateRegion."Sell-to Customer No.") THEN
+                               CurrReport.SKIP;
+
+                           //IF NOT lProviderAgreement.GET(Provider."No.",lServiceHeader."Corporate No.",lServiceHeader."Service Order Type") THEN
+                           //  lProviderAgreement.INIT;
+
+                           //<<IMH04.ISAT.EBA
+                           //Provider.GET(Provider."No.");
+                           //>>IMH04.ISAT.EBA
+
+                           // Agr‚ment
+
+                           //<<IMH03.ISAT.EBA
+                           {**
+                           lCorporateRegion.SETRANGE("Corporate No.","Corporate No.");
+                           lCorporateRegion.SETRANGE("Region Code","Corporate Region Code");
+                           IF lCorporateRegion.FINDFIRST THEN BEGIN
+                             lProviderAgreement.SETRANGE("Provider No.",Provider."No.");
+                             lProviderAgreement.SETRANGE("Corporate No.",lCorporateRegion."Sell-to Customer No.");
+                             lProviderAgreement.SETFILTER("Service Order Type",'%1|%2','',lServiceHeader."Service Order Type");
+                             lProviderAgreement.SETRANGE("Exclusion Type",lProviderAgreement."Exclusion Type"::Agree);
+                             IF lProviderAgreement.FINDFIRST THEN BEGIN
+                               AgreementCode := lProviderAgreement."Agreement No.";
+                             END;
+                             IF AgreementCode = '' THEN BEGIN
+                               AgreementCode := lCorporateRegion."SDR64 Provider No.";
+                             END;
+                           END;
+                           IF AgreementCode = '' THEN BEGIN
+                             lProviderAgreement.SETRANGE("Provider No.",Provider."No.");
+                             lProviderAgreement.SETRANGE("Corporate No.","Corporate No.");
+                             lProviderAgreement.SETFILTER("Service Order Type",'%1|%2','',lServiceHeader."Service Order Type");
+                             lProviderAgreement.SETRANGE("Exclusion Type",lProviderAgreement."Exclusion Type"::Agree);
+                             IF lProviderAgreement.FINDFIRST THEN BEGIN
+                               AgreementCode := lProviderAgreement."Agreement No.";
+                             END;
+
+                             IF AgreementCode = '' THEN BEGIN
+                               AgreementCode := Provider."No.";
+                             END;
+                           END;
+                           **}
+
+                           //>>IMH03.ISAT.EBA
+
+                           TextPiedPage :=
+                             Text020 + ' ' +
+                             CompanyInfo."Stock Capital" + ' ' + 'euros - ' +
+                             CompanyInfo."Trade Register" + ' - Siret ' +
+                             CompanyInfo."Registration No." + ' - ' +
+                             CompanyInfo.Address + ' - ' +
+                             CompanyInfo."Address 2" + ' - ' +
+                             CompanyInfo."Post Code" +
+                             CompanyInfo.City +  ' - Nø AZUR ' +
+                             CompanyInfo."Phone No." + ' - Fax ' + CompanyInfo."Fax No.";
+
+                           IF "Vendor Ledger Entry".Amount < 0 THEN BEGIN
+                             CALCFIELDS(Amount);
+                             Amount := "Vendor Ledger Entry".Amount * -1;
+                           END;
+                           IF NOT CurrReport.PREVIEW THEN BEGIN
+                             ExportPurchHeaderDoc("Vendor Ledger Entry");
+                           END;
+                         END;
+
+        DataItemLink=Transmission No.=FIELD(No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18660;
+            SectionHeight=2538;
+          }
+          CONTROLS
+          {
+            { 1100281000;PictureBox;0 ;0    ;4500 ;2538 ;SourceExpr=CompanyInfo.Picture }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18660;
+            SectionHeight=21150;
+          }
+          CONTROLS
+          {
+            { 1100281001;TextBox;450  ;0    ;3150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=Yes;
+                                                         SourceExpr=Text000 }
+            { 1100281002;TextBox;450  ;561  ;3150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text001 }
+            { 1100281003;TextBox;450  ;1407 ;3150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text002 }
+            { 1100281004;TextBox;450  ;1830 ;3150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text003 }
+            { 1100281005;TextBox;3750 ;561  ;3150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr="Vendor Ledger Entry"."Service No." }
+            { 1100281006;TextBox;3750 ;1407 ;3150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr="Vendor Ledger Entry"."Reference No." }
+            { 1100281007;TextBox;3750 ;1830 ;3150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=OrgLevelDesc }
+            { 1100281008;TextBox;11250;561  ;5850 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=CorporateRegion.Name }
+            { 1100281009;TextBox;11250;984  ;5850 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=CorporateRegion.Address }
+            { 1100281010;TextBox;11250;1407 ;5850 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=CorporateRegion."Address 2" }
+            { 1100281011;TextBox;11250;1830 ;5850 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=STRSUBSTNO('%1  %2' ,CorporateRegion."Post Code", CorporateRegion.City) }
+            { 1100281012;TextBox;9900 ;4791 ;6930 ;423  ;HorzAlign=Left;
+                                                         FontName=Arial;
+                                                         FontSize=9;
+                                                         SourceExpr='Niort le, '+FORMAT(TODAY,0,4) }
+            { 1100281015;TextBox;600  ;6060 ;18060;1692 ;VertAlign=Top;
+                                                         FontName=Arial;
+                                                         FontSize=9;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Texte;
+                                                         SourceExpr=STRSUBSTNO('%1' ,Text004) }
+            { 1100281017;TextBox;900  ;8175 ;3150 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text005 }
+            { 1100281018;TextBox;900  ;8673 ;3150 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text006 }
+            { 1100281019;TextBox;4500 ;8175 ;3150 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Service."Contact Name" }
+            { 1100281020;TextBox;4500 ;8673 ;3150 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Service."Member No." }
+            { 1100281021;TextBox;600  ;9444 ;18060;1692 ;VertAlign=Top;
+                                                         FontName=Arial;
+                                                         FontSize=9;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Texte;
+                                                         SourceExpr=STRSUBSTNO('%1' ,Text007) }
+            { 1100281022;TextBox;900  ;11559;4950 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text008 }
+            { 1100281023;TextBox;6300 ;11559;3150 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr=AgreementCode }
+            { 1100281024;TextBox;6300 ;12057;5100 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Provider.Name }
+            { 1100281025;TextBox;900  ;12057;4950 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text009 }
+            { 1100281026;TextBox;900  ;12623;4950 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text010 }
+            { 1100281027;TextBox;6300 ;12623;5100 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Provider.Address }
+            { 1100281028;TextBox;6300 ;13123;5100 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Provider."Address 2" }
+            { 1100281029;TextBox;900  ;13123;4950 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text011 }
+            { 1100281030;TextBox;900  ;13623;4950 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text012 }
+            { 1100281031;TextBox;6300 ;13623;5100 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr=STRSUBSTNO('%1  %2' ,Provider."Post Code", Provider.City) }
+            { 1100281032;TextBox;6300 ;14123;3150 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Amount }
+            { 1100281033;TextBox;900  ;14123;4950 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text013 }
+            { 1100281034;TextBox;900  ;14623;4950 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text014 }
+            { 1100281035;TextBox;6300 ;14623;3150 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr="Vendor Ledger Entry"."Document Date" }
+            { 1100281036;TextBox;6300 ;15123;3150 ;423  ;HorzAlign=Left;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr="Vendor Ledger Entry"."External Document No." }
+            { 1100281037;TextBox;900  ;15123;4950 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontItalic=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text015 }
+            { 1100281038;TextBox;600  ;16212;18060;1269 ;VertAlign=Top;
+                                                         FontName=Arial;
+                                                         FontSize=9;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Texte;
+                                                         SourceExpr=STRSUBSTNO('%1' ,Text016) }
+            { 1100281040;TextBox;11250;18612;4500 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text017 }
+            { 1100281041;TextBox;11250;19458;3150 ;423  ;FontSize=9;
+                                                         FontBold=Yes;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text018 }
+            { 1100281013;TextBox;11250;20304;5400 ;423  ;FontSize=9;
+                                                         FontBold=No;
+                                                         FontUnderline=No;
+                                                         SourceExpr=Text019 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            PrintOnEveryPage=Yes;
+            PlaceInBottom=Yes;
+            SectionWidth=18660;
+            SectionHeight=1269;
+          }
+          CONTROLS
+          {
+            { 1100281014;TextBox;1650 ;0    ;15300;1269 ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontName=Arial;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=TextPiedPage }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      CompanyInfo@1100281000 : Record 79;
+      GrandCompte@1100281001 : Record 18;
+      Text000@1100281002 : TextConst 'FRA=BON A PAYER';
+      Text001@1100281003 : TextConst 'FRA=R‚f. Sinistre IMH :';
+      Text002@1100281004 : TextConst 'FRA=R‚f. Sinistre :';
+      Text003@1100281005 : TextConst 'FRA=Equipe';
+      Text004@1100281006 : TextConst 'FRA=Madame, Monsieur,\ \Inter Mutuelles Habitat est intervenu pour mettre en oeuvre les r‚parations de l''habitation de votre soci‚taire';
+      Text005@1100281007 : TextConst 'FRA=Nom - Pr‚nom';
+      Text006@1100281008 : TextConst 'FRA=Nø adh‚rent';
+      Service@1100281009 : Record 50066;
+      Text007@1100281010 : TextConst 'FRA=Nous vous prions de bien trouver ci-joint une copie de la facture du prestataire ayant effectu‚ les r‚parations,\celles-ci ‚tant conformes … la demande de travaux.\ \Nous vous remercions d''effectuer le paiement de cette facture … votre prestataire :';
+      Provider@1100281011 : Record 50000;
+      Text008@1100281012 : TextConst 'FRA=Votre r‚f‚rence prestataire :';
+      Text009@1100281013 : TextConst 'FRA=Raison sociale Prestataire :';
+      Text010@1100281014 : TextConst 'FRA=Adresse prestataire :';
+      Text011@1100281015 : TextConst 'FRA=Adresse prestataire :';
+      Text012@1100281016 : TextConst 'FRA=Code postal et Ville prestataire :';
+      Text013@1100281017 : TextConst 'FRA=Montant … r‚gler :';
+      Text014@1100281018 : TextConst 'FRA=Date de la facture :';
+      Text015@1100281019 : TextConst 'FRA=Num‚ro de facture :';
+      Text016@1100281020 : TextConst 'FRA=Nous tenant … votre disposition pour toute pr‚cision, nous vous prions d''agr‚er, Madame, Monsieur,\ \l''expression de nos salutations distingu‚es.';
+      Text017@1100281021 : TextConst 'FRA=Service Comptabilit‚ IMH';
+      Text018@1100281022 : TextConst 'FRA=05.17.18.62.79';
+      Text019@1100281023 : TextConst 'FRA=INTER MUTUELLES HABITAT';
+      Text020@1100281024 : TextConst 'FRA=Groupement d''int‚rˆt ‚conomique au capital de';
+      ContactGDCompte@1100281026 : Record 5050;
+      TextPiedPage@1100281025 : Text[1024];
+      Amount@1100281027 : Text[30];
+      OrgLevelDesc@1100281028 : Text[80];
+      AgreementCode@1100281029 : Text[50];
+      CorporateRegion@1100281030 : Record 18;
+      PDFManagement@1100281032 : Codeunit 50127;
+      ToFilePath@1100281031 : Text[1024];
+
+    PROCEDURE ExportPurchHeaderDoc@1100281000(pVendorLedgerEntry@1100281000 : Record 25);
+    VAR
+      lPurchInvHeader@1100281001 : Record 122;
+      lFilePath@1100281004 : Text[1024];
+      lFolderMgt@1100281005 : Codeunit 50004;
+      lInteractionLogEntry@1100281006 : Record 5065;
+      lDocAttach@1100281007 : Record 50021;
+      lAttachmentMgt@1100281008 : Codeunit 50002;
+      lAttachmentTreeviewMgt@1100281011 : Codeunit 50001;
+      lFileName@1100281010 : Text[250];
+    BEGIN
+      IF NOT lPurchInvHeader.GET(pVendorLedgerEntry."Document No.") THEN
+        EXIT;
+
+
+      IF lInteractionLogEntry.GET(lPurchInvHeader."Interaction Log Entry No.") THEN BEGIN
+        // Cr‚ation ‚ventuelle du r‚pertoire
+        lFolderMgt.CreateCompletePath(ToFilePath,TRUE);
+        lDocAttach.RESET;
+        lDocAttach.SETCURRENTKEY("Interaction Log Entry No.","Attach. Template Code");
+        lDocAttach.SETRANGE("Interaction Log Entry No.", lInteractionLogEntry."Entry No.");
+
+        IF lDocAttach.FINDFIRST THEN BEGIN
+          lFileName := FORMAT(pVendorLedgerEntry."Entry No.") + '-' + pVendorLedgerEntry."Vendor No." + '-' +
+                       pVendorLedgerEntry."Document No." + '.' + lDocAttach."File Extension";
+          lFilePath := lAttachmentMgt.GetFilePath(lDocAttach);
+          // + '\' + lAttachmentTreeviewMgt.GetFileName(lDocAttach)
+          lFolderMgt.CopyFile(lFilePath, ToFilePath + lFileName);
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 25/09/13 @a ISAT.ZW  @v IMH6.01.351 @s AOUT @h 4748 @c Modif Nø t‚l‚phone compta */
+      /** @r IMH04 @d 08/08/12 @a ISAT.SB @v IMH6.01.146 @h 3799 @s Date de doc remplace date de compta */
+      /** @r IMH04 @d 26/12/11 @a ISAT.EBA @v IMH6.01.146 @s Correctif nom et adresse prestataire */
+      /** @r IMH03 @d 21/12/11 @a ISAT.EBA @v IMH6.01.018 @s Gestion des agr‚ments */
+      /** @r IMH02 @d 22/09/11 @a ISAT.SB @v IMH6.01.146 @s Adresse R‚gion Compte */
+      /** @r IMH01 @d 08/09/11 @a ISAT.SB @v IMH6.01.146 @s Cr‚ation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

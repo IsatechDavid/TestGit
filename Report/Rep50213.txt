@@ -1,0 +1,383 @@
+OBJECT Report 50213 Remove Duplicate order
+{
+  OBJECT-PROPERTIES
+  {
+    Date=29/08/12;
+    Time=15:18:56;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Remove Duplicate Orders;
+               FRA=Annulation commandes ventes en double];
+    ProcessingOnly=Yes;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table37;
+        DataItemTableView=SORTING(Document Type,Document No.,Line No.)
+                          WHERE(Document Type=FILTER(Order));
+        OnPreDataItem=BEGIN
+                        IF ExecuteTrait THEN
+                          IF PostingDate = 0D THEN
+                            ERROR(Text009);
+
+                        IF LogFile THEN BEGIN
+                          IF FileName = '' THEN
+                            ERROR(Text003);
+                          IF TextFile.CREATE(FileName)=FALSE THEN
+                            ERROR(Text005 +FileName);
+
+                          TextFile.TEXTMODE(TRUE);
+                          TextFile.WRITEMODE(TRUE);
+                          TxtLigne:=Text004;
+                          TextFile.CREATEOUTSTREAM(FluxSortant);
+                          FluxSortant.WRITETEXT(TxtLigne);
+                          FluxSortant.WRITETEXT;
+                        END;
+
+                          SETFILTER("Quantity Shipped",'<>0');
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lSalesLine2@1000000002 : Record 37;
+                           lSalesShipmentLine@1000000001 : Record 111;
+                           lShipmentInvoiced@1000000000 : Record 10825;
+                         BEGIN
+
+                           lSalesLine2.SETRANGE("Document Type","Sales Line"."Document Type"::Order);
+
+                           lSalesLine2.SETRANGE("Corporate No.","Sales Line"."Corporate No.");
+                           lSalesLine2.SETRANGE("Service Order Type","Sales Line"."Service Order Type");
+                           lSalesLine2.SETRANGE("Corporate Region Code","Sales Line"."Corporate Region Code");
+                           lSalesLine2.SETRANGE("Service No.","Sales Line"."Service No.");
+                           lSalesLine2.SETRANGE("Service Header No.","Sales Line"."Service Header No.");
+                           lSalesLine2.SETRANGE("Line Amount","Sales Line"."Line Amount");
+
+                           IF lSalesLine2.COUNT >=2 THEN
+                            BEGIN
+                              lSalesLine2.FINDLAST;
+
+                              IF NOT TempSalesLine.GET(lSalesLine2."Document Type",lSalesLine2."Document No.",
+                                                        lSalesLine2."Line No.") THEN
+                              BEGIN
+
+                                TempSalesLine.INIT;
+                                TempSalesLine."Document Type":= lSalesLine2."Document Type";
+                                TempSalesLine."Document No.":= lSalesLine2."Document No.";
+                                TempSalesLine."Line No.":=lSalesLine2."Line No.";
+                                TempSalesLine.INSERT;
+
+                                lSalesShipmentLine.RESET;
+                                //<<IMH.PC
+                                lSalesShipmentLine.SETCURRENTKEY("Order No.","Order Line No.");
+                                //>>IMH.PC
+                                lSalesShipmentLine.SETRANGE("Order No.",lSalesLine2."Document No.");
+                                lSalesShipmentLine.SETRANGE("Order Line No.",lSalesLine2."Line No.");
+
+                                IF lSalesShipmentLine.FINDSET THEN
+                                 REPEAT
+                                   //<<IMH.PC
+                                   lShipmentInvoiced.SETCURRENTKEY("Shipment No.","Shipment Line No.");
+                                   //>>IMH.PC
+                                   lShipmentInvoiced.SETRANGE("Shipment No.",lSalesShipmentLine."Document No.");
+                                   lShipmentInvoiced.SETRANGE("Shipment Line No.",lSalesShipmentLine."Line No.");
+                                   //<<IMH.PC
+                                   lShipmentInvoiced.SETFILTER("Posting Date",'>=%1',010112D);
+                                   //>>IMH.PC
+                                   IF lShipmentInvoiced.FINDFIRST THEN
+                                     ProcessInvoicedOrders(lShipmentInvoiced)
+                                   ELSE
+                                   BEGIN
+                                     IF lSalesShipmentLine."Quantity Invoiced"=0 THEN
+                                     BEGIN
+
+                                       ProcessNonInvoicedOrders(lSalesShipmentLine);
+                                     END;
+                                   END
+
+                                UNTIL lSalesShipmentLine.NEXT = 0;
+                               END
+                            END;
+                         END;
+
+        OnPostDataItem=VAR
+                         i@1000000000 : Integer;
+                         j@1000000001 : Integer;
+                       BEGIN
+                           IF LogFile THEN
+                           TextFile.CLOSE;
+                       END;
+
+        ReqFilterFields=Document No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9350;
+      Height=3410;
+    }
+    CONTROLS
+    {
+      { 1000000000;CheckBox;3630;1210 ;440  ;440  ;InPage=-1;
+                                                   ShowCaption=No;
+                                                   SourceExpr=LogFile }
+      { 1000000001;Label  ;330  ;1210 ;3080 ;440  ;CaptionML=[ENU=Log file;
+                                                              FRA=Fichier Excel] }
+      { 1000000002;TextBox;3520 ;1760 ;5500 ;440  ;Name=FileNameControl;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=File Name;
+                                                              FRA=Nom du fichier];
+                                                   SourceExpr=FileName;
+                                                   OnAssistEdit=BEGIN
+                                                                  FileName := CommonDialogMgt.OpenFile(Text001,FileName,4,Text002,1)
+                                                                END;
+                                                                 }
+      { 1000000003;Label  ;330  ;1760 ;3080 ;440  ;CaptionML=[ENU=Filename;
+                                                              FRA=Nom du fichier] }
+      { 1000000005;Label  ;330  ;660  ;3080 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=run treatment;
+                                                              FRA=Ex‚cuter traitement] }
+      { 1000000006;CheckBox;3630;660  ;440  ;440  ;ShowCaption=No;
+                                                   SourceExpr=ExecuteTrait }
+      { 1100281000;TextBox;3630 ;110  ;1810 ;440  ;CaptionML=[ENU=Posting Date;
+                                                              FRA=Date comptabilisation];
+                                                   SourceExpr=PostingDate }
+      { 1100281001;Label  ;330  ;110  ;3080 ;440  ;ParentControl=1100281000 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      TempSalesLine@1000000015 : TEMPORARY Record 37;
+      SalesSetup@1000000016 : Record 311;
+      CopyDocMgt@1000000017 : Codeunit 6620;
+      CommonDialogMgt@1000000005 : Codeunit 412;
+      TextFile@1000000001 : File;
+      LogFile@1000000002 : Boolean;
+      FluxSortant@1000000003 : OutStream;
+      FileName@1000000004 : Text[200];
+      Text001@1000000007 : TextConst 'ENU=Export to CSV File;FRA=Exporter en fichier csv';
+      Text002@1000000006 : TextConst 'ENU=CSV Files (*.csv)|*.csv|All Files (*.*)|*.*;FRA=Fichiers csv (*.csv)|*.csv|Tous les fichiers (*.*)|*.*';
+      Text003@1000000008 : TextConst 'ENU=You must enter a File Name.;FRA=Vous devez entrer un nom de fichier.';
+      TxtLigne@1000000009 : Text[400];
+      Text004@1000000010 : TextConst 'ENU="Customer No.;Document type;Document No;Amount;Posting date;Service No.;Service Header No.;Corporate No.;Service Order Type;Corporate Region Code;Reference No.";FRA="No Client;Type doc;No Document;Montant;Date comptabilisation;No Service;No Ligne Service;No grand compte;Type produit;Code region grand compte;No evenement"';
+      DocType@1000000018 : 'Quote,Blanket Order,Order,Invoice,Return Order,Credit Memo,Posted Shipment,Posted Invoice,Posted Return Receipt,Posted Credit Memo';
+      ExecuteTrait@1000000000 : Boolean;
+      Text005@1000000011 : TextConst 'ENU=File Creation Error;FRA="Erreur de cr‚ation fichier  "';
+      Text006@1000000012 : TextConst 'ENU=DUPLICATE;FRA=DOUBLON';
+      Text007@1000000013 : TextConst 'ENU=ORDER;FRA=COMMANDE';
+      Text008@1000000014 : TextConst 'ENU=INVOICE;FRA=FACTURE';
+      PostingDate@1100281000 : Date;
+      Text009@1100281001 : TextConst 'ENU=Please select a posting date;FRA=Veuillez selectionner SVP une date de comptabilisation';
+
+    PROCEDURE ProcessNonInvoicedOrders@1000000001(VAR pSalesShipmentLine@1000000002 : Record 111);
+    VAR
+      lSalesShipmentLine@1100281000 : Record 111;
+      lSalesHeader@1000000001 : Record 36;
+      lSalesLine@1000000004 : Record 37;
+      lSalesLine2@1000000005 : Record 37;
+      lUndoSalesShipment@1000000003 : Codeunit 5815;
+      lReleaseSalesDoc@1000000000 : Codeunit 414;
+    BEGIN
+      lSalesShipmentLine.COPY(pSalesShipmentLine);
+      lSalesShipmentLine.SETRANGE("Document No.",pSalesShipmentLine."Document No.");
+      lSalesShipmentLine.SETRANGE("Line No.",pSalesShipmentLine."Line No.");
+      lSalesHeader.GET(lSalesHeader."Document Type"::Order,pSalesShipmentLine."Order No.");
+
+      IF ExecuteTrait THEN
+      BEGIN
+
+        lSalesShipmentLine.MARK(TRUE);
+        lUndoSalesShipment.SetHideDialog(TRUE);
+        lUndoSalesShipment.RUN(lSalesShipmentLine);
+        lReleaseSalesDoc.PerformManualReopen(lSalesHeader);
+      END;
+
+      lSalesLine.GET(lSalesLine."Document Type"::Order,pSalesShipmentLine."Order No.",pSalesShipmentLine."Order Line No.");
+
+
+      //<<
+      IF LogFile THEN
+      BEGIN
+       TxtLigne:=lSalesHeader."Sell-to Customer No."+'; ';
+       TxtLigne+=Text007+'; ';
+       TxtLigne+=lSalesHeader."No."+'; ';
+       TxtLigne+=FORMAT(lSalesLine."Line Amount")+'; ';
+       TxtLigne+=FORMAT(lSalesHeader."Posting Date")+'; ';
+       TxtLigne+=lSalesLine."Service No."+'; ';
+       TxtLigne+=lSalesLine."Service Header No."+'; ';
+       TxtLigne+=lSalesLine."Corporate No."+'; ';
+       TxtLigne+=lSalesLine."Service Order Type"+'; ';
+       TxtLigne+=lSalesLine."Corporate Region Code"+'; ';
+       TxtLigne+=lSalesLine."Reference No."+'; ';
+       FluxSortant.WRITETEXT(TxtLigne);
+       FluxSortant.WRITETEXT;
+      END;
+      //>>
+
+
+      //<<
+      IF ExecuteTrait THEN
+      BEGIN
+
+        IF lSalesLine."Quantity Shipped" = 0 THEN
+          lSalesLine.DELETE(TRUE);
+
+        lSalesLine2.SETRANGE("Document Type",lSalesLine2."Document Type"::Order );
+        lSalesLine2.SETRANGE("Document No.",lSalesHeader."No.");
+        IF lSalesLine2.COUNT = 0 THEN
+            lSalesHeader.DELETE(TRUE);
+      END;
+      //>>
+    END;
+
+    PROCEDURE ProcessInvoicedOrders@1000000015(VAR pShipmentInvoiced@1000000001 : Record 10825);
+    VAR
+      lCustomerLedgerEntry@1000000000 : Record 21;
+      lSalesInvoiceLine@1000000002 : Record 113;
+      lToSalesHeader@1000000005 : Record 36;
+      lToSalesLine@1000000006 : Record 37;
+    BEGIN
+      //<<IMH.PC
+      lCustomerLedgerEntry.SETCURRENTKEY("Document No.");
+      //>>IMH.PC
+      lCustomerLedgerEntry.SETRANGE("Document Type", lCustomerLedgerEntry."Document Type"::Invoice);
+      lCustomerLedgerEntry.SETRANGE("Document No.",pShipmentInvoiced."Invoice No.");
+      IF lCustomerLedgerEntry.FINDFIRST THEN
+      BEGIN
+        lCustomerLedgerEntry.CALCFIELDS("Original Amt. (LCY)","Remaining Amt. (LCY)");
+        IF lCustomerLedgerEntry."Original Amt. (LCY)" = lCustomerLedgerEntry."Remaining Amt. (LCY)" THEN
+        BEGIN
+
+           lSalesInvoiceLine.GET(pShipmentInvoiced."Invoice No.",pShipmentInvoiced."Invoice Line No.");
+
+           //<<
+           IF LogFile THEN
+           BEGIN
+            TxtLigne:=lSalesInvoiceLine."Sell-to Customer No."+' ;';
+            TxtLigne+=Text008+'; ';
+            TxtLigne+=lSalesInvoiceLine."Document No."+'; ';
+            TxtLigne+=FORMAT(lSalesInvoiceLine."Line Amount")+' ;';
+            TxtLigne+=FORMAT(lSalesInvoiceLine."Posting Date")+' ;';
+            TxtLigne+=lSalesInvoiceLine."Service No."+' ;';
+            TxtLigne+=lSalesInvoiceLine."Service Header No."+' ;';
+            TxtLigne+=lSalesInvoiceLine."Corporate No."+' ;';
+            TxtLigne+=lSalesInvoiceLine."Service Order Type"+' ;';
+            TxtLigne+=lSalesInvoiceLine."Corporate Region Code"+' ;';
+            TxtLigne+=lSalesInvoiceLine."Reference No"+' ;';
+            FluxSortant.WRITETEXT(TxtLigne);
+            FluxSortant.WRITETEXT;
+           END;
+           //>>
+
+
+           //>>
+            IF ExecuteTrait THEN
+            BEGIN
+
+               lToSalesHeader.SETRANGE("External Document No.",Text006);
+               lToSalesHeader.SETRANGE("Document Type",lToSalesHeader."Document Type"::"Credit Memo");
+               lToSalesHeader.SETRANGE("Bill-to Customer No.",lCustomerLedgerEntry."Customer No.");
+               IF NOT lToSalesHeader.FINDFIRST THEN
+                 CreatCreditMemoHeader(lSalesInvoiceLine,lToSalesHeader);
+
+               CreatCreditMemoLine(lToSalesHeader,lSalesInvoiceLine);
+            END  ;
+           //>>
+
+        END
+      END
+    END;
+
+    PROCEDURE CreatCreditMemoLine@1000000000(VAR lToSalesHeader@1000000004 : Record 36;lSalesInvoiceLine@1000000003 : Record 113);
+    VAR
+      lFromSalesInvHeader@1000000001 : Record 112;
+      lFromSalesInvLine@1000000005 : Record 113;
+      lLinesNotCopied@1000000000 : Integer;
+      lMissingExCostRevLink@1000000002 : Boolean;
+    BEGIN
+
+      lFromSalesInvHeader.GET(lSalesInvoiceLine."Document No.");
+      lFromSalesInvLine.RESET;
+      lFromSalesInvLine.SETRANGE("Document No.",lFromSalesInvHeader."No.");
+
+      lFromSalesInvLine.SETRANGE("Line No." ,lSalesInvoiceLine."Line No.");
+
+      CopyDocMgt.CopySalesInvLinesToDoc(lToSalesHeader,lFromSalesInvLine,lLinesNotCopied,lMissingExCostRevLink);
+    END;
+
+    PROCEDURE CreatCreditMemoHeader@1000000002(lSalesInvoiceLine@1000000000 : Record 113;VAR lToSalesHeader@1000000001 : Record 36);
+    VAR
+      lSalesInvoiceHeader@1000000002 : Record 112;
+      lFromSalesInvLine@1000000017 : Record 113;
+      FromKitSalesLine@1000000016 : Record 25000;
+      FromSalesShptHeader@1000000015 : Record 110;
+      FromSalesShptLine@1000000014 : Record 111;
+      FromKitSalesShptLine@1000000013 : Record 25004;
+      FromSalesInvLine@1000000011 : Record 113;
+      FromKitSalesInvLine@1000000010 : Record 25005;
+      FromReturnRcptHeader@1000000009 : Record 6660;
+      FromReturnRcptLine@1000000008 : Record 6661;
+      FromSalesCrMemoHeader@1000000007 : Record 114;
+      FromSalesCrMemoLine@1000000006 : Record 115;
+      Index@1000000005 : Integer;
+      lLinesNotCopied@1000000004 : Integer;
+      lMissingExCostRevLink@1000000003 : Boolean;
+    BEGIN
+      lSalesInvoiceHeader.GET(lSalesInvoiceLine."Document No.");
+      lToSalesHeader.INIT;
+      lToSalesHeader."Document Type":= lToSalesHeader."Document Type"::"Credit Memo";
+      lToSalesHeader.INSERT(TRUE);
+      lToSalesHeader.VALIDATE("Sell-to Customer No.",lSalesInvoiceHeader."Sell-to Customer No.");
+      lToSalesHeader.VALIDATE("Bill-to Customer No.",lSalesInvoiceHeader."Bill-to Customer No.");
+      lToSalesHeader.TRANSFERFIELDS(lSalesInvoiceHeader,FALSE);
+      lToSalesHeader."External Document No.":=Text006;
+      lToSalesHeader."Pmt. Discount Date":=0D;
+      lToSalesHeader."Posting Date":= PostingDate;
+      lToSalesHeader."Document Date":=PostingDate;
+      lToSalesHeader.MODIFY ;
+
+      CopyDocMgt.CopyFromPstdSalesDocDimToHdr(
+                  lToSalesHeader,DocType::"Posted Invoice",FromSalesShptHeader,lSalesInvoiceHeader,
+                  FromReturnRcptHeader,FromSalesCrMemoHeader);
+    END;
+
+    BEGIN
+    {
+        /** @r IMH01 @d 07/08/12 @a ISAT.ML @v IMH6.01.146  @h Mantis 3796  @s Suppression commandes en double  @c cr‚ation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

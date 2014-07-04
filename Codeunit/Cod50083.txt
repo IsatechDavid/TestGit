@@ -1,0 +1,80 @@
+OBJECT Codeunit 50083 Post Batch Invoice Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=23/10/12;
+    Time=14:13:40;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 38=rm,
+                TableData 98=r;
+    OnRun=VAR
+            lPurchHeader@1100281000 : Record 38;
+          BEGIN
+            //<<IMH02.PC
+            IF GUIALLOWED THEN
+              IF NOT CONFIRM(Text001) THEN
+                EXIT;
+            //>>IMH02.PC
+            Code(lPurchHeader);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Do you want to launch reconciliation processing ?;FRA=Souhaitez-vous lancer le traitement de rapprochement ?';
+
+    PROCEDURE Code@1100281000(VAR pPurchHeader@1100281004 : Record 38);
+    VAR
+      lPurchHeader@1100281000 : Record 38;
+      lPostInvoiceMgt@1100281001 : Codeunit 50082;
+      lGLSetup@1100281002 : Record 98;
+    BEGIN
+      lGLSetup.GET;
+      WITH pPurchHeader DO BEGIN
+        SETCURRENTKEY(Reconciled);
+        FILTERGROUP(4);
+        SETRANGE("Document Type","Document Type"::Invoice);
+        SETRANGE(Reconciled,FALSE);
+      //  SETRANGE(Invoice,FALSE);
+        FILTERGROUP(0);
+        IF ISEMPTY THEN
+          EXIT;
+
+        FINDSET(TRUE,FALSE);
+        REPEAT
+          IF "Service No." <> '' THEN BEGIN
+            COMMIT;
+            lPurchHeader := pPurchHeader;
+            CLEARLASTERROR;
+            CLEAR(lPostInvoiceMgt);
+            IF NOT lPostInvoiceMgt.RUN(lPurchHeader) THEN BEGIN
+              IF lPurchHeader.GET("Document Type","No.") THEN BEGIN
+                lGLSetup.TESTFIELD("Setup To Ajust Reason Code");
+                lPurchHeader."Reconciliation Reject Code" := lGLSetup."Setup To Ajust Reason Code";
+                lPurchHeader."Reconciliation Reject Detail" := COPYSTR(GETLASTERRORTEXT, 1,
+                                                                       MAXSTRLEN("Reconciliation Reject Detail"));
+                lPurchHeader.MODIFY(TRUE);
+              END;
+            END;
+          END;
+        UNTIL NEXT = 0;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH10 @d 19/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3730
+          @a Ajout permission TableData Purchase Header=rm,
+          @a Ajout permission TableData General Ledger Setup=r */
+      /** @r IMH02 @d 25/01/12 @a ISAT.PC @v IMH6.01.145 @s Cr‚ation
+          @c Correctif suite dysfonctionnement du moteur de rapprochement */
+      /** @r IMH01 @d 16/03/11 @a ISAT.LLT @v IMH6.01.145 @s Rapprochement facture @c Cr‚ation */
+    }
+    END.
+  }
+}

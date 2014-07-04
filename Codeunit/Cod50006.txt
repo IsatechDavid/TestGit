@@ -1,0 +1,1348 @@
+OBJECT Codeunit 50006 Document Flow Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=27/03/14;
+    Time=14:39:56;
+    Modified=Yes;
+    Version List=IMH6.01,5005;
+  }
+  PROPERTIES
+  {
+    TableNo=50053;
+    OnRun=BEGIN
+            TreatDocFlow(Rec);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      AttachTreeviewMgt@1100281002 : Codeunit 50001;
+      AttachmentMgt@1100281000 : Codeunit 50002;
+      FolderMgt@1100281001 : Codeunit 50004;
+      Text009@1100281005 : TextConst 'ENU=Import Attachment;FRA=Importer document';
+      Text010@1100281004 : TextConst 'ENU=All Files (*.*)|*.*;FRA=Tous les fichiers (*.*)|*.*';
+      Text001@1100281003 : TextConst 'ENU=Attachment has been delete;FRA=Le document joint a ‚t‚ supprim‚';
+      Text011@1100281007 : TextConst 'FRA=Le document a d‚j… ‚t‚ int‚gr‚.\Un document avec le mˆme Nø facture fournisseur existe d‚j….';
+      Text012@1100281006 : TextConst 'FRA=Quelle page souhaitez vous transf‚rer de la page %1 … la page %2';
+      lTrayLineMgt@1000000000 : Codeunit 50050;
+
+    PROCEDURE TreatDocFlow@1100281003(pDocumentFlow@1100281000 : Record 50053);
+    VAR
+      lOutlookMgt@1100281003 : Codeunit 50005;
+    BEGIN
+      //traitement d'un flux document
+      CASE pDocumentFlow."Flow Source Type" OF
+        pDocumentFlow."Flow Source Type"::Outlook : BEGIN
+          lOutlookMgt.TreatOutLookDocFlow(pDocumentFlow);
+        END;
+      END;
+    END;
+
+    PROCEDURE CreateDocAttachment@1100281051(VAR pDocAttachment@1100281001 : Record 50021;VAR pDocQueue@1100281000 : Record 50054;pFileToImport@1100281005 : Text[250];pFileInstream@1100281003 : InStream);
+    VAR
+      lRecRef@1100281002 : RecordRef;
+      lDocFLow@1100281004 : Record 50053;
+    BEGIN
+      //Cr‚ation document joint
+      WITH pDocAttachment DO BEGIN
+        lRecRef.GETTABLE(pDocQueue);
+        AttachmentMgt.CollectRecordKey(pDocAttachment,lRecRef);
+        // Recup‚re l'arbo active
+        AttachTreeviewMgt.GetAttachTreeviewActive(lRecRef, "Attachment Treeview Code");
+        VALIDATE("Attachment Treeview Code");
+        IF pDocAttachment.Description = '' THEN
+          pDocAttachment.Description := COPYSTR(pDocQueue.Description,1,MAXSTRLEN(pDocAttachment.Description));
+        //<<IMH04
+
+        IF pDocAttachment."Attach. Template Code" = '' THEN
+          IF lDocFLow.GET(pDocQueue."Flow Code") THEN
+            pDocAttachment.VALIDATE("Attach. Template Code", lDocFLow."Attach. Template Code");
+        //>>IMH04
+        AttachmentMgt.CreateAttachment(pDocAttachment,lRecRef,pFileToImport, pFileInstream);
+        //pDocAttachment.Modifiable := FALSE; //IMH06.ST
+        pDocAttachment."Delete Mode" := pDocAttachment."Delete Mode"::All;
+        IF pFileToImport <> '' THEN
+          pDocAttachment."Orginal File Name" := FolderMgt.GetCurrentFileName(pFileToImport);
+        pDocAttachment.MODIFY;
+      END;
+    END;
+
+    PROCEDURE CreateQueueDocument@1100281001(pFileName@1100281007 : Text[260];pDocQueue@1100281009 : Record 50054);
+    VAR
+      lOutlookDocMgt@1100281004 : Codeunit 50005;
+      lDocFlow@1100281005 : Record 50053;
+      lDocQueue@1100281006 : Record 50054;
+      lDocAttachment@1100281010 : Record 50021;
+      lFileToImport@1100281001 : Text[500];
+      lFileInStream@1100281000 : InStream;
+      lFolderMgt@1100281002 : Codeunit 50004;
+      lTempBlob@1100281008 : TEMPORARY Record 99008535;
+    BEGIN
+      //IMH 02 isat.zw
+      //Nø FLux obligatoire
+      IF NOT (FORM.RUNMODAL(0, lDocFlow) = ACTION::LookupOK) THEN
+        EXIT;
+
+      IF pFileName = '' THEN BEGIN
+        IF ISSERVICETIER THEN BEGIN
+          IF NOT UPLOADINTOSTREAM(Text009,'',Text010,lFileToImport,lFileInStream) THEN
+            EXIT;
+        END ELSE BEGIN
+          lFileToImport := lFolderMgt.GetFileName(FALSE,'','');
+          IF lFileToImport = '' THEN
+            EXIT;
+        END;
+      END ELSE BEGIN
+        lFileToImport := pFileName;
+        IF ISSERVICETIER THEN BEGIN
+          lTempBlob.Blob.IMPORT(lFileToImport);
+          lTempBlob.Blob.CREATEINSTREAM(lFileInStream);
+        END;
+      END;
+
+      IF (lFolderMgt.GetFileExtension(lFileToImport) = 'msg') AND NOT ISSERVICETIER THEN BEGIN
+        lOutlookDocMgt.CreateMailQueueDocByFile(lFileToImport, lDocFlow, lDocQueue);
+      END ELSE BEGIN
+        //Cr‚ation d'une file document par mail
+        pDocQueue.VALIDATE("Flow Code", lDocFlow."Flow Code");
+        pDocQueue."Entry No." := 0;
+        pDocQueue.Description :=
+          COPYSTR(FolderMgt.GetBaseName(lFileToImport),1,MAXSTRLEN(pDocQueue.Description));
+        pDocQueue.INSERT(TRUE);
+        CreateDocAttachment(lDocAttachment, pDocQueue, lFileToImport, lFileInStream);
+      END;
+
+      //D‚clenchement actions automatique
+      //LaunchingDocumentAction(pDocQueue);
+    END;
+
+    PROCEDURE FinishDocQueueTrayLines@1100281005(pDocQueue@1100281000 : Record 50054);
+    VAR
+      lTrayLine@1100281001 : Record 50048;
+    BEGIN
+      lTrayLine.SETCURRENTKEY("Document Flow Code", "Document Queue Type", "Doc. Queue Entry No.");
+      lTrayLine.SETRANGE("Document Flow Code", pDocQueue."Flow Code");
+      lTrayLine.SETRANGE("Document Queue Type", pDocQueue."Queue Type");
+      lTrayLine.SETRANGE("Doc. Queue Entry No.", pDocQueue."Entry No.");
+
+      IF lTrayLine.FINDSET THEN
+        REPEAT
+          lTrayLine.VALIDATE(Closed, TRUE);
+          lTrayLine.MODIFY(TRUE);
+        UNTIL lTrayLine.NEXT = 0;
+    END;
+
+    PROCEDURE LaunchingDocumentAction@1100281000(VAR pDocumentQueue@1100281000 : Record 50054;VAR pTrayLine@1100281007 : Record 50048) : Boolean;
+    VAR
+      lTrayLineMgt@1100281002 : Codeunit 50050;
+      lDocumentAction@1100281001 : Record 50052;
+      lDocumentFlow@1100281003 : Record 50053;
+      lDocumentQueueSAVE@1100281005 : Record 50054;
+      lServiceHeader@1100281008 : Record 5900;
+      lProvider@1100281009 : Record 50000;
+      lTeam@1100281010 : Record 5083;
+      lSaveStatus@1100281004 : Integer;
+      lTeamCode@1100281006 : Code[20];
+      lService@1000000000 : Record 50066;
+      lFilterTeamTrayTask@1000000001 : TEMPORARY Record 50129;
+    BEGIN
+      //IHM03 isat.zw
+      //D‚clenchement actions automatique
+      //pDocumentQueue.SETRECFILTER;
+      lDocumentAction.SETRANGE("Flow Code", pDocumentQueue."Flow Code");
+      lDocumentAction.SETFILTER("Corporate No.", '%1|%2', pDocumentQueue."Corporate No.", '');
+      lDocumentAction.SETFILTER("Document Type", '%1|%2', pDocumentQueue."Document Type", pDocumentQueue."Document Type"::" ");
+      lDocumentAction.SETRANGE("Create Tray Line", TRUE);
+      IF lDocumentAction.ISEMPTY THEN
+        EXIT;
+      lTrayLineMgt.SetCallFrom(2);
+      IF lDocumentAction.FINDFIRST THEN BEGIN
+        CASE lDocumentAction."Action Team Type" OF
+          lDocumentAction."Action Team Type"::Service :
+            //<<IMH11.ISAT.EBA
+            //lTeamCode := GetDefaultTeamCode(lDocumentAction, pDocumentQueue);
+            BEGIN
+              IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pDocumentQueue."Service Header No.") THEN BEGIN
+                lServiceHeader.TESTFIELD("Default Team Code");
+                //<<IMH21
+                //lTeamCode := lServiceHeader."Default Team Code";
+                lTeamCode := lServiceHeader.GetTeamByServiceTask(lServiceHeader, lDocumentAction."Action Task Code");
+                //>>IMH21
+              END;
+            END;
+            //>>IMH11.ISAT.EBA
+          lDocumentAction."Action Team Type"::Provider :
+            //<<IMH11.ISAT.EBA
+            //lTeamCode := GetDefaultTeamCode(lDocumentAction, pDocumentQueue);
+            BEGIN
+              lProvider.GET(pDocumentQueue."Contact No.");
+              lTeamCode := lProvider.GetTerritoryTrayLine(lTeam.Territory::"NA Territory");
+            END;
+            //>>IMH11.ISAT.EBA
+          ELSE BEGIN
+            lTeamCode := lDocumentAction."Action Team Code";
+            //<<IMH22
+            IF lTeamCode = '' THEN BEGIN
+              IF lService.GET(pDocumentQueue."Service No.") THEN BEGIN
+                lFilterTeamTrayTask."Corporate No." := lService."Corporate No.";
+                lFilterTeamTrayTask."Corporate Region Code" := lService."Corporate Region Code";
+              END;
+              lTeamCode := lTrayLineMgt.GetTeamByTask(lDocumentAction."Action Task Code", lFilterTeamTrayTask, '');
+            END;
+            //>>IMH22
+          END;
+        END;
+        IF lTeamCode = '' THEN
+          lDocumentAction.FIELDERROR("Action Team Code");
+        lTrayLineMgt.CreateTLFromDocument(pDocumentQueue, lTeamCode,
+                                          lDocumentAction."Action Task Code", FALSE);
+        lTrayLineMgt.GetResultLine(pTrayLine);
+
+        CASE pDocumentQueue."Document Type" OF
+          pDocumentQueue."Document Type"::Invoice,pDocumentQueue."Document Type"::Quote,
+          pDocumentQueue."Document Type"::Minutes :
+            pTrayLine.VALIDATE("Linked To Table", pTrayLine."Linked To Table"::Intervention);
+          //pDocumentQueue."Document Type"::Claim:
+          //  pTrayLine.VALIDATE("Linked To Table", pTrayLine."Linked To Table"::Contact);
+          pDocumentQueue."Document Type"::"Provider Document":
+            pTrayLine.VALIDATE("Linked To Table", pTrayLine."Linked To Table"::Contact);
+        END;
+        pTrayLine.MODIFY(FALSE);
+
+        EXIT(TRUE);
+      END;
+      EXIT(FALSE);
+      {
+      lTrayLineMgt.SetCallFrom(2);
+      IF lDocumentAction.FINDFIRST THEN BEGIN
+        CASE lDocumentAction."Action Type" OF
+          lDocumentAction."Action Type"::"Post Document" : BEGIN
+            //<<IMH04
+            //D‚sactiv‚ Creation service dans la validation Document Queue
+            //IF pDocumentQueue."Document Type" = pDocumentQueue."Document Type"::"Service Request" THEN
+            //  CreateService(pDocumentQueue);
+            //>>IMH04
+            lSaveStatus := pDocumentQueue.Status;
+            pDocumentQueue.Status := pDocumentQueue.Status::Done;
+            pDocumentQueue.MODIFY;
+            COMMIT;
+            lDocumentQueueSAVE := pDocumentQueue;
+            IF CODEUNIT.RUN(CODEUNIT::"Doc. Queue-Post",pDocumentQueue) THEN BEGIN
+              IF lDocumentAction."Action Team Code" <> '' THEN
+                lTrayLineMgt.CreateTLFromDocument(lDocumentQueueSAVE, lDocumentAction."Action Team Code",
+                                                  lDocumentAction."Action Task Code", FALSE);
+            END ELSE BEGIN
+              pDocumentQueue.Status := lSaveStatus;
+              pDocumentQueue.MODIFY;
+              lDocumentAction.TESTFIELD("Error Team Code");
+              lTrayLineMgt.CreateTLFromDocument(pDocumentQueue, lDocumentAction."Error Team Code",
+                                                lDocumentAction."Error Task Code", FALSE);
+            END;
+          END;
+          lDocumentAction."Action Type"::"Create Action" : BEGIN
+            lDocumentAction.TESTFIELD("Action Team Code");
+            lTrayLineMgt.CreateTLFromDocument(pDocumentQueue, lDocumentAction."Action Team Code",
+                                              lDocumentAction."Action Task Code", FALSE);
+          END;
+        END;
+        pDocumentQueue.SETRANGE("Flow Code");
+        pDocumentQueue.SETRANGE("Queue Type");
+        pDocumentQueue.SETRANGE("Entry No.");
+        EXIT;
+      END;
+
+      lDocumentFlow.GET(pDocumentQueue."Flow Code");
+      lTrayLineMgt.CreateTLFromDocument(pDocumentQueue, lDocumentFlow."Default Team Code",
+                                        lDocumentFlow."Default Task Code", FALSE);
+
+      pDocumentQueue.SETRANGE("Flow Code");
+      pDocumentQueue.SETRANGE("Queue Type");
+      pDocumentQueue.SETRANGE("Entry No.");
+      }
+    END;
+
+    PROCEDURE CreateService@1100281004(VAR pDocumentQueue@1100281000 : Record 50054);
+    VAR
+      lServiceMgt@1100281001 : Codeunit 50064;
+      lContact@1100281002 : Record 5050;
+      lService@1100281003 : Record 50066;
+    BEGIN
+      //IMH03 Isat.zw
+      IF pDocumentQueue."Document Type" <> pDocumentQueue."Document Type"::"Service Request" THEN
+        EXIT;
+      pDocumentQueue.TESTFIELD("Service No.",'');
+      lContact.GET(pDocumentQueue."Contact No.");
+      lContact.TESTFIELD("Service Contact", lContact."Service Contact"::Beneficiary);
+
+      lServiceMgt.CreateServiceByContact(lService, pDocumentQueue."Contact No.");
+
+      pDocumentQueue.VALIDATE("Service Document Type", pDocumentQueue."Service Document Type"::Service);
+      pDocumentQueue.VALIDATE("Service No.", lService."Service No.");
+      pDocumentQueue.MODIFY(TRUE);
+    END;
+
+    PROCEDURE GetDocQueueLigne@1100281002(VAR pDocumentFlowHeader@1100281002 : Record 50107);
+    VAR
+      lNbToTreat@1100281005 : Integer;
+      lDocQueue@1100281000 : Record 50054;
+      lDocQueue2@1100281003 : Record 50054;
+      lDocQueue3@1100281001 : Record 50054;
+      lCount@1100281004 : Integer;
+    BEGIN
+      pDocumentFlowHeader.TESTFIELD("Flow Code");
+
+      IF pDocumentFlowHeader."Doc. Queue To extract Number" = 0 THEN
+        EXIT;
+
+      lDocQueue.SETCURRENTKEY("Document Flow Header No.");
+      lDocQueue.SETRANGE("Flow Code", pDocumentFlowHeader."Flow Code");
+      lDocQueue.SETRANGE("Document Flow Header No.", pDocumentFlowHeader."No.");
+      lDocQueue.SETRANGE("Origin Entry No.", 0);
+      lDocQueue.SETRANGE(Status, lDocQueue.Status::" ");
+
+      lNbToTreat := pDocumentFlowHeader."Doc. Queue To extract Number" - lDocQueue.COUNT;
+
+      IF lNbToTreat <= 0 THEN
+        EXIT;
+
+      lDocQueue.RESET;
+      //<<IMH15.PC
+      //lDocQueue.SETRANGE("Flow Code", pDocumentFlowHeader."Flow Code");
+      lDocQueue.SETCURRENTKEY("Document Flow Header No.",Delay);
+      lDocQueue.SETRANGE("Flow Code", pDocumentFlowHeader."Flow Code");
+      lDocQueue.SETRANGE(Delay, pDocumentFlowHeader.Delay);
+      //>>IMH15.PC
+      lDocQueue.SETRANGE("Document Flow Header No.", '');
+      lDocQueue.SETRANGE("Origin Entry No.", 0);
+      lDocQueue.SETRANGE(Status, lDocQueue.Status::" ");
+      IF lDocQueue.ISEMPTY THEN
+        EXIT;
+
+      lDocQueue.LOCKTABLE;
+      //IF lDocQueue.COUNT <= lNbToTreat THEN
+      //  lDocQueue.MODIFYALL("Document Flow Header Code", pDocumentFlowHeader."No.", TRUE);
+
+      IF lDocQueue.FINDSET THEN
+        REPEAT
+          lDocQueue2 := lDocQueue;
+          lDocQueue2.VALIDATE("Document Flow Header No.", pDocumentFlowHeader."No.");
+          lDocQueue2."Line No." := 0;
+          lDocQueue2.MODIFY(TRUE);
+
+          lDocQueue3.SETCURRENTKEY("Origin Entry No.");
+          lDocQueue3.SETRANGE("Flow Code", pDocumentFlowHeader."Flow Code");
+          lDocQueue3.SETRANGE("Document Flow Header No.", '');
+          lDocQueue3.SETRANGE("Origin Entry No.", lDocQueue."Entry No.");
+          lDocQueue3.SETRANGE(Status, lDocQueue.Status::" ");
+          IF lDocQueue3.FINDSET THEN
+            REPEAT
+              lDocQueue2 := lDocQueue3;
+              lDocQueue2.VALIDATE("Document Flow Header No.", pDocumentFlowHeader."No.");
+              lDocQueue2."Line No." := 0;
+              lDocQueue2.MODIFY(TRUE);
+            UNTIL lDocQueue3.NEXT = 0;
+          lCount += 1;
+        UNTIL (lDocQueue.NEXT = 0) OR (lCount = lNbToTreat);
+    END;
+
+    PROCEDURE DocQueueRapprochement@1100281006(VAR pDocumentQueue@1100281000 : Record 50054;pImportPath@1100281001 : Text[1024]);
+    VAR
+      lFileTable@1100281002 : Record 2000000022;
+      lFolderMgt@1100281003 : Codeunit 50004;
+      lCount@1100281004 : Integer;
+      lNbFile@1100281005 : Integer;
+      lTempBlob@1100281006 : Record 99008535;
+      lFileInStream@1100281007 : InStream;
+      lDocAttachment@1100281008 : Record 50021;
+      lDocumentQueue@1100281009 : Record 50054;
+    BEGIN
+      IF pDocumentQueue.ISEMPTY THEN
+        EXIT;
+
+      IF pImportPath = '' THEN
+        EXIT;
+      IF ISSERVICETIER THEN BEGIN
+        pImportPath := lFolderMgt.CopyLocalFolderToCompanyTmpDir(pImportPath);
+      END;
+
+      lDocumentQueue.COPY(pDocumentQueue);
+
+      lFileTable.SETRANGE(Path,pImportPath);
+      lFileTable.SETRANGE("Is a file",TRUE);
+      lNbFile := lFileTable.COUNT;
+      lFileTable.FINDFIRST;
+
+      lDocumentQueue.FINDSET;
+      REPEAT
+        IF lDocumentQueue."Document Page Number" = 0 THEN
+          lDocumentQueue."Document Page Number" := 1;
+        FOR lCount := 1 TO lDocumentQueue."Document Page Number" DO BEGIN
+          IF ISSERVICETIER THEN BEGIN
+            lTempBlob.Blob.IMPORT(lFileTable.Path+ '\' + lFileTable.Name);
+            lTempBlob.Blob.CREATEINSTREAM(lFileInStream);
+          END;
+          CLEAR(lDocAttachment);
+          lDocAttachment.INIT;
+          CreateDocAttachment(lDocAttachment, lDocumentQueue, lFileTable.Name, lFileInStream);
+          IF lFileTable.NEXT = 0 THEN BEGIN
+            IF ISSERVICETIER THEN
+              lFolderMgt.EraseTempFolder(pImportPath);
+            EXIT;
+          END;
+        END;
+      UNTIL lDocumentQueue.NEXT = 0;
+    END;
+
+    PROCEDURE CreateQueueAttach@1100281007(pFileName@1100281001 : Text[260];VAR pDocQueue@1100281000 : Record 50054);
+    VAR
+      lDocAttachment@1100281006 : Record 50021;
+      lFileToImport@1100281005 : Text[500];
+      lFileInStream@1100281004 : InStream;
+      lFolderMgt@1100281003 : Codeunit 50004;
+      lTempBlob@1100281002 : TEMPORARY Record 99008535;
+    BEGIN
+      //IMH04
+      IF pFileName = '' THEN BEGIN
+        IF ISSERVICETIER THEN BEGIN
+          IF NOT UPLOADINTOSTREAM(Text009,'',Text010,lFileToImport,lFileInStream) THEN
+            EXIT;
+        END ELSE BEGIN
+          lFileToImport := lFolderMgt.GetFileName(FALSE,'','');
+          IF lFileToImport = '' THEN
+            EXIT;
+        END;
+      END ELSE BEGIN
+        lFileToImport := pFileName;
+        IF ISSERVICETIER THEN BEGIN
+          lTempBlob.Blob.IMPORT(lFileToImport);
+          lTempBlob.Blob.CREATEINSTREAM(lFileInStream);
+        END;
+      END;
+
+      lDocAttachment.Description :=
+        COPYSTR(FolderMgt.GetBaseName(lFileToImport),1,MAXSTRLEN(lDocAttachment.Description));
+      CreateDocAttachment(lDocAttachment, pDocQueue, lFileToImport, lFileInStream);
+    END;
+
+    PROCEDURE CreateDocFlowHeaderHistory@1100281008(pDocumentFlowHeader@1100281000 : Record 50107);
+    VAR
+      lDocumentFlowHeaderHistory@1100281001 : Record 50108;
+    BEGIN
+      lDocumentFlowHeaderHistory.TRANSFERFIELDS(pDocumentFlowHeader);
+      lDocumentFlowHeaderHistory.INSERT(TRUE);
+    END;
+
+    PROCEDURE CreateDocQueueHistory@1100281009(VAR pDocumentQueue@1100281000 : Record 50054);
+    VAR
+      lDocumentQueueHistory@1100281001 : Record 50109;
+    BEGIN
+      IF pDocumentQueue.ISEMPTY THEN
+        EXIT;
+      pDocumentQueue.FINDSET;
+      REPEAT
+        lDocumentQueueHistory.INIT;
+        lDocumentQueueHistory.TRANSFERFIELDS(pDocumentQueue);
+        IF lDocumentQueueHistory.INSERT(TRUE) THEN;
+      UNTIL pDocumentQueue.NEXT = 0;
+    END;
+
+    PROCEDURE CreateInvoiceByDocQueue@1100281010(VAR pPurchaseHeader@1100281001 : Record 38;pDocQueue@1100281000 : Record 50054);
+    VAR
+      lContact@1100281002 : Record 5050;
+      lPurchHeader@1100281004 : Record 38;
+      lServiceHeader@1100281006 : Record 5900;
+      lServiceOrderType@1100281005 : Record 5903;
+      lVendorNo@1000000001 : Code[20];
+      lInvoiceToCreateOK@1000000000 : Boolean;
+    BEGIN
+      //IMH04
+      IF pDocQueue."Document Type" <> pDocQueue."Document Type"::"DFC To Qualify" THEN BEGIN
+        pDocQueue.TESTFIELD("Service Document No.");
+        lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,pDocQueue."Service Header No.");
+        lServiceOrderType.GET(lServiceHeader."Service Order Type");
+        IF (lServiceOrderType."Interv. Process Code" <> '') THEN
+          pDocQueue.TESTFIELD("Service Intervention Line No.");
+
+        pDocQueue.TESTFIELD(Amount);
+        //pDocQueue.TESTFIELD("Amount VAT");
+        pDocQueue.TESTFIELD("Amount Including VAT");
+      END;
+      pDocQueue.TESTFIELD("Contact No.");
+      pDocQueue.TESTFIELD("Vendor Invoice No.");
+      lContact.GET(pDocQueue."Contact No.");
+      lContact.GetVendor(lVendorNo);
+      //<<IMH05
+      lPurchHeader.RESET;
+      lPurchHeader.SETCURRENTKEY("Document Type","Buy-from Vendor No.","No."); //IMH14.ST
+      lPurchHeader.SETRANGE("Document Type",lPurchHeader."Document Type"::Invoice);
+      lPurchHeader.SETRANGE("Vendor Invoice No.",pDocQueue."Vendor Invoice No.");
+      lPurchHeader.SETRANGE("Buy-from Vendor No.", lVendorNo); //IMH14.ST
+      //<<IMH20.PC
+      // IF NOT lPurchHeader.FINDFIRST THEN BEGIN
+      //>>IMH05
+      IF pDocQueue."Service No." <> '' THEN BEGIN
+        lPurchHeader.SETRANGE("Service No.",pDocQueue."Service No.");
+      END;
+      IF pDocQueue."Service Document No." <> '' THEN BEGIN
+        lPurchHeader.SETRANGE("Service Header No.",pDocQueue."Service Document No.");
+      END;
+      IF pDocQueue."Service Intervention Line No." <> 0 THEN BEGIN
+        lPurchHeader.SETRANGE("Intervention Line No.",pDocQueue."Service Intervention Line No.");
+      END;
+      IF (pDocQueue.Amount <> 0) THEN BEGIN
+        lPurchHeader.SETRANGE("Enter Amount",pDocQueue.Amount);
+      END;
+      IF (pDocQueue."Amount VAT" <> 0) THEN BEGIN
+        lPurchHeader.SETRANGE("Enter Amount VAT",pDocQueue."Amount VAT");
+      END;
+      IF (pDocQueue."Amount Including VAT" <> 0) THEN BEGIN
+        lPurchHeader.SETRANGE("Enter Amount Including VAT",pDocQueue."Amount Including VAT");
+      END;
+      lInvoiceToCreateOK := lPurchHeader.ISEMPTY;
+
+      IF lInvoiceToCreateOK THEN BEGIN
+      //>>IMH20.PC
+        pPurchaseHeader.INIT;
+        pPurchaseHeader.VALIDATE("Document Type", pPurchaseHeader."Document Type"::Invoice);
+        pPurchaseHeader."No." := '';
+        pPurchaseHeader.INSERT(TRUE);
+
+        pPurchaseHeader.VALIDATE("Buy-from Vendor No.", lVendorNo);
+        pPurchaseHeader.VALIDATE("Document Date", pDocQueue."Document Date");
+        IF lContact."Service Contact" = lContact."Service Contact"::Provider THEN
+          pPurchaseHeader."Provider No." := pDocQueue."Contact No.";
+
+        IF pDocQueue.Amount <> 0 THEN
+          pPurchaseHeader.VALIDATE("Enter Amount", pDocQueue.Amount);
+        IF pDocQueue."Amount VAT" <> 0 THEN
+          pPurchaseHeader.VALIDATE("Enter Amount VAT", pDocQueue."Amount VAT");
+        IF pDocQueue."Amount Including VAT" <> 0 THEN
+          pPurchaseHeader.VALIDATE("Enter Amount Including VAT", pDocQueue."Amount Including VAT");
+        IF pDocQueue."Amount obsolescence" <> 0 THEN
+          pPurchaseHeader.VALIDATE("Depreciation Amount",pDocQueue."Amount obsolescence");
+        IF pDocQueue."Franchise Amount" <> 0 THEN
+          pPurchaseHeader.VALIDATE("Deductible Amount",pDocQueue."Franchise Amount");
+
+        pPurchaseHeader."Vendor Invoice No." := pDocQueue."Vendor Invoice No.";
+
+        IF pDocQueue."Service No." <> '' THEN
+          pPurchaseHeader.VALIDATE("Service No.", pDocQueue."Service No.");
+        IF pDocQueue."Service Header No." <> '' THEN
+          pPurchaseHeader.VALIDATE("Service Header No.", pDocQueue."Service Header No.");
+        IF (pDocQueue."Service Intervention Line No."<> 0) THEN
+          pPurchaseHeader.VALIDATE("Intervention Line No.", pDocQueue."Service Intervention Line No.");
+
+        pPurchaseHeader.UpdateByInvoicingMatrice;
+        pPurchaseHeader."Doc. Flow Header History No." := pDocQueue."Document Flow Header No.";
+        pPurchaseHeader."Doc. Flow Header Hist Line No." := pDocQueue."Line No.";
+        pPurchaseHeader.MODIFY(TRUE);
+      //<<IMH05
+      END ELSE BEGIN
+        MESSAGE(Text011);
+      END;
+      //>>IMH05
+    END;
+
+    PROCEDURE AffectDocQueueToFlowHeader@1100281011(pDocFlowHeaderNo@1100281000 : Code[20];VAR pDocQueue@1100281002 : Record 50054);
+    VAR
+      lDocFlowHeader@1100281001 : Record 50107;
+    BEGIN
+      IF pDocFlowHeaderNo = '' THEN
+        IF FORM.RUNMODAL(0, lDocFlowHeader) = ACTION::LookupOK THEN
+          pDocFlowHeaderNo := lDocFlowHeader."No.";
+      IF pDocFlowHeaderNo = '' THEN
+        EXIT;
+      pDocQueue.VALIDATE("Document Flow Header No.", pDocFlowHeaderNo);
+      pDocQueue.MODIFY(TRUE);
+    END;
+
+    PROCEDURE ChangerFlowDocAttach@1100481004(VAR pAttachment@1100481000 : Record 50021);
+    VAR
+      lChangeFlowDocattach@1100481001 : Form 50252;
+      lNewEntryNo@1100281000 : Integer;
+      lReverseDoc@1100281001 : Boolean;
+      lDocQueue@1100281002 : Record 50054;
+      lDocAttach@1100281003 : Record 50021;
+    BEGIN
+      IF pAttachment.Deleted THEN BEGIN
+        ERROR(Text001);
+      END;
+
+      CLEAR(lChangeFlowDocattach);
+      lChangeFlowDocattach.SetValue(pAttachment);
+      lChangeFlowDocattach.RUNMODAL;
+      IF lChangeFlowDocattach.GetIsOK THEN BEGIN
+        lChangeFlowDocattach.GetValue(lNewEntryNo, lReverseDoc);
+        IF lReverseDoc THEN BEGIN
+          lDocAttach.SETRANGE("Referent Table No.", pAttachment."Referent Table No.");
+          lDocAttach.SETRANGE("Key Integer 1", pAttachment."Key Integer 1");
+          lDocAttach.SETRANGE("Key Integer 2", lNewEntryNo);
+          lDocAttach.SETRANGE("Key Code 1", pAttachment."Key Code 1");
+          IF lDocAttach.FINDSET THEN BEGIN
+            lDocQueue.GET(pAttachment."Key Code 1", pAttachment."Key Integer 1", pAttachment."Key Integer 2");
+            REPEAT
+              CreateDocAttachByDocAttach(lDocQueue, lDocAttach, TRUE);
+            UNTIL lDocAttach.NEXT = 0;
+          END;
+
+        END;
+        IF lNewEntryNo <> 0 THEN BEGIN
+          lDocQueue.GET(pAttachment."Key Code 1", pAttachment."Key Integer 1", lNewEntryNo);
+          CreateDocAttachByDocAttach(lDocQueue, pAttachment, TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE CreateDocAttachByDocAttach@1100281013(pDocQueue@1100281000 : Record 50054;VAR pDocAttachment@1100281001 : Record 50021;pDeleteDoc@1100281007 : Boolean);
+    VAR
+      lDocAttachment@1100281006 : Record 50021;
+      lFileToImport@1100281005 : Text[500];
+      lFileInStream@1100281004 : InStream;
+      lAttachMgt@1100281003 : Codeunit 50002;
+      lTempBlob@1100281002 : TEMPORARY Record 99008535;
+    BEGIN
+      lFileToImport := lAttachMgt.GetFilePath(pDocAttachment);
+      IF ISSERVICETIER THEN BEGIN
+        lTempBlob.Blob.IMPORT(lFileToImport);
+        lTempBlob.Blob.CREATEINSTREAM(lFileInStream);
+      END;
+
+      lDocAttachment := pDocAttachment;
+      lDocAttachment."Referent Table No." := 0;
+      lDocAttachment."Key Integer 1" := 0;
+      lDocAttachment."Key Integer 2" := 0;
+      lDocAttachment."Key Code 1" := '';
+      lDocAttachment."Key Code 2" := '';
+      lDocAttachment."Entry No." := 0;
+
+      CreateDocAttachment(lDocAttachment, pDocQueue, lFileToImport, lFileInStream);
+
+      IF pDeleteDoc THEN BEGIN
+        lAttachMgt.DeleteAllAttachment(pDocAttachment, FALSE)
+      END;
+    END;
+
+    PROCEDURE GetProviderBySenderName@1100281012(pFlowCode@1100281007 : Code[10];pSenderName@1100281001 : Text[250];VAR pProviderNo@1100281000 : Code[20];VAR pErrorMessage@1100281002 : Text[250]) : Boolean;
+    VAR
+      lErrorText001@1100281003 : TextConst 'ENU=The fax No. is not valid.;FRA=Aucun prestataire trouv‚ pour le nø fax %1.';
+      lDocFlow@1100281008 : Record 50053;
+      lPos@1100281006 : Integer;
+      lFaxNo@1100281004 : Text[100];
+      lSuffixAddress@1100281005 : Text[100];
+      lProvider@1100281009 : Record 50000;
+      lErrorText002@1100281010 : TextConst 'ENU=More provider have the same fax No. %1.;FRA=Plusieurs prestaitaires ont le mˆme nø fax %1.';
+      lPhoneStandardization@1100281011 : Codeunit 50099;
+    BEGIN
+      lPos := STRPOS(pSenderName, '@');
+      IF lPos = 0 THEN
+        EXIT(FALSE);
+
+      IF NOT lDocFlow.GET(pFlowCode) THEN
+        EXIT(FALSE);
+
+      IF lDocFlow."Provider Fax Suffix" = '' THEN
+        EXIT(FALSE);
+
+      lSuffixAddress := COPYSTR(pSenderName, lPos + 1);
+      IF lSuffixAddress <> lDocFlow."Provider Fax Suffix" THEN
+        EXIT(FALSE);
+
+      lFaxNo := COPYSTR(pSenderName, 1, lPos - 1);
+      IF lFaxNo = '' THEN BEGIN
+        pErrorMessage := STRSUBSTNO(lErrorText002, lFaxNo);
+        EXIT(FALSE);
+      END;
+
+      lProvider.SETCURRENTKEY("Fax No.");
+      lProvider.SETRANGE("Fax No.", lFaxNo);
+      IF NOT lProvider.ISEMPTY THEN BEGIN
+        IF lProvider.COUNT = 1 THEN BEGIN
+          lProvider.FINDFIRST;
+          pProviderNo := lProvider."No.";
+          EXIT(TRUE);
+        END;
+        pErrorMessage := STRSUBSTNO(lErrorText002, lFaxNo);
+        EXIT(FALSE);
+      END;
+
+      //<<IMH19
+      CASE STRLEN(lFaxNo) OF
+        11 : BEGIN
+          IF (COPYSTR(lFaxNo,1,2) = '33') THEN BEGIN
+            lFaxNo := '0' + COPYSTR(lFaxNo,3);
+          END;
+        END;
+        12 : BEGIN
+          IF (COPYSTR(lFaxNo,1,3) = '+33') THEN BEGIN
+            lFaxNo := '0' + COPYSTR(lFaxNo,4);
+          END;
+        END;
+      END;
+      //>>IMH19
+
+      lPhoneStandardization.SetHideMessage(TRUE);
+      lPhoneStandardization.ValidatePhoneNo(
+        DATABASE::Provider,lProvider.FIELDNO("Fax No."),'',lFaxNo);
+
+      lProvider.SETRANGE("Fax No.", lFaxNo);
+      IF NOT lProvider.ISEMPTY THEN BEGIN
+        IF lProvider.COUNT = 1 THEN BEGIN
+          lProvider.FINDFIRST;
+          pProviderNo := lProvider."No.";
+          EXIT(TRUE);
+        END;
+        pErrorMessage := STRSUBSTNO(lErrorText002, lFaxNo);
+        EXIT(FALSE);
+      END;
+
+      pErrorMessage := STRSUBSTNO(lErrorText001, lFaxNo);
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE GetProviderBySubject@1000000000(pSubjectMail@1100281005 : Text[1024];VAR pContactNo@1100281009 : Code[20]) : Boolean;
+    VAR
+      lErrorText001@1100281003 : TextConst 'ENU=The fax No. is not valid.;FRA=Aucun prestataire trouv‚ pour le nø fax %1.';
+      lPhoneNoList@1100281007 : Record 50055;
+      lContact@1100281004 : Record 5050;
+      lErrorText002@1100281010 : TextConst 'ENU=More provider have the same fax No. %1.;FRA=Plusieurs prestaitaires ont le mˆme nø fax %1.';
+      lTempNo@1100281000 : Text[11];
+      lCharBuffer@1100281002 : Text[1];
+      lInteger@1100281001 : Integer;
+      i@1100281008 : Integer;
+      lPos@1100281006 : Integer;
+      lTempNo2@1100281011 : Text[30];
+    BEGIN
+      // IMH06.PC
+      // Recherche d'un nø de tel / fax dans le sujet du mail
+
+      lTempNo := '';
+      FOR i := 1 TO STRLEN(pSubjectMail) DO BEGIN
+        lCharBuffer := COPYSTR(pSubjectMail,i,1);
+        IF lCharBuffer <> ' ' THEN BEGIN
+          IF NOT EVALUATE(lInteger,lCharBuffer) THEN BEGIN
+            lTempNo := '';
+          END ELSE BEGIN
+            lTempNo += lCharBuffer;
+          END;
+        END;
+        CASE STRLEN(lTempNo) OF
+          9 : BEGIN
+            IF (COPYSTR(lTempNo,1,2) <> '33') AND (COPYSTR(lTempNo,1,1) <> '0') THEN BEGIN
+              lTempNo2 := '0' + lTempNo;
+              lPhoneNoList.SETCURRENTKEY("Search Phone No.");
+              lPhoneNoList.SETRANGE("Search Phone No.",lTempNo2);
+              IF lPhoneNoList.FINDSET THEN BEGIN
+                REPEAT
+                  IF lContact.GET(lPhoneNoList."Contact No.") THEN BEGIN
+                    pContactNo := lContact."No.";
+                    EXIT(TRUE);
+                  END;
+                UNTIL lPhoneNoList.NEXT = 0;
+              END;
+            END;
+          END;
+      //<<IMH09.ST
+          10 : BEGIN
+            lPhoneNoList.SETCURRENTKEY("Search Phone No.");
+            lPhoneNoList.SETRANGE("Search Phone No.",lTempNo);
+            IF lPhoneNoList.FINDSET THEN BEGIN
+              REPEAT
+                IF lContact.GET(lPhoneNoList."Contact No.") THEN BEGIN
+                  pContactNo := lContact."No.";
+                  EXIT(TRUE);
+                END;
+              UNTIL lPhoneNoList.NEXT = 0;
+            END;
+          END;
+      //>>IMH09.ST
+          11 : BEGIN
+            IF (COPYSTR(lTempNo,1,2) <> '33') THEN BEGIN
+              lPhoneNoList.SETCURRENTKEY("Search Phone No.");
+              lPhoneNoList.SETRANGE("Search Phone No.",lTempNo);
+              IF lPhoneNoList.FINDSET THEN BEGIN
+                REPEAT
+                  IF lContact.GET(lPhoneNoList."Contact No.") THEN BEGIN
+                    pContactNo := lContact."No.";
+                    EXIT(TRUE);
+                  END;
+                UNTIL lPhoneNoList.NEXT = 0;
+              END;
+            END;
+          END;
+        END;
+        IF STRLEN(lTempNo) = 11 THEN BEGIN
+          lTempNo := COPYSTR(lTempNo,11,1);
+        END;
+      END;
+    END;
+
+    PROCEDURE GetDefaultTeamCode@1100281014(pDocumentAction@1100281000 : Record 50052;pDocumentQueue@1100281001 : Record 50054) : Code[20];
+    VAR
+      lServiceHeader@1100281002 : Record 5900;
+      lInterventionLine@1100281003 : Record 50075;
+      lProvider@1100281004 : Record 50000;
+      lSalespersonPurchaser@1100281005 : Record 13;
+      lService@1000000000 : Record 50066;
+      lFilterTeamTrayTask@1000000001 : TEMPORARY Record 50129;
+    BEGIN
+      CASE pDocumentAction."Document Type" OF
+      {
+        pDocumentAction."Document Type"::Invoice : ;
+        pDocumentAction."Document Type"::Quote, pDocumentAction."Document Type"::Minutes : BEGIN
+          lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pDocumentQueue."Service Header No.");
+          lServiceHeader.TESTFIELD("Default Team Code");
+          EXIT(lServiceHeader."Default Team Code");
+        END;
+        }
+        pDocumentAction."Document Type"::"Provider Document" : BEGIN
+          lProvider.GET(pDocumentQueue."Contact No.");
+          lSalespersonPurchaser.GET(lProvider."Salesp. Network Assistant Code");
+          lSalespersonPurchaser.CALCFIELDS("Default Team Code");
+          lSalespersonPurchaser.TESTFIELD("Default Team Code");
+          EXIT(lSalespersonPurchaser."Default Team Code");
+        END;
+        ELSE BEGIN
+          IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pDocumentQueue."Service Header No.") THEN BEGIN
+            //<<IMH21
+            //lServiceHeader.TESTFIELD("Default Team Code");
+            //EXIT(lServiceHeader."Default Team Code");
+            //lTeamCode := lServiceHeader."Default Team Code";
+            EXIT(lServiceHeader.GetTeamByServiceTask(lServiceHeader, pDocumentAction."Action Task Code"));
+            //>>IMH21
+          END ELSE BEGIN
+            //<<IMH22
+            IF lService.GET(pDocumentQueue."Service No.") THEN BEGIN
+              lFilterTeamTrayTask."Corporate No." := lService."Corporate No.";
+              lFilterTeamTrayTask."Corporate Region Code" := lService."Corporate Region Code";
+            END;
+            EXIT(lTrayLineMgt.GetTeamByTask(pDocumentAction."Action Task Code", lFilterTeamTrayTask, ''));
+            //>>IMH22
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetProviderTeamCode@1100281020(pDocumentAction@1100281000 : Record 50052;pDocumentQueue@1100281001 : Record 50054) : Code[20];
+    VAR
+      lProvider@1100281004 : Record 50000;
+    BEGIN
+    END;
+
+    PROCEDURE CreateInteractionByHistoryLine@1100281015(VAR pDocumentQueueHistory@1100281007 : Record 50109);
+    VAR
+      lInteractionLogEntry@1100281006 : Record 5065;
+      lSegmentLineTmp@1100281004 : TEMPORARY Record 5077;
+      lDocFlow@1100281002 : Record 50053;
+      lInteractionTemplateCode@1100281001 : Code[20];
+      lServiceInterventionLine@1100281000 : Record 50075;
+      lContact@1100281008 : Record 5050;
+      lService@1100281009 : Record 50066;
+      lServiceHeader@1100281012 : Record 5900;
+      lIntervLine@1100281013 : Record 50075;
+      lDocumentQueueTmp@1100281010 : TEMPORARY Record 50054;
+      lPurchHeader@1100281005 : Record 38;
+      lServiceInterventionQuote@1100281011 : Record 50076;
+    BEGIN
+      pDocumentQueueHistory.CALCFIELDS(Attachment);
+      IF pDocumentQueueHistory.Attachment > 0 THEN BEGIN
+        IF lDocFlow.GET(pDocumentQueueHistory."Flow Code") THEN;
+        lSegmentLineTmp.SetHideWizard(2);
+        CASE pDocumentQueueHistory."Document Type" OF
+          pDocumentQueueHistory."Document Type"::" " : BEGIN
+            lContact.GET(pDocumentQueueHistory."Contact No.");
+            lInteractionTemplateCode := lDocFlow."Interaction Template Code";
+            lSegmentLineTmp.CreateInteractionFromContact2(lContact, lInteractionTemplateCode);
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+          END;
+          pDocumentQueueHistory."Document Type"::Invoice : BEGIN
+            lContact.GET(pDocumentQueueHistory."Contact No.");
+            lInteractionTemplateCode := lDocFlow."Invoice Interac. Tmpl. Code";
+            lSegmentLineTmp.CreateInteractionFromContact2(lContact, lInteractionTemplateCode);
+            //lSegmentLineTmp.CreateInteractionFromPurchOrd(
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+            lInteractionLogEntry."Document Type" := lInteractionLogEntry."Document Type"::"Purch. Ord.";
+            lInteractionLogEntry."Document No." := pDocumentQueueHistory."Document No.";
+            //<<IMH16.PC
+            lInteractionLogEntry."Document Date" := pDocumentQueueHistory."Document Date";
+            lInteractionLogEntry."Vendor No." := pDocumentQueueHistory."Contact No.";
+            lInteractionLogEntry."Service No." := pDocumentQueueHistory."Service No.";
+            lInteractionLogEntry."Service Header No." := pDocumentQueueHistory."Service Header No.";
+            lInteractionLogEntry."Intervention Line No." := pDocumentQueueHistory."Service Intervention Line No.";
+            lInteractionLogEntry."Provider No." := pDocumentQueueHistory."Contact No.";
+            //>>IMH16.PC
+            IF lPurchHeader.GET(lPurchHeader."Document Type"::Invoice, pDocumentQueueHistory."Document No.") THEN BEGIN
+              lInteractionLogEntry."Document Date" := lPurchHeader."Document Date";
+              lInteractionLogEntry."Vendor No." := lPurchHeader."Buy-from Vendor No.";
+              lInteractionLogEntry."Service No." := lPurchHeader."Service No.";
+              lInteractionLogEntry."Service Header No." := lPurchHeader."Service Header No.";
+              lInteractionLogEntry."Intervention Line No." := lPurchHeader."Intervention Line No.";
+              lInteractionLogEntry."Provider No." := lPurchHeader."Buy-from Vendor No.";
+              lPurchHeader."Interaction Log Entry No." := lInteractionLogEntry."Entry No.";
+              lPurchHeader.MODIFY(FALSE);
+            END;
+            lInteractionLogEntry.MODIFY(FALSE);
+          END;
+          pDocumentQueueHistory."Document Type"::Quote : BEGIN
+            lInteractionTemplateCode := lDocFlow."Quote Interac. Tmpl. Code";
+            lServiceInterventionQuote.GET(pDocumentQueueHistory."Service Header No.",pDocumentQueueHistory.
+      "Service Intervention Line No."
+              ,pDocumentQueueHistory."Service Intervention Quote No.");
+            lSegmentLineTmp.CreateInteracFromIntervQuote(lServiceInterventionQuote, lInteractionTemplateCode);
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+          END;
+
+          pDocumentQueueHistory."Document Type"::Minutes :  BEGIN
+            lInteractionTemplateCode := lDocFlow."Minute Interac. Tmpl. Code";
+            lServiceInterventionLine.GET(pDocumentQueueHistory."Service Header No.",
+              pDocumentQueueHistory."Service Intervention Line No.");
+            lSegmentLineTmp.CreateInteracFromIntervention(lServiceInterventionLine, lInteractionTemplateCode);
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+          END;
+          {
+          pDocumentQueueHistory."Document Type"::"Service Request" :  BEGIN
+            lInteractionTemplateCode := lDocFlow."Serv Request Interac. Tmpl.";
+            lService.GET(pDocumentQueueHistory."Service No.");
+            lSegmentLineTmp.CreateInteractionFromService(lService, lInteractionTemplateCode);
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+          END;
+          }
+          pDocumentQueueHistory."Document Type"::"Provider Document", pDocumentQueueHistory."Document Type"::"DPR To Qualify" : BEGIN
+            lContact.GET(pDocumentQueueHistory."Contact No.");
+            lInteractionTemplateCode := lDocFlow."Prov Doc.  Interac. Tmpl. Code";
+            lSegmentLineTmp.CreateInteractionFromContact2(lContact, lInteractionTemplateCode);
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+          END;
+          pDocumentQueueHistory."Document Type"::"Document Follow Up", pDocumentQueueHistory."Document Type"::"DGS To Qualify",
+            pDocumentQueueHistory."Document Type"::"DQP To Qualify", pDocumentQueueHistory."Document Type"::"Service Request",
+            pDocumentQueueHistory."Document Type"::Claim : BEGIN  //IMH17
+            //lInteractionTemplateCode := lDocFlow."Doc. Flw. Interac. Tmpl. Code";
+            CASE pDocumentQueueHistory."Document Type" OF
+              pDocumentQueueHistory."Document Type"::"Service Request" :
+                lInteractionTemplateCode := lDocFlow."Serv Request Interac. Tmpl.";
+              pDocumentQueueHistory."Document Type"::"Document Follow Up" :
+                lInteractionTemplateCode := lDocFlow."Doc. Flw. Interac. Tmpl. Code";
+              pDocumentQueueHistory."Document Type"::"DGS To Qualify" :
+                lInteractionTemplateCode := lDocFlow."DGS Qualif Interac. Tmpl. Code";
+              pDocumentQueueHistory."Document Type"::"DQP To Qualify" :
+                lInteractionTemplateCode := lDocFlow."DQP Qualif Interac. Tmpl. Code";
+              //<<IMH17
+              pDocumentQueueHistory."Document Type"::Claim :
+                lInteractionTemplateCode := lDocFlow."Claim Interac. Tmpl. Code";
+              //>>IMH17
+            END;
+            IF pDocumentQueueHistory."Service Intervention Line No." <> 0 THEN BEGIN
+              lIntervLine.GET(pDocumentQueueHistory."Service Header No.", pDocumentQueueHistory."Service Intervention Line No.");
+              lSegmentLineTmp.CreateInteracFromIntervention(lIntervLine, lInteractionTemplateCode);
+            END ELSE BEGIN
+              IF pDocumentQueueHistory."Service Header No." <> '' THEN BEGIN
+                lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pDocumentQueueHistory."Service Header No.");
+                lSegmentLineTmp.CreateInteracFromServHeader(lServiceHeader, lInteractionTemplateCode);
+              END ELSE
+                IF pDocumentQueueHistory."Service No." <> '' THEN BEGIN
+                  lService.GET(pDocumentQueueHistory."Service No.");
+                  lSegmentLineTmp.CreateInteractionFromService(lService, lInteractionTemplateCode);
+                END;
+            END;
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+          END;
+          pDocumentQueueHistory."Document Type"::"DFC To Qualify" : BEGIN
+            lContact.GET(pDocumentQueueHistory."Contact No.");
+            lInteractionTemplateCode := lDocFlow."DFC Qualif Interac. Tmpl. Code";
+            lSegmentLineTmp.CreateInteractionFromContact2(lContact, lInteractionTemplateCode);
+            //lSegmentLineTmp.CreateInteractionFromPurchOrd(
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+            lInteractionLogEntry."Document Type" := lInteractionLogEntry."Document Type"::"Purch. Ord.";
+            lInteractionLogEntry."Document No." := pDocumentQueueHistory."Document No.";
+            IF lPurchHeader.GET(lPurchHeader."Document Type"::Invoice, pDocumentQueueHistory."Document No.") THEN BEGIN
+              lInteractionLogEntry."Document Date" := lPurchHeader."Document Date";
+              lInteractionLogEntry."Vendor No." := lPurchHeader."Buy-from Vendor No.";
+              lInteractionLogEntry."Service No." := lPurchHeader."Service No.";
+              lInteractionLogEntry."Service Header No." := lPurchHeader."Service Header No.";
+              lInteractionLogEntry."Intervention Line No." := lPurchHeader."Intervention Line No.";
+              lInteractionLogEntry."Provider No." := lPurchHeader."Buy-from Vendor No.";
+              lPurchHeader."Interaction Log Entry No." := lInteractionLogEntry."Entry No.";
+              lPurchHeader.MODIFY(FALSE);
+            END;
+            lInteractionLogEntry.MODIFY(FALSE);
+          END;
+          {
+          //IMH17 d‚sactiv‚
+          //<<IMH12
+          pDocumentQueueHistory."Document Type"::Claim : BEGIN
+            lDocFlow.TESTFIELD("Claim Interac. Tmpl. Code");
+            lInteractionTemplateCode := lDocFlow."Claim Interac. Tmpl. Code";
+            lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pDocumentQueueHistory."Service Header No.");
+            lSegmentLineTmp.CreateInteracFromServHeader(lServiceHeader, lInteractionTemplateCode);
+            lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+          END;
+          //>>IMH12
+          }
+        END;
+
+        //lSegmentLineTmp.CreateInteracFromDocQueue(DocumentQueue, lInteractionTemplateCode);
+        IF lSegmentLineTmp."Created Interac. Log Entry No." <> 0 THEN BEGIN
+          lInteractionLogEntry.GET(lSegmentLineTmp."Created Interac. Log Entry No.");
+          lInteractionLogEntry.Description :=
+            COPYSTR(pDocumentQueueHistory.Description,1,MAXSTRLEN(lInteractionLogEntry.Description));
+          lInteractionLogEntry."Corporate No." := pDocumentQueueHistory."Corporate No.";
+          IF pDocumentQueueHistory."Document Date" <> 0D THEN
+            lInteractionLogEntry."Document Date" := pDocumentQueueHistory."Document Date";
+          //<<IMH10
+          lInteractionLogEntry."Document Flow Code" := pDocumentQueueHistory."Flow Code";
+          lInteractionLogEntry."Document Queue Type" := pDocumentQueueHistory."Queue Type";
+          lInteractionLogEntry."Doc. Queue Entry No." := pDocumentQueueHistory."Entry No.";
+          //>>IMH10
+          lInteractionLogEntry.MODIFY(FALSE);
+        END;
+        IF lInteractionLogEntry."Entry No." <> 0 THEN BEGIN
+          lDocumentQueueTmp.TRANSFERFIELDS(pDocumentQueueHistory);
+          lDocumentQueueTmp.INSERT;
+          CopyDocAttachment(lDocumentQueueTmp, lServiceInterventionQuote, lInteractionLogEntry, 2);
+        END;
+      END;
+    END;
+
+    PROCEDURE CopyDocAttachment@1100281016(VAR pDocumentQueue@1100281000 : Record 50054;pServIntervQuote@1100281007 : Record 50076;pInteractionLogEntry@1100281009 : Record 5065;pToAttachmentType@1100281008 : 'DocumentQueue,IntervQuote,Interaction');
+    VAR
+      lSourceAttchMgt@1100281003 : Codeunit 50003;
+      lAttachmentMgt@1100281004 : Codeunit 50002;
+      lAttachmentTreeviewMgt@1100281005 : Codeunit 50001;
+      lDocAttachment@1100281001 : Record 50021;
+      lDocAttachmentFilter@1100281002 : Record 50021;
+      lAttachmentTemp@1100281006 : TEMPORARY Record 5062;
+    BEGIN
+      //IMH02
+      //transferer les documents joints d'un file vers les objet li‚ (Document service, Contact)
+      lDocAttachment.SETRANGE("Referent Table No.", DATABASE::"Document Queue");
+      lDocAttachment.SETRANGE("Key Integer 1", pDocumentQueue."Queue Type");
+      lDocAttachment.SETRANGE("Key Integer 2", pDocumentQueue."Entry No.");
+      lDocAttachment.SETRANGE("Key Code 1", pDocumentQueue."Flow Code");
+      IF NOT lDocAttachment.ISEMPTY THEN BEGIN
+        lDocAttachment.FINDSET;
+        REPEAT
+          CASE pToAttachmentType OF
+            pToAttachmentType::DocumentQueue : BEGIN
+              CASE pDocumentQueue."Service Document Type" OF
+                pDocumentQueue."Service Document Type"::" " : BEGIN
+                  lDocAttachmentFilter.RESET;
+                  lDocAttachmentFilter.SETRANGE("Contact No.", pDocumentQueue."Contact No.");
+                END;
+                  pDocumentQueue."Service Document Type"::Service : BEGIN
+                  lDocAttachmentFilter.RESET;
+                  lDocAttachmentFilter.SETRANGE("Service No.", pDocumentQueue."Service No.");
+                END;
+                pDocumentQueue."Service Document Type"::"Service Header" : BEGIN
+                  lDocAttachmentFilter.RESET;
+                  lDocAttachmentFilter.SETRANGE("Service Document No.", pDocumentQueue."Service Document No.");
+                END;
+                pDocumentQueue."Service Document Type"::Intervention : BEGIN
+                  lDocAttachmentFilter.RESET;
+                  lDocAttachmentFilter.SETRANGE("Service Document No.", pDocumentQueue."Service Document No.");
+                  lDocAttachmentFilter.SETRANGE("Service Intervention Line No.", pDocumentQueue."Service Intervention Line No.");
+                END;
+              END;
+            END;
+            pToAttachmentType::IntervQuote : BEGIN
+              lDocAttachmentFilter.RESET;
+              lDocAttachmentFilter.SETRANGE("Service Document No.", pServIntervQuote."Service Header No.");
+              lDocAttachmentFilter.SETRANGE("Service Intervention Line No.", pServIntervQuote."Intervention Line No.");
+              lDocAttachmentFilter.SETRANGE("Intervention Quote Line No.", pServIntervQuote."Line No.");
+            END;
+            pToAttachmentType::Interaction : BEGIN
+              lDocAttachmentFilter.RESET;
+              lDocAttachmentFilter.SETRANGE("Interaction Log Entry No.", pInteractionLogEntry."Entry No.");
+            END;
+          END;
+
+          lDocAttachmentFilter := lDocAttachment;
+          lDocAttachmentFilter."Key Integer 1" := 0;
+          lDocAttachmentFilter."Key Integer 2" := 0;
+          lDocAttachmentFilter."Key Code 1" := '';
+          lDocAttachmentFilter."Key Code 2" := '';
+          lDocAttachmentFilter.Modifiable := FALSE; //IMH06.ST
+          lDocAttachmentFilter."Document Queue Type" := pDocumentQueue."Document Type"; // IMH07.PC
+          //<<IMH10
+          lDocAttachmentFilter."Document Flow Code" := pDocumentQueue."Flow Code";
+          lDocAttachmentFilter."Queue Type" := pDocumentQueue."Queue Type";
+          lDocAttachmentFilter."Doc. Queue Entry No." := pDocumentQueue."Entry No.";
+          //>>IMH10
+          //<<IMH18
+          IF pInteractionLogEntry.Description <> '' THEN
+            lDocAttachmentFilter.Description := pInteractionLogEntry.Description;
+          //>>IMH18
+          lSourceAttchMgt.CreateAttachment(lDocAttachmentFilter, lAttachmentTreeviewMgt.GetCompletFileName(lDocAttachment),
+                                           lAttachmentTemp);
+          IF (lDocAttachment."Delete Mode" <> lDocAttachment."Delete Mode"::All) OR (NOT lDocAttachment.Modifiable) THEN BEGIN
+            lDocAttachment."Delete Mode" := 0;
+            lDocAttachment.Modifiable := TRUE;
+            lDocAttachment.MODIFY(FALSE);
+          END;
+          lAttachmentMgt.DeleteAttachment(lDocAttachment, FALSE);
+          COMMIT;
+        UNTIL lDocAttachment.NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE DocQueueRapWithNewLine@1100281017(pDocumentFlowHeader@1100281011 : Record 50107;pImportPath@1100281000 : Text[250]);
+    VAR
+      lFileTable@1100281002 : Record 2000000022;
+      lFolderMgt@1100281003 : Codeunit 50004;
+      lCount@1100281004 : Integer;
+      lNbLine@1100281001 : Integer;
+      lNbFile@1100281005 : Integer;
+      lTempBlob@1100281006 : Record 99008535;
+      lFileInStream@1100281007 : InStream;
+      lDocAttachment@1100281008 : Record 50021;
+      lDocumentQueue@1100281009 : Record 50054;
+      i@1100281010 : Integer;
+      lTempPath@1100281012 : Text[1024];
+      lDicName@1100281013 : Text[250];
+      lPath@1100281014 : Text[1024];
+    BEGIN
+      IF pImportPath = '' THEN
+        EXIT;
+      pDocumentFlowHeader.TESTFIELD("No."); //IMH12.ST
+      //<<IMH08
+      lPath := pImportPath;
+      //construire le nom du r‚pertoire temp
+      lDicName := lFolderMgt.GetCurrentFileName(pImportPath);
+      IF STRLEN(USERID) > 3 THEN
+        lDicName := COPYSTR(USERID, 1, 3) + '_' + lDicName + '_' + pDocumentFlowHeader."No."
+      ELSE
+        lDicName := USERID + '_' + lDicName + '_' + pDocumentFlowHeader."No.";
+      //Creation repertoire temp
+      lTempPath := lFolderMgt.GetPathForFile(pImportPath) + lDicName + '\';
+      lFolderMgt.CreateLocalCompletePath(lTempPath, TRUE);
+      //>>IMH08
+
+      IF ISSERVICETIER THEN BEGIN
+        pImportPath := lFolderMgt.CopyLocalFolderToCompanyTmpDir(pImportPath);
+      END;
+
+
+      lDocumentQueue.RESET;
+      lDocumentQueue.SETCURRENTKEY("Document Flow Header No."); //IMH12.ST
+      lDocumentQueue.SETRANGE("Document Flow Header No.",pDocumentFlowHeader."No.");
+      IF lDocumentQueue.FINDSET THEN
+        REPEAT
+          IF lDocumentQueue."Document Page Number" = 0 THEN
+            lNbLine += 1
+          ELSE
+            lNbLine += lDocumentQueue."Document Page Number";
+        UNTIL lDocumentQueue.NEXT = 0;
+
+      lFileTable.SETRANGE(Path,pImportPath);
+      lFileTable.SETRANGE("Is a file",TRUE);
+      lFileTable.SETFILTER(Name,'<>%1&<>%2&<>%3', '.','..','Thumbs.db');
+      lNbFile := lFileTable.COUNT;
+      lFileTable.FINDFIRST;
+
+      IF (lNbFile > lNbLine) THEN
+      BEGIN
+        FOR i := lNbLine+1 TO lNbFile DO
+        BEGIN
+          lDocumentQueue.INIT;
+          lDocumentQueue."Flow Code" := pDocumentFlowHeader."Flow Code";
+          lDocumentQueue."Queue Type" := pDocumentFlowHeader."Queue Type";
+          lDocumentQueue."Line No." := i;
+          lDocumentQueue."Document Flow Header No." := pDocumentFlowHeader."No.";
+          lDocumentQueue.INSERT(TRUE);
+        END;
+      END;
+
+      lDocumentQueue.RESET;
+      lDocumentQueue.SETCURRENTKEY("Document Flow Header No."); //IMH12.ST
+      lDocumentQueue.SETRANGE("Document Flow Header No.",pDocumentFlowHeader."No.");
+      lDocumentQueue.FINDSET;
+      REPEAT
+        IF lDocumentQueue."Document Page Number" = 0 THEN
+          lDocumentQueue."Document Page Number" := 1;
+        FOR lCount := 1 TO lDocumentQueue."Document Page Number" DO BEGIN
+          IF ISSERVICETIER THEN BEGIN
+            lTempBlob.Blob.IMPORT(lFileTable.Path+ '\' + lFileTable.Name);
+            lTempBlob.Blob.CREATEINSTREAM(lFileInStream);
+          END;
+          CLEAR(lDocAttachment);
+          lDocAttachment.INIT;
+          CreateDocAttachment(lDocAttachment, lDocumentQueue, lFileTable.Name, lFileInStream);
+          lFolderMgt.CopyFile(lFileTable.Path+ '\' + lFileTable.Name, lTempPath + lFileTable.Name);
+          lFolderMgt.EraseFile(pImportPath + lFileTable.Name);
+          lFolderMgt.EraseFile(lPath + lFileTable.Name);
+        END;
+        lDocumentQueue."Origin File Path" := lTempPath;
+        lDocumentQueue.MODIFY;
+      UNTIL (lDocumentQueue.NEXT = 0) OR (lFileTable.NEXT = 0);
+
+      lFileTable.RESET;
+      lFileTable.SETRANGE(Path,pImportPath);
+      lFileTable.SETFILTER(Name,'<>%1&<>%2&<>%3', '.','..','Thumbs.db');
+      IF lNbFile = lFileTable.COUNT THEN BEGIN
+        lFolderMgt.EraseTempFolder(COPYSTR(lPath, 1, STRLEN(lPath) - 1));
+      END;
+
+      lFolderMgt.EraseTempFolder(pImportPath);
+    END;
+
+    PROCEDURE MoveAttachment@1100281018(DocHeader@1100281003 : Code[20];DocLineQueueFrom@1100281000 : Integer;DocLineQueueTo@1100281001 : Integer;lPage@1100281009 : Integer);
+    VAR
+      lDocQueueFrom@1100281002 : Record 50054;
+      lDocQueueTo@1100281004 : Record 50054;
+      lDocAttachament@1100281005 : Record 50021;
+      lDocAttachament2@1100281006 : Record 50021;
+      lDiag@1100281007 : Dialog;
+      LEntryNo@1100281008 : Integer;
+      lAttachmentTreeviewMgt@1100281010 : Codeunit 50001;
+    BEGIN
+      lDocQueueFrom.RESET;
+      lDocQueueFrom.SETCURRENTKEY("Document Flow Header No.","Line No.");
+      lDocQueueFrom.SETRANGE("Document Flow Header No.",DocHeader);
+      lDocQueueFrom.SETRANGE("Line No.",DocLineQueueFrom);
+      IF lDocQueueFrom.FINDFIRST THEN
+      BEGIN
+        lDocQueueTo.RESET;
+        lDocQueueTo.SETCURRENTKEY("Document Flow Header No.","Line No.");
+        lDocQueueTo.SETRANGE("Document Flow Header No.",DocHeader);
+        lDocQueueTo.SETRANGE("Line No.",DocLineQueueTo);
+        IF lDocQueueTo.FINDFIRST THEN
+        BEGIN
+          lDocAttachament2.RESET;
+          lDocAttachament2.SETRANGE("Referent Table No.",50054);
+          lDocAttachament2.SETRANGE("Key Integer 2",lDocQueueTo."Entry No.");
+          IF NOT lDocAttachament2.FINDLAST THEN
+            lDocAttachament2.INIT;
+
+          lDocAttachament.RESET;
+          lDocAttachament.SETRANGE("Referent Table No.",50054);
+          lDocAttachament.SETRANGE("Key Integer 2",lDocQueueFrom."Entry No.");
+          IF NOT lDocAttachament.ISEMPTY THEN
+          BEGIN
+            IF (lDocAttachament.COUNT = 1) THEN
+            BEGIN
+              lDocAttachament.FINDFIRST;
+              LEntryNo := lDocAttachament2."Entry No." + 1;
+              lDocAttachament2.INIT;
+              lDocAttachament2 := lDocAttachament;
+              lDocAttachament2."Key Integer 2" := lDocQueueTo."Entry No.";
+              lDocAttachament2."Entry No." := LEntryNo;
+              lDocAttachament2.INSERT;
+              IF lAttachmentTreeviewMgt.MoveFile(lDocAttachament,lDocAttachament2,FALSE) THEN
+                lDocAttachament.DELETE;
+            END;
+            IF (lDocAttachament.COUNT > 1) THEN
+            BEGIN
+              IF lDocAttachament.FINDSET THEN
+              REPEAT
+                IF lPage = 1 THEN
+                BEGIN
+                  LEntryNo := lDocAttachament2."Entry No." + 1;
+                  lDocAttachament2.INIT;
+                  lDocAttachament2 := lDocAttachament;
+                  lDocAttachament2."Key Integer 2" := lDocQueueTo."Entry No.";
+                  lDocAttachament2."Entry No." := LEntryNo;
+                  lDocAttachament2.INSERT;
+                  IF lAttachmentTreeviewMgt.MoveFile(lDocAttachament,lDocAttachament2,FALSE) THEN
+                    lDocAttachament.DELETE;
+                END;
+                lPage := lPage - 1;
+              UNTIL (lDocAttachament.NEXT = 0);
+            END;
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE ArchiveDocQueueFile@1100281019(VAR pDocumentQueue@1100281000 : Record 50054;VAR pDocAttach@1100281009 : Record 50021);
+    VAR
+      lFileName@1100281002 : Text[1024];
+      lDocumentFlow@1100281003 : Record 50053;
+      lFileTable@1100281004 : Record 2000000022;
+      lDicName@1100281005 : Text[250];
+      lPos@1100281006 : Integer;
+      lLastPos@1100281007 : Integer;
+      lText@1100281008 : Text[250];
+    BEGIN
+      IF pDocumentQueue."Origin File Path" = '' THEN
+        EXIT;
+
+      lDocumentFlow.GET(pDocumentQueue."Flow Code");
+      IF lDocumentFlow."File Archive Path" = '' THEN
+        EXIT;
+
+      lDicName := FolderMgt.GetCurrentFileName(pDocumentQueue."Origin File Path");
+      lPos := STRPOS(lDicName, '_');
+      lDicName := COPYSTR(lDicName, lPos + 1);
+      lText := lDicName;
+      lPos := STRPOS(lDicName, '_');
+      WHILE lPos <> 0 DO BEGIN
+        lText := COPYSTR(lText, lPos + 1, STRLEN(lText) - lPos);
+        lPos := STRPOS(lText, '_');
+      END;
+      lDicName := COPYSTR(lDicName, 1, STRLEN(lDicName) - STRLEN(lText) - 1);
+
+      FolderMgt.CreateLocalCompletePath(lDocumentFlow."File Archive Path" + lDicName + '\', TRUE);
+
+      //lDocAttachment.SETRANGE("Referent Table No.", DATABASE::"Document Queue");
+      //lDocAttachment.SETRANGE("Key Integer 1", pDocumentQueue."Queue Type");
+      //lDocAttachment.SETRANGE("Key Integer 2", pDocumentQueue."Entry No.");
+      //lDocAttachment.SETRANGE("Key Code 1", pDocumentQueue."Flow Code");
+      //IF USERID = 'ISAT-ZW' THEN
+      //  MESSAGE(FORMAT(pDocAttach.COUNT));
+      IF NOT pDocAttach.ISEMPTY THEN BEGIN
+        pDocAttach.FINDSET;
+        REPEAT
+          lFileName := pDocumentQueue."Origin File Path" + pDocAttach."Orginal File Name";
+          FolderMgt.CopyFile2(lFileName, lDocumentFlow."File Archive Path" + lDicName + '\' + pDocAttach."Orginal File Name");
+          FolderMgt.EraseFile(lFileName);
+        UNTIL pDocAttach.NEXT = 0;
+      END;
+
+      {
+      FolderMgt.FolderIsEmpty(pDocumentQueue."Origin File Path");
+      lFileTable.SETRANGE(Path, pDocumentQueue."Origin File Path");
+      lFileTable.SETFILTER(Name,'<>%1&<>%2&<>%3', '.','..','Thumbs.db');
+      MESSAGE(FORMAT(lFileTable.COUNT));
+      IF lFileTable.COUNT = 0 THEN
+        FolderMgt.EraseTempFolder(pDocumentQueue."Origin File Path");
+      FolderMgt.ClearFileSys;
+      MESSAGE('4');
+       }
+    END;
+
+    BEGIN
+    {
+      /** @r IMH22 @d 26/03/14 @a ISAT.ZW @v IMH6.01.5005 @s Reorganisation DPS @h 5005
+          @c Ajout la gestion de team code par defaut */
+      /** @r IMH21 @d 24/02/14 @a ISAT.ZW @v IMH6.01.4985 @s R‚organisation DPS @c Gestion de code corbeille service par d‚faut */
+      /** @r IMH20 @d 31/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3835 */
+      /** @r IMH19 @d 26/09/12 @a ISAT.ZW @v IMH6.01.218 @s NEP00009 @h 3698
+          @c Formalisation nø fax prestataire */
+      /** @r IMH18 @d 19/09/12 @a ISAT.ZW @v IMH6.01.224 @s NEP00004 @h 3567
+          @c Modification designation document joint pour les flux GED */
+      /** @r IMH17 @d 18/07/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 3456
+          @c Affectation document r‚cla */
+      /** @r IMH16 @d 22/03/12 @a ISAT.PC @v IMH6.01.165 @s GED @h 3166
+          @c Probl‚matique des factures scann‚es arrivant en doc joint des prestataries */
+      /** @r IMH15 @d 05/03/12 @a ISAT.PC @v IMH6.01.165 @s GED @c Ajout champ nø3000, Delay
+          @c Ajout de la cl‚ "Document Flow Header No.","Delay" pour la gestion des flux en retard */
+      /** @r IMH14 @d 20/01/12 @a ISAT.ST @v IMH6.01.004 @s Contr“le des Nø document fournisseur
+          @c Filtre fournisseur manquant  */
+      /** @r IMH13 @d 16/01/12 @a ISAT.ZW @v IMH6.01.198 @s FLux doc @c Gestion document type r‚clamation */
+      /** @r IMH12 @d 21/12/11 @s ISAT.ST @v IMH6.01.198 @s Flux doc @c Optimisations FINDFIRST->FINDSET + SETCURRENTKEY manquants */
+      /** @r IMH11 @d 13/12/11 @a ISAT.EBA @v IMH6.01.198 @s Flux doc
+          @c Corbeille r‚gion AR */
+      /** @r IMH10 @d 07/12/11 @a ISAT.ZW @v IMH6.01.198 @s FLux doc @c Faire suivre nø flux dans interaction + doc joint */
+      /** @r IMH09 @d 30/11/11 @a ISAT.ST @v IMH6.01.198 @s Extranet @c Recherche par le sujet : cas de 10 chiffres tel */
+      /** @r IMH08 @d 02/11/11 @a ISAT.ZW @v IMH6.01.198 @s Extranet @c Archivage Fichier repprochement  */
+      /** @r IMH07 @d 05/10/11 @a ISAT.PC @v IMH6.01.198 @s Extranet @c on r‚cupŠre le type de document qualifi‚  */
+      /** @r IMH06 @d 28/07/11 @a ISAT.ST @v IMH6.01.004 @s Docs Entrants non modifiables  */
+      /** @r IMH05 @d 05/07/11 @a ISAT.VA @v IMH6.01.004 @s Contr“le des Nø document fournisseur  */
+      /** @r IMH04 @d 18/03/11 @a ISAT.ZW @v IMH6.01.004 @s Gestion GED @c Gestion FLux entrant */
+      /** @r IMH03 @d 05/11/10 @a ISAT.ZW @v IMH6.01.004 @s Gestion GED @c Fonction LaunchingDocumentAction */
+      /** @r IMH02 @d 28/10/10 @a ISAT.ZW @v IMH6.01.004 @s Gestion GED @c Nø flux obligatoire en creation file doc */
+      /** @r IMH01 @d 28/09/10 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

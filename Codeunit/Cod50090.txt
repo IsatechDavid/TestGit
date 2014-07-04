@@ -1,0 +1,225 @@
+OBJECT Codeunit 50090 Import Address Reference
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/07/11;
+    Time=09:31:23;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lFirstLine@1100281000 : Text[250];
+            lFileRead@1100281001 : Boolean;
+          BEGIN
+            //FileName :=
+            //'\\SIFS1\Clients-Prospects\I\IMH\3 - Applicatifs\PC000098 - IMH - 2010_09_03\' +
+            //'4 - Dev_Test\Fichiers La Poste\extrait_hexavia_38.txt';
+
+            OpenFile(lFirstLine);
+
+            CASE TRUE OF
+              STRPOS(lFirstLine, 'HEXAVIA') > 0 : BEGIN
+                lFirstLine := COPYSTR(lFirstLine, STRPOS(lFirstLine, 'HEXAVIA'));
+                IF STRPOS(lFirstLine, '38') > 0 THEN
+                  lFileRead := ImportHEXAVIA38;
+              END;
+              STRPOS(lFirstLine, 'HEXAPOST') > 0 : BEGIN
+                lFirstLine := COPYSTR(lFirstLine, STRPOS(lFirstLine, 'HEXAPOST'));
+                IF STRPOS(lFirstLine, '38') > 0 THEN
+                  lFileRead := ImportHEXAPOST38(STRPOS(lFirstLine, 'COMPLET') > 0);
+              END;
+            END;
+
+            CloseFile;
+
+            IF NOT lFileRead THEN
+              MESSAGE(Text003, lFirstLine);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ToolsMgt@1100281007 : Codeunit 8016602;
+      ImportFile@1100281004 : File;
+      FileOpened@1100281005 : Boolean;
+      FileName@1100281000 : Text[250];
+      Text001@1100281002 : TextConst 'ENU=Import Attachment;FRA=Importer document';
+      Text002@1100281001 : TextConst 'ENU=All Files (*.*)|*.*;FRA=Tous les fichiers (*.*)|*.*';
+      FileInstream@1100281003 : InStream;
+      Text003@1100281006 : TextConst 'ENU=unrecognized file type : %1.;FRA=Type de fichier non reconnu : %1.';
+      TempAddressReference@1100281008 : TEMPORARY Record 50077;
+
+    PROCEDURE SetFile@1100281003(pFileName@1100281000 : Text[250]);
+    BEGIN
+      pFileName := FileName;
+    END;
+
+    PROCEDURE GetFile@1100281004() rFileName : Text[250];
+    BEGIN
+      rFileName := FileName;
+    END;
+
+    PROCEDURE OpenFile@1100281012(VAR pFristLine@1100281002 : Text[250]) : Boolean;
+    BEGIN
+      IF NOT ISSERVICETIER THEN BEGIN
+        IF NOT ImportFile.OPEN(FileName) THEN
+          EXIT(FALSE);
+        ImportFile.CREATEINSTREAM(FileInstream);
+        FileOpened := TRUE;
+      END ELSE BEGIN
+        IF ImportFile.OPEN(FileName) THEN BEGIN
+          ImportFile.CREATEINSTREAM(FileInstream);
+          FileOpened := TRUE;
+        END ELSE
+          IF NOT UPLOADINTOSTREAM(Text001,'',Text002, FileName, FileInstream) THEN
+            EXIT(FALSE);
+      END;
+      FileInstream.READTEXT(pFristLine);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE CloseFile@1100281014();
+    BEGIN
+      IF FileOpened THEN
+        ImportFile.CLOSE;
+      CLEAR(FileInstream);
+    END;
+
+    PROCEDURE ImportHEXAPOST38@1100281005(pFullFile@1100281001 : Boolean) : Boolean;
+    VAR
+      lReadedLine@1100281000 : Text[1024];
+    BEGIN
+      WHILE NOT FileInstream.EOS DO BEGIN
+        FileInstream.READTEXT(lReadedLine);
+        ProcessHEXAPOSTLine38(lReadedLine, pFullFile);
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ProcessHEXAPOSTLine38@1100281006(pReadedLine@1100281000 : Text[1024];pFullFile@1100281002 : Boolean);
+    VAR
+      lPostCode@1100281001 : Record 225;
+      lPostCode2@1100281004 : Record 225;
+      lTextModif@1100281003 : Text[30];
+    BEGIN
+      lPostCode.INIT;
+      lPostCode.Code := DELCHR(COPYSTR(pReadedLine, 45, 5), '>', ' ');
+      lPostCode.City := FormatText(DELCHR(COPYSTR(COPYSTR(pReadedLine, 7, 38), 1, MAXSTRLEN(lPostCode.City)), '>', ' '));
+      lPostCode."Search City" := lPostCode.City;
+      lPostCode.VALIDATE("Geo. Reference Code", COPYSTR(pReadedLine, 1, 5));
+      IF pFullFile THEN
+        lTextModif := COPYSTR(pReadedLine, 88, 1);
+      CASE lTextModif OF
+        'I','' : IF lPostCode.INSERT(TRUE) THEN;
+        'A' : BEGIN
+          IF lPostCode.GET(lPostCode.Code, lPostCode.City) THEN
+            lPostCode.DELETE(TRUE);
+        END;
+        'R' : BEGIN
+          IF lPostCode2.GET(lPostCode.Code, lPostCode.City) THEN BEGIN
+            lPostCode2."Geo. Reference Code" := lPostCode."Geo. Reference Code";
+            lPostCode2.MODIFY(TRUE);
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE ImportHEXAVIA38@1100281007() : Boolean;
+    VAR
+      lReadedLine@1100281000 : Text[1024];
+      lAddressReference@1100281002 : Record 50077;
+      lAddressReference2@1100281001 : Record 50077;
+    BEGIN
+      WHILE NOT FileInstream.EOS DO BEGIN
+        FileInstream.READTEXT(lReadedLine);
+        ProcessHEXAVIALine38(lReadedLine);
+      END;
+
+      IF TempAddressReference.FINDFIRST THEN
+        REPEAT
+          lAddressReference := TempAddressReference;
+          //lAddressReference.VALIDATE("Address Synonym");
+          IF lAddressReference2.GET(TempAddressReference."Country/Region Code", TempAddressReference."Post Code") THEN BEGIN
+            lAddressReference.MODIFY(TRUE);
+          END ELSE BEGIN
+            lAddressReference.INSERT(TRUE);
+          END;
+        UNTIL TempAddressReference.NEXT = 0;
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ProcessHEXAVIALine38@1100281008(pReadedLine@1100281000 : Text[1024]);
+    VAR
+      lAddressReference@1100281001 : Record 50077;
+      lAddressReference2@1100281004 : Record 50077;
+      lTypeLineText@1100281002 : Text[30];
+      lTextModif@1100281003 : Text[30];
+    BEGIN
+      lAddressReference.INIT;
+      lTypeLineText := COPYSTR(pReadedLine, 1, 1);
+      CASE lTypeLineText OF
+        'L' : EXIT;
+        'V' : BEGIN
+          lAddressReference."Country/Region Code" := GetCountry;
+          lAddressReference."Geo. Reference Code" := DELCHR(COPYSTR(pReadedLine, 2, 5), '>', ' ');
+          EVALUATE(lAddressReference."Post Code", DELCHR(COPYSTR(pReadedLine, 7, 8), '>', ' '));
+          lAddressReference."Way Name" := FormatText(DELCHR(COPYSTR(pReadedLine, 55, 32), '>', ' '));
+          lAddressReference."Way Type" := DELCHR(COPYSTR(pReadedLine, 87, 4), '>', ' ');
+          lAddressReference."Post Code" := DELCHR(COPYSTR(pReadedLine, 104, 5), '>', ' ');
+          lTextModif := COPYSTR(pReadedLine, 142, 1);
+        END;
+        'W' : BEGIN
+          lAddressReference."Country/Region Code" := GetCountry;
+          EVALUATE(lAddressReference."Post Code", DELCHR(COPYSTR(pReadedLine, 15, 8), '>', ' '));
+          lAddressReference."Way Name" := FormatText(DELCHR(COPYSTR(pReadedLine, 55, 32), '>', ' '));
+          lAddressReference."Way Type" := DELCHR(COPYSTR(pReadedLine, 87, 4), '>', ' ');
+          //EVALUATE(lAddressReference."Address Synonym", DELCHR(COPYSTR(pReadedLine, 7, 8), '>', ' '));
+          lTextModif := COPYSTR(pReadedLine, 107, 1);
+          IF lTextModif <> 'S' THEN BEGIN
+            TempAddressReference := lAddressReference;
+            TempAddressReference.INSERT;
+          END;
+        END;
+      END;
+
+      IF (lTypeLineText <> 'W') OR (lTextModif = 'S') THEN
+        CASE lTextModif OF
+          'C',' ' : IF lAddressReference.INSERT(TRUE) THEN;
+          'S' : BEGIN
+            IF lAddressReference.GET(lAddressReference."Country/Region Code", lAddressReference."Post Code") THEN
+              lAddressReference.DELETE(TRUE);
+          END;
+          'M' : BEGIN
+            IF lAddressReference2.GET(lAddressReference."Country/Region Code", lAddressReference."Post Code") THEN BEGIN
+              lAddressReference2."Geo. Reference Code" := lAddressReference."Geo. Reference Code";
+              lAddressReference2."Post Code" := lAddressReference."Post Code";
+              lAddressReference2."Way Name" := lAddressReference."Way Name";
+              lAddressReference2."Way Type" := lAddressReference."Way Type";
+              lAddressReference2.MODIFY(TRUE);
+            END ELSE
+              lAddressReference.INSERT(TRUE);
+          END;
+        END;
+    END;
+
+    PROCEDURE GetCountry@1100281015() : Code[10];
+    BEGIN
+      EXIT('FRA');
+    END;
+
+    PROCEDURE FormatText@1100281011(pText@1100281000 : Text[250]) : Text[250];
+    BEGIN
+      EXIT(ToolsMgt.FormatImport(pText));
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 18/10/10 @a ISAT.ZW @v IMH6.01.012 @s Normalisation des donn‚es @c Cr‚ation objet */
+    }
+    END.
+  }
+}

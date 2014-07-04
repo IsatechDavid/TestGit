@@ -1,0 +1,1368 @@
+OBJECT Codeunit 50125 Broadcast WebService Fusion
+{
+  OBJECT-PROPERTIES
+  {
+    Date=09/09/11;
+    Time=14:38:18;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIXmlDocMgt@1100281000 : Codeunit 8016713;
+      FUSIONInterfaceMgt@1100281004 : Codeunit 50181;
+      InterfaceSetup@1100281001 : Record 50139;
+      InterfaceSetupGotten@1100281002 : Boolean;
+      NameSpace@1100281003 : Text[30];
+
+    PROCEDURE EncodeReferentielMessage@1100281000(pBroadcastTokenCode@1100281000 : Code[20];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLReferentialRequest@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLProducts@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLProduct@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLKeyAccounts@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLKeyAccount@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServOrderType@1100281007 : Record 5903;
+      lCust@1100281010 : Record 18;
+      lContact@1100281011 : Record 5050;
+      lMarketingSetup@1100281012 : Record 5079;
+      lContBusRelation@1100281013 : Record 5054;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'ReferentialRequest', lXMLReferentialRequest);
+      //Identifier
+      AddElement(lXMLReferentialRequest,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+
+      //Liste Type produits
+      AddElement(lXMLReferentialRequest,'Products','',NameSpace,lXMLProducts);
+
+      lServOrderType.SETRANGE(Fusion, TRUE);
+      IF lServOrderType.FINDFIRST THEN
+        REPEAT
+          //Type produit
+          AddElement(lXMLProducts,'Product','',NameSpace,lXMLProduct);
+          //Description
+          AddElement(lXMLProduct,'Description',lServOrderType.Description,NameSpace,lXMLNewNode);
+          //Fusion code
+          AddElement(lXMLProduct,'FusionCode',lServOrderType."Fusion Code",NameSpace,lXMLNewNode);
+          //Navision code --> code type service
+          AddElement(lXMLProduct,'NavisionCode',lServOrderType.Code,NameSpace,lXMLNewNode);
+        UNTIL lServOrderType.NEXT = 0;
+
+      //Liste Grands Comptes (KeyAccounts)
+      AddElement(lXMLReferentialRequest,'KeyAccounts','',NameSpace,lXMLKeyAccounts);
+      lMarketingSetup.GET;
+
+      lCust.SETRANGE("Service Contact", lCust."Service Contact");
+      lCust.SETRANGE("Service Corporate", TRUE);
+
+      IF lCust.FINDFIRST THEN
+        REPEAT
+          //Grand Compte
+          AddElement(lXMLKeyAccounts,'KeyAccount','',NameSpace,lXMLKeyAccount);
+          //Name
+          AddElement(lXMLKeyAccount,'Name',lCust.Name,NameSpace,lXMLNewNode);
+          //region
+          AddElement(lXMLKeyAccount,'Region',lCust."Corporate Region Code",NameSpace,lXMLNewNode);
+
+          lContBusRelation.SETCURRENTKEY("Link to Table", "No.");
+          lContBusRelation.SETRANGE("Link to Table", lContBusRelation."Link to Table"::Customer);
+          lContBusRelation.SETRANGE("Business Relation Code", lMarketingSetup."Bus. Rel. Code for Customers");
+          lContBusRelation.SETRANGE("No.", lCust."No.");
+          IF lContBusRelation.FINDFIRST THEN
+            IF lContact.GET(lContBusRelation."Contact No.") THEN BEGIN
+              //Fusion code
+              AddElement(lXMLKeyAccount,'FusionCode',lContact."GUID Fusion Code",NameSpace,lXMLNewNode);
+              //Navision code --> code type service
+              AddElement(lXMLKeyAccount,'NavisionCode',lContact."GTA Code",NameSpace,lXMLNewNode);
+            END;
+        UNTIL lCust.NEXT = 0;
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE EncodeServiceList@1100281006(pBroadcastTokenCode@1100281000 : Code[20];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLServicesList@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLServices@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLService@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIMQBufferManagement@1100281007 : Codeunit 8016708;
+      lSentMQBuffer@1100281005 : TEMPORARY Record 8016720;
+      lServiceHeader@1100281008 : Record 5900;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'ServicesList', lXMLServicesList);
+      //Identifier
+      AddElement(lXMLServicesList,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      AddElement(lXMLServicesList,'Services','',NameSpace,lXMLServices);
+
+      lSentMQBuffer."EAI MQ Code" := InterfaceSetup."Fusion EAI Sent MQ Code";
+      lEAIMQBufferManagement.LoadFusionSendMQToBuffer(DATABASE::"Service Header", lSentMQBuffer);
+
+      IF lSentMQBuffer.FINDFIRST THEN
+        REPEAT
+          IF lServiceHeader.GET(lSentMQBuffer."Document Type", lSentMQBuffer."Service Header No.") THEN BEGIN
+            //Service
+            AddElement(lXMLServices,'Service','',NameSpace,lXMLService);
+            //StreamIdenifierNo
+            AddElement(lXMLService,'StreamIdenifierNo',lSentMQBuffer."Entry No.",NameSpace,lXMLNewNode);
+            //ServiceNum
+            AddElement(lXMLService,'ServiceNum',lServiceHeader."No.",NameSpace,lXMLNewNode);
+            //Disaster : lServiceHeader."Reference No."
+            AddElement(lXMLService,'DisaterNum',lServiceHeader."Reference No.",NameSpace,lXMLNewNode);
+            //CreationDate
+            AddElement(lXMLService,'CreationDate',FORMAT(lServiceHeader."Creation Date"),NameSpace,lXMLNewNode);
+            //ModificationDate
+            AddElement(lXMLService,'ModificationDate',FORMAT(lServiceHeader."Last Modification Date"),NameSpace,lXMLNewNode);
+            //lSentMQBuffer.Status := lSentMQBuffer.Status::Sent;
+            lSentMQBuffer.MODIFY;
+            lEAIMQBufferManagement.TransferSendMQBufferToSendMQ(lSentMQBuffer);
+          END;
+        UNTIL lSentMQBuffer.NEXT = 0;
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE EncodeServiceDetail@1100281018(pBroadcastTokenCode@1100281000 : Code[20];pServiceHeaderNo@1100281009 : Code[20];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLService@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIMQBufferManagement@1100281007 : Codeunit 8016708;
+      lSentMQBuffer@1100281005 : TEMPORARY Record 8016720;
+      lServiceHeader@1100281008 : Record 5900;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN
+        EXIT(FALSE);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'Services', lXMLService);
+      //Identifier
+      AddElement(lXMLService,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      //ServiceNum
+      AddElement(lXMLService,'ServiceNum',lServiceHeader."No.",NameSpace,lXMLNewNode);
+      //FusionCode
+      AddElement(lXMLService,'FusionNum',lServiceHeader."GUID Fusion Code",NameSpace,lXMLNewNode);
+      //SellToCust -----------??????????-------------Donneur d'ordre-----------donneur d'ordre r‚gion-----
+      AddElement(lXMLService,'SellToCust',lServiceHeader."Corporate No.",NameSpace,lXMLNewNode);
+      //Disaster : lServiceHeader."Reference No."
+      AddElement(lXMLService,'DisaterNum',lServiceHeader."Reference No.",NameSpace,lXMLNewNode);
+      //DisaterDate
+      AddElement(lXMLService,'DisaterDate',FORMAT(lServiceHeader."Event Date"),NameSpace,lXMLNewNode);
+      //Product Type
+      AddElement(lXMLService,'ProductType',lServiceHeader."Service Order Type",NameSpace,lXMLNewNode);
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE EncodeServiceContactList@1100281004(pBroadcastTokenCode@1100281000 : Code[20];pServiceHeaderNo@1100281009 : Code[20];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContactsList@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContacts@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLContact@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServiceHeader@1100281008 : Record 5900;
+      lContact@1100281005 : Record 5050;
+      lIntervLine@1100281007 : Record 50075;
+      lServiceHeaderAddress@1100281010 : Record 50068;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN
+        EXIT(FALSE);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'ContactsList', lXMLContactsList);
+      //Identifier
+      AddElement(lXMLContactsList,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      //ServiceNum
+      AddElement(lXMLContactsList,'ServiceNum',pServiceHeaderNo,NameSpace,lXMLNewNode);
+      //FusionNum
+      AddElement(lXMLContactsList,'FusionNum',lServiceHeader."GUID Fusion Code",NameSpace,lXMLNewNode);
+      //Contacts
+      AddElement(lXMLContactsList,'Contacts','',NameSpace,lXMLContacts);
+
+      //Contacts Liste
+      //beneficiaire
+      IF lContact.GET(lServiceHeader."Contact No.") THEN BEGIN
+        //Contact
+        AddElement(lXMLContacts,'Contact','',NameSpace,lXMLContact);
+        AddContactElement(lXMLContact, lContact, 'Beneficiary');
+      END;
+
+      //Prestataires
+      lIntervLine.SETRANGE("Service Header No.", pServiceHeaderNo);
+      IF lIntervLine.FINDFIRST THEN
+        REPEAT
+          IF lContact.GET(lIntervLine."Provider No.") THEN BEGIN
+            //Contact
+            AddElement(lXMLContacts,'Contact','',NameSpace,lXMLContact);
+            AddContactElement(lXMLContact, lContact, 'Provider');
+          END;
+        UNTIL lIntervLine.NEXT = 0;
+
+      //Exprert/Annexe
+      lServiceHeaderAddress.SETRANGE("Service Header No.", lServiceHeader."No.");
+      lServiceHeaderAddress.SETFILTER("Address Type", '=%1|=%2',
+        lServiceHeaderAddress."Address Type"::"Annexe Contact", lServiceHeaderAddress."Address Type"::"Expert Contact");
+      IF lServiceHeaderAddress.FINDFIRST THEN
+        REPEAT
+          //Contact
+          AddElement(lXMLContacts,'Contact','',NameSpace,lXMLContact);
+          CASE lServiceHeaderAddress."Address Type" OF
+            lServiceHeaderAddress."Address Type"::"Annexe Contact" :
+              AddServHeaderAddElement(lXMLContact, lServiceHeaderAddress, 'Annexe');
+            lServiceHeaderAddress."Address Type"::"Expert Contact" :
+              AddServHeaderAddElement(lXMLContact, lServiceHeaderAddress, 'Expert');
+          END;
+        UNTIL lServiceHeaderAddress.NEXT = 0;
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE AddContactElement@1100281015(VAR pXMLContact@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pContact@1100281000 : Record 5050;pContactType@1100281001 : Text[50]);
+    VAR
+      lSaluiation@1100281003 : Record 5068;
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      //ContactNum
+      AddElement(pXMLContact,'ContactNum',pContact."No.",NameSpace,lXMLNewNode);
+
+      //Attribut type contact
+      AddAttribute(pXMLContact,'Type',pContactType);
+      //Attribut LegalForm contact
+      CASE pContact.Type OF
+        pContact.Type::Company : AddAttribute(pXMLContact,'LegalForm','Morale');
+        pContact.Type::Person : AddAttribute(pXMLContact,'LegalForm','Natural');
+      END;
+
+      //Salutation
+      IF lSaluiation.GET(pContact."Salutation Code") THEN
+        AddElement(pXMLContact,'Salutation',lSaluiation.Description,NameSpace,lXMLNewNode)
+      ELSE
+        AddElement(pXMLContact,'Salutation',pContact."Salutation Code",NameSpace,lXMLNewNode);
+      //LastName
+      AddElement(pXMLContact,'LastName',pContact.Surname,NameSpace,lXMLNewNode);
+      //FirstName
+      AddElement(pXMLContact,'FirstName',pContact."First Name",NameSpace,lXMLNewNode);
+      //Adress
+      AddElement(pXMLContact,'Adress',pContact.Address,NameSpace,lXMLNewNode);
+      //Adress2
+      AddElement(pXMLContact,'Adress2',pContact."Address 2",NameSpace,lXMLNewNode);
+      //PostCode
+      AddElement(pXMLContact,'PostCode',pContact."Post Code",NameSpace,lXMLNewNode);
+      //City
+      AddElement(pXMLContact,'City',pContact.City,NameSpace,lXMLNewNode);
+      //PhoneNum
+      AddElement(pXMLContact,'PhoneNum',pContact."Phone No.",NameSpace,lXMLNewNode);
+      //MobilePhoneNum
+      AddElement(pXMLContact,'MobilePhoneNum',pContact."Mobile Phone No.",NameSpace,lXMLNewNode);
+      //BusPhoneNum
+      AddElement(pXMLContact,'BusPhoneNum',pContact."Business Phone No.",NameSpace,lXMLNewNode);
+      //Email
+      AddElement(pXMLContact,'Email',pContact."E-Mail",NameSpace,lXMLNewNode);
+    END;
+
+    LOCAL PROCEDURE AddServHeaderAddElement@1100281032(VAR pXMLContact@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pServiceHeaderAddress@1100281000 : Record 50068;pContactType@1100281001 : Text[50]);
+    VAR
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lSaluiation@1100281003 : Record 5068;
+    BEGIN
+      //ContactNum
+      AddElement(pXMLContact,'ContactNum',
+        pServiceHeaderAddress."Service Header No." + '#' +
+        FORMAT(pServiceHeaderAddress."Address Type",0,'<Number>') + '#' + FORMAT(pServiceHeaderAddress."Address No."),
+        NameSpace,lXMLNewNode);
+
+      //Attribut type contact
+      AddAttribute(pXMLContact,'Type',pContactType);
+      //Attribut LegalForm contact
+      AddAttribute(pXMLContact,'LegalForm','Natural');
+
+      //Salutation
+      IF lSaluiation.GET(pServiceHeaderAddress."Salutation Code") THEN
+        AddElement(pXMLContact,'Salutation',lSaluiation.Description,NameSpace,lXMLNewNode)
+      ELSE
+        AddElement(pXMLContact,'Salutation',pServiceHeaderAddress."Salutation Code",NameSpace,lXMLNewNode);
+      //LastName
+      AddElement(pXMLContact,'LastName',pServiceHeaderAddress.Surname,NameSpace,lXMLNewNode);
+      //FirstName
+      AddElement(pXMLContact,'FirstName',pServiceHeaderAddress."First Name",NameSpace,lXMLNewNode);
+      //Adress
+      AddElement(pXMLContact,'Adress',pServiceHeaderAddress.Address,NameSpace,lXMLNewNode);
+      //Adress2
+      AddElement(pXMLContact,'Adress2',pServiceHeaderAddress."Address 2",NameSpace,lXMLNewNode);
+      //PostCode
+      AddElement(pXMLContact,'PostCode',pServiceHeaderAddress."Post Code",NameSpace,lXMLNewNode);
+      //City
+      AddElement(pXMLContact,'City',pServiceHeaderAddress.City,NameSpace,lXMLNewNode);
+      //PhoneNum
+      AddElement(pXMLContact,'PhoneNum',pServiceHeaderAddress."Phone No.",NameSpace,lXMLNewNode);
+      //MobilePhoneNum
+      AddElement(pXMLContact,'MobilePhoneNum',pServiceHeaderAddress."Mobile Phone No.",NameSpace,lXMLNewNode);
+      //BusPhoneNum
+      AddElement(pXMLContact,'BusPhoneNum','',NameSpace,lXMLNewNode);
+      //Email
+      AddElement(pXMLContact,'Email','',NameSpace,lXMLNewNode);
+    END;
+
+    PROCEDURE EncodeAttachementsList@1100281044(pBroadcastTokenCode@1100281000 : Code[20];pServiceHeaderNo@1100281009 : Code[20];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttachmentsList@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttachments@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttachment@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttaccKey@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServiceHeader@1100281008 : Record 5900;
+      lAttachment@1100281005 : Record 50021;
+      lAttachmentMgt@1100281010 : Codeunit 50002;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN
+        EXIT(FALSE);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'AttachmentsList', lXMLAttachmentsList);
+      //Identifier
+      AddElement(lXMLAttachmentsList,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      //ServiceNum
+      AddElement(lXMLAttachmentsList,'ServiceNum',pServiceHeaderNo,NameSpace,lXMLNewNode);
+      //FusionNum
+      AddElement(lXMLAttachmentsList,'FusionNum',lServiceHeader."GUID Fusion Code",NameSpace,lXMLNewNode);
+
+      //Attachments
+      AddElement(lXMLAttachmentsList,'Attachments','',NameSpace,lXMLAttachments);
+
+      //Attachments List
+      lAttachment.SETCURRENTKEY("Service No.","Service Document No.","Service Intervention Line No.","Intervention Quote Line No.");
+      lAttachment.SETRANGE("Service No.", lServiceHeader."Service No.");
+      lAttachment.SETRANGE("Service Document No.", lServiceHeader."No.");
+
+      IF lAttachment.FINDFIRST THEN
+        REPEAT
+          AddElement(lXMLAttachments,'Attachment','',NameSpace,lXMLAttachment);
+          //AttachKey
+          AddElement(lXMLAttachment,'AttachKey',
+            FORMAT(lAttachment."Referent Table No.") + '#' + FORMAT(lAttachment."Key Integer 1") +
+            '#' + FORMAT(lAttachment."Key Integer 2") + '#' + lAttachment."Key Code 1" +
+            '#' + lAttachment."Key Code 2" + '#' + FORMAT(lAttachment."Entry No.")
+            ,NameSpace,lXMLAttaccKey);
+          {
+          AddElement(lXMLAttachment,'AttachKey', '',NameSpace,lXMLAttaccKey);
+          //cl‚ 1 document joint reference table
+          AddElement(lXMLAttaccKey,'ReferentTableNo',FORMAT(lAttachment."Referent Table No."),NameSpace,lXMLNewNode);
+          //cl‚ 2 document Key Integer 1
+          AddElement(lXMLAttaccKey,'KeyInteger1',FORMAT(lAttachment."Key Integer 1"),NameSpace,lXMLNewNode);
+          //cl‚ 3 document Key Integer 2
+          AddElement(lXMLAttaccKey,'KeyInteger2',FORMAT(lAttachment."Key Integer 2"),NameSpace,lXMLNewNode);
+          //cl‚ 4 document Key code 1
+          AddElement(lXMLAttaccKey,'KeyCode1',lAttachment."Key Code 1",NameSpace,lXMLNewNode);
+          //cl‚ 5 document Key code 2
+          AddElement(lXMLAttaccKey,'KeyCode2',lAttachment."Key Code 2",NameSpace,lXMLNewNode);
+          //cl‚ 6 document Entry No.
+          AddElement(lXMLAttaccKey,'KeyEntryNo',FORMAT(lAttachment."Entry No."),NameSpace,lXMLNewNode);
+          //AttachDescription
+          }
+          AddElement(lXMLAttachment,'AttachDescription',lAttachment.Description,NameSpace,lXMLNewNode);
+          //AttachSize
+          AddElement(lXMLAttachment,'AttachSize',FORMAT(lAttachmentMgt.GetAttachFileSize(lAttachment)),NameSpace,lXMLNewNode);
+          //AttachExtension
+          AddElement(lXMLAttachment,'AttachExtension',lAttachment."File Extension",NameSpace,lXMLNewNode);
+        UNTIL lAttachment.NEXT = 0;
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE EncodeAttachementDetail@1100281010(pBroadcastTokenCode@1100281000 : Code[20];pServiceHeaderNo@1100281009 : Code[20];pAttachmentKey@1100281018 : Text[250];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttachment@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttachmentBigText@1100281017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttaccKey@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lAttachment@1100281005 : Record 50021;
+      lAttachmentMgt@1100281010 : Codeunit 50002;
+      lServiceHeader@1100281016 : Record 5900;
+      lAttachBigText@1100281002 : BigText;
+      lDocAttachment@1100281008 : Record 50021;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      //IF NOT lAttachment.GET(pReferentTableNo, pKeyInteger1, pKeyInteger2, pKeyCode1, pKeyCode2, pKeyEntryNo) THEN
+      IF NOT FUSIONInterfaceMgt.GetDocAttachByKey(pAttachmentKey, lAttachment) THEN
+        EXIT(FALSE);
+        {
+      else
+        IF not lAttachment.GET(lDocAttachment."Referent Table No.", lDocAttachment."Key Integer 1",
+            lDocAttachment."Key Integer 2", lDocAttachment."Key Code 1", lDocAttachment."Key Code 2",
+            lDocAttachment."Entry No.") THEN
+        EXIT(FALSE);
+      }
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN
+        EXIT(FALSE);
+
+      IF lAttachment."Service Document No." <> lServiceHeader."No." THEN
+        EXIT(FALSE);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'AttachementDetail', lXMLAttachment);
+      //Identifier
+      AddElement(lXMLAttachment,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      //ServiceNum
+      AddElement(lXMLAttachment,'ServiceNum',pServiceHeaderNo,NameSpace,lXMLNewNode);
+      //FusionNum
+      AddElement(lXMLAttachment,'FusionNum',lServiceHeader."GUID Fusion Code",NameSpace,lXMLNewNode);
+
+      //AttachKey
+      AddElement(lXMLAttachment,'AttachKey',
+        FORMAT(lAttachment."Referent Table No.") + '#' + FORMAT(lAttachment."Key Integer 1") +
+        '#' + FORMAT(lAttachment."Key Integer 2") + '#' + lAttachment."Key Code 1" +
+        '#' + lAttachment."Key Code 2" + '#' + FORMAT(lAttachment."Entry No.")
+        ,NameSpace,lXMLAttaccKey);
+
+      {
+      //AttachKey
+      AddElement(lXMLAttachment,'AttachKey','',NameSpace,lXMLAttaccKey);
+      //cl‚ 1 document joint reference table
+      AddElement(lXMLAttaccKey,'ReferentTableNo',FORMAT(lAttachment."Referent Table No."),NameSpace,lXMLNewNode);
+      //cl‚ 2 document Key Integer 1
+      AddElement(lXMLAttaccKey,'KeyInteger1',FORMAT(lAttachment."Key Integer 1"),NameSpace,lXMLNewNode);
+      //cl‚ 3 document Key Integer 2
+      AddElement(lXMLAttaccKey,'KeyInteger2',FORMAT(lAttachment."Key Integer 2"),NameSpace,lXMLNewNode);
+      //cl‚ 4 document Key code 1
+      AddElement(lXMLAttaccKey,'KeyCode1',lAttachment."Key Code 1",NameSpace,lXMLNewNode);
+      //cl‚ 5 document Key code 2
+      AddElement(lXMLAttaccKey,'KeyCode2',lAttachment."Key Code 2",NameSpace,lXMLNewNode);
+      //cl‚ 6 document Entry No.
+      AddElement(lXMLAttaccKey,'KeyEntryNo',FORMAT(lAttachment."Entry No."),NameSpace,lXMLNewNode);
+      }
+      //MIMEType
+      AddElement(lXMLAttachment,'MIMEType',lAttachment.GetMIMEType,NameSpace,lXMLNewNode);
+      //AttachDescription
+      AddElement(lXMLAttachment,'AttachDescription',lAttachment.Description,NameSpace,lXMLNewNode);
+      //AttachSize
+      AddElement(lXMLAttachment,'AttachSize',FORMAT(lAttachmentMgt.GetAttachFileSize(lAttachment)),NameSpace,lXMLNewNode);
+      //AttachExtension
+      AddElement(lXMLAttachment,'AttachExtension',lAttachment."File Extension",NameSpace,lXMLNewNode);
+      //Attachment
+      //AddElement(lXMLAttachment,'Attachment','',NameSpace,lXMLAttachmentBigText);
+      //LoadAttachToBigText(lAttachment, lAttachBigText);
+      lAttachmentMgt.GetFilePath(lAttachment);
+
+      AddFileToElement(lXMLAttachment,'Attachment',lAttachmentMgt.GetFilePath(lAttachment),NameSpace,lXMLNewNode);
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ServiceCreation@1100281021(pBroadcastTokenCode@1100281000 : Code[20];pFusionServiceNo@1100281009 : Code[20];pRequestUserName@1100281008 : Text[50];pGTACorporateNo@1100281017 : Code[20];pFusionBeneficiaryNo@1100281018 : Code[20];pSinisterNo@1100281012 : Code[30];pSinisterDate@1100281019 : DateTime;pMissionOrderNo@1100281011 : Code[20];pMissionOrderDate@1100281020 : DateTime;pServiceOrderType@1100281021 : Code[10];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAcquittement@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLEtat@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServiceHeader@1100281016 : Record 5900;
+      lService@1100281030 : Record 50066;
+      lContact@1100281027 : Record 5050;
+      lCorporateCust@1100281022 : Record 18;
+      lCustomer@1100281029 : Record 18;
+      lServOrderType@1100281034 : Record 5903;
+      lCustNo@1100281028 : Code[20];
+      lSuccess@1100281005 : Boolean;
+      lErrorText@1100281010 : Text[80];
+      lErrorText001@1100281013 : TextConst 'ENU="The service %1 existent. ";FRA=Le nø service %1 existe d‚j….';
+      lErrorText002@1100281002 : TextConst 'ENU="The sinister %1 existent. ";FRA=Le nø sinistre %1 existe d‚j….';
+      lErrorText003@1100281015 : TextConst 'ENU=Insert error in the Navison base.;FRA=Erreur de cr‚ation dans la base Navision.';
+      lErrorText004@1100281014 : TextConst 'ENU=The corporate of beneficiary %1 is %2.;FRA=Le grand compte du b‚n‚ficiare %1 est %2.';
+      lErrorText005@1100281023 : TextConst 'ENU="The corporate %1 nonexistent. ";FRA=Le nø grand compte %1 n''existe pas.';
+      lErrorText006@1100281024 : TextConst 'ENU="The beneficiary %1 nonexistent. ";FRA=Le nø b‚n‚ficiaire %1 n''existe pas.';
+      lErrorText007@1100281025 : TextConst 'ENU="The contact %1 is not a corporate. ";FRA=Le contact %1 n''est pas un grand compte.';
+      lErrorText008@1100281026 : TextConst 'ENU="The contact %1 is not a beneficiary. ";FRA=Le contact %1 n''est pas un b‚n‚ficiaire.';
+      lErrorText009@1100281031 : TextConst 'ENU=The sinister date is not valid.;FRA=La date de sinistre n''est pas valide.';
+      lErrorText011@1100281033 : TextConst 'ENU="The service order type %1 nonexistent. ";FRA=Le type produit %1 n''existe pas.';
+      lErrorText012@1100281032 : TextConst 'ENU=The Fusion service No. is obligatory.;FRA=Le nø service Fusion manquant.';
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      lSuccess := TRUE;
+
+      IF pFusionServiceNo = '' THEN BEGIN
+        lSuccess := FALSE;
+        lErrorText := lErrorText012;
+      END;
+
+      IF lSuccess THEN BEGIN
+        //controle sur l'existance du service
+        lServiceHeader.SETCURRENTKEY("GUID Fusion Code");
+        lServiceHeader.SETRANGE("GUID Fusion Code", pFusionServiceNo);
+        IF NOT lServiceHeader.ISEMPTY THEN BEGIN
+          lSuccess := FALSE;
+          lErrorText := STRSUBSTNO(lErrorText001, pFusionServiceNo);
+        END;
+      END;
+      {
+      //controle sur l'existance du no sinistre
+      lServiceHeader.SETCURRENTKEY("Reference No.");
+      lServiceHeader.SETRANGE("Reference No.", pSinisterNo);
+      IF NOT lServiceHeader.ISEMPTY THEN BEGIN
+        lSuccess := FALSE;
+        lErrorText := STRSUBSTNO(lErrorText002, pSinisterNo);
+      END;
+
+      //Controle sur le grand compte
+      IF lSuccess THEN BEGIN
+        lContact.SETCURRENTKEY("GTA Code");
+        lContact.SETRANGE("GTA Code", pGTACorporateNo);
+        IF lContact.ISEMPTY THEN BEGIN
+          lSuccess := FALSE;
+          lErrorText := STRSUBSTNO(lErrorText005, pGTACorporateNo);
+        END ELSE BEGIN
+          lContact.FINDFIRST;
+          IF NOT lContact.GetCustomer(lCustNo) THEN BEGIN
+            lSuccess := FALSE;
+            lErrorText := STRSUBSTNO(lErrorText005, pGTACorporateNo);
+          END ELSE BEGIN
+            IF NOT lCorporateCust.GET(lCustNo) THEN BEGIN
+              lSuccess := FALSE;
+              lErrorText := STRSUBSTNO(lErrorText005, pGTACorporateNo);
+            END ELSE BEGIN
+              IF (lCorporateCust."Service Contact" <> lCorporateCust."Service Contact"::"Corporate Customer") OR
+                 (NOT lCorporateCust."Service Corporate") THEN BEGIN
+                lSuccess := FALSE;
+                lErrorText := STRSUBSTNO(lErrorText007, pGTACorporateNo);
+              END;
+            END;
+          END;
+        END;
+      END;
+      }
+
+      //Controle sur le b‚n‚ficiaire
+      IF lSuccess THEN BEGIN
+        lContact.RESET;
+        lContact.SETCURRENTKEY("GUID Fusion Code");
+        lContact.SETRANGE("GUID Fusion Code", pFusionBeneficiaryNo);
+        IF lContact.ISEMPTY THEN BEGIN
+          lSuccess := FALSE;
+          lErrorText := STRSUBSTNO(lErrorText006, pFusionBeneficiaryNo);
+        END ELSE BEGIN
+          lContact.FINDFIRST;
+          IF lContact."Service Contact" <> lContact."Service Contact"::Beneficiary THEN BEGIN
+            lSuccess := FALSE;
+            lErrorText := STRSUBSTNO(lErrorText008, pFusionBeneficiaryNo);
+          END;
+        END;
+      END;
+
+      {
+      IF lSuccess THEN BEGIN
+        IF lContact."Corporate No." <> '' THEN
+          IF lCorporateCust."No." <> lContact."Corporate No." THEN BEGIN
+            lSuccess := FALSE;
+            IF lCustomer.GET(lContact."Corporate No.") THEN;
+            lErrorText := STRSUBSTNO(lErrorText004, pFusionBeneficiaryNo, lCustomer.Name);
+          END;
+      END;
+      }
+
+      //controle sur type produit
+      IF lSuccess THEN BEGIN
+        IF NOT lServOrderType.GET(pServiceOrderType) THEN BEGIN
+          lSuccess := FALSE;
+          lErrorText := STRSUBSTNO(lErrorText011, pServiceOrderType);
+        END;
+      END;
+      IF lSuccess THEN BEGIN
+        //controle si le service exist poue le b‚n‚ficiaire + date d'‚v‚nement alors creation ligne produit pour le service trouv‚
+        //sinon cr‚ation service + ligne produit
+        lService.SETCURRENTKEY("Contact No.", "Event Date");
+        lService.SETRANGE("Contact No.", lContact."No.");
+        lService.SETRANGE("Event Date", DT2DATE(pSinisterDate));
+        IF lService.ISEMPTY THEN BEGIN
+          //controle date sinistre (Date ‚v‚nement)
+          lService.VALIDATE("Contact No.", lContact."No.");
+          lService."Event Date" := DT2DATE(pSinisterDate);
+          IF NOT lService.CheckEventDate THEN BEGIN
+            lSuccess := FALSE;
+            lErrorText := lErrorText009;
+          END;
+
+          CLEAR(lService);
+          lContact.CreateService(lService, FALSE);
+
+          lService.VALIDATE("Reference No.", pSinisterNo);
+          lService.VALIDATE("Event Date", DT2DATE(pSinisterDate));
+          lService.MODIFY(TRUE);
+        END ELSE
+          lService.FINDFIRST;
+
+        lServiceHeader."GUID Fusion Code" := pFusionServiceNo;
+        IF NOT lService.CreateServiceHeader(lServiceHeader, lServOrderType.Code) THEN BEGIN
+          lSuccess := FALSE;
+          lErrorText := lErrorText003;
+        END;
+      END;
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'Acquittement', lXMLAcquittement);
+      //Identifier
+      AddElement(lXMLAcquittement,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      //FusionNum
+      AddElement(lXMLAcquittement,'FusionNum',lServiceHeader."GUID Fusion Code",NameSpace,lXMLNewNode);
+
+      //AttachKey
+      AddElement(lXMLAcquittement,'Etat','',NameSpace,lXMLEtat);
+      //Attribut Etat --> Success, Error
+      IF lSuccess THEN
+        AddAttribute(lXMLEtat,'Type','Success')
+      ELSE
+        AddAttribute(lXMLEtat,'Type','Error');
+
+      //ServiceNum
+      AddElement(lXMLAcquittement,'ServiceNum',lServiceHeader."No.",NameSpace,lXMLNewNode);
+
+      //ErrorDescription
+      AddElement(lXMLAcquittement,'ErrorDescription',lErrorText,NameSpace,lXMLNewNode);
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(lSuccess);
+    END;
+
+    PROCEDURE ContactServiceCreation@1100281005(pBroadcastTokenCode@1100281000 : Code[20];pServiceHeaderNo@1100281009 : Code[20];pTypeAction@1100281021 : 'Delete,Add';pFusionContactGUID@1100281013 : Code[40];pNavisionContactNo@1100281008 : Code[20];pContactType@1100281012 : 'Contact involved,Annexe Contact,Voucher,Expert Contact';pCivility@1100281029 : Text[30];pName@1100281011 : Text[50];pFirstName@1100281015 : Text[30];pAddress@1100281018 : Text[50];pAddress2@1100281019 : Text[50];pCity@1100281020 : Text[30];pPostCode@1100281028 : Code[20];pFaxNo@1100281030 : Text[30];pPhoneNo@1100281031 : Text[30];pMobilePhoneNo@1100281032 : Text[30];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAcquittement@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLEtat@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServiceHeader@1100281016 : Record 5900;
+      lServiceHeaderAddress@1100281014 : Record 50068;
+      lPhoneStandardization@1100281027 : Codeunit 50099;
+      lSuccess@1100281005 : Boolean;
+      lErrorText@1100281010 : Text[80];
+      lErrorText001@1100281017 : TextConst 'ENU=The service %1 nonexistent.;FRA=Le nø service %1 n''existe pas.';
+      lErrorText002@1100281022 : TextConst 'ENU=The contact %1 nonexistent.;FRA=Le contact nø %1 n''existe pas.';
+      lErrorText003@1100281002 : TextConst 'ENU=Impossible to delete a % type contact.;FRA=Impossible de supprimer un contact de type %1.';
+      lErrorText004@1100281023 : TextConst 'ENU=The contact is not linked to the service %1.;FRA=Le contact n''est pas li‚ au service %1.';
+      lErrorText005@1100281024 : TextConst 'ENU=The GUID contact is obligatory for a create type.;FRA=Le GUID contact Fusion est obligatoire pour le type action cr‚ation.';
+      lErrorText006@1100281026 : TextConst 'ENU=Phone No. % format is not correct.;FRA=Le format du nø de t‚l‚phone %1 n''est pas correct.';
+      lErrorText011@1100281025 : TextConst 'ENU=Post code %1 city %2 is not exist.;FRA=Code postal %1 ville %2 n''existe pas dans la base NAVISION.';
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+
+      lSuccess := TRUE;
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN BEGIN
+        lSuccess := FALSE;
+        lErrorText := STRSUBSTNO(lErrorText001, pServiceHeaderNo);
+      END;
+
+      IF lSuccess THEN BEGIN
+        IF pTypeAction = pTypeAction::Delete THEN BEGIN
+          IF NOT FUSIONInterfaceMgt.GetServHeaderAddByKey(pNavisionContactNo, lServiceHeaderAddress) THEN BEGIN
+            lSuccess := FALSE;
+            lErrorText := STRSUBSTNO(lErrorText002, pNavisionContactNo);
+          END;
+          IF lSuccess THEN
+            IF lServiceHeaderAddress."Service Header No." <> lServiceHeader."No." THEN BEGIN
+              lSuccess := FALSE;
+              lErrorText := STRSUBSTNO(lErrorText004, pServiceHeaderNo);
+            END;
+        END ELSE BEGIN
+          IF pFusionContactGUID = '' THEN BEGIN
+            lSuccess := FALSE;
+            lErrorText := lErrorText005;
+          END;
+          IF lSuccess THEN
+            IF NOT FUSIONInterfaceMgt.CheckPostCode(pPostCode, pCity) THEN BEGIN
+              lSuccess := FALSE;
+              lErrorText := STRSUBSTNO(lErrorText011, pPostCode, pCity);
+            END;
+          //Controle format no telephone
+          lPhoneStandardization.SetHideMessage(TRUE);
+          IF lSuccess THEN
+            IF NOT lPhoneStandardization.ValidatePhoneNo(DATABASE::"Service Header Address",25,'',pFaxNo) THEN BEGIN
+              lSuccess := FALSE;
+              lErrorText := STRSUBSTNO(lErrorText006, pFaxNo);
+            END;
+          IF lSuccess THEN
+            IF NOT lPhoneStandardization.ValidatePhoneNo(DATABASE::"Service Header Address",19,'',pPhoneNo) THEN BEGIN
+              lSuccess := FALSE;
+              lErrorText := STRSUBSTNO(lErrorText006, pPhoneNo);
+            END;
+          IF lSuccess THEN
+            IF NOT lPhoneStandardization.ValidatePhoneNo(DATABASE::"Service Header Address",26,'',pMobilePhoneNo) THEN BEGIN
+              lSuccess := FALSE;
+              lErrorText := STRSUBSTNO(lErrorText006, pMobilePhoneNo);
+            END;
+        END;
+      END;
+
+      IF lSuccess THEN BEGIN
+        CASE pTypeAction OF
+          pTypeAction::Delete : BEGIN
+            lServiceHeaderAddress.DELETE(TRUE);
+          END;
+          pTypeAction::Add : BEGIN
+            //si contact existe --> MAJ contact
+            lServiceHeaderAddress.RESET;
+            lServiceHeaderAddress.SETCURRENTKEY("GUID Fusion Code");
+            lServiceHeaderAddress.SETRANGE("GUID Fusion Code", pFusionContactGUID);
+            IF lServiceHeaderAddress.ISEMPTY THEN BEGIN
+              lServiceHeaderAddress.RESET;
+              lServiceHeaderAddress.INIT;
+              lServiceHeaderAddress."Service Header No." := lServiceHeader."No.";
+              CASE pContactType OF
+                pContactType::"Contact involved" :
+                  lServiceHeaderAddress."Address Type" := lServiceHeaderAddress."Address Type"::"Contact involved";
+                pContactType::"Annexe Contact" :
+                  lServiceHeaderAddress."Address Type" := lServiceHeaderAddress."Address Type"::"Annexe Contact";
+                pContactType::Voucher :
+                  lServiceHeaderAddress."Address Type" := lServiceHeaderAddress."Address Type"::Voucher;
+                pContactType::"Expert Contact" :
+                  lServiceHeaderAddress."Address Type" := lServiceHeaderAddress."Address Type"::"Expert Contact";
+              END;
+              lServiceHeaderAddress."Address No." := 0;
+              lServiceHeaderAddress.INSERT(TRUE)
+            END ELSE
+              lServiceHeaderAddress.FINDFIRST;
+
+            lServiceHeaderAddress."Post Code" := pPostCode;
+            lServiceHeaderAddress.City := pCity;
+            lServiceHeaderAddress.Address := pAddress;
+            lServiceHeaderAddress."Address 2" := pAddress2;
+            lServiceHeaderAddress."Salutation Code" := FUSIONInterfaceMgt.GetSalutationByFusion(pCivility);
+            lServiceHeaderAddress.VALIDATE(Name, pName);
+            lServiceHeaderAddress."First Name" := pFirstName;
+            lServiceHeaderAddress.VALIDATE("Fax No.", pFaxNo);
+            lServiceHeaderAddress.VALIDATE("Phone No.", pPhoneNo);
+            lServiceHeaderAddress.VALIDATE("Mobile Phone No.", pMobilePhoneNo);
+
+            lServiceHeaderAddress."GUID Fusion Code" := pFusionContactGUID;
+            lServiceHeaderAddress.MODIFY(TRUE);
+          END;
+        END;
+      END;
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'Acquittement', lXMLAcquittement);
+      //Identifier
+      AddElement(lXMLAcquittement,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      //FusionNum
+      AddElement(lXMLAcquittement,'FusionNum',lServiceHeader."GUID Fusion Code",NameSpace,lXMLNewNode);
+
+      //AttachKey
+      AddElement(lXMLAcquittement,'Etat','',NameSpace,lXMLEtat);
+      //Attribut Etat --> Success, Error
+      IF lSuccess THEN
+        AddAttribute(lXMLEtat,'Type','Success')
+      ELSE
+        AddAttribute(lXMLEtat,'Type','Error');
+
+      //ErrorDescription
+      AddElement(lXMLAcquittement,'ErrorDescription',lErrorText,NameSpace,lXMLNewNode);
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(lSuccess);
+    END;
+
+    PROCEDURE AttachmentServiceCreation@1100281045(pBroadcastTokenCode@1100281039 : Code[20];pServiceHeaderNo@1100281021 : Code[20];pRequestUserName@1100281020 : Text[50];pType@1100281019 : 'Delete,Add';pFusionAttachGUID@1100281018 : Code[40];pAttachmentKey@1100281015 : Text[250];pAttachBinaryContent@1100281013 : BigText;pAttachDescriptionText50@1100281012 : Text[50];pAttachFileName@1100281011 : Text[100];pAttachFileExtension@1100281009 : Text[30];pCreationDate@1100281008 : DateTime;VAR pXML@1100281000 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAcquittement@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLEtat@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServiceHeader@1100281016 : Record 5900;
+      lAttachment@1100281014 : Record 50021;
+      lAttachmentTemp@1100281024 : TEMPORARY Record 5062;
+      lSourceAttchMgt@1100281025 : Codeunit 50003;
+      lSuccess@1100281005 : Boolean;
+      lErrorText@1100281010 : Text[80];
+      lErrorText001@1100281017 : TextConst 'ENU=The service %1 nonexistent.;FRA=Le nø service %1 n''existe pas.';
+      lErrorText002@1100281022 : TextConst 'ENU=The attachment nonexistent.;FRA=Le document joint n''existe pas.';
+      lErrorText003@1100281002 : TextConst 'ENU=The attachment is not linked to the service %1.;FRA=Le document joint n''est pas li‚ au service %1.';
+      lFileName@1100281023 : Text[250];
+      lFile@1100281026 : File;
+      lOutStream@1100281027 : OutStream;
+      lErrorText005@1100281028 : TextConst 'ENU=The GUID attachment is obligatory for a create type.;FRA=Le GUID document joint Fusion est obligatoire pour le type action cr‚ation.';
+      lErrorText006@1100281029 : TextConst 'ENU=The file attachment is empty.;FRA=Le fichier du document joint est vide.';
+      lAdoStream@1100281030 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+      lTempBlob@1100281031 : Record 99008535;
+      lXmlDoc@1100281041 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+      lXmlNodeList@1100281043 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281042 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+      lAttributeNode@1100281044 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      lSuccess := TRUE;
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN BEGIN
+        lSuccess := FALSE;
+        lErrorText := STRSUBSTNO(lErrorText001, pServiceHeaderNo);
+      END;
+
+      IF lSuccess THEN
+        IF pType = pType::Add THEN
+          IF pAttachBinaryContent.LENGTH = 0 THEN BEGIN
+            lSuccess := FALSE;
+            lErrorText := STRSUBSTNO(lErrorText006, pServiceHeaderNo);
+          END;
+
+      IF pType = pType::Delete THEN BEGIN
+        IF NOT FUSIONInterfaceMgt.GetDocAttachByKey(pAttachmentKey, lAttachment) THEN BEGIN
+        //IF NOT lAttachment.GET(pReferentTableNo, pKeyInteger1, pKeyInteger2, pKeyCode1, pKeyCode2, pKeyEntryNo) THEN BEGIN
+          lSuccess := FALSE;
+          lErrorText := lErrorText002;
+        END;
+
+        IF lAttachment."Service Document No." <> lServiceHeader."No." THEN BEGIN
+          lSuccess := FALSE;
+          lErrorText := STRSUBSTNO(lErrorText003, pServiceHeaderNo);
+        END;
+      END;
+
+      IF lSuccess THEN BEGIN
+        CASE pType OF
+          pType::Delete : BEGIN
+            IF NOT lAttachment.Deleted THEN BEGIN
+              lAttachment.Deleted := TRUE;
+              lAttachment.MODIFY(TRUE);
+            END;
+          END;
+          pType::Add : BEGIN
+            lTempBlob.Blob.CREATEOUTSTREAM(lOutStream);
+            pAttachBinaryContent.WRITE(lOutStream);
+            IF ISCLEAR(lXmlDoc) THEN BEGIN
+              CREATE(lXmlDoc);
+            END;
+            lXmlDoc.load(lTempBlob.Blob);
+            lXmlNodeList := lXmlDoc.getElementsByTagName('ROOT');
+            lXmlDomElement := lXmlNodeList.item(0);
+            lAttributeNode := lXmlDomElement.selectSingleNode('BinaryString');
+            lAttributeNode.dataType := 'bin.base64';
+
+            CREATE(lAdoStream);
+            lAdoStream.Open;
+            lAdoStream.Type := 1;
+
+            lAdoStream.Write(lAttributeNode.nodeTypedValue);
+            lFile.CREATETEMPFILE;
+            lFileName := lFile.NAME + '_' + pAttachFileName+'.'+pAttachFileExtension;
+            lAdoStream.SaveToFile(lFileName);
+            lAdoStream.Close;
+
+            lAttachment.RESET;
+            lAttachment.SETRANGE("Service Document No.", lServiceHeader."No.");
+
+            lAttachment."Key Integer 1" := 0;
+            lAttachment."Key Integer 2" := 0;
+            lAttachment."Key Code 1" := '';
+            lAttachment."Key Code 2" := '';
+
+            lAttachment.Description := pAttachDescriptionText50;
+            lAttachment."Description 2" := COPYSTR(pAttachFileName,1,MAXSTRLEN(lAttachment."Description 2"));
+            lAttachment."GUID Fusion Code" := pFusionAttachGUID;
+
+            lSourceAttchMgt.CreateAttachment(lAttachment
+              ,lFileName
+              ,lAttachmentTemp);
+            lAttachment."Creation Date" := pCreationDate;
+            lAttachment.MODIFY(FALSE);
+            IF ERASE(lFileName) THEN;
+          END;
+        END;
+      END;
+      CLEAR(lXMLDocument);
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'Acquittement', lXMLAcquittement);
+      //Identifier
+      AddElement(lXMLAcquittement,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      //FusionNum
+      AddElement(lXMLAcquittement,'FusionNum',lServiceHeader."GUID Fusion Code",NameSpace,lXMLNewNode);
+
+      //AttachKey
+      AddElement(lXMLAcquittement,'Etat','',NameSpace,lXMLEtat);
+      //Attribut Etat --> Success, Error
+      IF lSuccess THEN
+        AddAttribute(lXMLEtat,'Type','Success')
+      ELSE
+        AddAttribute(lXMLEtat,'Type','Error');
+
+      //ErrorDescription
+      AddElement(lXMLAcquittement,'ErrorDescription',lErrorText,NameSpace,lXMLNewNode);
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(lSuccess);
+    END;
+
+    PROCEDURE AddFileElement1@1100281028(VAR ParXMLNode@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";ParNodeName@1100281006 : Text[250];ParNodeFilePath@1100281005 : Text[1024];ParNameSpace@1100281004 : Text[250];VAR ParXMLNewNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR lAdoStream@1100281009 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream") ExitStatus@1000000006 : Integer;
+    VAR
+      LocXMLNewNode@1000000005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      LocXMLCDATASection@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF8A-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMCDATASection";
+      lRBAutoMgt@1100281011 : Codeunit 419;
+      lFolderMgt@1100281013 : Codeunit 50004;
+      lPos@1100281002 : Integer;
+      lLength@1100281000 : Integer;
+      lText@1100281003 : Text[1024];
+      lFileCompletNameBuffer@1100281010 : Text[1024];
+    BEGIN
+      //IMH02 isat.zw
+      LocXMLNewNode := ParXMLNode.ownerDocument.createNode('element', ParNodeName, ParNameSpace);
+
+      IF ISCLEAR(LocXMLNewNode) THEN BEGIN
+        ExitStatus := 50;
+        EXIT;
+      END;
+
+      //IF ISCLEAR(lAdoStream) THEN
+      //  CREATE(lAdoStream);
+
+      //lFileCompletNameBuffer := lRBAutoMgt.ServerTempFileName('.',lFolderMgt.GetFileExtension(ParNodeFilePath));
+      //IF ISSERVICETIER THEN BEGIN
+      //  DOWNLOAD(ParNodeFilePath,'','<TEMP>','',lFileCompletNameBuffer);
+      //END
+      //ELSE BEGIN
+      //  FILE.COPY(ParNodeFilePath,lFileCompletNameBuffer);
+      //END;
+      //Error(format(Exists(ParNodeFilePath)));
+
+      //lFileCompletNameBuffer := lFolderMgt.CreateCompanyTmpFileName(lFolderMgt.GetFileExtension(ParNodeFilePath));
+
+      //lFolderMgt.CopyFile2(ParNodeFilePath,lFileCompletNameBuffer);
+      //FILE.COPY(ParNodeFilePath,lFileCompletNameBuffer);
+      //  lFileCompletNameBuffer := ParNodeFilePath;
+      {
+      lAdoStream.Type := 1; // 1=adTypeBinary
+      lAdoStream.Open;
+      lAdoStream.LoadFromFile(lFileCompletNameBuffer);
+      }
+      //LocXMLCDATASection := ParXMLNode.ownerDocument.createCDATASection('test');
+      //LocXMLCDATASection.nodeTypedValue := lAdoStream.Read(-1); // -1=adReadAll
+      LocXMLNewNode.dataType := 'bin.base64';
+      LocXMLNewNode.nodeTypedValue := lAdoStream.Read(-1); // -1=adReadAll
+      //ParXMLNode.appendChild(LocXMLCDATASection);
+      ParXMLNode.appendChild(LocXMLNewNode);
+      ParXMLNewNode := LocXMLNewNode;
+      //lAdoStream.Close;
+      //CLEAR(lAdoStream);
+      //lFolderMgt.EraseTempFile(lFileCompletNameBuffer);
+      ExitStatus := 0;
+    END;
+
+    PROCEDURE CommentServiceCreation@1100281017(pBroadcastTokenCode@1100281000 : Code[20];pServiceHeaderNo@1100281009 : Code[20];pRequestUserName@1100281008 : Text[50];pRequestDateTime@1100281011 : DateTime;pComment@1100281012 : BigText;VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAcquittement@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLEtat@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServiceHeader@1100281016 : Record 5900;
+      lAdvCommentLine@1100281002 : Record 50056;
+      lAdvCommentLine2@1100281018 : Record 50056;
+      lSuccess@1100281005 : Boolean;
+      lErrorText@1100281010 : Text[80];
+      lErrorText001@1100281017 : TextConst 'ENU="The service %1 existent. ";FRA=Le nø service %1 existe d‚j….';
+      lErrorText002@1100281014 : TextConst 'ENU=Comment empty.;FRA=Le commentaire est vide.';
+      lErrorText003@1100281015 : TextConst 'ENU=Insert error in the Navison base.;FRA=Erreur d''insertion dans la base Navision.';
+      lTextMgt@1100281013 : Codeunit 50085;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      lSuccess := TRUE;
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN BEGIN
+        lSuccess := FALSE;
+        lErrorText := STRSUBSTNO(lErrorText001, pServiceHeaderNo);
+      END;
+
+      IF pComment.LENGTH = 0 THEN BEGIN
+        lSuccess := FALSE;
+        lErrorText := lErrorText002;
+      END;
+
+      IF lSuccess THEN BEGIN
+        lAdvCommentLine.INIT;
+        lAdvCommentLine.VALIDATE("Source Table ID", DATABASE::"Service Header");
+        lAdvCommentLine.VALIDATE("Source No.", lServiceHeader."Service No.");
+        lAdvCommentLine.VALIDATE("Source No. 2", lServiceHeader."No.");
+        lAdvCommentLine."Source No. 3" := 0;
+        lAdvCommentLine."Source No. 4" := '';
+        //lAdvCommentLine.SetUpNewLine;
+        lAdvCommentLine.Date := DT2DATE(pRequestDateTime);
+        //lAdvCommentLine.Comment := pComment;
+        lAdvCommentLine."Fusion User Name" := pRequestUserName;
+        lTextMgt.SaveBigText(lAdvCommentLine, lAdvCommentLine.Date, pComment);
+        IF DT2DATE(pRequestDateTime) <> 0D THEN BEGIN
+          lAdvCommentLine."Creation Date" := pRequestDateTime;
+          lAdvCommentLine.MODIFY;
+          lAdvCommentLine.RESET;
+          lAdvCommentLine2.SETRANGE("Source Table ID",lAdvCommentLine."Source Table ID");
+          lAdvCommentLine2.SETRANGE("Source No.",lAdvCommentLine."Source No.");
+          lAdvCommentLine2.SETRANGE("Source No. 2",lAdvCommentLine."Source No. 2");
+          lAdvCommentLine2.SETRANGE("Source No. 3",lAdvCommentLine."Source No. 3");
+          lAdvCommentLine2.SETRANGE("Source No. 4",lAdvCommentLine."Source No. 4");
+          lAdvCommentLine2.SETRANGE("Attached To Line No.", lAdvCommentLine."Line No.");
+          IF NOT lAdvCommentLine2.ISEMPTY THEN
+            lAdvCommentLine2.MODIFYALL("Creation Date", lAdvCommentLine."Creation Date");
+        END;
+
+        {
+        IF lAdvCommentLine.INSERT(TRUE) THEN BEGIN
+          lSuccess := FALSE;
+          lErrorText := lErrorText003;
+        END;
+        }
+      END;
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'Acquittement', lXMLAcquittement);
+      //Identifier
+      AddElement(lXMLAcquittement,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      //FusionNum
+      AddElement(lXMLAcquittement,'FusionNum',lServiceHeader."GUID Fusion Code",NameSpace,lXMLNewNode);
+
+      //AttachKey
+      AddElement(lXMLAcquittement,'Etat','',NameSpace,lXMLEtat);
+      //Attribut Etat --> Success, Error
+      IF lSuccess THEN
+        AddAttribute(lXMLEtat,'Type','Success')
+      ELSE
+        AddAttribute(lXMLEtat,'Type','Error');
+
+      //ErrorDescription
+      AddElement(lXMLAcquittement,'ErrorDescription',lErrorText,NameSpace,lXMLNewNode);
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(lSuccess);
+    END;
+
+    PROCEDURE EncodeQuoteToVerifyList@1100281011(pBroadcastTokenCode@1100281000 : Code[20];VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLQuotesList@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLQuotes@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLQuote@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServiceInterventionQuote@1100281005 : Record 50076;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'QuotesToVerifyList', lXMLQuotesList);
+      //Identifier
+      AddElement(lXMLQuotesList,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      AddElement(lXMLQuotesList,'Quotes','',NameSpace,lXMLQuotes);
+
+      lServiceInterventionQuote.SETCURRENTKEY("Expert Quote Check");
+      lServiceInterventionQuote.SETRANGE("Expert Quote Check", lServiceInterventionQuote."Expert Quote Check"::"Expert Check");
+
+      IF lServiceInterventionQuote.FINDFIRST THEN
+        REPEAT
+          AddElement(lXMLQuotes,'Quote','',NameSpace,lXMLQuote);
+          //Service header no
+          AddElement(lXMLQuote,'ServiceHeaderNo',lServiceInterventionQuote."Service Header No.",NameSpace,lXMLNewNode);
+          //intervention line no
+          AddElement(lXMLQuote,'InterventionLineNo',FORMAT(lServiceInterventionQuote."Intervention Line No."),NameSpace,lXMLNewNode);
+          AddElement(lXMLQuote,'QuoteLineNo',FORMAT(lServiceInterventionQuote."Line No."),NameSpace,lXMLNewNode);
+        UNTIL lServiceInterventionQuote.NEXT = 0;
+
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE EncodeQuoteDetail@1100281020(pBroadcastTokenCode@1100281000 : Code[20];pServiceHeaderNo@1100281009 : Code[20];pInterventionLineNo@1100281002 : Integer;pQuoteLineNo@1100281010 : Integer;VAR pXML@1100281001 : BigText) : Boolean;
+    VAR
+      lXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLQuote@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttachments@1100281011 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLAttachment@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lSentMQBuffer@1100281005 : TEMPORARY Record 8016720;
+      lServiceInterventionQuote@1100281008 : Record 50076;
+      lAttachment@1100281007 : Record 50021;
+      lAttachmentMgt@1100281013 : Codeunit 50002;
+    BEGIN
+      {
+      <ControleDevis>
+        <Date>
+        <Emetteur>
+        <Destinataire>
+        <DateEch‚ance>
+        <Nø de service Navision>
+        <Devis> (PJ en format PDF ou WORD)
+           <Document>
+        </Devis>
+      </ControleDevis>
+      }
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      IF NOT lServiceInterventionQuote.GET(pServiceHeaderNo, pInterventionLineNo, pQuoteLineNo) THEN
+        EXIT(FALSE);
+
+      //Root Node
+      EAIXmlDocMgt.CreateXmlByRootNodeName(lXMLDocument, 'Quote', lXMLQuote);
+      //Identifier
+      AddElement(lXMLQuote,'Identifier',pBroadcastTokenCode,NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'ServiceNo',lServiceInterventionQuote."Service No.",NameSpace,lXMLNewNode);
+      //Service header no
+      AddElement(lXMLQuote,'ServiceHeaderNo',lServiceInterventionQuote."Service Header No.",NameSpace,lXMLNewNode);
+      //intervention line no
+      AddElement(lXMLQuote,'InterventionLineNo',FORMAT(lServiceInterventionQuote."Intervention Line No."),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'QuoteLineNo',FORMAT(lServiceInterventionQuote."Line No."),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'Receive Date',FORMAT(lServiceInterventionQuote."Receive Date"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'DocumentDate',FORMAT(lServiceInterventionQuote."Document Date"),NameSpace,lXMLNewNode);
+      //AddElement(lXMLQuote,'ApprovalDate',FORMAT(lServiceInterventionQuote."Approval Date"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'ServiceOrderType',FORMAT(lServiceInterventionQuote."Service Order Type"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'ContactNo',FORMAT(lServiceInterventionQuote."Contact No."),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'QuoteReference',FORMAT(lServiceInterventionQuote."Quote Reference"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'CorporateNo',FORMAT(lServiceInterventionQuote."Corporate No."),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'Provider No.',FORMAT(lServiceInterventionQuote."Provider No."),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'DeductibleAmount',FORMAT(lServiceInterventionQuote."Deductible Amount (LCY)"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'Depreciation Amount',FORMAT(lServiceInterventionQuote."Depreciation Amount"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'CorporateRegionCode',FORMAT(lServiceInterventionQuote."Corporate Region Code"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'Exempt VAT Base Amount',FORMAT(lServiceInterventionQuote."Exempt VAT Base Amount"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'Reduced VAT Base Amount',FORMAT(lServiceInterventionQuote."Reduced VAT Base Amount"),NameSpace,lXMLNewNode);
+      AddElement(lXMLQuote,'Normal VAT Base Amount',FORMAT(lServiceInterventionQuote."Normal VAT Base Amount"),NameSpace,lXMLNewNode);
+
+      //Attachments
+      AddElement(lXMLQuote,'Attachments','',NameSpace,lXMLAttachments);
+
+      //Attachments List
+      lAttachment.SETCURRENTKEY("Service No.","Service Document No.","Service Intervention Line No.","Intervention Quote Line No.");
+      lAttachment.SETRANGE("Service No.", lServiceInterventionQuote."Service No.");
+      lAttachment.SETRANGE("Service Document No.", lServiceInterventionQuote."Service Header No.");
+      lAttachment.SETRANGE("Service Intervention Line No.", lServiceInterventionQuote."Intervention Line No.");
+      lAttachment.SETRANGE("Intervention Quote Line No.", lServiceInterventionQuote."Line No.");
+
+      IF lAttachment.FINDFIRST THEN
+        REPEAT
+          AddElement(lXMLAttachments,'Attachment','',NameSpace,lXMLAttachment);
+          //AttachKey
+          AddElement(lXMLAttachment,'AttachKey',
+            FORMAT(lAttachment."Referent Table No.") + '#' + FORMAT(lAttachment."Key Integer 1") +
+            '#' + FORMAT(lAttachment."Key Integer 2") + '#' + lAttachment."Key Code 1" +
+            '#' + lAttachment."Key Code 2" + '#' + FORMAT(lAttachment."Entry No.")
+            ,NameSpace,lXMLNewNode);
+          AddElement(lXMLAttachment,'AttachDescription',lAttachment.Description,NameSpace,lXMLNewNode);
+          //AttachSize
+          AddElement(lXMLAttachment,'AttachSize',FORMAT(lAttachmentMgt.GetAttachFileSize(lAttachment)),NameSpace,lXMLNewNode);
+          //AttachExtension
+          AddElement(lXMLAttachment,'AttachExtension',lAttachment."File Extension",NameSpace,lXMLNewNode);
+        UNTIL lAttachment.NEXT = 0;
+      LoadXMLDocToBigText(lXMLDocument, pXML);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ValidationQuote@1100281027(pBroadcastTokenCode@1100281004 : Code[20];pServiceHeaderNo@1100281003 : Code[20];pInterventionLineNo@1100281002 : Integer;pQuoteLineNo@1100281001 : Integer;pStatus@1100281005 : 'Quote Checked OK,Quote Checked Refusal';pValidationComment@1100281000 : Text[250]) : Boolean;
+    VAR
+      lServiceInterventionQuote@1100281006 : Record 50076;
+    BEGIN
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      IF NOT lServiceInterventionQuote.GET(pServiceHeaderNo, pInterventionLineNo, pQuoteLineNo) THEN
+        EXIT(FALSE);
+
+      CASE pStatus OF
+        pStatus::"Quote Checked OK" :
+          lServiceInterventionQuote."Expert Quote Check" := lServiceInterventionQuote."Expert Quote Check"::"Quote Checked OK";
+        pStatus::"Quote Checked Refusal" :
+          lServiceInterventionQuote."Expert Quote Check" := lServiceInterventionQuote."Expert Quote Check"::"Quote Checked Refusal";
+      END;
+      lServiceInterventionQuote."Expert Quote Check Comment" := pValidationComment;
+      lServiceInterventionQuote.MODIFY(TRUE);
+    END;
+
+    PROCEDURE RequestAcquittal@1100281014(pBroadcastTokenCode@1100281000 : Code[20];pStreamIdenifierNo@1100281009 : Code[20];pGUIDFusionCode@1100281002 : Code[40];pStatus@1100281001 : 'Success,Error';pErrorDescription@1100281010 : Text[250]) : Boolean;
+    VAR
+      lEAIMQBufferManagement@1100281007 : Codeunit 8016708;
+      lSentMQBuffer@1100281005 : TEMPORARY Record 8016720;
+      lServiceHeader@1100281008 : Record 5900;
+      lAdvCommentLine@1100281006 : Record 50056;
+      lRecId@1100281003 : RecordID;
+      lRecRef@1100281004 : RecordRef;
+    BEGIN
+      //pStatus := 1;
+
+      IF pBroadcastTokenCode = '' THEN
+        EXIT(FALSE);
+      GetInterfaceSetup;
+      IF pBroadcastTokenCode <> InterfaceSetup."Fusion Broadcast Token" THEN
+        EXIT(FALSE);
+
+      lSentMQBuffer."EAI MQ Code" := InterfaceSetup."Fusion EAI Sent MQ Code";
+      lEAIMQBufferManagement.LoadFusionSendMQBufferByIdent(pStreamIdenifierNo, lSentMQBuffer);
+      CASE pStatus OF
+        pStatus::Success : lSentMQBuffer.Status := lSentMQBuffer.Status::Processing;
+        pStatus::Error : BEGIN
+          lSentMQBuffer.Status := lSentMQBuffer.Status::Error;
+          lSentMQBuffer."Comment Status" := pErrorDescription;
+        END;
+      END;
+      lSentMQBuffer.MODIFY;
+      IF lSentMQBuffer.Status = lSentMQBuffer.Status::Processing THEN BEGIN
+        lRecId := lSentMQBuffer.RecordId;
+        CASE lRecId.TABLENO OF
+          DATABASE::"Service Header" : BEGIN
+            IF lServiceHeader.GET(lSentMQBuffer."Document Type", lSentMQBuffer."Service Header No.") THEN BEGIN
+              lServiceHeader."GUID Fusion Code" := pGUIDFusionCode;
+              lServiceHeader.MODIFY(FALSE);
+            END;
+          END;
+          DATABASE::"Adv. Comment Line" : BEGIN
+            lRecRef := lRecId.GETRECORD;
+            lRecRef.LOCKTABLE;
+            IF lRecRef.FIND('=') THEN BEGIN
+              lRecRef.SETTABLE(lAdvCommentLine);
+              lAdvCommentLine."GUID Fusion Code" := pGUIDFusionCode;
+              lAdvCommentLine.MODIFY;
+            END;
+          END;
+        END;
+        lEAIMQBufferManagement.TransferSendMQBufferToHistoMQ(lSentMQBuffer);
+      END ELSE
+        lEAIMQBufferManagement.TransferSendMQBufferToSendMQ(lSentMQBuffer);
+
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE GetInterfaceSetup@1100281007();
+    BEGIN
+      IF NOT InterfaceSetupGotten THEN BEGIN
+        InterfaceSetup.GET;
+        InterfaceSetupGotten := TRUE;
+      END;
+    END;
+
+    LOCAL PROCEDURE LoadXMLDocToBigText@1100281019(VAR pXMLDocument@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v3.0'.DOMDocument60";VAR pXML@1100281000 : BigText);
+    BEGIN
+      pXML.ADDTEXT(pXMLDocument.xml);
+      {
+      lTempBlob.INIT;
+      lTempBlob.Blob.CREATEINSTREAM(lInstream);
+      pXMLDocument.save(lInstream);
+      lTempBlob.CALCFIELDS(Blob);
+      lTempBlob.Blob.CREATEINSTREAM(lInstream);
+      pXML.READ(lInstream);
+      CLEAR(lInstream);
+      }
+    END;
+
+    LOCAL PROCEDURE LoadAttachToBigText@1100281009(pAttachment@1100281000 : Record 50021;VAR pBigText@1100281001 : BigText);
+    VAR
+      lAttachMgt@1100281002 : Codeunit 50002;
+      lFilePath@1100281003 : Text[500];
+      lFile@1100281004 : File;
+      lInStream@1100281005 : InStream;
+    BEGIN
+      lFilePath := lAttachMgt.GetFilePath(pAttachment);
+      lFile.OPEN(lFilePath);
+      lFile.CREATEINSTREAM(lInStream);
+      pBigText.READ(lInStream);
+      lFile.CLOSE;
+    END;
+
+    LOCAL PROCEDURE CreateXmlByRootNodeName@1100281001(VAR pParXmlDoc@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pRootNodeName@1100281001 : Text[250];VAR pParXmlNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    BEGIN
+      EAIXmlDocMgt.CreateXmlByRootNodeName(pParXmlDoc, pRootNodeName, pParXmlNode);
+    END;
+
+    LOCAL PROCEDURE AddElement@1100281002(VAR pParXMLNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pParNodeName@1100281003 : Text[250];pParNodeText@1100281002 : Text[1024];pParNameSpace@1100281001 : Text[250];VAR pParXMLNewNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    BEGIN
+      EAIXmlDocMgt.AddElement(pParXMLNode, pParNodeName, pParNodeText, pParNameSpace, pParXMLNewNode);
+    END;
+
+    LOCAL PROCEDURE AddFileToElement@1100281003(VAR pParXMLNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pParNodeName@1100281000 : Text[250];pParNodeFilePath@1100281002 : Text[1024];pParNameSpace@1100281004 : Text[250];VAR pParXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    BEGIN
+      EAIXmlDocMgt.AddFileElement(pParXMLNode, pParNodeName, pParNodeFilePath, pParNameSpace, pParXMLNewNode);
+    END;
+
+    LOCAL PROCEDURE AddAttribute@1100281012(VAR ParXMLNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";ParName@1100281002 : Text[260];ParNodeValue@1100281001 : Text[260]);
+    BEGIN
+      EAIXmlDocMgt.AddAttribute(ParXMLNode, ParName, ParNodeValue);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 16/03/11 @a CAP.ZW @v IMH6.01.136 @s Interface Fusion @c cr‚ation de la table */
+    }
+    END.
+  }
+}

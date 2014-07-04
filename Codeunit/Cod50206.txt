@@ -1,0 +1,377 @@
+OBJECT Codeunit 50206 Campaign Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/09/12;
+    Time=15:21:04;
+    Modified=Yes;
+    Version List=IMH6.01,NEP00005;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      TEXT0001@1100281000 : TextConst 'ENU=You don''t have access to this campaign;FRA=Vous n''avez pas accŠs … cet ‚v‚nement climatique';
+      Text002@1100281001 : TextConst 'ENU=The cause is not authorized for this campaign;FRA=La cause n''est pas autoris‚e pour cet ‚v‚nement climatique';
+      ProviderSearchMgt@1000000000 : Codeunit 50000;
+      Text003@1000000001 : TextConst 'ENU=You can''t create intervention besause the conditions are not filled.;FRA=Les conditions ne sont pas remplies pour la cr‚ation intervention nø %1.';
+
+    PROCEDURE ValidateCampProviderAssign@1100281001(VAR pCampaign@1000000000 : Record 5071;VAR pServiceHeader@1000000001 : Record 5900;pProviderCode@1000000002 : Code[20]);
+    VAR
+      lProviderSetup@1100281000 : Record 50011;
+      lTrayLineManagement@1100281001 : Codeunit 50050;
+      lServiceHeader@1000000003 : Record 5900;
+      lTrayLine@1000000004 : Record 50048;
+      lInterventioManagement@1100281002 : Codeunit 50014;
+      lInterventionLine@1100281003 : Record 50075;
+    BEGIN
+      IF pProviderCode = '' THEN
+        EXIT;
+
+      pCampaign.TESTFIELD(Team);
+      lProviderSetup.GET;
+      lProviderSetup.TESTFIELD("Camp. Create Interv Task Code");
+      IF pServiceHeader.FINDSET THEN
+        REPEAT
+          lServiceHeader.GET(pServiceHeader."Document Type"::Invoice, pServiceHeader."No.");
+          //<<IMH09
+          IF NOT lServiceHeader."Intervention Allowed" THEN
+            ERROR(Text003);
+          //>>IMH09
+          lServiceHeader.TESTFIELD("Intervention Allowed");
+          lServiceHeader.CheckServiceCreateInterv;
+          lInterventioManagement.CreateIntervWithProvider(lServiceHeader, lInterventionLine, pProviderCode, FALSE);
+          lTrayLineManagement.CreateTLForCampaign(pCampaign, lInterventionLine, pProviderCode,
+            pCampaign.Team, lProviderSetup."Camp. Create Interv Task Code", FALSE);
+        UNTIL pServiceHeader.NEXT = 0;
+    END;
+
+    PROCEDURE GetProvidInProcCampIntervNb@1100281000(pProviderNo@1100281000 : Code[20]) : Integer;
+    VAR
+      lIntervention@1100281001 : Record 50075;
+    BEGIN
+      lIntervention.SETCURRENTKEY("Provider No.","Mission Status","Intervention Status",Suspended,Closed);
+      lIntervention.SETRANGE("Provider No.", pProviderNo);
+      lIntervention.SETFILTER("Intervention Status", '%1|%2|%3',
+                                lIntervention."Intervention Status"::" ",
+                                lIntervention."Intervention Status"::InProgress,
+                                lIntervention."Intervention Status"::Suspended);
+      lIntervention.SETFILTER("Campaign No.", '<>%1', '');
+      EXIT(lIntervention.COUNT);
+    END;
+
+    PROCEDURE GetProvidCanceledCampIntervNb@1100281007(pProviderNo@1100281000 : Code[20]) : Integer;
+    VAR
+      lIntervention@1100281001 : Record 50075;
+    BEGIN
+      lIntervention.SETCURRENTKEY("Provider No.","Mission Status","Intervention Status",Suspended,Closed);
+      lIntervention.SETRANGE("Provider No.", pProviderNo);
+      lIntervention.SETRANGE("Intervention Status", lIntervention."Intervention Status"::Cancel);
+      lIntervention.SETFILTER("Campaign No.", '<>%1', '');
+      EXIT(lIntervention.COUNT);
+    END;
+
+    PROCEDURE GetProvidClosedCampIntervNb@1100281011(pProviderNo@1100281000 : Code[20]) : Integer;
+    VAR
+      lIntervention@1100281001 : Record 50075;
+    BEGIN
+      lIntervention.SETCURRENTKEY("Provider No.","Mission Status","Intervention Status",Suspended,Closed);
+      lIntervention.SETRANGE("Provider No.", pProviderNo);
+      lIntervention.SETRANGE("Intervention Status", lIntervention."Intervention Status"::Closed);
+      lIntervention.SETFILTER("Campaign No.", '<>%1', '');
+      EXIT(lIntervention.COUNT);
+    END;
+
+    PROCEDURE GetNonAssignedServHeaderNb@1000000000(VAR pCampaignNo@1000000000 : Code[20]) rCount : Integer;
+    VAR
+      lServiceHeader@1000000001 : Record 5900;
+      lIntervention@1100281000 : Record 50075;
+    BEGIN
+      //<<IMH06
+      EXIT(GetNonAssignedServHdrNbBySpec(pCampaignNo, ''));
+      {
+      IF pCampaignNo = '' THEN
+        EXIT;
+      //>>IMH06
+      lServiceHeader.SETCURRENTKEY("Campaign No.");
+      lServiceHeader.SETRANGE("Campaign No.", pCampaignNo);
+      //<<IMH04
+      IF lServiceHeader.FINDSET THEN
+        REPEAT
+          lIntervention.SETRANGE("Service Header No.", lServiceHeader."No.");
+          lIntervention.setfilter("Intervention Status", '<>%1', lIntervention."Intervention Status"::cancel);  //IMH06
+          lIntervention.SETRANGE("Campaign No.", pCampaignNo);
+          IF lIntervention.ISEMPTY THEN
+            rCount := rCount + 1;
+        UNTIL lServiceHeader.NEXT = 0;
+      //>>IMH04
+
+      EXIT(rCount);
+      }
+      //>>IMH06
+    END;
+
+    PROCEDURE GetPreAssignedServHeaderNb@1000000002(VAR pCampaignNo@1000000000 : Code[20]) rCount : Integer;
+    VAR
+      lServiceHeader@1000000001 : Record 5900;
+      lIntervention@1000000002 : Record 50075;
+    BEGIN
+      //<<IMH06
+      IF pCampaignNo = '' THEN
+        EXIT;
+      //>>IMH06
+      lServiceHeader.SETCURRENTKEY("Campaign No.");
+      lServiceHeader.SETRANGE("Campaign No.", pCampaignNo);
+
+      IF lServiceHeader.FINDSET THEN
+        REPEAT
+          lIntervention.SETRANGE("Service Header No.", lServiceHeader."No.");
+          lIntervention.SETFILTER("Intervention Status", '<>%1', lIntervention."Intervention Status"::Cancel);  //IMH06
+          lIntervention.SETRANGE("Campaign No.", pCampaignNo);
+          //<<IMH04
+          IF NOT lIntervention.ISEMPTY THEN
+          //>>IMH04
+            rCount := rCount + 1;
+        UNTIL lServiceHeader.NEXT = 0;
+      EXIT(rCount);
+    END;
+
+    PROCEDURE GetServHeaderNbBySpecCamp@1000000001(pCampaignNo@1000000000 : Code[20];pSpecializationCode@1000000001 : Code[10]) rCount : Integer;
+    VAR
+      lInterventionDescription@1000000002 : Record 50070;
+      lServiceHeader@1000000003 : Record 5900;
+    BEGIN
+      //IMH06
+      IF pCampaignNo = '' THEN
+        EXIT;
+      IF pSpecializationCode = '' THEN
+        EXIT;
+      lServiceHeader.SETCURRENTKEY("Campaign No.");
+      lServiceHeader.SETRANGE("Campaign No.", pCampaignNo);
+      IF lServiceHeader.FINDSET THEN
+        REPEAT
+          lInterventionDescription.SETRANGE("Service Header No.", lServiceHeader."No.");
+          lInterventionDescription.SETRANGE("Speciality Code", pSpecializationCode);
+          IF NOT lInterventionDescription.ISEMPTY THEN
+            rCount += 1;
+        UNTIL lServiceHeader.NEXT = 0;
+    END;
+
+    PROCEDURE GetIntervNbBySpecCamp@1000000007(pCampaignNo@1000000000 : Code[20];pSpecializationCode@1000000001 : Code[10]) rCount : Integer;
+    VAR
+      lIntervLine@1000000002 : Record 50075;
+      lServiceCode@1000000003 : Record 50040;
+    BEGIN
+      //IMH06
+      IF pCampaignNo = '' THEN
+        EXIT;
+      IF pSpecializationCode = '' THEN
+        EXIT;
+      lIntervLine.SETCURRENTKEY("Campaign No.");
+      lIntervLine.SETRANGE("Campaign No.", pCampaignNo);
+      lIntervLine.SETFILTER("Intervention Status", '<>%1', lIntervLine."Intervention Status"::Cancel);
+      IF lIntervLine.FINDSET THEN
+        REPEAT
+          lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+          lServiceCode.SETRANGE("Service No.", lIntervLine."Service No.");
+          lServiceCode.SETRANGE("Service Header No.", lIntervLine."Service Header No.");
+          lServiceCode.SETRANGE("Intervention Line No.", lIntervLine."Line No.");
+          lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+          lServiceCode.SETRANGE(Code, pSpecializationCode);
+          IF NOT lServiceCode.ISEMPTY THEN
+            rCount += 1;
+        UNTIL lIntervLine.NEXT = 0;
+    END;
+
+    PROCEDURE GetNonAssignedServHdrNbBySpec@1000000009(pCampaignNo@1000000000 : Code[20];pSpecializationCode@1000000005 : Code[10]) rCount : Integer;
+    VAR
+      lServiceHeader@1000000001 : Record 5900;
+      lIntervention@1100281000 : Record 50075;
+      lIntervDesc@1000000002 : Record 50070;
+      lServiceCode@1000000003 : Record 50040;
+      lFound@1000000004 : Boolean;
+      lToCount@1000000006 : Boolean;
+    BEGIN
+      //<<IMH06
+      IF pCampaignNo = '' THEN
+        EXIT;
+      lServiceHeader.SETCURRENTKEY("Campaign No.");
+      lServiceHeader.SETRANGE("Campaign No.", pCampaignNo);
+      IF lServiceHeader.FINDSET THEN
+        REPEAT
+          lToCount := TRUE;
+          lIntervDesc.SETRANGE("Service Header No.", lServiceHeader."No.");
+          IF pSpecializationCode <> '' THEN
+            lIntervDesc.SETRANGE("Speciality Code", pSpecializationCode);
+          IF lIntervDesc.FINDSET THEN BEGIN
+            REPEAT
+              lFound := FALSE;
+              lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+              lServiceCode.SETRANGE("Service No.", lServiceHeader."Service No.");
+              lServiceCode.SETRANGE("Service Header No.", lServiceHeader."No.");
+              lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+              lServiceCode.SETRANGE(Code, lIntervDesc."Speciality Code");
+              IF NOT lServiceCode.ISEMPTY THEN BEGIN
+                lServiceCode.FINDSET;
+                REPEAT
+                  IF lIntervention.GET(lServiceCode."Service Header No.", lServiceCode."Intervention Line No.") THEN
+                    IF lIntervention."Intervention Status" <> lIntervention."Intervention Status"::Cancel THEN
+                      lFound := TRUE;
+                UNTIL (lServiceCode.NEXT = 0) OR lFound;
+              END;
+              lToCount := NOT lFound;
+            UNTIL (lIntervDesc.NEXT = 0) OR lToCount;
+            IF lToCount THEN
+              rCount += 1;
+          END;
+        UNTIL lServiceHeader.NEXT = 0;
+
+      EXIT(rCount);
+    END;
+
+    PROCEDURE CheckServiceHeaderToAssign@1000000010(pCampaignNo@1000000002 : Code[20];pServiceHeader@1000000001 : Record 5900) : Boolean;
+    VAR
+      lIntervention@1100281000 : Record 50075;
+    BEGIN
+      lIntervention.SETRANGE("Service Header No.", pServiceHeader."No.");
+      lIntervention.SETRANGE("Campaign No.", pCampaignNo);
+      lIntervention.SETFILTER("Intervention Status", '<>%1', lIntervention."Intervention Status"::Cancel);
+      EXIT(lIntervention.ISEMPTY);
+    END;
+
+    PROCEDURE UpdateServiceCampNo@1100281002(pService@1100281000 : Record 50066;pCampaignNo@1100281001 : Code[20]);
+    VAR
+      lServiceHeader@1100281002 : Record 5900;
+      lIntervention@1100281003 : Record 50075;
+    BEGIN
+      lServiceHeader.SETCURRENTKEY("Service No.");
+      lServiceHeader.SETRANGE("Service No.");
+      IF lServiceHeader.FINDFIRST THEN
+        REPEAT
+          IF lServiceHeader."Campaign No." <> pCampaignNo THEN BEGIN
+            lServiceHeader.VALIDATE("Campaign No.", pCampaignNo);
+            lServiceHeader.MODIFY(FALSE);
+          END;
+          lIntervention.SETRANGE("Service Header No.", lServiceHeader."No.");
+          IF lIntervention.FINDFIRST THEN
+            REPEAT
+              IF lIntervention."Campaign No." <> pCampaignNo THEN BEGIN
+                lIntervention.VALIDATE("Campaign No.", pCampaignNo);
+                lIntervention.MODIFY(FALSE);
+              END;
+            UNTIL lIntervention.NEXT = 0;
+        UNTIL lServiceHeader.NEXT = 0;
+    END;
+
+    PROCEDURE CheckAccessAllowed@1100281003(CampaignNo@1100281000 : Code[20]);
+    VAR
+      lUserSetup@1100281001 : Record 91;
+      lCampaignUser@1100281002 : Record 50171;
+    BEGIN
+      IF lUserSetup.GET(USERID) THEN
+        IF lUserSetup."Show To EVC" THEN EXIT;
+      IF lCampaignUser.GET(CampaignNo,USERID) THEN EXIT;
+      ERROR(TEXT0001);
+    END;
+
+    PROCEDURE CheckServiceCause@1100281004(pCampaignNo@1100281000 : Code[20];pServiceCause@1100281001 : Code[10]) : Boolean;
+    VAR
+      lCampServCause@1100281002 : Record 50166;
+    BEGIN
+      //<<IMH03
+      IF pCampaignNo = '' THEN
+        EXIT(TRUE);
+      IF pServiceCause = '' THEN
+        ERROR(Text002);
+
+      IF NOT lCampServCause.GET(pCampaignNo,pServiceCause) THEN
+          ERROR(Text002);
+      //>>IMH03
+    END;
+
+    PROCEDURE CheckSpecServHeader@1100281005(pServiceHeaderNo@1100281000 : Code[20];pProviderNo@1100281001 : Code[20]) : Boolean;
+    VAR
+      lInterventionDescription@1100281002 : Record 50070;
+      lInterventionLine@1100281003 : Record 50075;
+      lProviderSpecialization@1100281007 : Record 50006;
+      lSpecBuildingTradeTmp@1100281004 : TEMPORARY Record 50031;
+      lServiceCode@1100281005 : Record 50040;
+      lSpecToExcl@1100281006 : Boolean;
+      lMessage@1000000000 : Text[250];
+      lServiceHeader@1000000001 : Record 5900;
+    BEGIN
+      //IMH05
+      IF NOT lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, pServiceHeaderNo) THEN
+        EXIT;
+      lInterventionDescription.SETRANGE("Service Header No.", pServiceHeaderNo);
+      IF lInterventionDescription.FINDSET THEN
+        REPEAT
+          lSpecToExcl := FALSE;
+          lProviderSpecialization.SETRANGE("Provider No.", pProviderNo);
+          lProviderSpecialization.SETRANGE("Specialization Code", lInterventionDescription."Speciality Code");
+          lProviderSpecialization.SETRANGE("Building Trade No.", lInterventionDescription."Building Trade No.");
+          IF lProviderSpecialization.ISEMPTY THEN
+            lSpecToExcl := TRUE;
+          IF NOT lSpecToExcl THEN BEGIN
+            lServiceCode.SETCURRENTKEY("Service Type","Service Header No.","Code Type",Code);
+            lServiceCode.SETRANGE("Service Type", lServiceCode."Service Type"::Intervention);
+            lServiceCode.SETRANGE("Service Header No.", pServiceHeaderNo);
+            lServiceCode.SETRANGE("Code Type", lServiceCode."Code Type"::Speciality);
+            lServiceCode.SETRANGE(Code, lInterventionDescription."Speciality Code");
+            lServiceCode.SETRANGE("Building Trade No.", lInterventionDescription."Building Trade No.");
+            //<<IMH07
+            lSpecToExcl := FALSE;
+            IF lServiceCode.FINDFIRST THEN BEGIN
+              REPEAT
+                IF lInterventionLine.GET(lServiceCode."Service Header No.", lServiceCode."Intervention Line No.") THEN
+                  IF lInterventionLine."Intervention Status" <> lInterventionLine."Intervention Status"::Cancel THEN
+                    lSpecToExcl := TRUE;
+              UNTIL (lServiceCode.NEXT = 0) OR lSpecToExcl;
+              IF NOT lSpecToExcl THEN
+                //Controle agreement prestataire
+                IF NOT ProviderSearchMgt.ExclusionProvider(lMessage, 0, 1, pServiceHeaderNo,
+                     pProviderNo, lServiceHeader."Corporate No.", lInterventionDescription."Speciality Code") THEN
+                  EXIT(TRUE);
+            END ELSE
+              //Controle agreement prestataire
+              IF NOT ProviderSearchMgt.ExclusionProvider(lMessage, 0, 1, pServiceHeaderNo,
+                   pProviderNo, lServiceHeader."Corporate No.", lInterventionDescription."Speciality Code") THEN
+                EXIT(TRUE);
+          END;
+          //IMH07
+        UNTIL lInterventionDescription.NEXT = 0;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE ActiveCamp@1000000003(pCampaignNo@1000000000 : Code[20];pActive@1000000001 : Boolean);
+    VAR
+      lCampaignProviderSetup@1000000002 : Record 50034;
+    BEGIN
+      //IMH08
+      IF pCampaignNo = '' THEN
+        EXIT;
+      lCampaignProviderSetup.SETRANGE("Campaign No.", pCampaignNo);
+      IF NOT lCampaignProviderSetup.ISEMPTY THEN
+        lCampaignProviderSetup.MODIFYALL(Archived, NOT pActive, FALSE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH09 @d 24/09/12 @a ISAT.ZW @v IMH6.01.214 @s Ev‚nement climatique @h 3625  @c Correction */
+      /** @r IMH08 @d 16/05/12 @a ISAT.ZW @v IMH6.01.181 @s Ev‚nement climatique @h 3462 @c Archivage */
+      /** @r IMH07 @d 14/05/12 @a ISAT.ZW @v IMH6.01.181 @s Ev‚nement climatique @h 3466 @c Gestion exclusion GC */
+      /** @r IMH06 @d 14/05/12 @a ISAT.ZW @v IMH6.01.181 @s Ev‚nement climatique @h 3364 @c Correction */
+      /** @r IMH05 @d 26/04/12 @a ISAT.ZW @v IMH6.01.181 @s Ev‚nement climatique @h 3433 @c Gestion multi sp‚cialit‚ */
+      /** @r IMH04 @d 25/04/12 @a ISAT.ZW @v IMH6.01.181 @s Ev‚nement climatique @h 3408 @c Correction */
+      /** @r IMH03 @d 24/04/12 @a ISAT.ZW @v IMH6.01.181 @s Ev‚nement climatique @h 3365 @c Ajout fonction CheckServiceCause */
+      /** @r IMH02 @d 19/04/12 @a ISAT.NFO @v IMH6.01.181 @s Ev‚nement climatique @c ajout fonction checkaccessallowed */
+      /** @r IMH01 @d 08/03/12 @a ISAT.ZW @v IMH6.01.181 @s Ev‚nement climatique @c Cr‚ation  */
+    }
+    END.
+  }
+}

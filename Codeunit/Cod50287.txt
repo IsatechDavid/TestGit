@@ -1,0 +1,125 @@
+OBJECT Codeunit 50287 Prov. Search Follow-up Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/05/14;
+    Time=10:59:55;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.P011;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 50000=rm;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE CreateFollowUpFromFirstSearch@1100281002(VAR pPSRBuffer@1100281000 : TEMPORARY Record 51000);
+    BEGIN
+      //IMH02
+      IF pPSRBuffer."Provider No." = '' THEN BEGIN
+        EXIT;
+      END;
+      CreateFollowUp(pPSRBuffer."Provider No.", pPSRBuffer."Service Header No.", 0);
+    END;
+
+    PROCEDURE CreateFollowUpFromSecSearch@1100281005(VAR pProvSecSearchBuffer@1100281000 : TEMPORARY Record 51006);
+    BEGIN
+      //IMH02
+      IF pProvSecSearchBuffer."Provider No." = '' THEN BEGIN
+        EXIT;
+      END;
+      CreateFollowUp(pProvSecSearchBuffer."Provider No.", pProvSecSearchBuffer."Service Header No.", 0);
+    END;
+
+    PROCEDURE CreateFollowUpFromInterv@1100281004(VAR pServInterLine@1100281000 : TEMPORARY Record 50075);
+    VAR
+      lProvSearchFollowupCard@1100281001 : Page 50388;
+      lProvider@1100281002 : Record 50000;
+    BEGIN
+      //IMH02
+      IF pServInterLine."Provider No." = '' THEN BEGIN
+        EXIT;
+      END;
+
+      CreateFollowUp(pServInterLine."Provider No.", pServInterLine."Service Header No.", pServInterLine."Line No.");
+    END;
+
+    PROCEDURE CreateFollowUp@1100281000(pProviderNo@1100281004 : Code[20];pServHeaderNo@1100281003 : Code[20];pIntervLineNo@1100281000 : Integer);
+    VAR
+      lProvSearchFollowupCard@1100281001 : Page 50388;
+      lProvider@1100281002 : Record 50000;
+    BEGIN
+      //IMH02
+      lProvSearchFollowupCard.SetValues(pProviderNo, pServHeaderNo, pIntervLineNo);
+      IF lProvSearchFollowupCard.RUNMODAL = ACTION::OK THEN BEGIN
+        lProvider.GET(pProviderNo);
+        lProvSearchFollowupCard.GetValues(
+          lProvider."Follow Up", lProvider."Follow Up Start Date",lProvider."Follow Up End Date");
+        lProvider.VALIDATE("Follow Up");
+        lProvider."Follow Up Origin" := pServHeaderNo;
+        lProvider.MODIFY;
+        CreateFollowUpTrayLine(lProvider."No.", lProvider."Follow Up");  //IMH03
+      END;
+    END;
+
+    PROCEDURE CreateFollowUpTrayLine@1100281008(pProviderNo@1100281006 : Code[20];pComment@1100281005 : Text[175]);
+    VAR
+      lProvSecSearchSetup@1100281007 : Record 50133;
+      lProvider@1100281001 : Record 50000;
+      lContact@1100281010 : Record 5050;
+      lTeam@1100281002 : Record 5083;
+      lFilterTeamTrayTask@1000000000 : TEMPORARY Record 50129;
+      lTrayLine@1100281004 : Record 50048;
+      lTrayLineManagement@1100281003 : Codeunit 50050;
+      lTeamCode@1100281000 : Code[10];
+    BEGIN
+      lContact.GET(pProviderNo);
+      lProvider.GET(pProviderNo);
+      lProvSecSearchSetup.GET;
+
+      WITH lProvSecSearchSetup DO BEGIN
+        CASE "Follow-up DPR Tray Line" OF
+          "Follow-up DPR Tray Line"::RC : lTeamCode := lProvider.GetCoordinatorTrayLine;
+          "Follow-up DPR Tray Line"::NA : lTeamCode := lProvider.GetNetworkAssistantTrayLine;
+          "Follow-up DPR Tray Line"::NF : lTeamCode := lProvider.GetFacilitatorTrayLine;
+          "Follow-up DPR Tray Line"::"RC Territory" : lTeamCode := lProvider.GetTerritoryTrayLine(lTeam.Territory::"RC Territory");
+          "Follow-up DPR Tray Line"::"NA Territory" : lTeamCode := lProvider.GetTerritoryTrayLine(lTeam.Territory::"NA Territory");
+          "Follow-up DPR Tray Line"::"NF Territory" : lTeamCode := lProvider.GetTerritoryTrayLine(lTeam.Territory::"NF Territory");
+        END;
+
+        lTrayLineManagement.SetCallFrom(1);
+        IF lTeamCode = '' THEN BEGIN
+          lTeamCode := "Default Follow-up Team Code";
+        END;
+        IF lTeamCode = '' THEN BEGIN
+          lTeamCode := lTrayLineManagement.GetTeamByTask("Follow-up Task Code", lFilterTeamTrayTask, '');
+        END;
+        IF lTeamCode = '' THEN BEGIN
+          EXIT;
+        END;
+
+        IF lTrayLineManagement.CreateTLFromContact(
+             lContact,lTeamCode,"Follow-up Task Code", FALSE)
+        THEN BEGIN
+          lTrayLineManagement.GetResultLine(lTrayLine);
+          IF pComment <> '' THEN BEGIN
+            lTrayLine."Short Comment" := COPYSTR(pComment,1,120);
+            lTrayLine.MODIFY(FALSE);
+          END;
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 14/05/14 @a ISAT.ZW @v IMH6.01.P011 @h 5112 @s New Provider Search @c Gestion Activit‚ corbeille */
+      /** @r IMH02 @d 09/04/14 @a ISAT.ZW @v IMH6.01.P011 @s New Provider Search @c Finalisation */
+      /** @r IMH01 @d 18/02/14 @a ISAT.PC @v IMH6.01.P011 @s New Provider Search @c Creation */
+    }
+    END.
+  }
+}

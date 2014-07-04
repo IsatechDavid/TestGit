@@ -1,0 +1,139 @@
+OBJECT Codeunit 50186 FUSION Sent Acquittal Gen. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=04/11/11;
+    Time=15:08:31;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAIRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+          BEGIN
+            Code(Rec);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIXMLDocMgt@1100281000 : Codeunit 8016713;
+      EAIXMLMgt@1100281004 : Codeunit 8016710;
+      XMLDOMMgt@1100281002 : Codeunit 6224;
+      XMLDocMgt@1100281003 : Codeunit 99008514;
+
+    PROCEDURE Code@1100281000(VAR pEAISentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lInterfaceSetup@1100281002 : Record 50139;
+      lServiceHeader@1100281006 : Record 5900;
+      lOutStream@1100281001 : OutStream;
+      lInStream@1100281005 : InStream;
+      lRecID@1100281003 : RecordID;
+      lRecRef@1100281004 : RecordRef;
+      lAdoStream@1100281009 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+      lFileName@1100281008 : Text[250];
+      lTempFile@1100281007 : File;
+      lServiceInterventionQuote@1100281010 : Record 50076;
+      lFusionType@1100281011 : 'Service,Quote';
+    BEGIN
+      {
+      <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+         <soapenv:Header/>
+         <soapenv:Body>
+            <tem:SetInt‚grationFlux>
+               <tem:ticketSiTiers>?</tem:ticketSiTiers>
+               <tem:fluxSortantId>?</tem:fluxSortantId>
+               <tem:int‚grationAvecSuccŠs>?</tem:int‚grationAvecSuccŠs>
+               <tem:identifiantElementSiTiers>?</tem:identifiantElementSiTiers>
+               <tem:messageErreur>?</tem:messageErreur>
+            </tem:SetInt‚grationFlux>
+         </soapenv:Body>
+      </soapenv:Envelope>
+      }
+      //Generation de SOAP XML d'‚mission vers le WS Fusion
+      lInterfaceSetup.GET;
+      lInterfaceSetup.TESTFIELD("Navision Broadcast Token");
+
+      CREATE(lAdoStream);
+      CLEAR(pEAISentMQBuffer."XML Source");
+
+      lAdoStream.Open;
+      lAdoStream.Charset('UTF-8');
+
+      IF pEAISentMQBuffer.Status <> pEAISentMQBuffer.Status::Error THEN BEGIN
+        lRecID := pEAISentMQBuffer.RecordId;
+        lRecRef := lRecID.GETRECORD;
+        IF lRecRef.FIND('=') THEN;
+        IF lRecID.TABLENO = DATABASE::"Service Header" THEN BEGIN
+          lRecRef.SETTABLE(lServiceHeader);
+          lFusionType := lFusionType::Service;
+        END;
+
+        IF lRecID.TABLENO = DATABASE::"Service Intervention Quote" THEN BEGIN
+          lRecRef.SETTABLE(lServiceInterventionQuote);
+          lFusionType := lFusionType::Quote;
+        END;
+      END;
+
+      lAdoStream.WriteText('<?xml version="1.0"  encoding="utf-8"?>');
+      lAdoStream.WriteText('<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" ');
+      lAdoStream.WriteText('xmlns:tem="http://tempuri.org/">');
+      lAdoStream.WriteText('<soapenv:Header/>');
+      lAdoStream.WriteText('<soapenv:Body>');
+
+      lAdoStream.WriteText('<tem:SetInt‚grationFlux>');
+      lAdoStream.WriteText('<tem:ticketSiTiers>' +
+          lInterfaceSetup."Navision Broadcast Token" + '</tem:ticketSiTiers>');
+      lAdoStream.WriteText('<tem:fluxSortantId>' +
+          pEAISentMQBuffer."Message ID" + '</tem:fluxSortantId>');
+
+      IF pEAISentMQBuffer.Status = pEAISentMQBuffer.Status::Error THEN BEGIN
+        lAdoStream.WriteText('<tem:int‚grationAvecSuccŠs>false</tem:int‚grationAvecSuccŠs>');
+        lAdoStream.WriteText('<tem:identifiantElementSiTiers/>');
+        lAdoStream.WriteText('<tem:messageErreur>' +
+            pEAISentMQBuffer."Comment Status" + '</tem:messageErreur>');
+      END ELSE BEGIN
+        lAdoStream.WriteText('<tem:int‚grationAvecSuccŠs>true</tem:int‚grationAvecSuccŠs>');
+        CASE lFusionType OF
+          lFusionType::Service :
+            lAdoStream.WriteText('<tem:identifiantElementSiTiers>' +
+                lServiceHeader."No." + '</tem:identifiantElementSiTiers>');
+          lFusionType::Quote :
+            lAdoStream.WriteText('<tem:identifiantElementSiTiers>' +
+                lServiceInterventionQuote."Service Header No." + '#' +
+                FORMAT(lServiceInterventionQuote."Intervention Line No.") + '#' +
+                FORMAT(lServiceInterventionQuote."Line No.") +
+                 '</tem:identifiantElementSiTiers>');
+        END;
+        lAdoStream.WriteText('<tem:messageErreur/>');
+      END;
+
+      lAdoStream.WriteText('</tem:SetInt‚grationFlux>');
+
+      lAdoStream.WriteText('</soapenv:Body>');
+      lAdoStream.WriteText('</soapenv:Envelope>');
+
+      lTempFile.CREATETEMPFILE;
+      lFileName := lTempFile.NAME + '.xml';
+      lAdoStream.SaveToFile(lFileName);
+      lAdoStream.Close;
+      pEAISentMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+      lTempFile.OPEN(lFileName);
+      lTempFile.CREATEINSTREAM(lInStream);
+      COPYSTREAM(lOutStream,lInStream);
+      lTempFile.CLOSE;
+      ERASE(lFileName);
+      CLEAR(lAdoStream);
+      //pEAISentMQBuffer."XML Source".EXPORT('Z:\Temp\test fusion\DemandeAcq.xml');
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 12/04/11 @a ISAT.ZW @v IMH6.01.136 @s Interface Fusion @c cr‚ation */
+    }
+    END.
+  }
+}

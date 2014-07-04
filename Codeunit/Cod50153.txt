@@ -1,0 +1,1659 @@
+OBJECT Codeunit 50153 DRALL Managment
+{
+  OBJECT-PROPERTIES
+  {
+    Date=07/11/12;
+    Time=17:37:29;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lAttachedFile@1100281000 : Text[250];
+          BEGIN
+            LaunchConstruction('');
+            CreateExcel(lAttachedFile);
+            SendByMail(lAttachedFile,FALSE);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      XlApp@1000000011 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024500-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Application";
+      XlWrkBk@1000000010 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";
+      XlWrkSht@1000000009 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020820-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Worksheet";
+      XlPivotTable@1000000008 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";
+      XlPivotCache@1000000007 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002441C-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotCache";
+      XlPivotField@1000000006 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020874-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotField";
+      CurrentRowNo@1000000005 : Integer;
+      HeaderText@1000000004 : ARRAY [6] OF Text[30];
+      HeaderTextToExcel@1000000003 : ARRAY [6] OF Text[30];
+      PivotFieldName@1000000002 : Text[100];
+      HeadingType@1000000001 : 'Date Interval,Number of Days';
+      WDialog@1000000000 : Dialog;
+      Text002@1000000012 : TextConst 'FRA=Vous devez param‚trer un chemin pour l''extraction du fichier';
+      Text001@1000000013 : TextConst 'ENU=Construct\@1@@@@@@@@@@@@@@;FRA=Construction\@1@@@@@@@@@@@@@@';
+      Text003@1000000014 : TextConst 'ENU=Excel Creation\@1@@@@@@@@@@@@@@;FRA=Cr‚ation Excel\@1@@@@@@@@@@@@@@';
+
+    PROCEDURE LaunchConstruction@1100281007(pProviderNo@1100281002 : Code[20]);
+    VAR
+      lProvider@1100281001 : Record 50000;
+      lProvSpecialization@1100281000 : Record 50006;
+      lSpecialization@1100281003 : Record 50005;
+      CalcProvider@1100281004 : Boolean;
+      lTotalCounter@1000000002 : Integer;
+      lCurrentCounter@1000000001 : Integer;
+      lModuloCounter@1000000000 : Integer;
+      lWDialog@1000000003 : Dialog;
+    BEGIN
+      lProvider.RESET;
+      IF pProviderNo <> '' THEN BEGIN
+        lProvider.SETRANGE("No.",pProviderNo);
+      END;
+      IF GUIALLOWED THEN BEGIN
+        lTotalCounter := lProvider.COUNT;
+        lCurrentCounter := 0;
+        lModuloCounter := ROUND(lTotalCounter * 5 / 100,1,'>');
+        lWDialog.OPEN(Text001);
+      END;
+      IF lProvider.FINDSET THEN BEGIN
+        REPEAT
+          IF GUIALLOWED THEN BEGIN
+            lCurrentCounter += 1;
+            IF lCurrentCounter MOD lModuloCounter = 0 THEN BEGIN
+              lWDialog.UPDATE(1,ROUND(lCurrentCounter / lTotalCounter * 9999,1,'>'));
+            END;
+          END;
+          CheckProvider(lProvider."No.");
+        UNTIL (lProvider.NEXT = 0);
+      END;
+      IF GUIALLOWED THEN BEGIN
+        lWDialog.CLOSE;
+      END;
+    END;
+
+    PROCEDURE CheckProvider@1100281006(pProviderNo@1100281000 : Code[20]);
+    VAR
+      lProvider@1000000002 : Record 50000;
+      lProvSpecialization@1000000001 : Record 50006;
+      lSpecialization@1000000000 : Record 50005;
+      lDADHistoryOld@1100281003 : Record 50147;
+      lDADHistoryNew@1100281004 : Record 50147;
+    BEGIN
+      // Cette fonction va regarder si sur le prestataire pProviderNo il y a eu des diff‚rences
+      IF NOT lProvider.GET(pProviderNo) THEN BEGIN
+        EXIT;
+      END;
+
+      // cr‚ation de la version 0 - on est alors en insertion
+      IF NOT lDADHistoryOld.GET(pProviderNo,0) THEN BEGIN
+        CreateVersion(pProviderNo,0,lDADHistoryOld,TRUE);
+        // s'il n'y a pas de sp‚cialit‚ active => prestataire non transmis … la DAD
+        IF NOT lDADHistoryOld."Speciality Enabled" OR NOT lDADHistoryOld.Enable THEN BEGIN
+          lDADHistoryOld.Statut := lDADHistoryOld.Statut::"No Change";
+        END ELSE BEGIN
+          lDADHistoryOld.Statut := lDADHistoryOld.Statut::Enable;
+        END;
+        lDADHistoryOld.MODIFY(TRUE);
+        lDADHistoryNew := lDADHistoryOld;
+        lDADHistoryNew."Version No." := 1;
+        lDADHistoryNew.INSERT(TRUE);
+      END ELSE BEGIN
+        lDADHistoryOld.GET(pProviderNo,1);
+        // On cr‚e la version actuelle sans insertion
+        CreateVersion(pProviderNo,1,lDADHistoryNew,FALSE);
+        // on test s'il y a eu modification
+        IF CheckGap(lDADHistoryOld,lDADHistoryNew) THEN BEGIN
+          // la version 1 devient la verison 0
+          lDADHistoryOld."Version No." := 0;
+          lDADHistoryOld.MODIFY;
+          // gestion du statut sur la version 1
+          ManageStatut(lDADHistoryNew,lDADHistoryOld);
+          lDADHistoryNew.MODIFY(TRUE);
+          EXIT;
+        END ELSE BEGIN
+          lDADHistoryNew.Statut := lDADHistoryNew.Statut::"No Change";
+          lDADHistoryNew.MODIFY(TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE CreateVersion@1100281000(pProviderNo@1100281000 : Code[20];pVersionNo@1100281001 : Integer;VAR pDADHistory@1100281004 : Record 50147;pInsert@1100281005 : Boolean);
+    VAR
+      lDADHistory@1000000000 : Record 50147;
+      lVendor@1000000002 : Record 23;
+      lVendorBankAccount@1100281003 : Record 288;
+      lProvider@1100281002 : Record 50000;
+    BEGIN
+      // G‚n‚ration des versions anciennes
+      IF NOT lProvider.GET(pProviderNo) THEN BEGIN
+        EXIT;
+      END;
+
+      WITH lDADHistory DO BEGIN
+        "No." := pProviderNo;
+        "Version No." := pVersionNo;
+        Name := lProvider.Name;
+        Address := lProvider.Address;
+        "Address 2" := lProvider."Address 2";
+        City := lProvider.City;
+        "Post Code" := lProvider."Post Code";
+        IF (pProviderNo < '500000') THEN BEGIN
+          "Coheris No." := pProviderNo;
+        END ELSE BEGIN
+          "Coheris No." := '';
+        END;
+
+        //<<IMH02.PC
+        //Enable := (NOT lProvider."Invisible Open Space") AND lProvider.Enable;
+        Enable :=
+          (NOT lProvider."Invisible Open Space") AND
+          lProvider.Enable AND
+          CheckHours(pProviderNo);
+        //>>IMH02.PC
+
+        IF lVendor.GET(pProviderNo) THEN BEGIN
+          IF (lVendor."Default Bank Account Code" <> '') THEN BEGIN
+            IF lVendorBankAccount.GET(lVendor."No.",lVendor."Default Bank Account Code") THEN BEGIN
+              IBAN := lVendorBankAccount.IBAN;
+            END;
+          END;
+        END;
+      END;
+
+      // Update sp‚cialit‚s
+      UpdateSpecialization(pProviderNo,lDADHistory);
+
+      // Gestion de la partie communication
+      UpdateCommunication(pProviderNo,lDADHistory);
+
+      // Gestion des heures d'ouverture
+      UpdateHour(pProviderNo,lDADHistory);
+
+      // Gestion de la comp‚tence g‚ographique
+      UpdateGeo(pProviderNo,lDADHistory);
+
+      IF pInsert THEN BEGIN
+        lDADHistory.INSERT(TRUE);
+      END;
+      pDADHistory := lDADHistory;
+    END;
+
+    PROCEDURE ManageStatut@1100281015(VAR pDADHistoryNew@1100281000 : Record 50147;pDADHistoryOld@1100281001 : Record 50147);
+    BEGIN
+      // gŠre la gestion du statut
+
+      IF (pDADHistoryOld.Enable) AND (NOT pDADHistoryNew.Enable) THEN BEGIN
+        pDADHistoryNew.Statut := pDADHistoryNew.Statut::Disable;
+        EXIT;
+      END;
+
+      IF (NOT pDADHistoryOld.Enable) AND (pDADHistoryNew.Enable) THEN BEGIN
+        pDADHistoryNew.Statut := pDADHistoryNew.Statut::Enable;
+        EXIT;
+      END;
+
+      IF (NOT pDADHistoryOld.Enable) AND (NOT pDADHistoryNew.Enable) THEN BEGIN
+        pDADHistoryNew.Statut := pDADHistoryNew.Statut::"No Change";
+        EXIT;
+      END;
+
+      IF (pDADHistoryOld.Enable) AND (pDADHistoryNew.Enable) THEN BEGIN
+        pDADHistoryNew.Statut := pDADHistoryNew.Statut::Modification;
+        EXIT;
+      END;
+
+      {
+      IF (pDADHistoryNew."Speciality Enabled") AND (NOT pDADHistoryNew."Speciality Enabled") THEN BEGIN
+        pDADHistoryNew.Statut := pDADHistoryNew.Statut::Disable;
+        EXIT;
+      END;
+      IF (NOT pDADHistoryOld."Speciality Enabled") AND (pDADHistoryNew."Speciality Enabled") THEN BEGIN
+        pDADHistoryNew.Statut := pDADHistoryNew.Statut::Enable;
+        EXIT;
+      END;
+      }
+    END;
+
+    LOCAL PROCEDURE UpdateCommunication@1100281001(pVendorNo@1100281000 : Code[20];VAR pDADHistory@1100281001 : Record 50147);
+    VAR
+      lProvider@1100281002 : Record 50000;
+      lVendBankAccount@1100281003 : Record 288;
+      lProvSpecialisation@1100281004 : Record 50006;
+      lAdvCommentLine@1100281005 : Record 50056;
+      lProviderHour@1100281006 : Record 50028;
+      lProviderSetup@1100281007 : Record 50011;
+      lContact@1100281008 : Record 5050;
+    BEGIN
+      // Gestion de la partie communication
+      lProvider.GET(pVendorNo);
+      lContact.RESET;
+      lContact.SETCURRENTKEY("Company No.");
+      lContact.SETRANGE("Company No.",pVendorNo);
+      lContact.SETRANGE("Preferred Contact DGS",TRUE);
+      IF lContact.FINDFIRST THEN BEGIN
+        pDADHistory."Phone No." := lContact."Phone No.";
+        pDADHistory."Fax No." := lContact."Fax No.";
+        pDADHistory."E-Mail" := lContact."E-Mail";
+      END;
+
+      IF (pDADHistory."Phone No." = '') THEN BEGIN
+        lProvider.CALCFIELDS("Admin. Contact Phone No.");
+        IF (lProvider."Admin. Contact Phone No." <> '') THEN BEGIN
+          pDADHistory."Phone No." := lProvider."Admin. Contact Phone No.";
+        END ELSE BEGIN
+          pDADHistory."Phone No." := lProvider."Phone No.";
+        END;
+      END;
+
+      IF (pDADHistory."Fax No." = '') THEN BEGIN
+        lProvider.CALCFIELDS("Admin. Contact Fax No.");
+        IF (lProvider."Admin. Contact Fax No." <> '') THEN BEGIN
+          pDADHistory."Fax No." := lProvider."Admin. Contact Fax No.";
+        END ELSE BEGIN
+          pDADHistory."Fax No." := lProvider."Fax No.";
+        END;
+      END;
+
+      IF (pDADHistory."E-Mail" = '') THEN BEGIN
+        lProvider.CALCFIELDS("Admin. Contact E-mail");
+        IF (lProvider."Admin. Contact E-mail" <> '') THEN BEGIN
+          pDADHistory."E-Mail" := lProvider."Admin. Contact E-mail";
+        END ELSE BEGIN
+          pDADHistory."E-Mail" := lProvider."E-Mail";
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE UpdateHour@1100281002(pVendorNo@1100281000 : Code[20];VAR pDADHistory@1100281001 : Record 50147);
+    VAR
+      lProvider@1100281002 : Record 50000;
+      lVendBankAccount@1100281003 : Record 288;
+      lProvSpecialisation@1100281004 : Record 50006;
+      lAdvCommentLine@1100281005 : Record 50056;
+      lProviderHour@1100281006 : Record 50028;
+      lProviderSetup@1100281007 : Record 50011;
+      lContact@1100281008 : Record 5050;
+    BEGIN
+      lProviderSetup.GET;
+      lProviderHour.RESET;
+      lProviderHour.SETRANGE("Provider No.",pVendorNo);
+      lProviderHour.SETRANGE(Emergency,TRUE);
+      lProviderHour.SETRANGE(Day,lProviderHour.Day::Monday);
+      IF lProviderHour.FINDFIRST THEN BEGIN
+        pDADHistory."Start Monday Business Hours" := lProviderHour."Start Time";
+        pDADHistory."End Monday Business Hours" := lProviderHour."End Time";
+      END ELSE BEGIN
+        pDADHistory."Start Monday Business Hours" := lProviderSetup."Start Monday Business Hours";
+        pDADHistory."End Monday Business Hours" := lProviderSetup."End Monday Business Hours";
+      END;
+
+      lProviderHour.SETRANGE(Day,lProviderHour.Day::Tuesday);
+      IF lProviderHour.FINDFIRST THEN BEGIN
+        pDADHistory."Start Tuesday Business Hours" := lProviderHour."Start Time";
+        pDADHistory."End Tuesday Business Hours" := lProviderHour."End Time";
+      END ELSE BEGIN
+        pDADHistory."Start Tuesday Business Hours" := lProviderSetup."Start Tuesday Business Hours";
+        pDADHistory."End Tuesday Business Hours" := lProviderSetup."Start Tuesday Business Hours";
+      END;
+
+      lProviderHour.SETRANGE(Day,lProviderHour.Day::Wednesday);
+      IF lProviderHour.FINDFIRST THEN BEGIN
+        pDADHistory."Start Wednes. Business Hours" := lProviderHour."Start Time";
+        pDADHistory."End Wednes. Business Hours" := lProviderHour."End Time";
+      END ELSE BEGIN
+        pDADHistory."Start Wednes. Business Hours" := lProviderSetup."Start Wednes. Business Hours";
+        pDADHistory."End Wednes. Business Hours" := lProviderSetup."End Wednes. Business Hours";
+      END;
+
+      lProviderHour.SETRANGE(Day,lProviderHour.Day::Thursday);
+      IF lProviderHour.FINDFIRST THEN BEGIN
+        pDADHistory."Start Thursday Business Hours" := lProviderHour."Start Time";
+        pDADHistory."End Thursday Business Hours" := lProviderHour."End Time";
+      END ELSE BEGIN
+        pDADHistory."Start Thursday Business Hours" := lProviderSetup."Start Thursday Business Hours";
+        pDADHistory."End Thursday Business Hours" := lProviderSetup."End Thursday Business Hours";
+      END;
+
+      lProviderHour.SETRANGE(Day,lProviderHour.Day::Friday);
+      IF lProviderHour.FINDFIRST THEN BEGIN
+        pDADHistory."Start Friday Business Hours" := lProviderHour."Start Time";
+        pDADHistory."End Friday Business Hours" := lProviderHour."End Time";
+      END ELSE BEGIN
+        pDADHistory."Start Friday Business Hours" := lProviderSetup."Start Friday Business Hours";
+        pDADHistory."End Friday Business Hours" := lProviderSetup."End Friday Business Hours";
+      END;
+
+      lProviderHour.SETRANGE(Day,lProviderHour.Day::Saturday);
+      IF lProviderHour.FINDFIRST THEN BEGIN
+        pDADHistory."Start Satur. Business Hours" := lProviderHour."Start Time";
+        pDADHistory."End Satur. Business Hours" := lProviderHour."End Time";
+      END ELSE BEGIN
+        pDADHistory."Start Satur. Business Hours" := lProviderSetup."Start Satur. Business Hours";
+        pDADHistory."End Satur. Business Hours" := lProviderSetup."End Satur. Business Hours";
+      END;
+
+      lProviderHour.SETRANGE(Day,lProviderHour.Day::Sunday);
+      IF lProviderHour.FINDFIRST THEN BEGIN
+        pDADHistory."Start Sunday Business Hours" := lProviderHour."Start Time";
+        pDADHistory."End Sunday Business Hours" := lProviderHour."End Time";
+      END ELSE BEGIN
+        pDADHistory."Start Sunday Business Hours" := lProviderSetup."Start Sunday Business Hours";
+        pDADHistory."End Sunday Business Hours" := lProviderSetup."End Sunday Business Hours";
+      END;
+    END;
+
+    PROCEDURE UpdateSpecialization@1000000000(pProviderNo@1000000001 : Code[20];VAR pDADHistory@1000000005 : Record 50147);
+    VAR
+      lProviderSpecialization@1000000002 : Record 50006;
+      lSpecialization@1000000003 : Record 50005;
+      lMainSpecialization@1000000000 : Boolean;
+      lOK@1000000004 : Boolean;
+    BEGIN
+      // Check les sp‚cialit‚s
+
+      WITH lProviderSpecialization DO BEGIN
+        RESET;
+        SETRANGE("Provider No.",pProviderNo);
+        SETRANGE(Emergency,TRUE);
+        IF ISEMPTY THEN BEGIN
+          pDADHistory."First Emergency Type" := pDADHistory."First Emergency Type"::" ";
+          pDADHistory."First Specialization Code" := '';
+          pDADHistory.Enable := FALSE;
+          pDADHistory."Speciality Enabled" := FALSE;
+          EXIT;
+        END;
+
+        SETRANGE("Main Specialization",TRUE);
+        lMainSpecialization := NOT ISEMPTY;
+        SETRANGE("Main Specialization");
+
+        FINDSET;
+        REPEAT
+          IF lSpecialization.GET("Specialization Code") THEN BEGIN
+            IF lSpecialization."Show On DAD" THEN BEGIN
+              IF lMainSpecialization THEN BEGIN
+                IF "Main Specialization" THEN BEGIN
+                  pDADHistory."First Specialization Code" := lProviderSpecialization."Specialization Code";
+                  pDADHistory."First Emergency Type" := lProviderSpecialization."Emergency Type";
+                  pDADHistory."Speciality Enabled" := TRUE;
+                END;
+              END ELSE BEGIN
+                pDADHistory."First Specialization Code" := lProviderSpecialization."Specialization Code";
+                pDADHistory."First Emergency Type" := lProviderSpecialization."Emergency Type";
+                pDADHistory."Speciality Enabled" := TRUE;
+              END;
+              IF pDADHistory."Others Specializations Code" = '' THEN BEGIN
+                pDADHistory."Others Specializations Code" := "Specialization Code";
+              END ELSE BEGIN
+                IF STRLEN(pDADHistory."Others Specializations Code") +
+                   STRLEN("Specialization Code") + 1 <=
+                   MAXSTRLEN(pDADHistory."Others Specializations Code")
+                THEN BEGIN
+                  pDADHistory."Others Specializations Code" :=
+                    pDADHistory."Others Specializations Code" + ',' + "Specialization Code";
+                END;
+              END;
+            END;
+          END;
+        UNTIL NEXT = 0;
+        IF NOT pDADHistory."Speciality Enabled" THEN BEGIN
+          pDADHistory.Enable := FALSE;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE UpdateGeo@1100281003(pVendorNo@1100281000 : Code[20];VAR pDADHistory@1100281001 : Record 50147);
+    VAR
+      lProvider@1100281002 : Record 50000;
+      lVendBankAccount@1100281003 : Record 288;
+      lProvSpecialisation@1100281004 : Record 50006;
+      lAdvCommentLine@1100281005 : Record 50056;
+      lProviderHour@1100281006 : Record 50028;
+      lProviderSetup@1100281007 : Record 50011;
+      lContact@1100281008 : Record 5050;
+      lAbilityGeoProvSetup@1100281009 : Record 50033;
+      lAbilityGeoProvSetupTemp@1100281010 : TEMPORARY Record 50033;
+      lGeoRef@1100281011 : Text[1024];
+      lGeoProvcount@1100281012 : Integer;
+    BEGIN
+      lGeoRef := '';
+      lAbilityGeoProvSetupTemp.DELETEALL;
+      lProvider.GET(pVendorNo);
+      lAbilityGeoProvSetup.RESET;
+      lAbilityGeoProvSetup.SETRANGE("Provider No.",pVendorNo);
+      lAbilityGeoProvSetup.SETFILTER("Specialization Code",'%1|%2','',pDADHistory."First Specialization Code");
+      lAbilityGeoProvSetup.SETRANGE(Emergency,TRUE);
+      IF lAbilityGeoProvSetup.FINDSET THEN BEGIN
+        REPEAT
+          lAbilityGeoProvSetupTemp := lAbilityGeoProvSetup;
+          IF lAbilityGeoProvSetupTemp.INSERT THEN;
+        UNTIL (lAbilityGeoProvSetup.NEXT = 0);
+      END;
+
+      WITH lAbilityGeoProvSetupTemp DO BEGIN
+        RESET;
+        SETRANGE("Setup Type","Setup Type"::Territory);
+        IF FINDSET THEN BEGIN
+          lGeoRef += 'REG : ';
+          lGeoProvcount := 0;
+          REPEAT
+            IF (lGeoProvcount > 0) THEN BEGIN
+              lGeoRef += ',';
+            END;
+            lGeoProvcount += 1;
+            lGeoRef += "Start Reference Code";
+          UNTIL (lAbilityGeoProvSetupTemp.NEXT = 0);
+        END;
+
+        SETRANGE("Setup Type","Setup Type"::Area);
+        IF FINDSET THEN BEGIN
+          IF (lGeoRef <> '') THEN BEGIN
+            lGeoRef += ' - ';
+          END;
+          lGeoRef += 'DEP : ';
+          lGeoProvcount := 0;
+          REPEAT
+            IF (lGeoProvcount > 0) THEN BEGIN
+              lGeoRef += ',';
+            END;
+            lGeoProvcount += 1;
+            lGeoRef += "Start Reference Code";
+          UNTIL (lAbilityGeoProvSetupTemp.NEXT = 0);
+        END;
+
+        SETRANGE("Setup Type","Setup Type"::"City (Distance)");
+        IF FINDSET THEN BEGIN
+          IF (lGeoRef <> '') THEN BEGIN
+            lGeoRef += ' - ';
+          END;
+          lGeoRef += 'CP : ';
+          lGeoProvcount := 0;
+          REPEAT
+            IF (lGeoProvcount > 0) THEN BEGIN
+              lGeoRef += ',';
+            END;
+            lGeoProvcount += 1;
+            lGeoRef += "Start Reference Code" + '(' + FORMAT("Emergency Distance (km)") + ')';
+          UNTIL (lAbilityGeoProvSetupTemp.NEXT = 0);
+        END;
+      END;
+
+      pDADHistory."Geo Reference" := COPYSTR(lGeoRef,1,250);
+    END;
+
+    PROCEDURE CheckGap@1100281005(pDADHistoryNew@1100281003 : TEMPORARY Record 50147;pDADHistoryOld@1100281001 : TEMPORARY Record 50147) : Boolean;
+    VAR
+      lOldDADLine@1100281002 : Record 50147;
+    BEGIN
+      IF (pDADHistoryNew.Name <> pDADHistoryOld.Name) THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew.Address <> pDADHistoryOld.Address) THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Address 2" <> pDADHistoryOld."Address 2") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew.City <> pDADHistoryOld.City) THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (DELCHR(pDADHistoryNew."Phone No.",'=',' ') <> DELCHR(pDADHistoryOld."Phone No.",'=',' ')) THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (DELCHR(pDADHistoryNew."Fax No.",'=',' ') <> DELCHR(pDADHistoryOld."Fax No.",'=',' ')) THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Post Code" <> pDADHistoryOld."Post Code") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."E-Mail" <> pDADHistoryOld."E-Mail") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."First Emergency Type" <> pDADHistoryOld."First Emergency Type") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      //<<IMH03.PC
+      {
+      IF (pDADHistoryNew."First Specialization Code" <> pDADHistoryOld."First Specialization Code") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      }
+      //>>IMH03.PC
+      IF (pDADHistoryNew."Others Specializations Code" <> pDADHistoryOld."Others Specializations Code") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Last Comment Creation Date" <> pDADHistoryOld."Last Comment Creation Date") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew.IBAN <> pDADHistoryOld.IBAN) THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Start Monday Business Hours" <> pDADHistoryOld."Start Monday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."End Monday Business Hours" <> pDADHistoryOld."End Monday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Start Tuesday Business Hours" <> pDADHistoryOld."Start Tuesday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."End Tuesday Business Hours" <> pDADHistoryOld."End Tuesday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Start Wednes. Business Hours" <> pDADHistoryOld."Start Wednes. Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Start Thursday Business Hours" <> pDADHistoryOld."Start Thursday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."End Thursday Business Hours" <> pDADHistoryOld."End Thursday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Start Friday Business Hours" <> pDADHistoryOld."Start Friday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."End Friday Business Hours" <> pDADHistoryOld."End Friday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Start Satur. Business Hours" <> pDADHistoryOld."Start Satur. Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."End Satur. Business Hours" <> pDADHistoryOld."End Satur. Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Start Sunday Business Hours" <> pDADHistoryOld."Start Sunday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."End Sunday Business Hours" <> pDADHistoryOld."End Sunday Business Hours") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Geo Reference" <> pDADHistoryOld."Geo Reference") THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew.Enable <> pDADHistoryOld.Enable) THEN BEGIN
+        EXIT(TRUE);
+      END;
+      IF (pDADHistoryNew."Speciality Enabled" <> pDADHistoryOld."Speciality Enabled") THEN BEGIN
+        EXIT(TRUE);
+      END;
+
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE CreateExcel@1100281009(VAR pAttachedFile@1100281027 : Text[250]);
+    VAR
+      lText010@1000000007 : TextConst 'FRA=Un fichier est g‚n‚r‚ dans le r‚pertoire d''export … la date du jour.';
+      lText100@1100281010 : TextConst 'ENU=Excel program not found.;FRA=Programme Excel non trouv‚.';
+      lText101@1100281000 : TextConst 'ENU=DatasSource;FRA=DRALL';
+      lText103@1100281024 : TextConst 'FRA=Statut';
+      lText104@1100281020 : TextConst 'FRA=Ref Coh‚ris';
+      lText105@1100281002 : TextConst 'ENU=Description;FRA=Ref NAV';
+      lText106@1100281003 : TextConst 'ENU=Service No.;FRA=Raison Sociale';
+      lText107@1100281004 : TextConst 'ENU=Reference No.;FRA=Adresse 1';
+      lText108@1100281005 : TextConst 'ENU=Creation Date;FRA=Adresse 2';
+      lText109@1100281006 : TextConst 'ENU=Menber No.;FRA=Code Postal';
+      lText110@1100281007 : TextConst 'ENU=Menber Name;FRA=Ville';
+      lText111@1100281008 : TextConst 'ENU=Member Firstname;FRA=Nø T‚l‚phone';
+      lText112@1100281009 : TextConst 'ENU=Provider No.;FRA=Nø Fax';
+      lText113@1100281013 : TextConst 'ENU=Provider Name;FRA=E-mail';
+      lText114@1100281012 : TextConst 'ENU=External Document No.;FRA=Disponibilit‚';
+      lText115@1100281018 : TextConst 'ENU=Invoiced to pay;FRA=Horaires si non disponible';
+      lText116@1100281019 : TextConst 'ENU=Deductile Information;FRA=Corps de m‚tier';
+      lMailSetup@1000000002 : Record 50115;
+      lDADHistory@1000000001 : Record 50147;
+      lDADHistoryOld@1000000000 : Record 50147;
+      lStartCounter@1100281001 : Integer;
+      lCounter@1100281011 : Integer;
+      lText117@1100281014 : TextConst 'ENU=Event No.;FRA=Commentaire';
+      lText118@1100281015 : TextConst 'ENU=Agreement No.;FRA=IBAN';
+      lText119@1100281016 : TextConst 'FRA=Zone g‚ographique';
+      lTotalCounter@1000000006 : Integer;
+      lCurrentCounter@1000000005 : Integer;
+      lModuloCounter@1000000004 : Integer;
+      lWDialog@1000000003 : Dialog;
+    BEGIN
+      // Cr‚ation du fichier Excel
+
+      lDADHistory.RESET;
+      lDADHistory.SETRANGE("Version No.",1);
+      lDADHistory.SETFILTER(Statut,'<>%1',lDADHistory.Statut::"No Change");
+      //lDADHistory.SETFILTER("No.",'500169');
+      IF GUIALLOWED THEN BEGIN
+        lTotalCounter := lDADHistory.COUNT;
+        lCurrentCounter := 0;
+        lModuloCounter := ROUND(lTotalCounter * 5 / 100,1,'>');
+        lWDialog.OPEN(Text003);
+      END;
+      IF lDADHistory.FINDSET THEN BEGIN
+        IF NOT CREATE(XlApp,TRUE,TRUE) THEN BEGIN
+          ERROR(lText100);
+        END;
+
+        //Cr‚ation de la feuille source de donn‚e du tableau crois‚ dynamique
+        XlApp.Visible := FALSE;
+        XlApp.DisplayAlerts := FALSE;
+        XlWrkBk := XlApp.Workbooks.Add;
+        XlWrkSht := XlWrkBk.Worksheets.Add;
+        XlWrkSht.Name := lText101;
+        //Suppression des feuilles par d‚faut
+        lStartCounter := XlWrkBk.Worksheets.Count;
+        FOR lCounter := lStartCounter DOWNTO 2 DO BEGIN
+          XlWrkSht := XlWrkBk.Worksheets.Item(lCounter);
+          XlWrkSht.Delete;
+        END;
+
+        XlWrkSht := XlWrkBk.Worksheets.Item(1);
+        XlWrkSht.Range('A1').Value := FORMAT(lText103);
+        XlWrkSht.Range('B1').Value := FORMAT(lText104);
+        XlWrkSht.Range('C1').Value := FORMAT(lText105);
+        XlWrkSht.Range('D1').Value := FORMAT(lText106);
+        XlWrkSht.Range('E1').Value := FORMAT(lText107);
+        XlWrkSht.Range('F1').Value := FORMAT(lText108);
+        XlWrkSht.Range('G1').Value := FORMAT(lText109);
+        //<<IMH03.PC
+        XlWrkSht.Range('G:G').NumberFormat := '@';
+        //>>IMH03.PC
+        XlWrkSht.Range('H1').Value := FORMAT(lText110);
+        XlWrkSht.Range('I1').Value := FORMAT(lText111);
+        XlWrkSht.Range('J1').Value := FORMAT(lText112);
+        XlWrkSht.Range('K1').Value := FORMAT(lText113);
+        XlWrkSht.Range('L1').Value := FORMAT(lText114);
+        XlWrkSht.Range('M1').Value := FORMAT(lText115);
+        XlWrkSht.Range('N1').Value := FORMAT(lText116);
+        //XlWrkSht.Range('O1').Value := FORMAT(lText117);
+        XlWrkSht.Range('O1').Value := FORMAT(lText118);
+        XlWrkSht.Range('P1').Value := FORMAT(lText119);
+
+        CurrentRowNo := 1;
+
+        REPEAT
+          IF GUIALLOWED THEN BEGIN
+            lCurrentCounter += 1;
+            IF lCurrentCounter MOD lModuloCounter = 0 THEN BEGIN
+              lWDialog.UPDATE(1,ROUND(lCurrentCounter / lTotalCounter * 9999,1,'>'));
+            END;
+          END;
+          lDADHistoryOld.GET(lDADHistory."No.",0);
+          //<<IMH02.PC
+          IF CheckHoursToExcel(lDADHistory) THEN BEGIN
+            AddLine(lDADHistoryOld,lDADHistory);
+          END;
+          //>>IMH02.PC
+        UNTIL (lDADHistory.NEXT = 0);
+
+        IF NOT lMailSetup.GET(lMailSetup."Object Type"::Report,50034,USERID) THEN BEGIN
+          IF NOT lMailSetup.GET(lMailSetup."Object Type"::Report,50034,'') THEN BEGIN
+            ERROR(Text002);
+          END;
+        END;
+
+        pAttachedFile :=
+          GetDirectory(lMailSetup) + 'DAD-' +
+          FORMAT(CURRENTDATETIME,0,'<Day,2><Month,2><Year>-<Hours24><Minutes,2>') + '.xlsx';
+        XlWrkBk.SaveCopyAs(pAttachedFile);
+
+        CLEAR(XlWrkSht);
+        XlWrkBk.Close;
+        CLEAR(XlWrkBk);
+        XlApp.Quit;
+        CLEAR(XlApp);
+        MESSAGE(lText010);
+      END;
+      IF GUIALLOWED THEN BEGIN
+        lWDialog.CLOSE;
+      END;
+    END;
+
+    PROCEDURE CheckHours@1100281016(pProviderNo@1100281001 : Code[20]) rValue : Boolean;
+    VAR
+      lProviderSetup@1100281000 : Record 50011;
+      lProviderBusinessHours@1100281002 : Record 50028;
+    BEGIN
+      // IMH02.PC
+      // retourne vrai si les horaires sont compris dans le param‚trage
+
+      rValue := FALSE;
+      lProviderSetup.GET;
+      IF (lProviderSetup."DRALL Start Mor. Week Filter" = 0T) AND
+         (lProviderSetup."DRALL End Mor. Week Filter" = 0T) AND
+         (lProviderSetup."DRALL Start Ev. Week Filter" = 0T) AND
+         (lProviderSetup."DRALL End Ev. Week Filter" = 0T) AND
+         (lProviderSetup."DRALL Start Mor. Satur. Filter" = 0T) AND
+         (lProviderSetup."DRALL End Mor. Satur. Filter" = 0T) AND
+         (lProviderSetup."DRALL Start Ev. Satur. Filter" = 0T) AND
+         (lProviderSetup."DRALL End Ev. Satur. Filter" = 0T) AND
+         (lProviderSetup."DRALL Start Sunday Filter" = 0T) AND
+         (lProviderSetup."DRALL End Sunday Filter" = 0T)
+      THEN BEGIN
+        EXIT(TRUE);
+      END;
+
+      lProviderBusinessHours.SETRANGE("Provider No.",pProviderNo);
+      lProviderBusinessHours.SETRANGE(Emergency,TRUE);
+      // LUNDI
+      lProviderBusinessHours.SETRANGE(Day,lProviderBusinessHours.Day::Monday);
+      IF lProviderBusinessHours.FINDFIRST THEN BEGIN
+        IF (lProviderBusinessHours."Start Time" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderBusinessHours."Start Time" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderBusinessHours."End Time" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderBusinessHours."End Time" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END ELSE BEGIN
+        IF (lProviderSetup."Start Monday Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderSetup."Start Monday Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderSetup."End Monday Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderSetup."End Monday Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // MARDI
+      lProviderBusinessHours.SETRANGE(Day,lProviderBusinessHours.Day::Tuesday);
+      IF lProviderBusinessHours.FINDFIRST THEN BEGIN
+        IF (lProviderBusinessHours."Start Time" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderBusinessHours."Start Time" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderBusinessHours."End Time" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderBusinessHours."End Time" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END ELSE BEGIN
+        IF (lProviderSetup."Start Tuesday Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderSetup."Start Tuesday Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderSetup."End Monday Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderSetup."End Monday Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // MERCREDI
+      lProviderBusinessHours.SETRANGE(Day,lProviderBusinessHours.Day::Wednesday);
+      IF lProviderBusinessHours.FINDFIRST THEN BEGIN
+        IF (lProviderBusinessHours."Start Time" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderBusinessHours."Start Time" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderBusinessHours."End Time" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderBusinessHours."End Time" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END ELSE BEGIN
+        IF (lProviderSetup."Start Wednes. Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderSetup."Start Wednes. Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderSetup."End Wednes. Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderSetup."End Wednes. Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // JEUDI
+      lProviderBusinessHours.SETRANGE(Day,lProviderBusinessHours.Day::Thursday);
+      IF lProviderBusinessHours.FINDFIRST THEN BEGIN
+        IF (lProviderBusinessHours."Start Time" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderBusinessHours."Start Time" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderBusinessHours."End Time" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderBusinessHours."End Time" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END ELSE BEGIN
+        IF (lProviderSetup."Start Thursday Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderSetup."Start Thursday Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderSetup."End Thursday Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderSetup."End Thursday Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // VENDREDI
+      lProviderBusinessHours.SETRANGE(Day,lProviderBusinessHours.Day::Friday);
+      IF lProviderBusinessHours.FINDFIRST THEN BEGIN
+        IF (lProviderBusinessHours."Start Time" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderBusinessHours."Start Time" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderBusinessHours."End Time" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderBusinessHours."End Time" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END ELSE BEGIN
+        IF (lProviderSetup."Start Friday Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (lProviderSetup."Start Friday Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderSetup."End Friday Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (lProviderSetup."End Friday Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+
+      // SAMEDI
+      lProviderBusinessHours.SETRANGE(Day,lProviderBusinessHours.Day::Saturday);
+      IF lProviderBusinessHours.FINDFIRST THEN BEGIN
+        IF (lProviderBusinessHours."Start Time" >= lProviderSetup."DRALL Start Mor. Satur. Filter") AND
+           (lProviderBusinessHours."Start Time" <= lProviderSetup."DRALL End Mor. Satur. Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderBusinessHours."End Time" >= lProviderSetup."DRALL Start Ev. Satur. Filter") AND
+           (lProviderBusinessHours."End Time" <= lProviderSetup."DRALL End Ev. Satur. Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END ELSE BEGIN
+        IF (lProviderSetup."Start Satur. Business Hours" >= lProviderSetup."DRALL Start Mor. Satur. Filter") AND
+           (lProviderSetup."Start Satur. Business Hours" <= lProviderSetup."DRALL End Mor. Satur. Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderSetup."End Satur. Business Hours" >= lProviderSetup."DRALL Start Ev. Satur. Filter") AND
+           (lProviderSetup."End Satur. Business Hours" <= lProviderSetup."DRALL End Ev. Satur. Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+
+      // DIMANCHE
+      lProviderBusinessHours.SETRANGE(Day,lProviderBusinessHours.Day::Sunday);
+      IF lProviderBusinessHours.FINDFIRST THEN BEGIN
+        IF (lProviderBusinessHours."Start Time" >= lProviderSetup."DRALL Start Sunday Filter") THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderBusinessHours."End Time" <= lProviderSetup."DRALL End Sunday Filter") THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END ELSE BEGIN
+        IF (lProviderSetup."Start Sunday Business Hours" >= lProviderSetup."DRALL Start Sunday Filter") THEN BEGIN
+          EXIT(TRUE);
+        END;
+        IF (lProviderSetup."End Sunday Business Hours" <= lProviderSetup."DRALL End Sunday Filter") THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE CheckHoursToExcel@1100281017(pDRALLHistory@1100281001 : Record 50147) rValue : Boolean;
+    VAR
+      lProviderSetup@1100281000 : Record 50011;
+    BEGIN
+      // IMH02.PC
+      // retourne vrai si les horaires sont compris dans le param‚trage
+
+      rValue := FALSE;
+      lProviderSetup.GET;
+      IF (lProviderSetup."DRALL Start Mor. Week Filter" = 0T) AND
+         (lProviderSetup."DRALL End Mor. Week Filter" = 0T) AND
+         (lProviderSetup."DRALL Start Ev. Week Filter" = 0T) AND
+         (lProviderSetup."DRALL End Ev. Week Filter" = 0T) AND
+         (lProviderSetup."DRALL Start Mor. Satur. Filter" = 0T) AND
+         (lProviderSetup."DRALL End Mor. Satur. Filter" = 0T) AND
+         (lProviderSetup."DRALL Start Ev. Satur. Filter" = 0T) AND
+         (lProviderSetup."DRALL End Ev. Satur. Filter" = 0T) AND
+         (lProviderSetup."DRALL Start Sunday Filter" = 0T) AND
+         (lProviderSetup."DRALL End Sunday Filter" = 0T)
+      THEN BEGIN
+        EXIT(TRUE);
+      END;
+
+      // LUNDI
+      IF pDRALLHistory."Start Monday Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."Start Monday Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (pDRALLHistory."Start Monday Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      IF pDRALLHistory."End Monday Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."End Monday Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (pDRALLHistory."End Monday Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // MARDI
+      IF pDRALLHistory."Start Tuesday Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."Start Tuesday Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (pDRALLHistory."Start Tuesday Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      IF pDRALLHistory."End Tuesday Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."End Tuesday Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (pDRALLHistory."End Tuesday Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // MERCREDI
+      IF pDRALLHistory."Start Wednes. Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."Start Wednes. Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+            (pDRALLHistory."Start Wednes. Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      IF pDRALLHistory."End Wednes. Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."End Wednes. Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (pDRALLHistory."End Wednes. Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // JEUDI
+      IF pDRALLHistory."Start Thursday Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."Start Thursday Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (pDRALLHistory."Start Thursday Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      IF pDRALLHistory."End Thursday Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."End Thursday Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (pDRALLHistory."End Thursday Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // VENDREDI
+      IF pDRALLHistory."Start Friday Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."Start Friday Business Hours" >= lProviderSetup."DRALL Start Mor. Week Filter") AND
+           (pDRALLHistory."Start Friday Business Hours" <= lProviderSetup."DRALL End Mor. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      IF pDRALLHistory."End Friday Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."End Friday Business Hours" >= lProviderSetup."DRALL Start Ev. Week Filter") AND
+           (pDRALLHistory."End Friday Business Hours" <= lProviderSetup."DRALL End Ev. Week Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // SAMEDI
+      IF pDRALLHistory."Start Satur. Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."Start Satur. Business Hours" >= lProviderSetup."DRALL Start Mor. Satur. Filter") AND
+           (pDRALLHistory."Start Satur. Business Hours" <= lProviderSetup."DRALL End Mor. Satur. Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      IF pDRALLHistory."End Satur. Business Hours" <> 0T THEN BEGIN
+        IF (pDRALLHistory."End Satur. Business Hours" >= lProviderSetup."DRALL Start Ev. Satur. Filter") AND
+           (pDRALLHistory."End Satur. Business Hours" <= lProviderSetup."DRALL End Ev. Satur. Filter")
+        THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      // DIMANCHE
+      IF (pDRALLHistory."Start Sunday Business Hours" <> 0T) THEN BEGIN
+        IF (pDRALLHistory."Start Sunday Business Hours" >= lProviderSetup."DRALL Start Sunday Filter") THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+      IF (pDRALLHistory."End Sunday Business Hours" <> 0T) THEN BEGIN
+        IF (pDRALLHistory."End Sunday Business Hours" <= lProviderSetup."DRALL End Sunday Filter") THEN BEGIN
+          EXIT(TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE AddLine@1100281008(pDADHistoryOld@1100281000 : Record 50147;pDADHistoryNew@1100281003 : Record 50147);
+    VAR
+      lService@1100281001 : Record 50066;
+      lServiceInterventionLine@1100281012 : Record 50075;
+      lContact@1100281011 : Record 5050;
+      lProviderAgreement@1100281002 : Record 50012;
+      lFontColor@1100281004 : Integer;
+    BEGIN
+      CurrentRowNo += 1;
+      XlWrkSht.Range('A' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew.Statut);
+      XlWrkSht.Range('B' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."Coheris No.");
+      XlWrkSht.Range('C' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."No.");
+      XlWrkSht.Range('D' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew.Name);
+      XlWrkSht.Range('E' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew.Address);
+      XlWrkSht.Range('F' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."Address 2");
+      XlWrkSht.Range('G' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."Post Code");
+      XlWrkSht.Range('H' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew.City);
+      XlWrkSht.Range('I' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."Phone No.");
+      XlWrkSht.Range('J' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."Fax No.");
+      XlWrkSht.Range('K' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."E-Mail");
+      XlWrkSht.Range('L' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."First Emergency Type");
+      XlWrkSht.Range('M' + FORMAT(CurrentRowNo)).Value := AddHourField(pDADHistoryNew);
+      XlWrkSht.Range('N' + FORMAT(CurrentRowNo)).Value := GetSpecializationList(pDADHistoryNew."No.");
+      //XlWrkSht.Range('O' + FORMAT(CurrentRowNo)).Value := AddCommentField(pDADHistoryNew,pDADHistoryOld);
+      XlWrkSht.Range('O' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew.IBAN);
+      XlWrkSht.Range('P' + FORMAT(CurrentRowNo)).Value := FORMAT(pDADHistoryNew."Geo Reference");
+      IF pDADHistoryNew.Statut <> pDADHistoryNew.Statut::Disable THEN BEGIN
+        lFontColor := 3;
+        IF (pDADHistoryNew.Name <> pDADHistoryOld.Name) THEN BEGIN
+          XlWrkSht.Range('D' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew.Address <> pDADHistoryOld.Address) THEN BEGIN
+          XlWrkSht.Range('E' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew."Address 2" <> pDADHistoryOld."Address 2") THEN BEGIN
+          XlWrkSht.Range('F' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew."Post Code" <> pDADHistoryOld."Post Code") THEN BEGIN
+          XlWrkSht.Range('G' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew.City <> pDADHistoryOld.City) THEN BEGIN
+          XlWrkSht.Range('H' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (DELCHR(pDADHistoryNew."Phone No.",'=',' ') <> DELCHR(pDADHistoryOld."Phone No.",'=',' ')) THEN BEGIN
+          XlWrkSht.Range('I' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (DELCHR(pDADHistoryNew."Fax No.",'=',' ') <> DELCHR(pDADHistoryOld."Fax No.",'=',' ')) THEN BEGIN
+          XlWrkSht.Range('J' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew."E-Mail" <> pDADHistoryOld."E-Mail") THEN BEGIN
+          XlWrkSht.Range('K' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew."First Emergency Type" <> pDADHistoryOld."First Emergency Type") THEN BEGIN
+          XlWrkSht.Range('L' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew."Others Specializations Code" <> pDADHistoryOld."Others Specializations Code") THEN BEGIN
+          XlWrkSht.Range('N' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew."Start Monday Business Hours" <> pDADHistoryOld."Start Monday Business Hours") OR
+           (pDADHistoryNew."End Monday Business Hours" <> pDADHistoryOld."End Monday Business Hours") OR
+           (pDADHistoryNew."Start Tuesday Business Hours" <> pDADHistoryOld."Start Tuesday Business Hours") OR
+           (pDADHistoryNew."End Tuesday Business Hours" <> pDADHistoryOld."End Tuesday Business Hours") OR
+           (pDADHistoryNew."Start Wednes. Business Hours" <> pDADHistoryOld."Start Wednes. Business Hours") OR
+           (pDADHistoryNew."End Wednes. Business Hours" <> pDADHistoryOld."End Wednes. Business Hours") OR
+           (pDADHistoryNew."Start Thursday Business Hours" <> pDADHistoryOld."Start Thursday Business Hours") OR
+           (pDADHistoryNew."End Thursday Business Hours" <> pDADHistoryOld."End Thursday Business Hours") OR
+           (pDADHistoryNew."Start Friday Business Hours" <> pDADHistoryOld."Start Friday Business Hours") OR
+           (pDADHistoryNew."End Friday Business Hours" <> pDADHistoryOld."End Friday Business Hours") OR
+           (pDADHistoryNew."Start Satur. Business Hours" <> pDADHistoryOld."Start Satur. Business Hours") OR
+           (pDADHistoryNew."End Satur. Business Hours" <> pDADHistoryOld."End Satur. Business Hours") OR
+           (pDADHistoryNew."Start Sunday Business Hours" <> pDADHistoryOld."Start Sunday Business Hours") OR
+           (pDADHistoryNew."End Sunday Business Hours" <> pDADHistoryOld."End Sunday Business Hours")
+        THEN BEGIN
+          XlWrkSht.Range('M' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        //IF (pDADHistoryNew."Last Comment Creation Date" <> pDADHistoryOld."Last Comment Creation Date") THEN
+        //  XlWrkSht.Range('O' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        IF (pDADHistoryNew.IBAN <> pDADHistoryOld.IBAN) THEN BEGIN
+          XlWrkSht.Range('O' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF (pDADHistoryNew."Geo Reference" <> pDADHistoryOld."Geo Reference") THEN BEGIN
+          XlWrkSht.Range('P' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+        IF pDADHistoryNew.Statut = pDADHistoryNew.Statut::Enable THEN BEGIN
+          XlWrkSht.Range('A' + FORMAT(CurrentRowNo) + ':P' + FORMAT(CurrentRowNo)).Font.ColorIndex := lFontColor;
+        END;
+      END;
+    END;
+
+    PROCEDURE AddHourField@1100281012(pDADHistoryNew@1100281003 : Record 50147) Result : Text[1024];
+    VAR
+      lService@1100281001 : Record 50066;
+      lServiceInterventionLine@1100281012 : Record 50075;
+      lContact@1100281011 : Record 5050;
+      lProviderAgreement@1100281002 : Record 50012;
+      lTxtLundi@1100281000 : TextConst 'FRA=Lundi : %1 / %2';
+      lTxtMardi@1100281004 : TextConst 'FRA=Mardi : %1 / %2';
+      lTxtMercredi@1100281005 : TextConst 'FRA=Mercredi : %1 / %2';
+      lTxtJeudi@1100281006 : TextConst 'FRA=Jeudi : %1 / %2';
+      lTxtVendredi@1100281007 : TextConst 'FRA=Vendredi : %1 / %2';
+      lTxtSamedi@1100281008 : TextConst 'FRA=Samedi : %1 / %2';
+      lTxtDimanche@1100281009 : TextConst 'FRA=Dimanche : %1 / %2';
+    BEGIN
+      WITH pDADHistoryNew DO BEGIN
+        Result :=
+          STRSUBSTNO(lTxtLundi,"Start Monday Business Hours","End Monday Business Hours") + GetEOL +
+          STRSUBSTNO(lTxtMardi,"Start Tuesday Business Hours","End Tuesday Business Hours") + GetEOL +
+          STRSUBSTNO(lTxtMercredi,"Start Wednes. Business Hours","End Wednes. Business Hours") + GetEOL +
+          STRSUBSTNO(lTxtJeudi,"Start Thursday Business Hours","End Thursday Business Hours") + GetEOL +
+          STRSUBSTNO(lTxtVendredi,"Start Friday Business Hours","End Friday Business Hours") + GetEOL +
+          STRSUBSTNO(lTxtSamedi,"Start Satur. Business Hours","End Satur. Business Hours") + GetEOL +
+          STRSUBSTNO(lTxtDimanche,"Start Sunday Business Hours","End Sunday Business Hours");
+      END;
+    END;
+
+    PROCEDURE GetEOL@1100281013() Result : Text[2];
+    BEGIN
+      Result[1] := 13;
+      Result[2] := 10;
+    END;
+
+    PROCEDURE GetDirectory@1100281004(VAR MailNotificationSetup@1100281000 : Record 50115) rValue : Text[1024];
+    BEGIN
+      rValue := '';
+
+      WITH MailNotificationSetup DO BEGIN
+        CASE "First Part of Path" OF
+          "First Part of Path"::"Define in Notification Setup" : BEGIN
+            rValue :=
+              "Attachment Path";
+            CASE "Second Part of Path" OF
+              "Second Part of Path"::User : rValue += USERID + '\';
+              "Second Part of Path"::"Responsibility Center" : ;
+            END;
+          END;
+          "First Part of Path"::"Define in Responsibility Center" : BEGIN
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE SendByMail@1100281010(VAR pAttachedFile@1100281000 : Text[250];pOpenMail@1100281004 : Boolean);
+    VAR
+      Mail@1100281003 : Codeunit 397;
+      lComanyInfo@1100281002 : Record 79;
+      lDatabaseType@1100281001 : Record 50159;
+    BEGIN
+      lComanyInfo.GET;
+      IF NOT lDatabaseType.GET(lComanyInfo."Database Type") THEN BEGIN
+        EXIT;
+      END;
+      IF (lDatabaseType."E-mail DAD" = '') THEN BEGIN
+        EXIT;
+      END;
+
+      Mail.NewMessage(
+        lDatabaseType."E-mail DAD",
+        '',pAttachedFile,
+        '',pAttachedFile,
+        pOpenMail);
+    END;
+
+    PROCEDURE GetSpecialization@1100281014(pProviderNo@1100281002 : Code[20]) : Boolean;
+    VAR
+      lProviderSpecialization@1100281000 : Record 50006;
+      lSpecialization@1100281001 : Record 50005;
+    BEGIN
+      // retourne vrai si une des sp‚cialit‚s du prestataire est de type urgence
+      // et transmissible … la DAD
+
+      lProviderSpecialization.RESET;
+      lProviderSpecialization.SETRANGE("Provider No.",pProviderNo);
+      lProviderSpecialization.SETRANGE(Emergency,TRUE);
+      IF lProviderSpecialization.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      lProviderSpecialization.FINDSET;
+      REPEAT
+        IF lSpecialization.GET(lProviderSpecialization."Specialization Code") THEN BEGIN
+          IF lSpecialization."Show On DAD" THEN BEGIN
+            EXIT(TRUE);
+          END;
+        END;
+      UNTIL (lProviderSpecialization.NEXT = 0);
+    END;
+
+    PROCEDURE GetSpecializationList@1000000002(pProviderNo@1000000001 : Code[20]) rValue : Text[1024];
+    VAR
+      lProviderSpecialization@1000000002 : Record 50006;
+      lSpecialization@1000000003 : Record 50005;
+    BEGIN
+      // Resort la liste des sp‚cialit‚s pour la DAD
+
+      rValue := '';
+      WITH lProviderSpecialization DO BEGIN
+        RESET;
+        SETRANGE("Provider No.",pProviderNo);
+        SETRANGE(Emergency,TRUE);
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+
+        FINDSET;
+        REPEAT
+          IF lSpecialization.GET("Specialization Code") THEN BEGIN
+            IF lSpecialization."Show On DAD" THEN BEGIN
+              IF STRLEN(rValue) = 0 THEN BEGIN
+                rValue := lSpecialization.Description;
+              END ELSE BEGIN
+                IF STRLEN(rValue) + STRLEN(lSpecialization.Description) + 1 <= 1024 THEN BEGIN
+                  rValue += ',' + lSpecialization.Description;
+                END;
+              END;
+            END;
+          END;
+        UNTIL NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE AddCommentField@1100281011(pDADHistoryNew@1100281003 : Record 50147;pDADHistoryOld@1100281004 : Record 50147) Result : Text[1024];
+    VAR
+      lService@1100281001 : Record 50066;
+      lServiceInterventionLine@1100281012 : Record 50075;
+      lContact@1100281011 : Record 5050;
+      lProviderAgreement@1100281002 : Record 50012;
+      lAdvCommentLine@1100281000 : Record 50056;
+    BEGIN
+      lAdvCommentLine.RESET;
+      lAdvCommentLine.SETCURRENTKEY(
+        "Source Table ID","Source No.","Source No. 2","Source No. 3",
+        "Source No. 4","Source No. 5","Creation Date");
+      lAdvCommentLine.SETRANGE("Source Table ID",50000);
+      lAdvCommentLine.SETRANGE("Source No.",pDADHistoryNew."No.");
+      //lAdvCommentLine.SETFILTER("Creation Date",'>%1',pDADHistoryOld."User Date");
+      IF lAdvCommentLine.FINDSET THEN BEGIN
+        REPEAT
+          IF (Result <> '') THEN
+            Result += GetEOL;
+          Result := lAdvCommentLine.Comment;
+        UNTIL (lAdvCommentLine.NEXT = 0);
+      END;
+    END;
+
+    EVENT XlWrkSht@1000000009::SelectionChange@1543(Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::BeforeDoubleClick@1537(Target@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::BeforeRightClick@1534(Target@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::Activate@304();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::Deactivate@1530();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::Calculate@279();
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::Change@1545(Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::FollowHyperlink@1470(Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::PivotTableUpdate@2156(Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::PivotTableAfterValueChange@2886(TargetPivotTable@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::PivotTableBeforeAllocateChanges@2889(TargetPivotTable@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000002 : Integer;ValueChangeEnd@1000000001 : Integer;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::PivotTableBeforeCommitChanges@2892(TargetPivotTable@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000002 : Integer;ValueChangeEnd@1000000001 : Integer;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::PivotTableBeforeDiscardChanges@2893(TargetPivotTable@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000001 : Integer;ValueChangeEnd@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkSht@1000000009::PivotTableChangeSync@2894(Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::Open@1923();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::Activate@304();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::Deactivate@1530();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::BeforeClose@1546(VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::BeforeSave@1547(SaveAsUI@1000000001 : Boolean;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::BeforePrint@1549(VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::NewSheet@1550(Sh@1000000000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::AddinInstall@1552();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::AddinUninstall@1553();
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::WindowResize@1554(Wn@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::WindowActivate@1556(Wn@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::WindowDeactivate@1557(Wn@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetSelectionChange@1558(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetBeforeDoubleClick@1559(Sh@1000000002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetBeforeRightClick@1560(Sh@1000000002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetActivate@1561(Sh@1000000000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetDeactivate@1562(Sh@1000000000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetCalculate@1563(Sh@1000000000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetChange@1564(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetFollowHyperlink@1854(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetPivotTableUpdate@2157(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::PivotTableCloseConnection@2158(Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::PivotTableOpenConnection@2159(Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::Sync@2266(SyncEventType@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::BeforeXmlImport@2283(Map@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1000000002 : Text[1024];IsRefresh@1000000001 : Boolean;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::AfterXmlImport@2285(Map@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";IsRefresh@1000000001 : Boolean;Result@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::BeforeXmlExport@2287(Map@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1000000001 : Text[1024];VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::AfterXmlExport@2288(Map@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1000000001 : Text[1024];Result@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::RowsetComplete@2610(Description@1000000002 : Text[1024];Sheet@1000000001 : Text[1024];Success@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetPivotTableAfterValueChange@2895(Sh@1000000002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetPivotTableBeforeAllocateChanges@2896(Sh@1000000004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000002 : Integer;ValueChangeEnd@1000000001 : Integer;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetPivotTableBeforeCommitChanges@2897(Sh@1000000004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000002 : Integer;ValueChangeEnd@1000000001 : Integer;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetPivotTableBeforeDiscardChanges@2898(Sh@1000000003 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000001 : Integer;ValueChangeEnd@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::SheetPivotTableChangeSync@2899(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::AfterSave@2900(Success@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlWrkBk@1000000010::NewChart@2901(Ch@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020821-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Chart");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::NewWorkbook@1565(Wb@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetSelectionChange@1558(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetBeforeDoubleClick@1559(Sh@1000000002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetBeforeRightClick@1560(Sh@1000000002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetActivate@1561(Sh@1000000000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetDeactivate@1562(Sh@1000000000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetCalculate@1563(Sh@1000000000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetChange@1564(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookOpen@1567(Wb@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookActivate@1568(Wb@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookDeactivate@1569(Wb@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookBeforeClose@1570(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookBeforeSave@1571(Wb@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";SaveAsUI@1000000001 : Boolean;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookBeforePrint@1572(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookNewSheet@1573(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Sh@1000000000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookAddinInstall@1574(Wb@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookAddinUninstall@1575(Wb@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WindowResize@1554(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WindowActivate@1556(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WindowDeactivate@1557(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Wn@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020893-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Window");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetFollowHyperlink@1854(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00024431-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Hyperlink");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetPivotTableUpdate@2157(Sh@1000000001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookPivotTableCloseConnection@2160(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookPivotTableOpenConnection@2161(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Target@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookSync@2289(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";SyncEventType@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookBeforeXmlImport@2290(Wb@1000000004 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1000000002 : Text[1024];IsRefresh@1000000001 : Boolean;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookAfterXmlImport@2291(Wb@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";IsRefresh@1000000001 : Boolean;Result@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookBeforeXmlExport@2292(Wb@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1000000001 : Text[1024];VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookAfterXmlExport@2293(Wb@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Map@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{0002447B-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.XmlMap";Url@1000000001 : Text[1024];Result@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookRowsetComplete@2611(Wb@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Description@1000000002 : Text[1024];Sheet@1000000001 : Text[1024];Success@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::AfterCalculate@2612();
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetPivotTableAfterValueChange@2895(Sh@1000000002 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";TargetRange@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020846-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Range");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetPivotTableBeforeAllocateChanges@2896(Sh@1000000004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000002 : Integer;ValueChangeEnd@1000000001 : Integer;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetPivotTableBeforeCommitChanges@2897(Sh@1000000004 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1000000003 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000002 : Integer;ValueChangeEnd@1000000001 : Integer;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::SheetPivotTableBeforeDiscardChanges@2898(Sh@1000000003 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";TargetPivotTable@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020872-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.PivotTable";ValueChangeStart@1000000001 : Integer;ValueChangeEnd@1000000000 : Integer);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::ProtectedViewWindowOpen@2903(Pvw@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::ProtectedViewWindowBeforeEdit@2905(Pvw@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow";VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::ProtectedViewWindowBeforeClose@2906(Pvw@1000000002 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow";Reason@1000000001 : Integer;VAR Cancel@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::ProtectedViewWindowResize@2908(Pvw@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::ProtectedViewWindowActivate@2909(Pvw@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::ProtectedViewWindowDeactivate@2910(Pvw@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{000244CD-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.ProtectedViewWindow");
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookAfterSave@2911(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Success@1000000000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT XlApp@1000000011::WorkbookNewChart@2912(Wb@1000000001 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020819-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Workbook";Ch@1000000000 : Automation "{00020813-0000-0000-C000-000000000046} 1.7:{00020821-0000-0000-C000-000000000046}:'Microsoft Excel 14.0 Object Library'.Chart");
+    BEGIN
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 04/10/12 @a ISA.PC @v IMH6.01.218 @s NEP00009 @h 3960
+          @c Ne pas prendre en compte le code de la 1ere sp‚cialit‚ pour la modification */
+      /** @r IMH02 @d 09/07/12 @a ISA.PC @v IMH6.01.139 @h 2829 @c Changement nom de DAD Management … DRALL Management
+          @c Ajout filtre horaire */
+      /** @r IMH01 @d 18/01/12 @a ISA.PC @v IMH6.01.139 @h 2829 @c Nouvelle Version Code Unit */
+    }
+    END.
+  }
+}

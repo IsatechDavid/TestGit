@@ -1,0 +1,208 @@
+OBJECT Report 50210 Automatic Letter
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/02/13;
+    Time=14:57:20;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 17=rimd;
+    CaptionML=[ENU=Automatic Letter;
+               FRA=Lettrage automatique];
+    ProcessingOnly=Yes;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table17;
+        DataItemTableView=SORTING(G/L Account No.,Letter);
+        OnPreDataItem=BEGIN
+                        GeneralLedgerSetup.GET;
+                        GeneralLedgerSetup.TESTFIELD("Corp. Transf. Clearing Account");
+
+                        SETCURRENTKEY("G/L Account No.",Letter);
+                        SETRANGE("G/L Account No.",GeneralLedgerSetup."Corp. Transf. Clearing Account");
+                        SETRANGE(Letter,'');
+                        SETFILTER("Document Type",'%1|%2',"Document Type"::Invoice,"Document Type"::"Credit Memo");
+
+                        IF GUIALLOWED THEN BEGIN
+                          WDialog.OPEN(Text002);
+                        END ELSE BEGIN
+                          MESSAGE(Text001);
+                        END;
+
+                        TotalCounter := COUNT;
+                        IF GUIALLOWED THEN BEGIN
+                          StartDate := CURRENTDATETIME;
+                          ModuloCounter := ROUND(TotalCounter * 1 / 100,1,'>');
+                          CurrentCounter := 0;
+                          WDialog.UPDATE(1,FORMAT(StartDate));
+                          WDialog.UPDATE(2,Text001);
+                        END;
+                        CommitCounter := 0;
+
+                        IF NOT GUIALLOWED THEN BEGIN
+                          MESSAGE(GETFILTERS);
+                          MESSAGE(STRSUBSTNO(Text004,TotalCounter));
+                        END;
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lGLEntry@1100281001 : Record 17;
+                           lGLEntryApplication@1100281000 : Codeunit 10842;
+                           lAmount@1100281002 : Decimal;
+                           lLetterToSet@1100281003 : Text[10];
+                           lLetterDate@1100281004 : Date;
+                         BEGIN
+
+                           CurrentCounter += 1;
+                           IF GUIALLOWED THEN BEGIN
+                             IF CurrentCounter MOD ModuloCounter = 1 THEN BEGIN
+                               WDialog.UPDATE(3,ROUND(CurrentCounter / TotalCounter * 9999,1,'>'));
+                             END;
+                           END;
+
+                           lAmount := 0;
+                           lLetterToSet := '';
+
+                           IF TaskHandler.IsStoppingTime THEN BEGIN
+                             TaskHandler.AddExpiredMsg('');
+                             CurrReport.BREAK;
+                           END;
+
+                           IF ("G/L Account No." <> GeneralLedgerSetup."Corp. Transf. Clearing Account") OR
+                              NOT ("Document Type" IN ["Document Type"::Invoice,"Document Type"::"Credit Memo"]) OR
+                              (Letter <> '')
+                           THEN BEGIN
+                             CurrReport.SKIP;
+                           END;
+
+                           lGLEntry.RESET;
+                           lGLEntry.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+                           lGLEntry.SETRANGE("Service No.","Service No.");
+                           lGLEntry.SETRANGE("Service Header No.","Service Header No.");
+                           lGLEntry.SETRANGE("Intervention Line No.","Intervention Line No.");
+                           lGLEntry.SETRANGE("G/L Account No.","G/L Account No.");
+                           lGLEntry.SETFILTER(Letter,'');
+                           lGLEntry.SETFILTER("Document No.",'%1',"Document No." + '*');
+                           IF lGLEntry.FINDSET THEN BEGIN
+                             REPEAT
+                               lAmount += lGLEntry.Amount;
+                               IF lLetterDate < lGLEntry."Posting Date" THEN BEGIN
+                                 lLetterDate := lGLEntry."Posting Date";
+                               END;
+                             UNTIL lGLEntry.NEXT = 0;
+                           END;
+
+                           IF lAmount <> 0 THEN BEGIN
+                             CurrReport.SKIP;
+                           END;
+
+                           lLetterToSet := GetLastLetter;
+                           lGLEntryApplication.NextLetter(lLetterToSet);
+
+                           IF lGLEntry.FINDSET(TRUE) THEN BEGIN
+                             REPEAT
+                               lGLEntry.Letter := lLetterToSet;
+                               lGLEntry."Letter Date" := lLetterDate;
+                               lGLEntry.Open := FALSE;
+                               lGLEntry.MODIFY;
+                             UNTIL lGLEntry.NEXT = 0;
+                           END;
+
+                           CommitCounter += 1;
+                           IF CommitCounter MOD 5 = 1 THEN BEGIN
+                             COMMIT;
+                           END;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         IF GUIALLOWED THEN BEGIN
+                           WDialog.CLOSE;
+                           EndDate := CURRENTDATETIME;
+                           MESSAGE(STRSUBSTNO(Text003,FORMAT(StartDate),FORMAT(EndDate)));
+                         END;
+                       END;
+
+        ReqFilterFields=Document No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Automatic Application ID;FRA=Lettrage automatique';
+      GeneralLedgerSetup@1100281003 : Record 98;
+      TaskHandler@1000000000 : Codeunit 8016715;
+      WDialog@1100281001 : Dialog;
+      Text002@1000000001 : TextConst 'ENU=Start Date : #1###################\Process #2###########\@3@@@@@@@@@@@@@@@@@@@@;FRA=Date d‚but : #1###################\Traitement #2###################\@3@@@@@@@@@@@@@@@@@@@@';
+      TotalCounter@1000000006 : Integer;
+      ModuloCounter@1000000005 : Integer;
+      CurrentCounter@1000000004 : Integer;
+      CommitCounter@1100281002 : Integer;
+      StartDate@1000000003 : DateTime;
+      EndDate@1000000002 : DateTime;
+      Text003@1000000007 : TextConst 'ENU=Start : %1\End : %2;FRA=D‚but : %1\Fin : %2';
+      Text004@1100281004 : TextConst 'FRA=Nb lignes … traiter %1';
+
+    PROCEDURE GetLastLetter@1100281000() : Text[10];
+    VAR
+      lGLEntry@1100281000 : Record 17;
+    BEGIN
+      lGLEntry.SETCURRENTKEY("G/L Account No.",Letter);
+      lGLEntry.SETFILTER("G/L Account No.",GeneralLedgerSetup."Corp. Transf. Clearing Account");
+      IF lGLEntry.FINDLAST THEN BEGIN
+        IF STRLEN(lGLEntry.Letter) = 10 THEN BEGIN
+          EXIT(lGLEntry.Letter);
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 16/10/12 @a ISAT.PC @v IMH6.01.212 @h 3035 @s Processus … tƒches : expirations */
+      /** @r IMH01 @d 23/07/12 @a ISAT.RC @v IMH6.01.212 @h 3035 @s Lettrage automatis‚ du compte 471200 @c cr‚ation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

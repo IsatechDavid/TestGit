@@ -1,0 +1,211 @@
+OBJECT Codeunit 50047 Proc. Quote Req. Funct.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=11/01/13;
+    Time=10:09:24;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProcCommFct@1100281000 : Codeunit 50049;
+      Funct001_Name@1100281001 : TextConst 'ENU=Tray line activities exists;FRA=Activit‚s corbeilles en cours';
+      Funct001_Assist@1100281002 : TextConst 'ENU=Team code filter (unmandatory);FRA=Filtre code corbeille (non obligatoire)';
+      AssistMode@1100281003 : Boolean;
+      CurrRec@1100281004 : Record 50076;
+      Funct101_Name@1100281006 : TextConst 'ENU=Intervention Ceiling Overrun;FRA=D‚passement plafond d''intervention';
+      Funct101_Assist@1100281005 : TextConst 'ENU=Quote type filter;FRA=Filtre type devis';
+      Funct106_Name@1100281008 : TextConst 'ENU=Estimate overrun;FRA=D‚passement estimation';
+      Funct106_Assist@1100281007 : TextConst 'ENU=Quote type filter;FRA=Filtre type devis';
+
+    LOCAL PROCEDURE GetTableNo@1100281000() : Integer;
+    BEGIN
+      EXIT(DATABASE::"Service Intervention Quote");
+    END;
+
+    PROCEDURE LoadFunctionList@1100281001();
+    VAR
+      lProcFunction@1100281000 : Record 50085;
+    BEGIN
+      // Source Table, Type, nø de la fonction, Description, ParamŠtre o/n
+      WITH lProcFunction DO BEGIN
+        // Plage 1 … 99 : commun DPS
+        InitFunction(GetTableNo, "Function Type"::TestFunction,   1, Funct001_Name , TRUE);
+        // Plage 100 … 199 : selon la table origine
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 101, Funct101_Name , TRUE);
+        InitFunction(GetTableNo, "Function Type"::TestFunction, 106, Funct106_Name , TRUE); //IMH03.ST
+      END;
+      // Plage 200 : fonction communes
+      ProcCommFct.LoadTestFunctionList(GetTableNo); //IMH02.ST
+    END;
+
+    PROCEDURE AssistFunction@1100281009(pFunctionNo@1100281000 : Integer);
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      AssistMode := TRUE;
+      TestFunction(pFunctionNo, '', lRecRef);
+      AssistMode := FALSE;
+    END;
+
+    PROCEDURE TestFunction@1100281003(pFunctionNo@1100281000 : Integer;pParameters@1100281001 : Text[1024];pCurrRecRef@1100281002 : RecordRef) : Boolean;
+    BEGIN
+      IF NOT AssistMode THEN
+        pCurrRecRef.SETTABLE(CurrRec);
+      CASE pFunctionNo OF
+        1 : EXIT(TrayLineExist(TRUE, pParameters));
+        101 : EXIT(InterventionCeilingOverrun(pParameters));
+        106 : EXIT(EstimateOverrun(pParameters)); //IMH03.ST
+
+        201 : IF NOT AssistMode THEN
+                EXIT(AndFunction(pParameters, pCurrRecRef)); //IMH05.ST
+      END;
+      IF AssistMode THEN
+        ProcCommFct.AssistTestFunction(GetTableNo, pFunctionNo, pParameters)
+      ELSE
+        EXIT(ProcCommFct.TestFunction(GetTableNo, pFunctionNo, pParameters)); //IMH02.ST
+    END;
+
+    PROCEDURE CheckParameters@1100281010(pFunctionNo@1100281000 : Integer;pParameter@1100281002 : Text[1024];VAR pErrorText@1100281001 : Text[250]) : Boolean;
+    BEGIN
+      //IMH04.zw
+    END;
+
+    LOCAL PROCEDURE "------------------------------"@1100281004();
+    BEGIN
+    END;
+
+    LOCAL PROCEDURE TrayLineExist@1100281006(pUnclosed@1100281002 : Boolean;pParameters@1100281000 : Text[1024]) : Boolean;
+    VAR
+      lTrayLine@1100281001 : Record 50048;
+    BEGIN
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct001_Assist);
+        EXIT;
+      END;
+      lTrayLine.SETCURRENTKEY("Service No.", "Service Header No.", "Intervention Line No.");
+      lTrayLine.SETRANGE("Service No.", CurrRec."Service No.");
+      lTrayLine.SETRANGE("Service Header No.", CurrRec."Service Header No.");
+      lTrayLine.SETRANGE("Intervention Line No.", CurrRec."Line No.");
+      IF pUnclosed THEN
+        lTrayLine.SETRANGE(Closed, FALSE);
+      IF pParameters <> '' THEN
+        lTrayLine.SETFILTER("Team Code", pParameters);
+
+      EXIT(NOT lTrayLine.ISEMPTY);
+    END;
+
+    PROCEDURE InterventionCeilingOverrun@1100281007(pQuoteType@1100281001 : Text[1024]) : Boolean;
+    VAR
+      lServIntervQuote@1100281000 : Record 50076;
+      lServHeader@1100281004 : Record 5900;
+      lAddAmount@1100281005 : ARRAY [2] OF Decimal;
+      lServHeaderProcFct@1100281002 : Codeunit 50031;
+    BEGIN
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct101_Assist);
+        EXIT;
+      END;
+      IF NOT lServIntervQuote.GET(CurrRec."Service Header No.",CurrRec."Intervention Line No.",CurrRec."Line No.") THEN
+        CLEAR(lServIntervQuote);
+      //<<IMH03.ST
+      //lAddAmount[1] := CurrRec."Amount Excl. VAT (LCY)" - lServIntervQuote."Amount Excl. VAT (LCY)";
+      //lAddAmount[2] := CurrRec."Amount Incl. VAT (LCY)" - lServIntervQuote."Amount Incl. VAT (LCY)";
+
+      //<<IMH06 d‚sactiv‚
+      //lAddAmount[1] := CurrRec."Amount Excl. VAT (LCY)";
+      //lAddAmount[2] := CurrRec."Amount Incl. VAT (LCY)";
+      //>>IMH06
+
+      IF NOT lServHeader.GET(lServHeader."Document Type"::Invoice, CurrRec."Service Header No.") THEN
+        CLEAR(lServHeader);
+
+      EXIT(lServHeaderProcFct.InterventionCeilingOverrun(lServHeader, pQuoteType, lAddAmount[1], lAddAmount[2]));
+      //>>IMH03.ST
+    END;
+
+    PROCEDURE EstimateOverrun@1100281011(pQuoteType@1100281001 : Text[1024]) : Boolean;
+    VAR
+      lServIntervQuote@1100281004 : Record 50076;
+      lServHeader@1100281003 : Record 5900;
+      lAddAmount@1100281002 : ARRAY [2] OF Decimal;
+      lServHeaderProcFct@1100281000 : Codeunit 50031;
+      lCurrRec@1100281005 : TEMPORARY Record 50076;
+    BEGIN
+      //IMH03.ST
+      IF AssistMode THEN BEGIN
+        MESSAGE(Funct106_Assist);
+        EXIT;
+      END;
+
+      //<<IMH06 d‚sactiv‚
+      {
+      lServIntervQuote := CurrRec;
+      lServIntervQuote.SETRECFILTER;
+      IF pQuoteType <> '' THEN
+        lServIntervQuote.SETFILTER("Service Quote Type", pQuoteType);
+      lServIntervQuote.SETRANGE(Active, TRUE);
+      lServIntervQuote.SETRANGE("Approval Status", lServIntervQuote."Approval Status"::Yes);
+      IF lServIntervQuote.FINDFIRST THEN BEGIN
+        lAddAmount[1] := -lServIntervQuote."Amount Excl. VAT (LCY)";
+        lAddAmount[2] := -lServIntervQuote."Amount Incl. VAT (LCY)";
+      END;
+
+      lCurrRec := CurrRec;
+      IF pQuoteType <> '' THEN
+        lCurrRec.SETFILTER("Service Quote Type", pQuoteType);
+      lCurrRec.SETRANGE(Active, TRUE);
+      lCurrRec.SETRANGE("Approval Status", lServIntervQuote."Approval Status"::Yes);
+      IF lCurrRec.FINDFIRST THEN BEGIN
+        lAddAmount[1] += lServIntervQuote."Amount Excl. VAT (LCY)";
+        lAddAmount[2] += lServIntervQuote."Amount Incl. VAT (LCY)";
+      END;
+      }
+      //>>IMH06
+
+      IF NOT lServHeader.GET(lServHeader."Document Type"::Invoice, CurrRec."Service Header No.") THEN
+        CLEAR(lServHeader);
+
+      EXIT(lServHeaderProcFct.EstimateOverrun(lServHeader, pQuoteType, lAddAmount[1], lAddAmount[2]));
+    END;
+
+    PROCEDURE AndFunction@1100281015(pParameters@1100281000 : Text[1024];pCurrRecRef@1100281001 : RecordRef) : Boolean;
+    VAR
+      lFunctionNo@1100281002 : Integer;
+      lFunctionParam@1100281003 : Text[1024];
+    BEGIN
+      //IMH05.ST
+      IF pParameters  = '' THEN
+        EXIT(TRUE);
+      REPEAT
+        ProcCommFct.RetrieveFctParam(pParameters, lFunctionNo, lFunctionParam);
+        IF NOT TestFunction(lFunctionNo, lFunctionParam, pCurrRecRef) THEN
+          EXIT(FALSE);
+      UNTIL pParameters = '';
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH06 @d 04/01/12 @a ISAT.ZW @v IMH6.01.333 @s NEP00012 @h 4210 @c Modification */
+      /** @r IMH05 @d 04/07/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Ajout AndFunction */
+      /** @r IMH04 @d 05/05/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction CheckParameters */
+      /** @r IMH03 @d 02/04/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Modification InterventionCeilingOverrun -> Codeunit 50031
+          @c Ajout EstimateOverrun */
+      /** @r IMH02 @d 17/03/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Appel fonctions communes */
+      /** @r IMH01 @d 20/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts @c Cr‚ation objet */
+    }
+    END.
+  }
+}

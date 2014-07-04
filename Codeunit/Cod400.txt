@@ -1,0 +1,215 @@
+OBJECT Codeunit 400 SMTP Mail
+{
+  OBJECT-PROPERTIES
+  {
+    Date=13/06/13;
+    Time=11:43:53;
+    Modified=Yes;
+    Version List=NAVW15.00.01;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 409=r;
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      SMTPMailSetup@1003 : Record 409;
+      Mail@1000 : Automation "{68AEAA7B-9523-3511-AF5F-F2381D2C6F04} 1.0:{F9DAE2A4-D2F8-37C3-86D5-E4FFE166D860}:'Microsoft Navision Mail'.SmtpMessage";
+      Text001@1001 : TextConst 'ENU=The email address "%1" is invalid.;FRA=L''adresse e-mail ® %1 ¯ n''est pas valide.';
+      Text002@1002 : TextConst 'ENU=Attachment %1 does not exist or can not be accessed from the program.;FRA=Le document joint %1 n''existe pas ou le programme ne peut y acc‚der.';
+      Text003@1005 : TextConst 'ENU=The SMTP mail system returned the following error: %1;FRA=Le systŠme de messagerie SMTP a retourn‚ l''erreur suivante : %1';
+      CompanyInfo@1100281000 : Record 79;
+
+    PROCEDURE CreateMessage@1(SenderName@1008 : Text[100];SenderAddress@1000 : Text[50];Recipients@1001 : Text[1024];Subject@1004 : Text[200];Body@1005 : Text[1024];HtmlFormatted@1006 : Boolean);
+    VAR
+      lUserSetup@1100281000 : Record 91;
+      lEmail@1100281001 : Text[80];
+    BEGIN
+      //<<IMH01.ISAT.EBA
+      IF lUserSetup.GET(USERID) THEN;
+      IF lUserSetup."Group E-Mail" <> '' THEN BEGIN
+        SenderAddress := lUserSetup."Group E-Mail";
+      END;
+
+      CompanyInfo.GET;
+      lEmail := CompanyInfo.GetDBTypeEmail;
+      IF lEmail <> '' THEN BEGIN
+        Recipients := lEmail;
+      END;
+
+      IF Recipients <> '' THEN BEGIN
+        CheckValidEmailAddresses(Recipients);
+      END;
+      CheckValidEmailAddresses(SenderAddress);
+      SMTPMailSetup.GET;
+      SMTPMailSetup.TESTFIELD("SMTP Server");
+      IF ISCLEAR(Mail) THEN BEGIN
+        CREATE(Mail);
+      END;
+      Mail.FromName := SenderName;
+      Mail.FromAddress := SenderAddress;
+      Mail."To" := Recipients;
+      Mail.Subject := Subject;
+      Mail.Body := Body;
+      Mail.HtmlFormatted := HtmlFormatted;
+    END;
+
+    PROCEDURE Send@3();
+    VAR
+      Result@1000 : Text[1024];
+    BEGIN
+      WITH SMTPMailSetup DO BEGIN
+        Result :=
+          Mail.Send(
+            "SMTP Server",Authentication <> SMTPMailSetup.Authentication::Anonymous,"User ID", Password);
+      END;
+      CLEAR(Mail);
+      IF Result <> '' THEN BEGIN
+        ERROR(Text003,Result);
+      END;
+    END;
+
+    PROCEDURE AddRecipients@4(Recipients@1000 : Text[1024]);
+    VAR
+      Result@1001 : Text[1024];
+    BEGIN
+      //<<IMH01.ISAT.EBA
+      CompanyInfo.GET;
+      IF CompanyInfo.GetDBTypeEmail <> '' THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH01.ISAT.EBA
+
+      CheckValidEmailAddresses(Recipients);
+      Result := Mail.AddRecipients(Recipients);
+      IF Result <> '' THEN BEGIN
+        ERROR(Text003,Result);
+      END;
+    END;
+
+    PROCEDURE AddCC@5(Recipients@1000 : Text[1024]);
+    VAR
+      Result@1001 : Text[1024];
+    BEGIN
+      //<<IMH01.ISAT.EBA
+      CompanyInfo.GET;
+      IF CompanyInfo.GetDBTypeEmail <> '' THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH01.ISAT.EBA
+
+      CheckValidEmailAddresses(Recipients);
+      Result := Mail.AddCC(Recipients);
+      IF Result <> '' THEN BEGIN
+        ERROR(Text003,Result);
+      END;
+    END;
+
+    PROCEDURE AddBCC@6(Recipients@1000 : Text[1024]);
+    VAR
+      Result@1001 : Text[1024];
+    BEGIN
+      //<<IMH01.ISAT.EBA
+      CompanyInfo.GET;
+      IF CompanyInfo.GetDBTypeEmail <> '' THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH01.ISAT.EBA
+
+      CheckValidEmailAddresses(Recipients);
+      Result := Mail.AddBCC(Recipients);
+      IF Result <> '' THEN BEGIN
+        ERROR(Text003,Result);
+      END;
+    END;
+
+    PROCEDURE AppendBody@7(BodyPart@1000 : Text[1024]);
+    VAR
+      Result@1001 : Text[1024];
+    BEGIN
+      Result := Mail.AppendBody(BodyPart);
+      IF Result <> '' THEN BEGIN
+        ERROR(Text003,Result);
+      END;
+    END;
+
+    PROCEDURE AddAttachment@2(Attachment@1000 : Text[260]);
+    VAR
+      Result@1001 : Text[1024];
+    BEGIN
+      IF Attachment = '' THEN
+        EXIT;
+      IF NOT EXISTS(Attachment) THEN
+        ERROR(Text002,Attachment);
+      Result := Mail.AddAttachments(Attachment);
+      IF Result <> '' THEN
+        ERROR(Text003,Result);
+    END;
+
+    LOCAL PROCEDURE CheckValidEmailAddresses@8(Recipients@1000 : Text[1024]);
+    VAR
+      s@1002 : Text[1024];
+    BEGIN
+      IF Recipients = '' THEN
+        ERROR(Text001,Recipients);
+
+      s := Recipients;
+      WHILE STRPOS(s,';') > 1 DO BEGIN
+        CheckValidEmailAddress(COPYSTR(s,1,STRPOS(s,';') - 1));
+        s := COPYSTR(s,STRPOS(s,';') + 1);
+      END;
+      CheckValidEmailAddress(s);
+    END;
+
+    LOCAL PROCEDURE CheckValidEmailAddress@12(EmailAddress@1000 : Text[250]);
+    VAR
+      i@1001 : Integer;
+      NoOfAtSigns@1002 : Integer;
+    BEGIN
+      IF EmailAddress = '' THEN
+        ERROR(Text001,EmailAddress);
+
+      IF (EmailAddress[1] = '@') OR (EmailAddress[STRLEN(EmailAddress)] = '@') THEN
+        ERROR(Text001,EmailAddress);
+
+      FOR i := 1 TO STRLEN(EmailAddress) DO BEGIN
+        IF EmailAddress[i] = '@' THEN
+          NoOfAtSigns := NoOfAtSigns + 1;
+        IF NOT (
+          ((EmailAddress[i] >='a') AND (EmailAddress[i] <='z')) OR
+          ((EmailAddress[i] >='A') AND (EmailAddress[i] <='Z')) OR
+          ((EmailAddress[i] >='0') AND (EmailAddress[i] <='9')) OR
+          (EmailAddress[i] IN ['@','.','-','_']))
+        THEN
+          ERROR(Text001,EmailAddress);
+      END;
+
+      IF NoOfAtSigns <> 1 THEN
+        ERROR(Text001,EmailAddress);
+    END;
+
+    PROCEDURE SetBodyStream@1100281000(VAR pInStream@1100281000 : InStream);
+    VAR
+      lText@1100281001 : Text[1024];
+      lResult@1100281002 : Text[1024];
+    BEGIN
+      //IMH01.ST
+      WHILE NOT pInStream.EOS DO BEGIN
+        pInStream.READTEXT(lText);
+        lResult := Mail.AppendBody(lText);
+        IF lResult <> '' THEN
+          ERROR(Text003,lResult);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/09/11 @a ISAT.EBA @v IMH6.01.200 @s Type de base */
+    }
+    END.
+  }
+}

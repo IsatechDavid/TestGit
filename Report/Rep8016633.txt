@@ -1,0 +1,2767 @@
+OBJECT Report 8016633 Sales Invoice Isatech Plus
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:17:11;
+    Modified=Yes;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 7190=rimd;
+    CaptionML=[ENU=Sales - Invoice Isatech Plus;
+               FRA=Ventes - Facture Isatech Plus];
+    TopMargin=800;
+    BottomMargin=800;
+    LeftMargin=1000;
+    RightMargin=500;
+    OnInitReport=BEGIN
+                   GLSetup.GET;
+                   CompanyInfo.GET;
+                   SalesSetup.GET;
+                   CompanyInfo.CALCFIELDS(Picture);
+                   MaxLine := 32;
+                 END;
+
+    OnPreReport=BEGIN
+                  IF NOT CurrReport.USEREQUESTFORM THEN
+                    InitLogInteraction;
+                END;
+
+    Orientation=Portrait;
+    PaperSize=A4 210 x 297 mm;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table112;
+        DataItemTableView=SORTING(No.);
+        NewPagePerRecord=Yes;
+        ReqFilterHeadingML=[ENU=Posted Sales Invoice;
+                            FRA=Facture vente enregistr‚e];
+        OnAfterGetRecord=BEGIN
+                           CurrReport.LANGUAGE := Language.GetLanguageID("Language Code");
+
+                           IF RespCenter.GET("Responsibility Center") THEN BEGIN
+                             FormatAddr.RespCenter(CompanyAddr,RespCenter);
+                             CompanyInfo."Phone No." := RespCenter."Phone No.";
+                             CompanyInfo."Fax No." := RespCenter."Fax No.";
+                           END ELSE BEGIN
+                             FormatAddr.Company(CompanyAddr,CompanyInfo);
+                           END;
+
+                           CompanyAddrText :=
+                             STRSUBSTNO(
+                               Text007,
+                               CompanyInfo.Address + CompanyInfo."Address 2",
+                               COPYSTR(CompanyInfo."Country/Region Code",1,1),
+                               CompanyInfo."Post Code",
+                               CompanyInfo.City);
+
+                           SalesInvLine.SETRANGE("Document No.","No.");
+                           SalesInvLine.SETRANGE(Type,SalesInvLine.Type::Item);
+                           IF SalesInvLine.FIND('-') THEN;
+
+                           IF NOT Country.GET("Bill-to Country/Region Code") THEN;
+
+                           PostedDocDim1.SETRANGE("Table ID",DATABASE::"Sales Invoice Header");
+                           PostedDocDim1.SETRANGE("Document No.","Sales Invoice Header"."No.");
+
+                           IF "Order No." = '' THEN BEGIN
+                             OrderNoText := '';
+                           END ELSE BEGIN
+                             OrderNoText := FIELDCAPTION("Order No.");
+                           END;
+
+                           IF "Salesperson Code" = '' THEN BEGIN
+                             SalesPurchPerson.INIT;
+                             SalesPersonText := '';
+                           END ELSE BEGIN
+                             SalesPurchPerson.GET("Salesperson Code");
+                             SalesPersonText := Text000;
+                           END;
+
+                           IF "Your Reference" = '' THEN BEGIN
+                             ReferenceText := '';
+                           END ELSE BEGIN
+                             ReferenceText := FIELDCAPTION("Your Reference");
+                           END;
+
+                           IF "VAT Registration No." = '' THEN BEGIN
+                             VATNoText := '';
+                           END ELSE BEGIN
+                             VATNoText := FIELDCAPTION("VAT Registration No.");
+                           END;
+
+                           IF "Currency Code" = '' THEN BEGIN
+                             GLSetup.TESTFIELD("LCY Code");
+                             CurrencyText := GLSetup."LCY Code";
+                             TotalText := STRSUBSTNO(Text001,GLSetup."LCY Code");
+                             TotalInclVATText := STRSUBSTNO(Text002,GLSetup."LCY Code");
+                             TotalExclVATText := STRSUBSTNO(Text006,GLSetup."LCY Code");
+                           END ELSE BEGIN
+                             CurrencyText :="Currency Code";
+                             TotalText := STRSUBSTNO(Text001,"Currency Code");
+                             TotalInclVATText := STRSUBSTNO(Text002,"Currency Code");
+                             TotalExclVATText := STRSUBSTNO(Text006,"Currency Code");
+                           END;
+                           Cust.GET("Bill-to Customer No.");
+
+                           IF "Payment Terms Code" = '' THEN  BEGIN
+                             PaymentTerms.INIT;
+                           END ELSE BEGIN
+                             PaymentTerms.GET("Payment Terms Code");
+                           END;
+
+                           IF "Shipment Method Code" = '' THEN BEGIN
+                             ShipmentMethod.INIT;
+                           END ELSE BEGIN
+                             ShipmentMethod.GET("Shipment Method Code");
+                           END;
+
+                           ShowShippingAddr := TRUE;
+                           FormatAddr.SalesInvBillTo(CustAddr,"Sales Invoice Header");
+                           {FormatAddr.SalesInvShipTo(ShipToAddr,"Sales Invoice Header");
+                           ShowShippingAddr := "Sell-to Customer No." <> "Bill-to Customer No.";
+                           FOR i := 1 TO ARRAYLEN(ShipToAddr) DO BEGIN
+                             IF ShipToAddr[i] <> CustAddr[i] THEN BEGIN
+                               ShowShippingAddr := TRUE;
+                             END;
+                           END;}
+
+
+                           IF NOT BankAccount.GET(CompanyInfo."Default Bank Account No.") THEN BEGIN
+                             BankAccount.INIT;
+                           END;
+
+                           IF LogInteraction THEN BEGIN
+                             IF NOT CurrReport.PREVIEW THEN BEGIN
+                               IF "Bill-to Contact No." <> '' THEN BEGIN
+                                 SegManagement.LogDocument(
+                                   4,"No.",0,0,DATABASE::Contact,"Bill-to Contact No.","Salesperson Code",
+                                   "Campaign No.","Posting Description",'');
+                               END ELSE BEGIN
+                                 SegManagement.LogDocument(
+                                   4,"No.",0,0,DATABASE::Customer,"Bill-to Customer No.","Salesperson Code",
+                                   "Campaign No.","Posting Description",'');
+                               END;
+                             END;
+                           END;
+
+                           i := 1;
+                           VATTotal := 0;
+                           REPEAT
+                             VatBaseText[i] := '';
+                             VATRateText[i] := '';
+                             VATBase[i] := 0;
+                             VATRate[i] := 0;
+                             i += 1;
+                           UNTIL (i = 4);
+                           i := 1;
+
+                           //coordonn‚es magasin de info soci‚t‚
+                           IF NOT Location.GET(CompanyInfo."Location Code") THEN;
+                           LocationAddrText :=
+                             STRSUBSTNO(
+                               Text007,
+                               Location.Address + Location."Address 2",
+                               COPYSTR(Location."Country/Region Code",1,1),
+                               Location."Post Code",
+                               Location.City);
+
+                           // formatage adresse factor
+                           IF NOT  FactorEtablishement.GET(Cust."Factoring Etablishment Code") THEN;
+                           FactorEtablishementAddr := FactorEtablishement.Name+' '+FactorEtablishement.Address+' '+
+                           FactorEtablishement."Address 2"+' '+FactorEtablishement."Post Code"+' '+
+                           FactorEtablishement.City+' '+FactorEtablishement."Fax No.";
+
+                           // formatage coordonn‚es banque factor
+                           IF NOT  FactorBankAccount.GET(Cust."Factoring Bank Code") THEN;
+                           IF NOT Country.GET(FactorBankAccount."Country/Region Code") THEN;
+                           FactorBankAccountAddr := FactorBankAccount.Name+', '+FactorBankAccount.City+'. '+
+                           FactorBankAccountCountry.Name+'. '+'Code BIC : '+FactorBankAccount."Code BIC";
+
+                           // conditions de paiement du client
+                           IF NOT CustPaymentTerms.GET(Cust."Payment Terms Code") THEN;
+                           IF NOT CustPaymentMethod.GET(Cust."Payment Method Code") THEN;
+
+                           // conditions livraison du client
+                           IF NOT CustShipmentMethod.GET(Cust."Shipment Method Code") THEN;
+
+                           IF NOT PostedDocumentDimension.GET(112,"Sales Invoice Header"."No.",0,'JAUNE') THEN;
+                           IF NOT DimensionValue.GET('JAUNE',PostedDocumentDimension."Dimension Value Code") THEN;
+
+                           //IF NOT DimResponsable.GET(DimensionValue.Supervisor) THEN;
+                           //IF NOT DimAssistant.GET(DimensionValue.Assistant) THEN;
+
+                           CALCFIELDS("Amount Including VAT");
+                           IF "Sales Invoice Header"."Currency Code" = '' THEN BEGIN
+                             AmountLCY := 0;
+                             AmountHTLCY := 0;
+                             AmountVATLCY := 0;
+                             TextDS := '';
+                           END;
+
+                           IF ("Sales Invoice Header"."Currency Code" <> GLSetup."LCY Code")
+                             AND ("Sales Invoice Header"."Currency Code" <> '') THEN BEGIN
+
+                             TextDS := GLSetup."LCY Code";
+
+                             // conversion en devise soci‚t‚
+                             CALCFIELDS("Amount Including VAT");
+                             AmountLCY :=
+                               CurrencyExchangeRate.ExchangeAmtFCYToLCY(
+                                   "Order Date","Currency Code",
+                                   "Amount Including VAT","Currency Factor");
+
+                             CALCFIELDS(Amount);
+                               AmountHTLCY := CurrencyExchangeRate.ExchangeAmtFCYToLCY(
+                                   "Order Date","Currency Code",
+                                   Amount,"Currency Factor");
+
+                             ExchangeRate := CurrencyExchangeRate.ExchangeRate( "Order Date","Currency Code");
+
+                             // rechercher le montant taux de change
+                             CurrencyExchangeRate.SETRANGE(CurrencyExchangeRate."Currency Code","Currency Code");
+                             CurrencyExchangeRate.SETRANGE("Starting Date",0D,"Order Date");
+                             CurrencyExchangeRate.FIND('+');
+                             ExchangeRateAmount := CurrencyExchangeRate."Exchange Rate Amount";
+                             ExchangeRateGlobText :=
+                               STRSUBSTNO(TextRateExchange,
+                                        ExchangeRateAmount,
+                                       "Sales Invoice Header"."Currency Code",
+                                        ROUND(ExchangeRate,0.0001),GLSetup."LCY Code");
+                           END ELSE BEGIN
+                             ExchangeRateGlobText := '';
+                           END;
+
+                           ShipmentInvoiceText := '';
+                           ShipmentInvoiced2.SETRANGE("Invoice No.","Sales Invoice Header"."No.");
+                           IF ShipmentInvoiced2.FIND('-') THEN
+                             ShipmentInvoiceText := Text10800;
+                         END;
+
+        ReqFilterFields=No.,Sell-to Customer No.,No. Printed;
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        NewPagePerRecord=Yes;
+        DataItemVarName=CopyLoop;
+        OnPreDataItem=BEGIN
+                        NoOfLoops := ABS(NoOfCopies) + Cust."Invoice Copies" + 1;
+
+                        IF NoOfLoops <= 0 THEN BEGIN
+                          NoOfLoops := 1;
+                        END;
+
+                        CopyText := '';
+                        SETRANGE(Number,1,NoOfLoops);
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF Number > 1 THEN BEGIN
+                             CopyText := Text003;
+                           END;
+
+                           CurrReport.PAGENO := 1;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         IF NOT CurrReport.PREVIEW THEN
+                           SalesInvCountPrinted.RUN("Sales Invoice Header");
+                       END;
+
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        DataItemVarName=PageLoop;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19450;
+            SectionHeight=9729;
+            OnPreSection=BEGIN
+                           NbLineEdited := 23;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 147 ;PictureBox   ;105  ;0    ;10050;1692 ;HorzGlue=Left;
+                                                         SourceExpr=CompanyInfo.Picture }
+            { 26  ;Label        ;2589 ;2616 ;2700 ;423  ;Visible=No;
+                                                         ParentControl=27;
+                                                         HorzAlign=Left;
+                                                         VertAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         CaptionML=[ENU=Customer Code;
+                                                                    FRA=Code client] }
+            { 27  ;TextBox      ;5289 ;2616 ;4800 ;423  ;Visible=No;
+                                                         HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=10;
+                                                         SourceExpr="Sales Invoice Header"."Bill-to Customer No." }
+            { 29  ;TextBox      ;150  ;8037 ;3600 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=VATNoText }
+            { 30  ;TextBox      ;3750 ;8037 ;4950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr="Sales Invoice Header"."VAT Registration No." }
+            { 1000000095;Label  ;150  ;8460 ;3600 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Country of Origin;
+                                                                    FRA=Pays d'origine] }
+            { 1000000096;TextBox;3750 ;8460 ;4950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr='CHINA' }
+            { 1000000187;TextBox;150  ;9306 ;17850;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=STRSUBSTNO(Text012,"Sales Invoice Header"."No.","Sales Invoice Header"."External Document No.") }
+            { 1000000010;Label  ;105  ;5499 ;5880 ;423  ;VertAlign=Bottom;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=12;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Electronics;
+                                                                    FRA=Electronics] }
+            { 1000000078;Label  ;105  ;5076 ;5880 ;423  ;VertAlign=Bottom;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=12;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Printed circuit boards and;
+                                                                    FRA=Printed circuit boards and] }
+            { 1000000092;Label  ;105  ;4653 ;5880 ;423  ;VertAlign=Bottom;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=12;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Activities For;
+                                                                    FRA=Activities For] }
+            { 1000000188;Label  ;105  ;4230 ;5880 ;423  ;VertAlign=Bottom;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=12;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Consulting;
+                                                                    FRA=Consulting] }
+            { 1000000189;Label  ;105  ;3807 ;5880 ;423  ;VertAlign=Bottom;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=12;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=International;
+                                                                    FRA=International] }
+            { 1000000217;TextBox;10080;4653 ;7560 ;846  ;FontName=Palatino Linotype;
+                                                         FontSize=11;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CustAddr[1] }
+            { 1000000218;TextBox;10077;5449 ;7560 ;423  ;Visible=Yes;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustAddr[2] }
+            { 1000000219;TextBox;10077;5872 ;7560 ;423  ;Visible=Yes;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustAddr[3] }
+            { 1000000220;TextBox;10077;6295 ;7560 ;423  ;Visible=Yes;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustAddr[4] }
+            { 1000000221;TextBox;10077;6718 ;7560 ;423  ;Visible=Yes;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustAddr[5] }
+            { 1000000225;TextBox;150  ;6345 ;3600 ;846  ;FontName=Palatino Linotype;
+                                                         FontSize=14;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TextInvoice }
+            { 1000000228;TextBox;3750 ;6345 ;4880 ;846  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=14;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Sales Invoice Header"."No." }
+            { 1000000230;TextBox;3780 ;7614 ;3000 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT("Sales Invoice Header"."Posting Date" ,0,'<Day,2><Filler Character, >. <Month Text,3> <Year4>') }
+            { 1000000231;TextBox;150  ;7614 ;3600 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TextDate }
+            { 1000000127;TextBox;3789 ;2193 ;6360 ;423  ;Visible=No;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=Cust."Phone No." }
+            { 1000000128;TextBox;3789 ;1770 ;6360 ;423  ;Visible=No;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=Cust."Fax No." }
+            { 1000000129;TextBox;2589 ;1770 ;1200 ;423  ;Visible=No;
+                                                         HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=TextPhone }
+            { 1000000136;TextBox;2589 ;2193 ;1200 ;423  ;Visible=No;
+                                                         HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=TextFax }
+            { 1000000137;TextBox;10077;7141 ;7560 ;423  ;Visible=Yes;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustAddr[6] }
+            { 1000000138;TextBox;10077;7564 ;7560 ;423  ;Visible=Yes;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustAddr[7] }
+            { 1000000139;TextBox;10077;7987 ;7560 ;423  ;Visible=Yes;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustAddr[8] }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            PrintOnEveryPage=Yes;
+            PlaceInBottom=Yes;
+            SectionWidth=19450;
+            SectionHeight=3807;
+            KeepWithNext=Yes;
+          }
+          CONTROLS
+          {
+            { 1000000081;TextBox;105  ;0    ;7200 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=10;
+                                                         FontItalic=No;
+                                                         SourceExpr=Text013 }
+            { 1000000082;TextBox;105  ;423  ;6000 ;550  ;FontName=Palatino Linotype;
+                                                         FontSize=12;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=DimResponsable.Name }
+            { 1000000083;TextBox;105  ;1000 ;7200 ;550  ;FontName=Palatino Linotype;
+                                                         FontSize=10;
+                                                         FontItalic=No;
+                                                         SourceExpr=DimResponsable."E-Mail" }
+            { 1000000087;Shape  ;0    ;1560 ;18900;423  ;ShapeStyle=HorzLine }
+            { 1000000093;TextBox;105  ;2406 ;9660 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=CompanyAddrText }
+            { 1000000094;TextBox;10290;2406 ;8000 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr='No. 9 CiBi District, LianHua Villa, ChangAn' }
+            { 1000000097;TextBox;10300;423  ;7980 ;550  ;FontName=Palatino Linotype;
+                                                         FontSize=12;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=DimAssistant.Name }
+            { 1000000098;TextBox;10300;0    ;7200 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=10;
+                                                         SourceExpr=Text014 }
+            { 1000000111;TextBox;105  ;1983 ;9634 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text015 + ' ' +CompanyInfo."Home Page" }
+            { 1000000112;TextBox;10290;1983 ;7200 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text016 }
+            { 1000000113;TextBox;10292;1000 ;7200 ;550  ;FontName=Palatino Linotype;
+                                                         FontSize=10;
+                                                         FontItalic=No;
+                                                         SourceExpr=DimAssistant."E-Mail" }
+            { 1000000114;Label  ;105  ;2803 ;657  ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Tel :;
+                                                                    FRA=Tel :] }
+            { 1000000115;TextBox;4410 ;2829 ;3570 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Fax No.;
+                                                                    FRA=Nø t‚l‚copie];
+                                                         SourceExpr=CompanyInfo."Fax No." }
+            { 1000000116;TextBox;10290;2829 ;8000 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         SourceExpr='DongGuan, GuangDong, P.R.China   P.C.523840' }
+            { 1000000117;Label  ;3570 ;2829 ;840  ;423  ;ParentControl=1000000115;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Fax :;
+                                                                    FRA=Fax :] }
+            { 1000000118;TextBox;630  ;2829 ;2940 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Phone No.;
+                                                                    FRA=Nø t‚l‚phone];
+                                                         SourceExpr=CompanyInfo."Phone No." }
+            { 1000000190;TextBox;105  ;3225 ;10013;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=VAT Reg. No.;
+                                                                    FRA=Nø id. intracomm.];
+                                                         SourceExpr=CompanyInfo."Trade Register" + ' - APE ' + CompanyInfo."APE Code" +' VAT '+CompanyInfo."VAT Registration No." }
+            { 1000000191;TextBox;14500;3252 ;3570 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Fax No.;
+                                                                    FRA=Nø t‚l‚copie];
+                                                         SourceExpr='0086-769-85076771' }
+            { 1000000192;Label  ;13660;3252 ;840  ;423  ;ParentControl=1000000191;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Fax :;
+                                                                    FRA=Fax :] }
+            { 1000000202;TextBox;10930;3252 ;2940 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Phone No.;
+                                                                    FRA=Nø t‚l‚phone];
+                                                         SourceExpr='0086-769-85076770' }
+            { 1000000203;Label  ;10300;3252 ;630  ;423  ;ParentControl=1000000202;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Tel :;
+                                                                    FRA=Tel :] }
+            { 1000000086;TextBox;18150;3384 ;1300 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=STRSUBSTNO(Text005,FORMAT(CurrReport.PAGENO)) }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=FILTER(1..));
+        DataItemVarName=DimensionLoop1;
+        OnPreDataItem=BEGIN
+                        IF NOT ShowInternalInfo THEN BEGIN
+                          CurrReport.BREAK;
+                        END;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF Number = 1 THEN BEGIN
+                             IF NOT PostedDocDim1.FIND('-') THEN BEGIN
+                               CurrReport.BREAK;
+                             END;
+                           END ELSE BEGIN
+                             IF NOT Continue THEN BEGIN
+                               CurrReport.BREAK;
+                             END;
+                           END;
+
+                           CLEAR(DimText);
+                           Continue := FALSE;
+                           REPEAT
+                             OldDimText := DimText;
+                             IF DimText = '' THEN BEGIN
+                               DimText := STRSUBSTNO(
+                                 '%1 %2',PostedDocDim1."Dimension Code",PostedDocDim1."Dimension Value Code")
+                             END ELSE BEGIN
+                               DimText :=
+                                 STRSUBSTNO(
+                                   '%1, %2 %3',DimText,
+                                   PostedDocDim1."Dimension Code",PostedDocDim1."Dimension Value Code");
+                             END;
+                             IF STRLEN(DimText) > MAXSTRLEN(OldDimText) THEN BEGIN
+                               DimText := OldDimText;
+                               Continue := TRUE;
+                               EXIT;
+                             END;
+                           UNTIL (PostedDocDim1.NEXT = 0);
+                         END;
+
+        DataItemLinkReference=Sales Invoice Header;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF (Number = 1) THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+                             NbLineEdited += 1;
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 91  ;TextBox      ;3360 ;0    ;14700;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=DimText }
+            { 93  ;Label        ;0    ;0    ;3150 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Header Dimensions;
+                                                                    FRA=Analytique en-tˆte] }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF (Number > 1) THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+                             NbLineEdited += 1;
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 98  ;TextBox      ;3360 ;0    ;14700;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=DimText }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table113;
+        DataItemTableView=SORTING(Document No.,Line No.);
+        OnPreDataItem=BEGIN
+                        VATAmountLine.DELETEALL;
+                        SalesShipmentBuffer.RESET;
+                        SalesShipmentBuffer.DELETEALL;
+                        FirstValueEntryNo := 0;
+                        MoreLines := FIND('+');
+
+                        WHILE MoreLines AND (Description = '') AND ("No." = '') AND (Quantity = 0) AND (Amount = 0) DO BEGIN
+                          MoreLines := NEXT(-1) <> 0;
+                        END;
+
+                        IF NOT MoreLines THEN BEGIN
+                          CurrReport.BREAK;
+                        END;
+
+                        SETRANGE("Line No.",0,"Line No.");
+                        CurrReport.CREATETOTALS("Line Amount",Amount,"Amount Including VAT","Inv. Discount Amount");
+
+
+
+                        IF NOT PostedDocumentDimensionLine.GET(113,"Sales Invoice Line"."Document No.",
+                        "Sales Invoice Line"."Line No.",'JAUNE') THEN;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           PostedShipmentDate := 0D;
+                           IF Quantity <> 0 THEN BEGIN
+                             PostedShipmentDate := FindPostedShipmentDate;
+                           END;
+
+                           IF (Type = Type::"G/L Account") AND (NOT ShowInternalInfo) THEN BEGIN
+                             "No." := '';
+                           END;
+
+                           VATAmountLine.INIT;
+                           VATAmountLine."VAT Identifier" := "VAT Identifier";
+                           VATAmountLine."VAT Calculation Type" := "VAT Calculation Type";
+                           VATAmountLine."Tax Group Code" := "Tax Group Code";
+                           VATAmountLine."VAT %" := "VAT %";
+                           VATAmountLine."VAT Base" := Amount;
+                           VATAmountLine."Amount Including VAT" := "Amount Including VAT";
+                           VATAmountLine."Line Amount" := "Line Amount";
+                           IF "Allow Invoice Disc." THEN BEGIN
+                             VATAmountLine."Inv. Disc. Base Amount" := "Line Amount";
+                           END;
+
+                           VATAmountLine."Invoice Discount Amount" := "Inv. Discount Amount";
+                           VATAmountLine.InsertLine;
+                           IF IncludeShptNo THEN BEGIN
+                             ShipmentInvoiced.RESET;
+                             ShipmentInvoiced.SETRANGE("Invoice No.","Sales Invoice Line"."Document No.");
+                             ShipmentInvoiced.SETRANGE("Invoice Line No.","Sales Invoice Line"."Line No.");
+                           END;
+                         END;
+
+        DataItemLinkReference=Sales Invoice Header;
+        DataItemLink=Document No.=FIELD(No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=19450;
+            SectionHeight=1270;
+            OnPreSection=BEGIN
+                           NbLineEdited += 1;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 47  ;Label        ;17100;0    ;2150 ;1269 ;ParentControl=70;
+                                                         HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Total;
+                                                                    FRA=Montant] }
+            { 1000000001;Shape  ;75   ;0    ;19244;1270  }
+            { 43  ;Label        ;12900;0    ;2550 ;1269 ;ParentControl=66;
+                                                         HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000004;Shape  ;4050 ;15   ;170  ;1255 ;ShapeStyle=VertLine }
+            { 1000000005;Shape  ;10100;15   ;150  ;1255 ;ShapeStyle=VertLine }
+            { 1000000006;Shape  ;12800;15   ;150  ;1255 ;ShapeStyle=VertLine }
+            { 1000000007;Shape  ;15500;15   ;170  ;1255 ;ShapeStyle=VertLine }
+            { 42  ;Label        ;4200 ;0    ;5850 ;1269 ;ParentControl=65;
+                                                         HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000210;Label  ;10200;0    ;2550 ;1269 ;ParentControl=1000000233;
+                                                         HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000234;Shape  ;17000;15   ;150  ;1255 ;ShapeStyle=VertLine }
+            { 1000000014;TextBox;150  ;0    ;1650 ;1269 ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=TextYF }
+            { 1000000099;TextBox;15600;0    ;1481 ;1269 ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=TextUnitPrice }
+            { 1000000031;Shape  ;1800 ;15   ;150  ;1255 ;ShapeStyle=VertLine }
+            { 1000000002;Label  ;1900 ;0    ;2100 ;1269 ;HorzAlign=Center;
+                                                         VertAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Item Ref.;
+                                                                    FRA=Code Article] }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransHeader;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           NbLineEdited += 1;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 55  ;Label        ;12900;0    ;4050 ;423  ;ParentControl=56;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         LeaderDots=Yes;
+                                                         CaptionML=[ENU=Continued;
+                                                                    FRA=Report] }
+            { 56  ;TextBox      ;17100;0    ;2149 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Continued;
+                                                                    FRA=Report];
+                                                         SourceExpr="Line Amount";
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000049;Shape  ;19200;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000054;Shape  ;12800;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000055;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000059;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000060;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000061;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000233;TextBox;10200;0    ;2550 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Custom;
+                                                                    FRA=Douane];
+                                                         SourceExpr=item."Tariff No." }
+            { 1000000235;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000045;Shape  ;1800 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF (Type = 0) OR ("No." = '') THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+                             NbLineEdited += 1;
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 57  ;TextBox      ;4200 ;0    ;5850 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=Description }
+            { 1000000012;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000015;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000017;Shape  ;12800;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000020;Shape  ;19200;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000069;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000088;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000091;Shape  ;1800 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000105;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF (Type <>0) AND ("No." <> '') THEN BEGIN
+                             CurrReport.SHOWOUTPUT(TRUE);
+                             NbLineEdited += 1;
+                           END ELSE BEGIN
+                             CurrReport.SHOWOUTPUT(FALSE);
+                           END;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 65  ;TextBox      ;4200 ;0    ;5850 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=Description }
+            { 66  ;TextBox      ;12900;0    ;2550 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Quantity;
+                                                                    FRA=Quantit‚];
+                                                         BlankZero=No;
+                                                         SourceExpr=STRSUBSTNO('%1 %2',Quantity,"Unit of Measure") }
+            { 68  ;TextBox      ;15600;0    ;1350 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         BlankZero=No;
+                                                         SourceExpr="Unit Price";
+                                                         AutoFormatType=2;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 70  ;TextBox      ;17100;0    ;2149 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Total;
+                                                                    FRA=Montant];
+                                                         BlankZero=No;
+                                                         SourceExpr="Line Amount";
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000022;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000023;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000025;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000026;Shape  ;12800;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000027;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000236;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000248;TextBox;10200;0    ;2439 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Tariff No.;
+                                                                    FRA=Nom. produits];
+                                                         SourceExpr=item."Tariff No." }
+            { 1000000009;TextBox;150  ;0    ;1650 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=No.;
+                                                                    FRA=No.];
+                                                         SourceExpr="Shortcut Dimension 1 Code" }
+            { 1000000011;TextBox;1950 ;0    ;2100 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=No.;
+                                                                    FRA=No.];
+                                                         SourceExpr="No." }
+            { 1000000013;Shape  ;1800 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000021;Shape  ;19200;0    ;170  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=TransFooter;
+            SectionWidth=19450;
+            SectionHeight=423;
+            KeepWithNext=Yes;
+            OnPreSection=BEGIN
+                           NbLineEdited += 1;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 85  ;Label        ;13050;0    ;3900 ;423  ;ParentControl=86;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         LeaderDots=Yes;
+                                                         CaptionML=[ENU=Continued;
+                                                                    FRA=Report] }
+            { 86  ;TextBox      ;17100;0    ;2049 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Continued;
+                                                                    FRA=Report];
+                                                         SourceExpr="Line Amount";
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000063;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000064;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000065;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000066;Shape  ;12800;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000067;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000068;Shape  ;19200;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000080;Shape  ;75   ;393  ;19200;30   ;ShapeStyle=HorzLine }
+            { 1000000240;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000101;Shape  ;1800 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=4;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=Sales Shipment Buffer;
+        OnPreDataItem=BEGIN
+                        SalesShipmentBuffer.SETRANGE("Document No.","Sales Invoice Line"."Document No.");
+                        SalesShipmentBuffer.SETRANGE("Line No.","Sales Invoice Line"."Line No.");
+
+                        SETRANGE(Number,1,SalesShipmentBuffer.COUNT);
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF Number = 1 THEN BEGIN
+                             SalesShipmentBuffer.FIND('-');
+                           END ELSE BEGIN
+                             SalesShipmentBuffer.NEXT;
+                           END;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(FALSE);
+                           //NbLineEdited += 1;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 144 ;TextBox      ;6000 ;0    ;1470 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=SalesShipmentBuffer."Posting Date" }
+            { 146 ;TextBox      ;7470 ;0    ;1800 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         DecimalPlaces=0:5;
+                                                         SourceExpr=SalesShipmentBuffer.Quantity }
+            { 145 ;Label        ;4200 ;0    ;1500 ;423  ;VertAlign=Bottom;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Shipment;
+                                                                    FRA=Exp‚dition] }
+            { 1000000028;Shape  ;19200;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000029;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000030;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000032;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000033;Shape  ;12800;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000034;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000100;Shape  ;1800 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000019;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=4;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=FILTER(1..));
+        DataItemVarName=DimensionLoop2;
+        OnPreDataItem=BEGIN
+                        IF NOT ShowInternalInfo THEN BEGIN
+                          CurrReport.BREAK;
+                        END;
+
+                        PostedDocDim2.SETRANGE("Table ID",DATABASE::"Sales Invoice Line");
+                        PostedDocDim2.SETRANGE("Document No.","Sales Invoice Line"."Document No.");
+                        PostedDocDim2.SETRANGE("Line No.","Sales Invoice Line"."Line No.");
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF Number = 1 THEN BEGIN
+                             IF NOT PostedDocDim2.FIND('-') THEN
+                               CurrReport.BREAK;
+                           END ELSE
+                             IF NOT Continue THEN
+                               CurrReport.BREAK;
+
+                           CLEAR(DimText);
+                           Continue := FALSE;
+                           REPEAT
+                             OldDimText := DimText;
+                             IF DimText = '' THEN
+                               DimText := STRSUBSTNO(
+                                 '%1 %2',PostedDocDim2."Dimension Code",PostedDocDim2."Dimension Value Code")
+                             ELSE
+                               DimText :=
+                                 STRSUBSTNO(
+                                   '%1, %2 %3',DimText,
+                                   PostedDocDim2."Dimension Code",PostedDocDim2."Dimension Value Code");
+                             IF STRLEN(DimText) > MAXSTRLEN(OldDimText) THEN BEGIN
+                               DimText := OldDimText;
+                               Continue := TRUE;
+                               EXIT;
+                             END;
+                           UNTIL (PostedDocDim2.NEXT = 0);
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           NbLineEdited += 1;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 82  ;TextBox      ;4200 ;0    ;12600;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=DimText }
+            { 83  ;Label        ;420  ;0    ;3000 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Line Dimensions;
+                                                                    FRA=Analytique ligne] }
+            { 1000000035;Shape  ;19200;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000036;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000037;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000039;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000040;Shape  ;12800;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000041;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000237;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=4;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=ShipmentDatas;
+        OnPreDataItem=BEGIN
+                        ShipmentInvoiced.SETRANGE("Invoice No.","Sales Invoice Line"."Document No.");
+                        ShipmentInvoiced.SETRANGE("Invoice Line No.","Sales Invoice Line"."Line No.");
+
+                        IF COUNT < 1 THEN BEGIN
+                          CurrReport.BREAK;
+                        END;
+
+                        ShipmentDatas.SETRANGE(Number,1,ROUND(ShipmentInvoiced.COUNT / 3,1,'>'));
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           CLEAR(NoShipmentDatas);
+                           NoShipmentNumLoop := 0;
+                           IF Number = 1 THEN BEGIN
+                             ShipmentInvoiced.FIND('-');
+                             NoShipmentText := Text10800;
+                             REPEAT
+                               NoShipmentNumLoop := NoShipmentNumLoop + 1;
+                               NoShipmentDatas[NoShipmentNumLoop] := ShipmentInvoiced."Shipment No.";
+                             UNTIL (ShipmentInvoiced.NEXT = 0) OR (NoShipmentNumLoop = 3);
+                           END ELSE BEGIN
+                             NoShipmentText := '';
+                             CLEAR(NoShipmentDatas);
+                             REPEAT
+                               NoShipmentNumLoop := NoShipmentNumLoop + 1;
+                               NoShipmentDatas[NoShipmentNumLoop] := ShipmentInvoiced."Shipment No.";
+                             UNTIL (ShipmentInvoiced.NEXT = 0) OR (NoShipmentNumLoop = 3);
+                           END;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(FALSE);
+                           //NbLineEdited += 1;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1120000;TextBox   ;4200 ;0    ;1800 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=NoShipmentText }
+            { 1120001;TextBox   ;6000 ;0    ;1500 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=NoShipmentDatas[1] }
+            { 1000000042;Shape  ;19200;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000043;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000044;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000046;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000047;Shape  ;12800;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000048;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000238;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000223;Shape  ;1800 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000224;TextBox;7500 ;0    ;1650 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=NoShipmentDatas[2] }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table279;
+        DataItemTableView=SORTING(Table Name,No.,Language Code,Text No.)
+                          WHERE(Table Name=CONST(Standard Text));
+        OnPreDataItem=BEGIN
+                        IF SalesSetup."Factoring Comment"<>'' THEN BEGIN
+                          SETRANGE("No.",SalesSetup."Factoring Comment");
+                          SETRANGE("Sales Invoice",TRUE);
+                          SETFILTER("Starting Date",'<=%1|%2',"Sales Invoice Header"."Posting Date",0D);
+                          SETFILTER("Ending Date",'>=%1|%2',"Sales Invoice Header"."Posting Date",0D);
+
+                          SETRANGE("Language Code","Sales Invoice Header"."Language Code");
+                          IF NOT FIND('-') THEN BEGIN
+                            SETRANGE("Language Code");
+                            SETRANGE("All Language Codes",TRUE);
+                          END;
+
+                        END;
+                      END;
+
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=4;
+        DataItemTable=Table280;
+        DataItemTableView=SORTING(Table Name,No.,Language Code,Text No.,Line No.);
+        DataItemLink=Table Name=FIELD(Table Name),
+                     No.=FIELD(No.),
+                     Language Code=FIELD(Language Code),
+                     Text No.=FIELD(Text No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(SalesSetup."Factoring Comment" <> '');
+                           IF SalesSetup."Factoring Comment" <> '' THEN
+                             NbLineEdited += 1;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000184;TextBox;4200 ;0    ;5850 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=No;
+                                                         SourceExpr=Text }
+            { 1000000185;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000186;Shape  ;19200;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000193;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000194;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000195;Shape  ;12800;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000196;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000242;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000102;Shape  ;1800 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=VATCounter;
+        OnPreDataItem=BEGIN
+                        IF VATAmountLine.GetTotalVATAmount = 0 THEN BEGIN
+                          CurrReport.BREAK;
+                        END;
+
+                        SETRANGE(Number,1,VATAmountLine.COUNT);
+                        CurrReport.CREATETOTALS(
+                          VATAmountLine."Line Amount",
+                          VATAmountLine."Inv. Disc. Base Amount",
+                          VATAmountLine."Invoice Discount Amount",
+                          VATAmountLine."VAT Base",
+                          VATAmountLine."VAT Amount");
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           VATAmountLine.GetLine(Number);
+
+                           IF i <= 3 THEN BEGIN
+                             VatBaseText[i] := LocVATBaseText;
+                             VATRateText[i] := LocVATRateText;
+                             VATBase[i] := VATAmountLine."VAT Base";
+                             VATRate[i] := VATAmountLine."VAT %";
+                             VATTotal += VATAmountLine."VAT Amount";
+                             i += 1;
+                           END;
+                         END;
+
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=EmptyLoop;
+        OnPreDataItem=BEGIN
+
+                        IF (NbLineEdited < MaxLine) THEN BEGIN
+                          SETRANGE(Number,NbLineEdited,MaxLine);
+                        END ELSE BEGIN
+                          CurrReport.BREAK;
+                        END;
+                      END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=423;
+            KeepWithNext=Yes;
+          }
+          CONTROLS
+          {
+            { 1000000016;Shape  ;19200;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000079;Shape  ;15500;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000084;Shape  ;12800;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000085;Shape  ;10100;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000089;Shape  ;4050 ;0    ;170  ;423  ;ShapeStyle=VertLine }
+            { 1000000090;Shape  ;0    ;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000243;Shape  ;17000;0    ;150  ;423  ;ShapeStyle=VertLine }
+            { 1000000103;Shape  ;1800 ;0    ;150  ;423  ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        DataItemVarName=VATShow;
+        OnPreDataItem=BEGIN
+                        IF (VATTotal = 0) THEN BEGIN
+                          CurrReport.BREAK;
+                        END;
+                      END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=5922;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                           //CurrReport.SHOWOUTPUT(FALSE);
+                           CurrReport.SHOWOUTPUT((VATTotal <> 0) AND (Cust."Factoring Etablishment Code"  = ''));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000162;TextBox;105  ;0    ;10050;846  ;HorzAlign=Left;
+                                                         VertAlign=Top;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=ExchangeRateGlobText }
+            { 1000000122;TextBox;14894;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CurrencyText;
+                                                         AutoFormatType=1 }
+            { 1000000121;TextBox;12195;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CurrencyText;
+                                                         AutoFormatType=1 }
+            { 1000000157;TextBox;10200;0    ;2700 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text006 }
+            { 1000000160;Shape  ;75   ;0    ;11000;30   ;ShapeStyle=HorzLine }
+            { 1000000070;TextBox;2040 ;3807 ;7140 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Giro No.;
+                                                                    FRA=Nø CCP];
+                                                         SourceExpr=CompanyInfo.IBAN }
+            { 1000000071;Label  ;105  ;3807 ;1780 ;423  ;ParentControl=1000000070;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=IBAN;
+                                                                    FRA=IBAN] }
+            { 1000000073;TextBox;2040 ;4230 ;7140 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Giro No.;
+                                                                    FRA=Nø CCP];
+                                                         SourceExpr=CompanyInfo."SWIFT Code" }
+            { 1000000074;Label  ;105  ;2961 ;2100 ;423  ;ParentControl=1000000073;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=SWIFT/BIC;
+                                                                    FRA=SWIFT/BIC] }
+            { 1000000075;TextBox;5610 ;2538 ;3570 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=CompanyInfo."Bank Name" }
+            { 1000000062;Label  ;105  ;2538 ;5250 ;423  ;ParentControl=1000000075;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontUnderline=Yes;
+                                                         CaptionML=[ENU=Payment by bank transfer to :;
+                                                                    FRA=Paiement par transfert bancaire … :] }
+            { 1000000106;Shape  ;95   ;2961 ;9300 ;846   }
+            { 1000000018;Label  ;105  ;4203 ;1990 ;450  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Bank Code;
+                                                                    FRA=Code Banque] }
+            { 1000000024;Shape  ;2250 ;2961 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000051;Label  ;2670 ;2961 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Branch Code;
+                                                                    FRA=Code Guichet] }
+            { 1000000052;Shape  ;4560 ;2961 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000056;Label  ;4980 ;2961 ;1890 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Account No.;
+                                                                    FRA=Nø Compte] }
+            { 1000000057;Shape  ;6900 ;2961 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000077;Label  ;7300 ;2961 ;1950 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=RIB Key;
+                                                                    FRA=Cl‚ RIB] }
+            { 1000000197;TextBox;3950 ;1692 ;11400;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustPaymentTerms.Description }
+            { 1000000198;Label  ;105  ;1692 ;3750 ;423  ;ParentControl=1000000197;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Payment condition :;
+                                                                    FRA=Conditions de paiement :] }
+            { 1000000199;Label  ;105  ;2115 ;1800 ;423  ;ParentControl=1000000200;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Payment :;
+                                                                    FRA=Paiement :] }
+            { 1000000200;TextBox;1950 ;2115 ;13400;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustPaymentMethod.Description }
+            { 1000000201;TextBox;10800;2538 ;5200 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CustShipmentMethod.Description }
+            { 1000000215;TextBox;15679;846  ;2771 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=AmountLCY;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000246;TextBox;105  ;5499 ;19200;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=TextProperty2 }
+            { 1000000247;TextBox;105  ;5076 ;19200;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=TextProperty }
+            { 1000000142;TextBox;10200;423  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         DecimalPlaces=2:2;
+                                                         SourceExpr="Sales Invoice Line".Amount;
+                                                         AutoFormatType=1 }
+            { 1000000143;Shape  ;12800;0    ;150  ;1400 ;ShapeStyle=VertLine }
+            { 1000000144;TextBox;13000;0    ;2500 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=VATAmountLine.VATAmountText }
+            { 1000000147;TextBox;13000;423  ;1900 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr="Sales Invoice Line"."Amount Including VAT" - "Sales Invoice Line".Amount;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000148;Shape  ;15500;0    ;150  ;1400 ;ShapeStyle=VertLine }
+            { 1000000149;TextBox;15700;0    ;3500 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text002 }
+            { 1000000150;TextBox;15679;423  ;2771 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Sales Invoice Line"."Amount Including VAT";
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000131;TextBox;10200;846  ;1950 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=[AmountHTLCY ];
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000132;TextBox;13000;846  ;1900 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=AmountLCY-AmountHTLCY;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000110;TextBox;12195;846  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextDS;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000119;TextBox;14894;846  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextDS;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000120;TextBox;18500;846  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextDS;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000123;TextBox;18500;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CurrencyText;
+                                                         AutoFormatType=1 }
+            { 1000000000;TextBox;2400 ;846  ;3000 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ShipmentInvoiced2."Shipment No." }
+            { 1000000169;TextBox;105  ;846  ;2250 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ShipmentInvoiceText }
+            { 1000000255;Label  ;10800;3600 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Departure :;
+                                                                    FRA=D‚part :] }
+            { 1000000256;TextBox;12750;3600 ;5925 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Departure City Port" }
+            { 1000000257;Label  ;10800;4000 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Arrival :;
+                                                                    FRA=Arriv‚e :] }
+            { 1000000258;TextBox;12750;4000 ;6000 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Arrival City Port" }
+            { 1000000259;Label  ;10800;4400 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Journey No. :;
+                                                                    FRA=Voyage Nø :] }
+            { 1000000260;TextBox;12750;4400 ;2100 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Tracking No." }
+            { 1000000058;TextBox;13650;2961 ;2400 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT("Sales Invoice Header"."Due Date" ,0,'<Day,2><Filler Character, >. <Month Text,3> <Year4>') }
+            { 1000000205;Label  ;10800;2961 ;2850 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Due Date :;
+                                                                    FRA=Date d'‚cheance :] }
+            { 1000000003;Shape  ;10191;0    ;9128 ;1401  }
+            { 1000000038;TextBox;150  ;3384 ;2100 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Bank Branch No." }
+            { 1000000050;TextBox;2700 ;3384 ;1780 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Agency Code" }
+            { 1000000053;TextBox;4890 ;3384 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Bank Account No." }
+            { 1000000076;TextBox;7350 ;3384 ;1950 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."RIB Key" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=8883;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                           //CurrReport.SHOWOUTPUT(FALSE);
+                           CurrReport.SHOWOUTPUT((VATTotal <> 0) AND (Cust."Factoring Etablishment Code" <>'') );
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000008;Shape  ;10191;0    ;9128 ;1401  }
+            { 1000000159;TextBox;15700;0    ;3500 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text002 }
+            { 1000000155;TextBox;18500;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CurrencyText;
+                                                         AutoFormatType=1 }
+            { 1000000152;TextBox;15700;423  ;2780 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Sales Invoice Line"."Amount Including VAT";
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000124;TextBox;18500;846  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextDS;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000108;TextBox;15700;846  ;2780 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=AmountLCY;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000158;TextBox;13000;0    ;2500 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=VATAmountLine.VATAmountText }
+            { 1000000154;TextBox;14922;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CurrencyText;
+                                                         AutoFormatType=1 }
+            { 1000000146;TextBox;13000;423  ;1900 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr="Sales Invoice Line"."Amount Including VAT" - "Sales Invoice Line".Amount;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000130;TextBox;13000;846  ;1900 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=AmountLCY-AmountHTLCY;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000126;TextBox;14922;846  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextDS;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000156;TextBox;10300;0    ;2500 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text006 }
+            { 1000000153;TextBox;12220;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CurrencyText;
+                                                         AutoFormatType=1 }
+            { 1000000145;TextBox;10300;423  ;1900 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         DecimalPlaces=2:2;
+                                                         SourceExpr="Sales Invoice Line".Amount;
+                                                         AutoFormatType=1 }
+            { 1000000141;TextBox;10300;846  ;1900 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=[AmountHTLCY ];
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000134;TextBox;12220;846  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextDS;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000285;TextBox;2100 ;6768 ;6985 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Giro No.;
+                                                                    FRA=Nø CCP];
+                                                         SourceExpr=FactorBankAccount.IBAN }
+            { 1000000286;Label  ;105  ;6768 ;1950 ;423  ;ParentControl=1000000285;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=IBAN;
+                                                                    FRA=IBAN] }
+            { 1000000287;TextBox;2045 ;7191 ;7140 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Giro No.;
+                                                                    FRA=Nø CCP];
+                                                         SourceExpr=FactorBankAccount."SWIFT Code" }
+            { 1000000288;Label  ;105  ;5922 ;1950 ;423  ;ParentControl=1000000287;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=SWIFT/BIC;
+                                                                    FRA=SWIFT/BIC] }
+            { 1000000289;TextBox;5345 ;5499 ;3570 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=FactorBankAccount.Name }
+            { 1000000290;Label  ;105  ;5499 ;5250 ;423  ;ParentControl=1000000289;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontUnderline=Yes;
+                                                         CaptionML=[ENU=Payment by bank transfer to :;
+                                                                    FRA=Paiement par transfert bancaire … :] }
+            { 1000000293;Shape  ;95   ;5922 ;9195 ;846   }
+            { 1000000295;Label  ;105  ;7164 ;1990 ;450  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Bank Code;
+                                                                    FRA=Code Banque] }
+            { 1000000296;Shape  ;2145 ;5922 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000297;TextBox;105  ;6345 ;1900 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Bank Branch No." }
+            { 1000000298;TextBox;2545 ;6345 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Agency Code" }
+            { 1000000299;Label  ;2545 ;5922 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Branch Code;
+                                                                    FRA=Code Guichet] }
+            { 1000000300;Shape  ;4445 ;5922 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000301;TextBox;4845 ;6345 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Bank Account No." }
+            { 1000000302;Label  ;4845 ;5922 ;1890 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Account No.;
+                                                                    FRA=Nø Compte] }
+            { 1000000303;Shape  ;6645 ;5922 ;300  ;846  ;ShapeStyle=VertLine }
+            { 1000000304;TextBox;6945 ;6345 ;2100 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."RIB Key" }
+            { 1000000305;Label  ;6945 ;5922 ;2100 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=RIB Key;
+                                                                    FRA=Cl‚ RIB] }
+            { 1000000306;TextBox;105  ;3384 ;19200;1269 ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text008,FactorEtablishementAddr,FactorBankAccountAddr) }
+            { 1000000309;TextBox;105  ;5076 ;9300 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=No;
+                                                         SourceExpr=STRSUBSTNO(Text011,FactorBankAccount.Name) }
+            { 1000000310;TextBox;4045 ;2115 ;7650 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustPaymentTerms.Description }
+            { 1000000311;Label  ;105  ;2115 ;3900 ;423  ;ParentControl=1000000310;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Payment condition :;
+                                                                    FRA=Conditions de paiement :] }
+            { 1000000312;Label  ;105  ;2538 ;1700 ;423  ;ParentControl=1000000313;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Payment :;
+                                                                    FRA=Paiement :] }
+            { 1000000313;TextBox;1845 ;2538 ;9900 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustPaymentMethod.Description }
+            { 1000000314;TextBox;10800;5076 ;5250 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CustShipmentMethod.Description }
+            { 1000000320;TextBox;150  ;8460 ;19200;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=TextProperty2 }
+            { 1000000321;TextBox;150  ;8037 ;19200;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=TextProperty }
+            { 1000000267;Shape  ;75   ;0    ;11000;30   ;ShapeStyle=HorzLine }
+            { 1000000171;TextBox;2400 ;846  ;3150 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ShipmentInvoiced2."Shipment No." }
+            { 1000000180;TextBox;0    ;846  ;2355 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ShipmentInvoiceText }
+            { 1000000261;Label  ;10800;6345 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Departure :;
+                                                                    FRA=D‚part :] }
+            { 1000000262;Label  ;10800;6745 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Arrival :;
+                                                                    FRA=Arriv‚e :] }
+            { 1000000263;Label  ;10800;7145 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Journey No. :;
+                                                                    FRA=Voyage Nø :] }
+            { 1000000264;TextBox;12750;6345 ;6000 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Departure City Port" }
+            { 1000000265;TextBox;12750;6745 ;6000 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Arrival City Port" }
+            { 1000000266;TextBox;12750;7145 ;2100 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Tracking No." }
+            { 1000000280;Label  ;10800;5499 ;2700 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Due Date :;
+                                                                    FRA=Date d'‚cheance :] }
+            { 1000000281;TextBox;13500;5499 ;2550 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT("Sales Invoice Header"."Due Date" ,0,'<Day,2><Filler Character, >. <Month Text,3> <Year4>') }
+            { 1000000072;TextBox;0    ;0    ;10050;846  ;HorzAlign=Left;
+                                                         VertAlign=Top;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=ExchangeRateGlobText }
+            { 1000000204;Shape  ;12800;0    ;150  ;1400 ;ShapeStyle=VertLine }
+            { 1000000292;Shape  ;15500;0    ;150  ;1400 ;ShapeStyle=VertLine }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        DataItemVarName=NotVATShow;
+        OnPreDataItem=BEGIN
+                        IF (VATTotal <> 0) THEN BEGIN
+                          CurrReport.BREAK;
+                        END;
+                      END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=7191;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                           //CurrReport.SHOWOUTPUT(FALSE);
+                           CurrReport.SHOWOUTPUT((VATTotal = 0) AND (Cust."Factoring Etablishment Code" <>''));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000177;Shape  ;75   ;0    ;19200;30   ;ShapeStyle=HorzLine }
+            { 1000000174;TextBox;1890 ;1692 ;11550;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustPaymentMethod.Description }
+            { 1000000178;Label  ;105  ;1692 ;1800 ;423  ;ParentControl=1000000174;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Payment :;
+                                                                    FRA=Paiement :] }
+            { 1000000206;TextBox;3990 ;1269 ;9450 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustPaymentTerms.Description }
+            { 1000000207;Label  ;105  ;1269 ;3900 ;423  ;ParentControl=1000000206;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Payment condition :;
+                                                                    FRA=Conditions de paiement :] }
+            { 1000000208;TextBox;10800;3807 ;5200 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CustShipmentMethod.Description }
+            { 1000000346;TextBox;105  ;2115 ;19200;1269 ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         SourceExpr=STRSUBSTNO(Text008,FactorEtablishementAddr,FactorBankAccountAddr) }
+            { 1000000347;TextBox;105  ;3384 ;19200;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         MultiLine=No;
+                                                         SourceExpr=STRSUBSTNO(Text011,FactorBankAccount.Name) }
+            { 1000000348;Label  ;105  ;3807 ;5250 ;423  ;ParentControl=1000000365;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontUnderline=Yes;
+                                                         CaptionML=[ENU=Payment by bank transfer to :;
+                                                                    FRA=Paiement par transfert bancaire … :] }
+            { 1000000350;Label  ;105  ;5499 ;2100 ;423  ;ParentControl=1000000355;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=SWIFT/BIC;
+                                                                    FRA=SWIFT/BIC] }
+            { 1000000351;Shape  ;95   ;4230 ;9200 ;846   }
+            { 1000000352;TextBox;105  ;4653 ;2100 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Bank Branch No." }
+            { 1000000353;Label  ;105  ;5076 ;2100 ;423  ;ParentControl=1000000354;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=IBAN;
+                                                                    FRA=IBAN] }
+            { 1000000354;TextBox;2185 ;5076 ;7140 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Giro No.;
+                                                                    FRA=Nø CCP];
+                                                         SourceExpr=FactorBankAccount.IBAN }
+            { 1000000355;TextBox;2185 ;5499 ;7140 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Giro No.;
+                                                                    FRA=Nø CCP];
+                                                         SourceExpr=FactorBankAccount."SWIFT Code" }
+            { 1000000356;Label  ;105  ;4230 ;2250 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Bank Code;
+                                                                    FRA=Code Banque] }
+            { 1000000357;Shape  ;2295 ;4230 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000358;TextBox;2815 ;4653 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Agency Code" }
+            { 1000000359;Label  ;2815 ;4230 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Branch Code;
+                                                                    FRA=Code Guichet] }
+            { 1000000360;TextBox;105  ;6345 ;19200;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=TextProperty }
+            { 1000000361;TextBox;105  ;6768 ;19200;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=TextProperty2 }
+            { 1000000362;Shape  ;4695 ;4230 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000363;TextBox;5095 ;4653 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Bank Account No." }
+            { 1000000364;Label  ;5095 ;4230 ;1890 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Account No.;
+                                                                    FRA=Nø Compte] }
+            { 1000000365;TextBox;5795 ;3807 ;3570 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=FactorBankAccount.Name }
+            { 1000000366;Shape  ;6995 ;4230 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000367;TextBox;7495 ;4653 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."RIB Key" }
+            { 1000000368;Label  ;7495 ;4230 ;1890 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=RIB Key;
+                                                                    FRA=Cl‚ RIB] }
+            { 1000000226;TextBox;105  ;0    ;10350;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ExchangeRateGlobText }
+            { 1000000252;TextBox;15700;0    ;3500 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text002 }
+            { 1000000164;TextBox;15700;423  ;2850 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Sales Invoice Line"."Amount Including VAT";
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000166;TextBox;15700;846  ;2850 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=AmountLCY;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000167;TextBox;18600;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CurrencyText;
+                                                         AutoFormatType=1 }
+            { 1000000168;TextBox;18600;846  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextDS;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000211;TextBox;2400 ;423  ;3000 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ShipmentInvoiced2."Shipment No." }
+            { 1000000216;TextBox;105  ;423  ;2250 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ShipmentInvoiceText }
+            { 1000000268;Label  ;10800;4800 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Departure :;
+                                                                    FRA=D‚part :] }
+            { 1000000269;Label  ;10800;5200 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Arrival :;
+                                                                    FRA=Arriv‚e :] }
+            { 1000000270;Label  ;10800;5600 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Journey No. :;
+                                                                    FRA=Voyage Nø :] }
+            { 1000000271;TextBox;12750;4800 ;5925 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Departure City Port" }
+            { 1000000272;TextBox;12750;5200 ;6000 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Arrival City Port" }
+            { 1000000273;TextBox;12750;5600 ;2100 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Tracking No." }
+            { 1000000282;Label  ;10800;4230 ;2850 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Due Date :;
+                                                                    FRA=Date d'‚cheance :] }
+            { 1000000283;TextBox;13650;4230 ;2400 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT("Sales Invoice Header"."Due Date" ,0,'<Day,2><Filler Character, >. <Month Text,3> <Year4>') }
+            { 1000000107;Shape  ;15500;0    ;3811 ;1401  }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19450;
+            SectionHeight=5076;
+            KeepWithNext=No;
+            OnPreSection=BEGIN
+                           //CurrReport.SHOWOUTPUT(FALSE);
+                           CurrReport.SHOWOUTPUT((VATTotal = 0) AND (Cust."Factoring Etablishment Code"  = ''));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000165;Label  ;105  ;846  ;3900 ;423  ;ParentControl=1000000175;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Payment condition :;
+                                                                    FRA=Conditions de paiement :] }
+            { 1000000172;Label  ;105  ;1269 ;1950 ;423  ;ParentControl=1000000173;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Payment :;
+                                                                    FRA=Paiement :] }
+            { 1000000173;TextBox;1950 ;1269 ;9800 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustPaymentMethod.Description }
+            { 1000000175;TextBox;3900 ;846  ;7850 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=CustPaymentTerms.Description }
+            { 1000000176;TextBox;5560 ;1692 ;3570 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=CompanyInfo."Bank Name" }
+            { 1000000179;Label  ;105  ;1692 ;5250 ;423  ;ParentControl=1000000176;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontUnderline=Yes;
+                                                         CaptionML=[ENU=Payment by bank transfer to :;
+                                                                    FRA=Paiement par transfert bancaire … :] }
+            { 1000000181;Label  ;105  ;3384 ;1950 ;423  ;ParentControl=1000000330;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=SWIFT/BIC;
+                                                                    FRA=SWIFT/BIC] }
+            { 1000000182;Shape  ;2200 ;2115 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000183;Label  ;2620 ;2115 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Branch Code;
+                                                                    FRA=Code Guichet] }
+            { 1000000244;Shape  ;4510 ;2115 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000245;Label  ;4930 ;2115 ;1890 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Account No.;
+                                                                    FRA=Nø Compte] }
+            { 1000000307;Shape  ;6820 ;2115 ;420  ;846  ;ShapeStyle=VertLine }
+            { 1000000308;Label  ;7240 ;2115 ;1890 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=RIB Key;
+                                                                    FRA=Cl‚ RIB] }
+            { 1000000322;Shape  ;95   ;2115 ;9050 ;846   }
+            { 1000000327;TextBox;1990 ;2961 ;7140 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Giro No.;
+                                                                    FRA=Nø CCP];
+                                                         SourceExpr=CompanyInfo.IBAN }
+            { 1000000328;Label  ;105  ;2961 ;1950 ;423  ;ParentControl=1000000327;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=IBAN;
+                                                                    FRA=IBAN] }
+            { 1000000330;TextBox;1990 ;3384 ;7140 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Giro No.;
+                                                                    FRA=Nø CCP];
+                                                         SourceExpr=CompanyInfo."SWIFT Code" }
+            { 1000000331;Label  ;105  ;2115 ;1890 ;450  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Bank Code;
+                                                                    FRA=Code Banque] }
+            { 1000000332;TextBox;105  ;4230 ;17900;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=TextProperty }
+            { 1000000333;TextBox;105  ;4653 ;18000;423  ;FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         CaptionML=[ENU=Bank;
+                                                                    FRA=Banque];
+                                                         SourceExpr=TextProperty2 }
+            { 1000000336;TextBox;10800;1692 ;5200 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CustShipmentMethod.Description }
+            { 1000000104;Shape  ;75   ;0    ;19200;30   ;ShapeStyle=HorzLine }
+            { 1000000229;TextBox;105  ;0    ;9900 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ExchangeRateGlobText }
+            { 1000000227;TextBox;15700;846  ;2700 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=AmountLCY;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000232;TextBox;18520;846  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=TextDS;
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000239;TextBox;15700;423  ;2700 ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Sales Invoice Line"."Amount Including VAT";
+                                                         AutoFormatType=1;
+                                                         AutoFormatExpr="Sales Invoice Line".GetCurrencyCode }
+            { 1000000241;TextBox;18520;423  ;600  ;423  ;HorzAlign=Right;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         DecimalPlaces=2:2;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=CurrencyText;
+                                                         AutoFormatType=1 }
+            { 1000000250;TextBox;15700;0    ;3500 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Text002 }
+            { 1000000251;TextBox;2400 ;423  ;2550 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ShipmentInvoiced2."Shipment No." }
+            { 1000000254;TextBox;105  ;423  ;2250 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=ShipmentInvoiceText }
+            { 1000000274;Label  ;10800;2800 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Departure :;
+                                                                    FRA=D‚part :] }
+            { 1000000275;Label  ;10800;3200 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Arrival :;
+                                                                    FRA=Arriv‚e :] }
+            { 1000000276;Label  ;10800;3600 ;1950 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Journey No. :;
+                                                                    FRA=Voyage Nø :] }
+            { 1000000277;TextBox;12750;2800 ;5925 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Departure City Port" }
+            { 1000000278;TextBox;12750;3200 ;6000 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Arrival City Port" }
+            { 1000000279;TextBox;12750;3600 ;2100 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         FontBold=No;
+                                                         SourceExpr=DimensionValue."Tracking No." }
+            { 1000000284;Label  ;10800;2115 ;2850 ;423  ;FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         CaptionML=[ENU=Due Date :;
+                                                                    FRA=Date d'‚cheance :] }
+            { 1000000291;TextBox;13650;2115 ;2400 ;423  ;HorzAlign=Left;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=9;
+                                                         SourceExpr=FORMAT("Sales Invoice Header"."Due Date" ,0,'<Day,2><Filler Character, >. <Month Text,3> <Year4>') }
+            { 1000000109;Shape  ;15500;0    ;3811 ;1401  }
+            { 1000000125;TextBox;150  ;2538 ;1800 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Bank Branch No." }
+            { 1000000133;TextBox;2700 ;2538 ;1780 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Agency Code" }
+            { 1000000135;TextBox;4890 ;2538 ;1890 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."Bank Account No." }
+            { 1000000140;TextBox;7200 ;2538 ;1950 ;423  ;HorzAlign=Center;
+                                                         FontName=Palatino Linotype;
+                                                         FontSize=8;
+                                                         SourceExpr=FactorBankAccount."RIB Key" }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=5060;
+      Height=1760;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   InitLogInteraction;
+                   RequestOptionsForm.LogInteraction.ENABLED(LogInteraction);
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1   ;TextBox      ;3410 ;0    ;1650 ;440  ;CaptionML=[ENU=No. of Copies;
+                                                              FRA=Nombre de copies];
+                                                   SourceExpr=NoOfCopies }
+      { 21  ;Label        ;0    ;0    ;3300 ;440  ;ParentControl=1 }
+      { 2   ;CheckBox     ;3410 ;550  ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=[ENU=Show Internal Information;
+                                                              FRA=Afficher info. internes];
+                                                   SourceExpr=ShowInternalInfo }
+      { 3   ;Label        ;0    ;550  ;3300 ;440  ;ParentControl=2 }
+      { 4   ;CheckBox     ;3410 ;1100 ;440  ;440  ;Name=LogInteraction;
+                                                   ShowCaption=No;
+                                                   CaptionML=[ENU=Log Interaction;
+                                                              FRA=Journal interaction];
+                                                   SourceExpr=LogInteraction }
+      { 5   ;Label        ;0    ;1100 ;3300 ;440  ;ParentControl=4 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      Text000@1000 : TextConst 'ENU=Salesperson;FRA=Vendeur';
+      Text001@1001 : TextConst 'ENU=Total;FRA=Total';
+      Text002@1002 : TextConst 'ENU=Total TTC;FRA=Total TTC';
+      Text003@1003 : TextConst 'ENU=COPY;FRA=COPIE';
+      TextInvoice@1004 : TextConst 'ENU=Invoice No.;FRA=Facture Nø';
+      Text005@1005 : TextConst 'ENU=Page %1;FRA=Page %1';
+      Text006@1006 : TextConst 'ENU=Total HT;FRA=Total HT';
+      Country@1100281003 : Record 9;
+      GLSetup@1007 : Record 98;
+      ShipmentMethod@1008 : Record 10;
+      PaymentTerms@1009 : Record 3;
+      SalesPurchPerson@1010 : Record 13;
+      CompanyInfo@1011 : Record 79;
+      SalesSetup@1048 : Record 311;
+      Cust@1012 : Record 18;
+      VATAmountLine@1013 : TEMPORARY Record 290;
+      PostedDocDim1@1014 : Record 359;
+      PostedDocDim2@1015 : Record 359;
+      RespCenter@1016 : Record 5714;
+      Language@1017 : Record 8;
+      SalesInvCountPrinted@1018 : Codeunit 315;
+      FormatAddr@1019 : Codeunit 365;
+      SegManagement@1020 : Codeunit 5051;
+      SalesShipmentBuffer@1050 : TEMPORARY Record 7190;
+      PostedShipmentDate@1044 : Date;
+      CustAddr@1021 : ARRAY [8] OF Text[50];
+      ShipToAddr@1022 : ARRAY [8] OF Text[50];
+      CompanyAddr@1023 : ARRAY [8] OF Text[50];
+      OrderNoText@1024 : Text[30];
+      SalesPersonText@1025 : Text[30];
+      VATNoText@1026 : Text[30];
+      ReferenceText@1027 : Text[30];
+      TotalText@1028 : Text[50];
+      TotalExclVATText@1029 : Text[50];
+      TotalInclVATText@1030 : Text[50];
+      MoreLines@1031 : Boolean;
+      NoOfCopies@1032 : Integer;
+      NoOfLoops@1033 : Integer;
+      CopyText@1034 : Text[30];
+      ShowShippingAddr@1035 : Boolean;
+      i@1036 : Integer;
+      NextEntryNo@1043 : Integer;
+      FirstValueEntryNo@1042 : Integer;
+      DimText@1037 : Text[120];
+      OldDimText@1038 : Text[75];
+      ShowInternalInfo@1039 : Boolean;
+      Continue@1040 : Boolean;
+      LogInteraction@1041 : Boolean;
+      Text10800@1120000 : TextConst 'ENU=Shipment No :;FRA=Nø Exp‚dition :';
+      ShipmentInvoiced@1120001 : Record 10825;
+      NoShipmentNumLoop@1120002 : Integer;
+      NoShipmentDatas@1120003 : ARRAY [3] OF Text[20];
+      NoShipmentText@1120004 : Text[30];
+      IncludeShptNo@1120005 : Boolean;
+      "----------isat ec 12/12/05"@1000000000 : Integer;
+      CompanyAddrText@1000000001 : Text[250];
+      VATBase@1000000002 : ARRAY [3] OF Decimal;
+      VATRate@1000000003 : ARRAY [3] OF Decimal;
+      VATTotal@1000000004 : Decimal;
+      VatBaseText@1000000005 : ARRAY [3] OF Text[30];
+      VATRateText@1000000006 : ARRAY [3] OF Text[30];
+      SalesInvLine@1000000007 : Record 113;
+      LocVATBaseText@1100281002 : TextConst 'ENU=VAT Base;FRA=Base TVA';
+      LocVATRateText@1100281000 : TextConst 'ENU=VAT Rate;FRA=Taux TVA';
+      BankAccount@1000000009 : Record 270;
+      NbLineEdited@1000000008 : Integer;
+      MaxLine@1000000010 : Integer;
+      Text007@1000000011 : TextConst 'ENU=Address : %1, %2-%3 %4;FRA=Adresse : %1, %2-%3 %4';
+      "++++ICAPE1.01++++"@1000000012 : Integer;
+      Location@1000000013 : Record 14;
+      LocationAddrText@1000000014 : Text[250];
+      Text008@1000000016 : TextConst 'ENU=The amount of the debt in this invoice has been absolutely assigned to %1, who are solely entitled to receive payment by subrogation through %2;FRA=Le montant de la dette de cette facture doit absolument ˆtre pay‚e … %1, qui est seulement autoris‚e … recevoir le paiement par subrogation par le bias de %2';
+      FactorEtablishement@1000000019 : Record 270;
+      FactorEtablishementAddr@1000000017 : Text[250];
+      FactorBankAccount@1000000018 : Record 270;
+      FactorBankAccountAddr@1000000015 : Text[250];
+      FactorBankAccountCountry@1000000020 : Record 9;
+      Text009@1000000021 : TextConst 'ENU=Bank account nø;FRA=Compte bancaire Nø';
+      Text010@1000000022 : TextConst 'ENU=IBAN;FRA=IBAN';
+      Text011@1000000023 : TextConst 'ENU=Only a paiement to %1 is liberatory;FRA=Seulement un paiement … %1 est lib‚r‚';
+      Text012@1000000024 : TextConst 'ENU=Please kindly find following invoice %1 for your order %2;FRA=Veuillez trouver la facture suivante %1 pour votre commande %2';
+      CustPaymentTerms@1000000025 : Record 3;
+      CustPaymentMethod@1000000026 : Record 289;
+      DocumentDimension@1000000027 : Record 357;
+      CustShipmentMethod@1000000028 : Record 10;
+      DimensionValue@1000000029 : Record 349;
+      DimResponsable@1000000030 : Record 13;
+      DimAssistant@1000000031 : Record 13;
+      PostedDocumentDimension@1000000032 : Record 359;
+      PostedDocumentDimensionLine@1000000033 : Record 359;
+      Text013@1000000034 : TextConst 'ENU=Sales;FRA=Ventes';
+      Text014@1000000035 : TextConst 'ENU=Customer Services;FRA=Service client';
+      CurrencyExchangeRate@1000000036 : Record 330;
+      AmountLCY@1000000037 : Decimal;
+      Text015@1000000039 : TextConst 'ENU=France Headoffice:;FRA=France Headoffice:';
+      Text016@1000000038 : TextConst 'ENU=China Representative Office:;FRA=China Representative Office:';
+      BillToAddr@1000000040 : ARRAY [8] OF Text[50];
+      TextInvoiceNo@1000000041 : TextConst 'ENU=No.;FRA=Nø';
+      TextDate@1000000042 : TextConst 'ENU=Date;FRA=Date';
+      Text030@1000000043 : TextConst 'ENU=%1/%2;FRA=%1/%2';
+      TextItemNo@1000000044 : TextConst 'ENU=Item Ref.;FRA=R‚f. article';
+      item@1000000045 : Record 27;
+      TextProperty@1000000046 : TextConst 'ENU=Property agreement : goods above mentioned remain to Icape property until the full payment of the related invoice.;FRA=Accord de propri‚t‚ : les marchandises mentionn‚es ci-dessus restent la propri‚t‚ d''Icape jusqu''au paiement int‚gral de la facture relative.';
+      TextProperty2@1000000047 : TextConst 'ENU=(French law 80335 from 12. May 1980);FRA=(Loi fran‡aise 80335 du 12/05/1980)';
+      ShipmentInvoiced2@1000000048 : Record 10825;
+      TextYF@1000000049 : TextConst 'ENU=File No.;FRA=Dossier Nø';
+      ExchangeRate@1000000050 : Decimal;
+      TextRateExchange@1000000051 : TextConst 'ENU="Exchange Rate %1 %2 = %3 %4";FRA="Taux de change %1 %2 = %3 %4"';
+      ExchangeRateAmount@1000000052 : Decimal;
+      ExchangeRateGlobText@1000000053 : Text[50];
+      TextDS@1000000054 : Text[30];
+      LCYText@1000000055 : TextConst 'ENU=Total %1 TTC;FRA=Total %1 TTC';
+      TextUnitPrice@1000000056 : TextConst 'ENU=Price;FRA=Prix';
+      TextPhone@1000000058 : TextConst 'ENU=Phone :;FRA="T‚l : "';
+      TextFax@1000000057 : TextConst 'ENU="Fax : ";FRA="Fax : "';
+      CurrencyText@1000000059 : Text[30];
+      AmountHTLCY@1000000060 : Decimal;
+      AmountVATLCY@1000000061 : Decimal;
+      ShipmentInvoiceText@1000000062 : Text[30];
+      TextDueDate@1000000063 : TextConst 'ENU=Due Date :;FRA=Date d''‚ch‚ance :';
+
+    PROCEDURE InitLogInteraction@1();
+    BEGIN
+      LogInteraction := SegManagement.FindInteractTmplCode(4) <> '';
+    END;
+
+    PROCEDURE FindPostedShipmentDate@6() : Date;
+    VAR
+      SalesShipmentHeader@1000 : Record 110;
+      SalesShipmentBuffer2@1001 : TEMPORARY Record 7190;
+    BEGIN
+      NextEntryNo := 1;
+
+      IF "Sales Invoice Line"."Shipment No." <> '' THEN BEGIN
+        IF SalesShipmentHeader.GET("Sales Invoice Line"."Shipment No.") THEN BEGIN
+          EXIT(SalesShipmentHeader."Posting Date");
+        END;
+      END;
+
+      IF "Sales Invoice Header"."Order No." =' ' THEN BEGIN
+        EXIT("Sales Invoice Header"."Posting Date");
+      END;
+
+      CASE "Sales Invoice Line".Type OF
+        "Sales Invoice Line".Type::Item:
+          GenerateBufferFromValueEntry("Sales Invoice Line");
+        "Sales Invoice Line".Type::"G/L Account","Sales Invoice Line".Type::Resource,
+        "Sales Invoice Line".Type::"Charge (Item)","Sales Invoice Line".Type::"Fixed Asset":
+           GenerateBufferFromShipment("Sales Invoice Line");
+        "Sales Invoice Line".Type::" ": EXIT(0D);
+      END;
+
+      SalesShipmentBuffer.RESET;
+      SalesShipmentBuffer.SETRANGE("Document No.","Sales Invoice Line"."Document No.");
+      SalesShipmentBuffer.SETRANGE("Line No." ,"Sales Invoice Line"."Line No.");
+      IF SalesShipmentBuffer.FIND('-') THEN BEGIN
+        SalesShipmentBuffer2 := SalesShipmentBuffer;
+        IF SalesShipmentBuffer.NEXT = 0 THEN BEGIN
+          SalesShipmentBuffer.GET(
+            SalesShipmentBuffer2."Document No.",SalesShipmentBuffer2."Line No.",SalesShipmentBuffer2."Entry No.");
+          SalesShipmentBuffer.DELETE;
+          EXIT(SalesShipmentBuffer2."Posting Date");
+        END ;
+        SalesShipmentBuffer.CALCSUMS(Quantity);
+        IF SalesShipmentBuffer.Quantity <> "Sales Invoice Line".Quantity THEN BEGIN
+          SalesShipmentBuffer.DELETEALL;
+          EXIT("Sales Invoice Header"."Posting Date");
+        END;
+      END ELSE BEGIN
+        EXIT("Sales Invoice Header"."Posting Date");
+      END;
+
+      IF "Sales Invoice Line".Type = "Sales Invoice Line".Type:: Item THEN
+        IF NOT item.GET("Sales Invoice Line"."No.") THEN;
+    END;
+
+    PROCEDURE GenerateBufferFromValueEntry@2(SalesInvoiceLine2@1002 : Record 113);
+    VAR
+      ValueEntry@1000 : Record 5802;
+      ItemLedgerEntry@1001 : Record 32;
+      TotalQuantity@1003 : Decimal;
+      Quantity@1004 : Decimal;
+    BEGIN
+      TotalQuantity := SalesInvoiceLine2."Quantity (Base)";
+      ValueEntry.SETCURRENTKEY("Document No.","Posting Date");
+      ValueEntry.SETRANGE("Document No.",SalesInvoiceLine2."Document No.");
+      ValueEntry.SETRANGE("Posting Date","Sales Invoice Header"."Posting Date");
+      ValueEntry.SETRANGE("Item Charge No.",'');
+      ValueEntry.SETFILTER("Entry No.",'%1..',FirstValueEntryNo);
+      IF ValueEntry.FIND('-') THEN BEGIN
+        REPEAT
+          IF ItemLedgerEntry.GET(ValueEntry."Item Ledger Entry No.") THEN BEGIN
+            IF SalesInvoiceLine2."Qty. per Unit of Measure" <> 0 THEN BEGIN
+              Quantity := ValueEntry."Invoiced Quantity" / SalesInvoiceLine2."Qty. per Unit of Measure"
+            END ELSE BEGIN
+              Quantity := ValueEntry."Invoiced Quantity";
+            END;
+
+            AddBufferEntry(
+              SalesInvoiceLine2,
+              -Quantity,
+              ItemLedgerEntry."Posting Date");
+
+            TotalQuantity := TotalQuantity + ValueEntry."Invoiced Quantity";
+          END;
+          FirstValueEntryNo := ValueEntry."Entry No." + 1;
+        UNTIL (ValueEntry.NEXT = 0) OR (TotalQuantity = 0);
+      END;
+    END;
+
+    PROCEDURE GenerateBufferFromShipment@8(SalesInvoiceLine@1000 : Record 113);
+    VAR
+      SalesInvoiceHeader@1001 : Record 112;
+      SalesInvoiceLine2@1002 : Record 113;
+      SalesShipmentHeader@1006 : Record 110;
+      SalesShipmentLine@1004 : Record 111;
+      TotalQuantity@1003 : Decimal;
+      Quantity@1005 : Decimal;
+    BEGIN
+      TotalQuantity := 0;
+      SalesInvoiceHeader.SETCURRENTKEY("Order No.");
+      SalesInvoiceHeader.SETFILTER("No.",'..%1',"Sales Invoice Header"."No.");
+      SalesInvoiceHeader.SETRANGE("Order No.","Sales Invoice Header"."Order No.");
+      IF SalesInvoiceHeader.FIND('-') THEN BEGIN
+        REPEAT
+          SalesInvoiceLine2.SETRANGE("Document No.",SalesInvoiceHeader."No.");
+          SalesInvoiceLine2.SETRANGE("Line No.",SalesInvoiceLine."Line No.");
+          SalesInvoiceLine2.SETRANGE(Type,SalesInvoiceLine.Type);
+          SalesInvoiceLine2.SETRANGE("No.",SalesInvoiceLine."No.");
+          SalesInvoiceLine2.SETRANGE("Unit of Measure Code",SalesInvoiceLine."Unit of Measure Code");
+          IF SalesInvoiceLine2.FIND('-') THEN
+            REPEAT
+              TotalQuantity := TotalQuantity + SalesInvoiceLine2.Quantity;
+            UNTIL SalesInvoiceLine2.NEXT = 0;
+        UNTIL SalesInvoiceHeader.NEXT = 0;
+      END;
+
+      SalesShipmentLine.SETCURRENTKEY("Order No.","Order Line No.");
+      SalesShipmentLine.SETRANGE("Order No.","Sales Invoice Header"."Order No.");
+      SalesShipmentLine.SETRANGE("Order Line No.",SalesInvoiceLine."Line No.");
+      SalesShipmentLine.SETRANGE("Line No.",SalesInvoiceLine."Line No.");
+      SalesShipmentLine.SETRANGE(Type,SalesInvoiceLine.Type);
+      SalesShipmentLine.SETRANGE("No.",SalesInvoiceLine."No.");
+      SalesShipmentLine.SETRANGE("Unit of Measure Code",SalesInvoiceLine."Unit of Measure Code");
+      SalesShipmentLine.SETFILTER(Quantity,'<>%1',0);
+      IF SalesShipmentLine.FIND('-') THEN BEGIN
+        REPEAT
+          IF "Sales Invoice Header"."Get Shipment Used" THEN BEGIN
+            CorrectShipment(SalesShipmentLine);
+          END;
+          IF ABS(SalesShipmentLine.Quantity) <= ABS(TotalQuantity - SalesInvoiceLine.Quantity) THEN BEGIN
+            TotalQuantity := TotalQuantity - SalesShipmentLine.Quantity;
+          END ELSE BEGIN
+            IF ABS(SalesShipmentLine.Quantity)  > ABS(TotalQuantity) THEN BEGIN
+              SalesShipmentLine.Quantity := TotalQuantity;
+            END;
+            Quantity :=
+              SalesShipmentLine.Quantity - (TotalQuantity - SalesInvoiceLine.Quantity);
+
+            TotalQuantity := TotalQuantity - SalesShipmentLine.Quantity;
+            SalesInvoiceLine.Quantity := SalesInvoiceLine.Quantity - Quantity;
+
+            IF SalesShipmentHeader.GET(SalesShipmentLine."Document No.") THEN BEGIN
+              BEGIN
+                AddBufferEntry(
+                  SalesInvoiceLine,
+                  Quantity,
+                  SalesShipmentHeader."Posting Date");
+              END;
+            END;
+          END;
+        UNTIL (SalesShipmentLine.NEXT = 0) OR (TotalQuantity = 0);
+      END;
+    END;
+
+    PROCEDURE CorrectShipment@7(VAR SalesShipmentLine@1001 : Record 111);
+    VAR
+      SalesInvoiceLine@1000 : Record 113;
+    BEGIN
+      SalesInvoiceLine.SETCURRENTKEY("Shipment No.","Shipment Line No.");
+      SalesInvoiceLine.SETRANGE("Shipment No.",SalesShipmentLine."Document No.");
+      SalesInvoiceLine.SETRANGE("Shipment Line No.",SalesShipmentLine."Line No.");
+      IF SalesInvoiceLine.FIND('-') THEN BEGIN
+        REPEAT
+          SalesShipmentLine.Quantity := SalesShipmentLine.Quantity - SalesInvoiceLine.Quantity;
+        UNTIL SalesInvoiceLine.NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE AddBufferEntry@3(SalesInvoiceLine@1001 : Record 113;QtyOnShipment@1002 : Decimal;PostingDate@1003 : Date);
+    BEGIN
+      SalesShipmentBuffer.SETRANGE("Document No.",SalesInvoiceLine."Document No.");
+      SalesShipmentBuffer.SETRANGE("Line No.",SalesInvoiceLine."Line No.");
+      SalesShipmentBuffer.SETRANGE("Posting Date",PostingDate);
+      IF SalesShipmentBuffer.FIND('-') THEN BEGIN
+        SalesShipmentBuffer.Quantity := SalesShipmentBuffer.Quantity + QtyOnShipment;
+        SalesShipmentBuffer.MODIFY;
+        EXIT;
+      END;
+
+      WITH SalesShipmentBuffer DO BEGIN
+        "Document No." := SalesInvoiceLine."Document No.";
+        "Line No." := SalesInvoiceLine."Line No.";
+        "Entry No." := NextEntryNo;
+        Type := SalesInvoiceLine.Type;
+        "No." := SalesInvoiceLine."No.";
+        Quantity := QtyOnShipment;
+        "Posting Date" := PostingDate;
+        INSERT;
+        NextEntryNo := NextEntryNo + 1
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/01/11 @a ISAT.MA @v IMH6.01.040 @s Isatech+ */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

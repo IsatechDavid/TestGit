@@ -1,0 +1,238 @@
+OBJECT Codeunit 8016723 EAI Sent Validation Post Line
+{
+  OBJECT-PROPERTIES
+  {
+    Date=23/10/13;
+    Time=15:08:18;
+    Modified=Yes;
+    Version List=ISAEAI1.01,DARVA1.3,MATMUT01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAIRegisterMgt@1100481000 : Codeunit 8016711;
+            lSentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            CALCFIELDS("XML Source");
+            lSentMQBuffer := Rec;
+            lSentMQBuffer."XML Source" := "XML Source";
+            lSentMQBuffer.INSERT;
+            Code(lSentMQBuffer);
+            Rec := lSentMQBuffer;
+            IF lSentMQBuffer.Status <> lSentMQBuffer.Status::Warning THEN   //IMH03
+              lEAIRegisterMgt.UpdateSentActRegister("EAI Act Type Code","EAI Act Code",WORKDATE)
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100281000 : TextConst 'FRA=Aucun codeunit de validation pour l''acte %1, de type %2.';
+      Error002@1180044000 : TextConst 'ENU=EAI Act %1 is not set up to post message.;FRA=L''acte EAI %1 ne se valide pas automatiquement.';
+
+    LOCAL PROCEDURE Code@1100281000(VAR pSentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lEAIActMgt@1100281001 : Codeunit 8016703;
+      lEAIMQBufferMgt@1100481000 : Codeunit 8016708;
+      lEAIAct@1180044000 : Record 8016706;
+      lEAIActVersion@1180044001 : Record 8016713;
+      lValidationCodeUnitNo@1100281002 : Integer;
+    BEGIN
+      //On r‚cup‚re l'acte et on lance le codeunit de validation attach‚
+      pSentMQBuffer.TESTFIELD("EAI Act Code");
+
+      //<<EAI02
+      CASE pSentMQBuffer.Status OF
+        pSentMQBuffer.Status::Unprocessed : BEGIN
+          IF (NOT lEAIActMgt.AutoValidate(pSentMQBuffer."EAI Act Type Code",pSentMQBuffer."EAI Act Code")) THEN BEGIN
+            ERROR(Error002,pSentMQBuffer."EAI Act Code"); //il faut g‚n‚rer une erreur, sinon le traitement semble avoir r‚ussi...
+          END;
+        END;
+        pSentMQBuffer.Status::Processing,
+        pSentMQBuffer.Status::Error : BEGIN
+          EXIT;
+          //>>IMH02.PC
+        END;
+        pSentMQBuffer.Status::"Unit Test" : BEGIN
+        END;
+      END;
+      //>>EAI02
+
+      //<<EAI01
+      lEAIActMgt.GetTestActiveEAIActVersion(
+         lEAIAct,lEAIActVersion,pSentMQBuffer."EAI Act Type Code",pSentMQBuffer."EAI Act Code",WORKDATE);
+      //>>EAI01
+
+      lValidationCodeUnitNo :=
+         lEAIActMgt.GetValidationCodeUnitNo(pSentMQBuffer."EAI Act Type Code",pSentMQBuffer."EAI Act Code",WORKDATE);
+
+      IF lValidationCodeUnitNo = 0 THEN
+        ERROR(Error001,pSentMQBuffer."EAI Act Code",pSentMQBuffer."EAI Act Type Code");
+
+      lEAIMQBufferMgt.LockCurrentSendMQ(pSentMQBuffer);
+      CODEUNIT.RUN(lValidationCodeUnitNo,pSentMQBuffer);
+    END;
+
+    PROCEDURE ValidateSentLine@1100281001(VAR pSentMQBuffer@1100281000 : TEMPORARY Record 8016720);
+    VAR
+      lEAIMQBufferMgt@1100281002 : Codeunit 8016708;
+      lErrorProcess@1100281001 : Boolean;
+      lDARVASetup@1000000004 : Record 50126;
+      lSDR64Managment@1000000003 : Codeunit 50210;
+      lInterfaceReference@1000000002 : Record 50164;
+      lServiceInterventionLine@1000000001 : Record 50075;
+      lRecRef@1000000000 : RecordRef;
+      lRecID@1000000005 : RecordID;
+      lDARVAmgt@1000000006 : Codeunit 50150;
+      lType@1000000007 : ' ,SD64,SD99';
+    BEGIN
+      // IMH01 isat.zw centraliser code pour fonction PostUnit de talbes SentEQ
+      // Traitement du message
+
+      // N‚cessaire afin de r‚cuperer la valeur de retour de CodeUnit.RUN
+      COMMIT;
+
+      //<<IMH02.PC
+      IF pSentMQBuffer."Sleep Time" <= 0 THEN BEGIN
+        pSentMQBuffer."Set To Sleep" := pSentMQBuffer."Set To Sleep"::" ";
+      END;
+
+      IF pSentMQBuffer."Set To Sleep" = pSentMQBuffer."Set To Sleep"::Yes THEN BEGIN
+        pSentMQBuffer."Sleep Time" := pSentMQBuffer."Sleep Time" - 1;
+      END ELSE BEGIN
+      //>>IMH02.PC
+        CASE pSentMQBuffer.Step OF
+          pSentMQBuffer.Step::Generation : BEGIN
+            IF CODEUNIT.RUN(CODEUNIT::"EAI Sent Generation Post Line",pSentMQBuffer) THEN BEGIN
+              pSentMQBuffer.Step := pSentMQBuffer.Step::Validation;
+              pSentMQBuffer.Status := pSentMQBuffer.Status::Unprocessed;
+              pSentMQBuffer.MODIFY;
+
+              //<<IMH05.ACO
+              //<<IMH06.ACO
+              //lDARVAMgt.GetEAIActSendDARVAType(pSendMQBuffer,lType,lRecRef);
+              lDARVAmgt.GetEAIActSendDARVAType(pSentMQBuffer,lType);
+              //>>IMH06.ACO
+
+              IF lType = lType::SD64 THEN BEGIN
+                //<<IMH06.ACO
+                //lSDR64Managment.ChangeSendStatusIntervention(pRecRef, lInterfaceReference."Send Status"::Generated)
+                lSDR64Managment.ChangeSendStatusIntervention(lInterfaceReference."Send Status"::Generated,pSentMQBuffer);
+                //>>IMH06.ACO
+              END
+              //>>IMH05.ACO
+
+            END ELSE BEGIN
+              pSentMQBuffer."Comment Status" := COPYSTR(GETLASTERRORTEXT,1,250);
+              pSentMQBuffer.Status := pSentMQBuffer.Status::Error;
+              pSentMQBuffer.MODIFY;
+
+              //<<IMH05.ACO
+              //<<IMH06.ACO
+              //lDARVAMgt.GetEAIActSendDARVAType(pSendMQBuffer,lType,lRecRef);
+              lDARVAmgt.GetEAIActSendDARVAType(pSentMQBuffer,lType);
+              //>>IMH06.ACO
+
+              IF lType = lType::SD64 THEN BEGIN
+                //<<IM06.ACO
+                //lSDR64Managment.ChangeSendStatusIntervention(lRecRef,lInterfaceReference."Send Status"::"Generation Error");
+                lSDR64Managment.ChangeSendStatusIntervention(lInterfaceReference."Send Status"::"Generation Error",pSentMQBuffer);
+                //>>IMH06.ACO
+              END;
+              //>>IMH05.ACO
+
+              CLEARLASTERROR;
+            END;
+          END;
+          pSentMQBuffer.Step::Validation : BEGIN
+            IF CODEUNIT.RUN(CODEUNIT::"EAI Sent Validation Post Line",pSentMQBuffer) THEN BEGIN
+              //<<IMH03 isat.zw
+              IF pSentMQBuffer.Status <> pSentMQBuffer.Status::Warning THEN BEGIN
+              //>>IMH03 isat.zw
+                //<<IMH04.PC
+                IF pSentMQBuffer."Not Change Status" THEN BEGIN
+                  pSentMQBuffer."Not Change Status" := FALSE;
+                END ELSE BEGIN
+                //>>IMH04.PC
+                  pSentMQBuffer.Step := pSentMQBuffer.Step::Validation;
+                  pSentMQBuffer.Status := pSentMQBuffer.Status::Processing;
+                  pSentMQBuffer.MODIFY;
+                END;
+                //<<IMH05.ACO
+                //<<IMH06.ACO
+                //lDARVAMgt.GetEAIActSendDARVAType(pSendMQBuffer,lType,lRecRef);
+                lDARVAmgt.GetEAIActSendDARVAType(pSentMQBuffer,lType);
+                //>>IMH06.ACO
+                IF lType = lType::SD64 THEN BEGIN
+                  //<<IMH06.ACO
+                  //lSDR64Managment.ChangeSendStatusIntervention(lRecRef,lInterfaceReference."Send Status"::Validated);
+                  lSDR64Managment.ChangeSendStatusIntervention(lInterfaceReference."Send Status"::Validated,pSentMQBuffer);
+                  //>>IMH06.ACO
+                END;
+                //>>IMH05.ACO
+
+              END;
+            END ELSE BEGIN
+              //<<IMH04.PC
+              pSentMQBuffer."Not Change Status" := FALSE;
+              //>>IMH04.PC
+              lErrorProcess := TRUE;
+              pSentMQBuffer."Comment Status" := COPYSTR(GETLASTERRORTEXT,1,250);
+              //<<IMH03 isat.zw
+              IF pSentMQBuffer.Status <> pSentMQBuffer.Status::Warning THEN BEGIN
+              //>>IMH03 isat.zw
+                pSentMQBuffer.Status := pSentMQBuffer.Status::Error;
+              END;
+              pSentMQBuffer.MODIFY;
+
+              //<<IMH05.ACO
+              //<<IMH06.ACO
+              //lDARVAMgt.GetEAIActSendDARVAType(pSendMQBuffer,lType,lRecRef);
+              lDARVAmgt.GetEAIActSendDARVAType(pSentMQBuffer,lType);
+              //>>IMH06.ACO
+              IF lType = lType::SD64 THEN BEGIN
+                //<<IMH06.ACO
+                //lSDR64Managment.ChangeSendStatusIntervention(lRecRef,lInterfaceReference."Send Status"::"Validation Error");
+                lSDR64Managment.ChangeSendStatusIntervention(lInterfaceReference."Send Status"::"Validation Error",pSentMQBuffer);
+                //>>IMH06.ACO
+              END;
+              //>>IMH05.ACO
+
+              CLEARLASTERROR;
+            END;
+          END;
+        END;
+      END;
+
+      //<<IMH02.PC
+      // On v‚rifie que l'enregistrement n'a pas ‚t‚ modifi‚
+      // Cas de la r‚cup‚ration du flux de retour d'un web service
+      // Cas de la mise en attente
+      IF lErrorProcess THEN BEGIN
+        lEAIMQBufferMgt.CheckModifSendMQBuffFromSendMQ(pSentMQBuffer);
+        pSentMQBuffer.MODIFY;
+      END;
+      //>>IMH02.PC
+
+      // On enregistre le Buffer
+      lEAIMQBufferMgt.TransferSendMQBufferToSendMQ(pSentMQBuffer);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH06 @d 23/10/13 @a ISAT.ACO @v IMH6.01.348 @h 4804 @s DARVA MATMUT Lot 1
+          @c Modification test sur type flux */
+      /** @r IMH05 @d 22/10/13 @a ISAT.ACO @v IMH6.01.348 @h 4804 @s DARVA MATMUT Lot 1
+          @c Evolution statuts ‚mission SDR64 */
+      /** @r IMH04 @d 22/05/13 @a ISAT.PC @v IMH6.01.222 @s Uniformisation Darva @c Gestion pour laisser le flux en non trait‚ */
+      /** @r IHM03 @d 12/03/12 @a ISAT.ZW @v IMH6.01.132 @s DARVA @c gestion de Statut warning */
+      /** @r IHM02 @d 20/09/11 @a ISAT.PC @v IMH6.01.132 @s DARVA @c Gestion mise en attente */
+      /** @r IHM01 @d 06/01/11 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Ajout fonction ValidateSendMQLine */
+      /** @r EAI02 @d 07/12/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Suppression du test sur "validation automatique" */
+      /** @r EAI01 @d 24/10/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Test sur status=active */
+      /** @r EAI00 @d 01/02/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Cr‚ation de l'objet */
+    }
+    END.
+  }
+}

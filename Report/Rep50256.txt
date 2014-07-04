@@ -1,0 +1,161 @@
+OBJECT Report 50256 Mantis 5004
+{
+  OBJECT-PROPERTIES
+  {
+    Date=11/03/14;
+    Time=14:55:31;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    ProcessingOnly=Yes;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50124;
+        DataItemTableView=SORTING(Service No.,Service Header No.,Entry No.,Tag Entry No.);
+        OnPreDataItem=BEGIN
+                        SETRANGE("DARVA DT Storage"."Tag Type", "DARVA DT Storage"."Tag Type"::Tag);
+                        SETRANGE("Tag Description",'Message');
+                        SETFILTER("Service No.", '<>''''');
+                        SETFILTER("Service Header No.", '<>''''');
+
+                        ServiceHeaderTemp.DELETEALL;
+                      END;
+
+        OnAfterGetRecord=VAR
+                           lServiceHeader@1100281000 : Record 5900;
+                         BEGIN
+                           IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, "DARVA DT Storage"."Service Header No.") THEN BEGIN
+                             ServiceHeaderTemp.INIT;
+                             ServiceHeaderTemp.TRANSFERFIELDS(lServiceHeader);
+                             ServiceHeaderTemp.INSERT;
+                           END;
+                         END;
+
+        OnPostDataItem=VAR
+                         lDARVAStorage@1100281007 : Record 50124;
+                         lEAIPostedRcvdMQ@1100281006 : Record 8016737;
+                         lXmlDom@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+                         lInStream@1100281004 : InStream;
+                         lXmlDom2@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+                         lXmlDomElement@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+                         lRefNo@1100281001 : Text[30];
+                         lDARVASwitchSetup@1100281000 : Record 50180;
+                       BEGIN
+                         ServiceHeaderTemp.RESET;
+                         IF ServiceHeaderTemp.FINDSET THEN BEGIN
+                           IF CONFIRM(STRSUBSTNO(Text004,ServiceHeaderTemp.COUNT)) THEN BEGIN
+                             REPEAT
+                               //Suppression ancien stockage de la mˆme ligne produit
+                               lDARVAStorage.RESET;
+                               lDARVAStorage.SETRANGE("Service No.", ServiceHeaderTemp."Service No.");
+                               lDARVAStorage.SETRANGE("Service Header No.", ServiceHeaderTemp."No.");
+                               IF lDARVAStorage.FINDSET THEN
+                                 lDARVAStorage.DELETEALL;
+
+                               //lRefNo := 'VABF135M06505C';
+                               lRefNo := ServiceHeaderTemp."Reference No.";
+
+                               //R‚cup‚ration du code acte
+                               lDARVASwitchSetup.SETRANGE(lDARVASwitchSetup."Corporate No.", ServiceHeaderTemp."Corporate No.");
+                               lDARVASwitchSetup.SETRANGE(lDARVASwitchSetup."DARVA Data Flow Type", 'DT');
+                               lDARVASwitchSetup.SETRANGE(lDARVASwitchSetup.Direction, lDARVASwitchSetup.Direction::Receipt);
+                               lDARVASwitchSetup.SETRANGE(lDARVASwitchSetup."Line Type", lDARVASwitchSetup."Line Type"::Default);
+                               IF NOT lDARVASwitchSetup.FINDFIRST THEN
+                                 ERROR(STRSUBSTNO(Text003,ServiceHeaderTemp."Corporate No."));
+
+                               //R‚cup‚ration du flux … partir du nø de sinistre
+                               lEAIPostedRcvdMQ.SETCURRENTKEY("Reference No.");
+                               lEAIPostedRcvdMQ.SETRANGE("Reference No.", lRefNo);
+                               lEAIPostedRcvdMQ.SETRANGE(lEAIPostedRcvdMQ."EAI Act Code", lDARVASwitchSetup."Act Code");
+                               IF lEAIPostedRcvdMQ.FINDFIRST THEN BEGIN
+                                   lEAIPostedRcvdMQ.CALCFIELDS("XML Source");
+                                   lEAIPostedRcvdMQ."XML Source".CREATEINSTREAM(lInStream);
+                                   CLEAR(lXmlDom2);
+                                   CREATE(lXmlDom2);
+                                   lXmlDom2.load(lInStream);
+
+                                   DARVAXMLMgt.InitXMLDom(lXmlDom2,lXmlDom);
+
+                                   //si besoin, suppression lignes de mˆme nø s‚quence sans service et sans ligne produit
+                                   lDARVAStorage.RESET;
+                                   lDARVAStorage.SETRANGE("Service No.", '');
+                                   lDARVAStorage.SETRANGE("Service Header No.", '');
+                                   lDARVAStorage.SETRANGE(lDARVAStorage."EAI Entry No.", lEAIPostedRcvdMQ."Entry No.");
+                                   IF lDARVAStorage.FINDSET THEN
+                                     lDARVAStorage.DELETEALL;
+
+
+                                   //stockage des donn‚es de la DT
+                                   DARVAMgt.StorageAllDT(lEAIPostedRcvdMQ."Entry No.",lEAIPostedRcvdMQ."EAI MQ Code",
+                                                         ServiceHeaderTemp."Service No.", ServiceHeaderTemp."No.", lXmlDom);
+                               END;
+                             UNTIL ServiceHeaderTemp.NEXT = 0;
+                           END;
+                         END
+                         ELSE
+                           MESSAGE(Text005);
+                       END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=12000;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      DARVAMgt@1100281000 : Codeunit 50150;
+      DARVAXMLMgt@1100281001 : Codeunit 50154;
+      Text001@1100281002 : TextConst 'FRA=Extraction balises XML de la ligne produit %1 r‚alis‚e avec succŠs';
+      Text002@1100281003 : TextConst 'FRA=Echec lors de l''extraction des balises XML de la ligne produit %1. Le nø de s‚quence %2 possŠde d‚j… son extraction.';
+      Text003@1100281004 : TextConst 'FRA=Il n''y a pas de code acte de type DT pour le Grand Compte %1.';
+      ServiceHeaderTemp@1100281005 : TEMPORARY Record 5900;
+      Text004@1100281006 : TextConst 'FRA=%1 lignes produits … corriger. Souhaitez-vous continuer?';
+      Text005@1100281007 : TextConst 'FRA=Aucune ligne produit … corriger.';
+
+    BEGIN
+    {
+      /** @r IMH00 @d 26/02/14 @a ISAT.ACO @v IMH6.01.5004 @s Donn‚e manquante DRT @h 5004 @c Cr‚ation traitement */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

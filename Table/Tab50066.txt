@@ -1,0 +1,1636 @@
+OBJECT Table 50066 Service
+{
+  OBJECT-PROPERTIES
+  {
+    Date=12/06/14;
+    Time=11:29:09;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.P010;
+  }
+  PROPERTIES
+  {
+    Permissions=TableData 8016709=rimd,
+                TableData 8016710=rimd,
+                TableData 8016711=rimd,
+                TableData 8016712=rimd;
+    DataCaptionFields=Service No.;
+    OnInsert=BEGIN
+               TouchRecord(TRUE);
+
+               IF "Service No." = '' THEN BEGIN
+                 ServiceMgtSetup.GET;
+                 ServiceMgtSetup.TESTFIELD("Services Nos");
+                 NoSeriesMgt.InitSeries(ServiceMgtSetup."Services Nos",xRec."No. Series",0D,"Service No.","No. Series");
+               END;
+
+               TESTFIELD("Service No.");
+               ServLog.LogService(Rec,0); //IMH33.ST
+             END;
+
+    OnModify=BEGIN
+               //Donn‚es temporaire
+               IF "Service No." <> '' THEN BEGIN
+                 TESTFIELD("Contact No.");
+               END;
+               OnModify(xRec);//IMH17
+               TouchRecord(FALSE);
+               //<<IMH59
+               //AutoStep;
+               IF NOT SkipAutoStep THEN
+                 AutoStep;
+               //>>IMH59
+               ServLog.LogService(Rec,1); //IMH33.ST
+             END;
+
+    OnDelete=VAR
+               lServiceHeader@1100281000 : Record 5900;
+               lAdvCommentLine@1100281001 : Record 50056;
+               lDocAttach@1100281003 : Record 50021;
+               lTrayLine@1100281004 : Record 50048;
+               lProcMgt@1100281002 : Codeunit 50040;
+             BEGIN
+               lServiceHeader.SETCURRENTKEY("Service No.");
+               lServiceHeader.SETRANGE("Service No.","Service No.");
+               IF NOT lServiceHeader.ISEMPTY THEN
+                 lServiceHeader.DELETEALL(TRUE);
+
+               lAdvCommentLine.SETRANGE("Source Table ID",DATABASE::Service);
+               lAdvCommentLine.SETRANGE("Source No.","Service No.");
+               IF NOT lAdvCommentLine.ISEMPTY THEN
+                 lAdvCommentLine.DELETEALL;
+               //<<IMH22
+               lDocAttach.SETRANGE("Referent Table No.",DATABASE::Service);
+               lDocAttach.SETRANGE("Key Code 1","Service No.");
+               IF NOT lDocAttach.ISEMPTY THEN
+                 lDocAttach.DELETEALL;
+
+
+               lTrayLine.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+               lTrayLine.SETRANGE("Service No.","Service No.");
+               lTrayLine.SETRANGE("Source Table No.",DATABASE::Service);
+               IF NOT lTrayLine.ISEMPTY THEN
+                 lTrayLine.DELETEALL;
+               //>>IMH22
+
+               lProcMgt.DeleteSourceRec(DATABASE::Service, "Service No.", '', 0, 0); //IMH21.ST
+               ServLog.LogService(Rec,2); //IMH33.ST
+             END;
+
+    OnRename=BEGIN
+               ERROR(''); //IMH33.ST
+               TouchRecord(FALSE);
+               ServLog.LogService(Rec,3); //IMH33.ST
+             END;
+
+    CaptionML=[ENU=Service;
+               FRA=Service];
+    LookupFormID=Form50068;
+    DrillDownFormID=Form50068;
+  }
+  FIELDS
+  {
+    { 1   ;   ;Service No.         ;Code20        ;CaptionML=[ENU=Service No.;
+                                                              FRA=Nø service];
+                                                   Editable=No }
+    { 10  ;   ;Corporate No.       ;Code20        ;TableRelation=Customer.No. WHERE (Service Contact=CONST(Corporate Customer),
+                                                                                     Service Corporate=CONST(Yes));
+                                                   CaptionML=[ENU=Corporate No.;
+                                                              FRA=Nø grand compte];
+                                                   NotBlank=Yes }
+    { 11  ;   ;Contact No.         ;Code20        ;TableRelation=IF (Service Type=CONST(Beneficiairy)) Contact.No. WHERE (Service Contact=CONST(Beneficiary),
+                                                                                                                          Type=CONST(Company))
+                                                                                                                          ELSE IF (Service Type=CONST(Expert)) Contact.No. WHERE (Service Contact=FILTER(<>Beneficiary),
+                                                                                                                                                                                  Type=CONST(Company));
+                                                   OnValidate=VAR
+                                                                lContact@1100281000 : Record 5050;
+                                                              BEGIN
+                                                                GetContact;
+                                                              END;
+
+                                                   CaptionML=[ENU=Contact No.;
+                                                              FRA=Nø contact] }
+    { 12  ;   ;Channel             ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(50066),
+                                                                                  Field ID=CONST(12));
+                                                   CaptionML=[ENU=Channel;
+                                                              FRA=Canal] }
+    { 13  ;   ;Requisitioner       ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(50066),
+                                                                                  Field ID=CONST(13));
+                                                   CaptionML=[ENU=Requisitioner;
+                                                              FRA=Demandeur] }
+    { 14  ;   ;Urgent              ;Option        ;CaptionML=[ENU=Urgent;
+                                                              FRA=Urgent];
+                                                   OptionCaptionML=[ENU=,Yes,No;
+                                                                    FRA=,Oui,Non];
+                                                   OptionString=[ ,Yes,No] }
+    { 15  ;   ;Campaign No.        ;Code20        ;TableRelation=Campaign.No.;
+                                                   OnValidate=BEGIN
+                                                                IF CurrFieldNo = FIELDNO("Campaign No.") THEN
+                                                                  CALCFIELDS("Campaign Description");
+
+                                                                //<<IMH54
+                                                                CampaignManagement.CheckServiceCause("Campaign No.", "Service Cause");
+                                                                //>>IMH54
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              lCampaign@1100281001 : Record 5071;
+                                                              lDate@1100281000 : Date;
+                                                            BEGIN
+                                                              //<<IMH17
+                                                              IF "Event Date" <> 0D THEN
+                                                                lDate := "Event Date"
+                                                              ELSE
+                                                                lDate := DT2DATE("Creation Date");
+
+                                                              lCampaign.FILTERGROUP(2);
+                                                              lCampaign.SETFILTER("Starting Date",'<=%1|%2',lDate,0D);
+                                                              lCampaign.SETFILTER("Ending Date",'>=%1|%2',lDate,0D);
+                                                              lCampaign.FILTERGROUP(0);
+                                                              IF lCampaign.ISEMPTY THEN
+                                                                EXIT;
+                                                              IF FORM.RUNMODAL(0,lCampaign) = ACTION::LookupOK THEN
+                                                                VALIDATE("Campaign No.", lCampaign."No.");
+                                                              //>>IMH17
+                                                            END;
+
+                                                   CaptionML=[ENU=Campaign No.;
+                                                              FRA=Nø ‚v‚nement climatique] }
+    { 16  ;   ;Reference No.       ;Code30        ;CaptionML=[ENU=Reference No.;
+                                                              FRA=Nø ‚vŠnement] }
+    { 17  ;   ;Event Date          ;Date          ;OnValidate=BEGIN
+                                                                IF "Event Date" = 0D THEN
+                                                                  EXIT;
+                                                                CheckEventDate;
+                                                              END;
+
+                                                   CaptionML=[ENU=Event Date;
+                                                              FRA=Date ‚vŠnement] }
+    { 18  ;   ;Alt. Address Code   ;Code10        ;TableRelation="Contact Alt. Address".Code WHERE (Contact No.=FIELD(Contact No.));
+                                                   OnValidate=VAR
+                                                                lServiceHeader@1100281000 : Record 5900;
+                                                                lServiceInterventionLine@1100281001 : Record 50075;
+                                                                lToChange@1100281002 : Boolean;
+                                                              BEGIN
+                                                                lToChange := TRUE;
+
+                                                                IF CurrFieldNo = FIELDNO("Alt. Address Code") THEN
+                                                                  IF NOT CONFIRM(Text011) THEN
+                                                                    lToChange := FALSE;
+
+                                                                IF lToChange THEN BEGIN
+                                                                  //IF xRec."Alt. Address Code" <> Rec."Alt. Address Code" THEN
+                                                                    GetAltAddress;
+                                                                  //<<IMH34
+                                                                  IF "Service No." <> '' THEN BEGIN
+                                                                    lServiceHeader.SETCURRENTKEY("Service No.");
+                                                                    lServiceHeader.SETRANGE("Service No.", "Service No.");
+                                                                    IF lServiceHeader.FINDSET THEN
+                                                                      REPEAT
+                                                                        lServiceHeader.GetShipToAddress;
+                                                                        lServiceHeader.MODIFY(FALSE);
+                                                                        IF "Service Type" <> "Service Type"::Expert THEN BEGIN //IMH52.ST
+                                                                          lServiceInterventionLine.SETRANGE("Service Header No.", lServiceHeader."No.");
+                                                                          lServiceInterventionLine.SETRANGE("Intervention Status", lServiceInterventionLine."Intervention Status"::InProgress);
+                                                                          IF lServiceInterventionLine.FINDSET THEN
+                                                                            REPEAT
+                                                                              lServiceInterventionLine.GetAltAddress;
+                                                                              lServiceInterventionLine.MODIFY(FALSE);
+                                                                            UNTIL lServiceInterventionLine.NEXT = 0;
+                                                                        END;
+                                                                      UNTIL lServiceHeader.NEXT = 0;
+                                                                  END;
+
+                                                                  //>>IMH34
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Alt. Address Code;
+                                                              FRA=Code adresse] }
+    { 19  ;   ;Contact Name        ;Text50        ;CaptionML=[ENU=Contact Name;
+                                                              FRA=Nom b‚n‚ficiaire] }
+    { 20  ;   ;Address             ;Text50        ;CaptionML=[ENU=Address;
+                                                              FRA=Adresse] }
+    { 21  ;   ;Address 2           ;Text50        ;CaptionML=[ENU=Address 2;
+                                                              FRA=Adresse (2Šme ligne)] }
+    { 22  ;   ;Post Code           ;Code20        ;TableRelation="Post Code";
+                                                   OnValidate=BEGIN
+                                                                PostCode.ValidatePostCode(City,"Post Code","Country/Region Code"); //IMH25 Ajout Code pays
+                                                                "Geo. Reference Code" := PostCode.GetReferenceGeoCode("Post Code",City);  //IMH11 isat.zw
+                                                              END;
+
+                                                   OnLookup=BEGIN
+                                                              PostCode.LookUpPostCode(City,"Post Code","Country/Region Code", TRUE); //IMH25 Ajout Code pays
+                                                            END;
+
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Post Code;
+                                                              FRA=Code postal] }
+    { 23  ;   ;City                ;Text30        ;OnValidate=BEGIN
+                                                                PostCode.ValidateCity(City,"Post Code","Country/Region Code"); //IMH25 Ajout Code pays
+                                                              END;
+
+                                                   OnLookup=BEGIN
+                                                              PostCode.LookUpCity(City,"Post Code", "Country/Region Code", TRUE); //IMH25 Ajout Code pays
+                                                            END;
+
+                                                   CaptionML=[ENU=City;
+                                                              FRA=Ville] }
+    { 24  ;   ;Country/Region Code ;Code10        ;TableRelation=Country/Region;
+                                                   CaptionML=[ENU=Country/Region Code;
+                                                              FRA=Code pays/r‚gion] }
+    { 25  ;   ;County              ;Text30        ;CaptionML=[ENU=County;
+                                                              FRA=R‚gion] }
+    { 26  ;   ;Geo. Reference Code ;Code10        ;TableRelation="Geographical Reference";
+                                                   CaptionML=[ENU=Geo. Reference Code;
+                                                              FRA=Code r‚f‚rence g‚o.];
+                                                   Editable=No }
+    { 27  ;   ;Contact Salutation Code;Code10     ;TableRelation=Salutation.Code;
+                                                   CaptionML=[ENU=Contact Salutation Code;
+                                                              FRA=Code appelation] }
+    { 28  ;   ;Contact Mobile Phone No.;Text30    ;FieldClass=Normal;
+                                                   OnValidate=VAR
+                                                                lServiceHeader@1100281000 : Record 5900;
+                                                                lServiceInterventionLine@1100281001 : Record 50075;
+                                                              BEGIN
+                                                                //<<IMH36.ST
+                                                                PhoneStd.SetHideMessage(CurrFieldNo <> FIELDNO("Contact Mobile Phone No."));
+                                                                PhoneStd.ValidatePhoneNo(DATABASE::Service,FIELDNO("Contact Mobile Phone No."),
+                                                                                         "Country/Region Code", "Contact Mobile Phone No.");
+                                                                //>>IMH36.ST
+
+                                                                {IMH40.ST Inutile, ce sont des flowfields
+                                                                //<<IMH37.VA
+                                                                IF ("Contact Mobile Phone No." <> '') THEN
+                                                                BEGIN
+                                                                  lServiceHeader.RESET;
+                                                                  lServiceHeader.SETCURRENTKEY("Service no.");
+                                                                  lServiceHeader.SETRANGE("Service No.","Service No.");
+                                                                  IF lServiceHeader.FINDSET THEN
+                                                                    REPEAT
+                                                                      lServiceHeader."Contact Mobile Phone No." := "Contact Mobile Phone No.";
+                                                                      lServiceHeader.MODIFY;
+
+                                                                      lServiceInterventionLine.RESET;
+                                                                      lServiceInterventionLine.SETRANGE("Service Header No.",lServiceHeader."No.");
+                                                                      IF lServiceInterventionLine.FINDSET THEN
+                                                                        REPEAT
+                                                                          lServiceInterventionLine."Mobile Phone No." := "Contact Mobile Phone No.";
+                                                                          lServiceInterventionLine.MODIFY;
+                                                                        UNTIL(lServiceInterventionLine.NEXT = 0);
+                                                                    UNTIL(lServiceHeader.NEXT = 0);
+                                                                END;
+                                                                //>>IMH37.VA
+                                                                }//>>IMH40.ST
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Contact Mobile Phone No.;
+                                                              FRA=Nø t‚l‚phone mobile] }
+    { 29  ;   ;Contact Phone No.   ;Text30        ;OnValidate=VAR
+                                                                lServiceHeader@1100281001 : Record 5900;
+                                                                lServiceInterventionLine@1100281000 : Record 50075;
+                                                              BEGIN
+                                                                //<<IMH36.ST
+                                                                PhoneStd.SetHideMessage(CurrFieldNo <> FIELDNO("Contact Phone No."));
+                                                                PhoneStd.ValidatePhoneNo(DATABASE::Service,FIELDNO("Contact Phone No."),
+                                                                                         "Country/Region Code", "Contact Phone No.");
+                                                                //>>IMH36.ST
+
+                                                                //<<IMH37.VA
+                                                                IF ("Contact Phone No." <> '') THEN BEGIN
+                                                                  lServiceHeader.RESET;
+                                                                  lServiceHeader.SETCURRENTKEY("Service No.");
+                                                                  lServiceHeader.SETRANGE("Service No.","Service No.");
+                                                                  IF lServiceHeader.FINDSET THEN
+                                                                  REPEAT
+                                                                    lServiceHeader."Phone No." := "Contact Phone No.";
+                                                                    lServiceHeader.MODIFY;
+
+                                                                    lServiceInterventionLine.RESET;
+                                                                    lServiceInterventionLine.SETRANGE("Service Header No.",lServiceHeader."No.");
+                                                                    IF lServiceInterventionLine.FINDSET THEN
+                                                                      REPEAT
+                                                                        lServiceInterventionLine."Phone No." := "Contact Phone No.";
+                                                                        lServiceInterventionLine.MODIFY;
+                                                                      UNTIL(lServiceInterventionLine.NEXT = 0);
+                                                                  UNTIL(lServiceHeader.NEXT = 0);
+                                                                END;
+                                                                //>>IMH37.VA
+                                                              END;
+
+                                                   ExtendedDatatype=Phone No.;
+                                                   CaptionML=[ENU=Phone No.;
+                                                              FRA=Nø t‚l‚phone] }
+    { 30  ;   ;Corporate Declaration;Boolean      ;CaptionML=[ENU=Corporate Declaration;
+                                                              FRA=D‚claration grand compte];
+                                                   Editable=No }
+    { 31  ;   ;Confidence Prior    ;Boolean       ;CaptionML=[ENU=Confidence Prior;
+                                                              FRA=Confiance pr‚alable] }
+    { 32  ;   ;Taking Charge On Voucher;Boolean   ;CaptionML=[ENU=Taking Charge On Voucher;
+                                                              FRA=Prise en charge sur justificatifs] }
+    { 33  ;   ;Expense Payment     ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(50066),
+                                                                                  Field ID=CONST(33));
+                                                   CaptionML=[ENU=Expense Payment;
+                                                              FRA=Paiement des frais] }
+    { 34  ;   ;Sensed Building Trade;Code20       ;TableRelation=IF (Sensed Speciality=CONST('')) "Building Trade".No.
+                                                                 ELSE IF (Sensed Speciality=FILTER(<>'')) "Specialization Building Trade"."Building Trade No." WHERE (Specialization Code=FIELD(Sensed Speciality));
+                                                   OnValidate=VAR
+                                                                lSpecBuild@1100281000 : Record 50031;
+                                                              BEGIN
+                                                                IF "Sensed Speciality" <> '' THEN BEGIN
+                                                                  IF "Sensed Building Trade" = '' THEN
+                                                                    VALIDATE("Sensed Speciality", '')
+                                                                  ELSE
+                                                                    IF NOT lSpecBuild.GET("Sensed Building Trade", "Sensed Speciality") THEN
+                                                                      VALIDATE("Sensed Speciality", '')
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Sensed Building Trade;
+                                                              FRA=Corps de m‚tier pressenti] }
+    { 35  ;   ;Sensed Speciality   ;Code20        ;TableRelation=IF (Sensed Building Trade=FILTER(<>'')) "Specialization Building Trade"."Specialization Code" WHERE (Building Trade No.=FIELD(Sensed Building Trade))
+                                                                 ELSE IF (Sensed Building Trade=CONST('')) Specialization.Code;
+                                                   OnValidate=VAR
+                                                                lSpeciality@1100281000 : Record 50005;
+                                                                lBuildTrade@1100281001 : Code[20];
+                                                              BEGIN
+                                                                IF "Sensed Speciality" <> '' THEN BEGIN
+                                                                  IF lSpeciality.GetBuildingTrade("Sensed Speciality", lBuildTrade) THEN
+                                                                    "Sensed Building Trade" := lBuildTrade
+                                                                  ELSE
+                                                                    "Sensed Speciality" := xRec."Sensed Speciality";
+                                                                END;
+                                                              END;
+
+                                                   CaptionML=[ENU=Sensed Speciality;
+                                                              FRA=Sp‚cialit‚ pressentie] }
+    { 36  ;   ;VIP Code            ;Code10        ;CaptionML=[ENU=VIP Code;
+                                                              FRA=Code VIP];
+                                                   Editable=No }
+    { 37  ;   ;Corporate Region Code;Code10       ;TableRelation="Corporate Region"."Region Code" WHERE (Corporate No.=FIELD(Corporate No.));
+                                                   OnValidate=VAR
+                                                                lCorporateRegion@1100281000 : Record 50058;
+                                                              BEGIN
+                                                                //<<IMH20
+                                                                // Le Nø contact CG doit ˆtre initialis‚ … vide (demande du 14/12/10)
+                                                                {
+                                                                IF ("Corporate Contact No." = '') AND ("Corporate Region Code" <> '') THEN BEGIN
+                                                                  lCorporateRegion.SETRANGE("Corporate No.","Corporate No.");
+                                                                  lCorporateRegion.SETRANGE("Region Code","Corporate Region Code");
+                                                                  IF NOT lCorporateRegion.ISEMPTY THEN BEGIN
+                                                                    lCorporateRegion.FINDFIRST;
+                                                                    "Corporate Contact No." := lCorporateRegion."Main Contact No.";
+                                                                  END ELSE BEGIN
+                                                                    lCorporateRegion.SETRANGE("Region Code");
+                                                                    lCorporateRegion.SETFILTER("Region Code",'%1','');
+                                                                    IF NOT lCorporateRegion.ISEMPTY THEN BEGIN
+                                                                      lCorporateRegion.FINDFIRST;
+                                                                      "Corporate Contact No." := lCorporateRegion."Main Contact No.";
+                                                                    END
+                                                                  END;
+                                                                END;
+                                                                }
+                                                                //>>IMH20
+                                                              END;
+
+                                                   CaptionML=[ENU=Corporate Region Code;
+                                                              FRA=Code r‚gion grand compte];
+                                                   Editable=Yes }
+    { 38  ;   ;Contract Form Code  ;Code10        ;TableRelation="Contact Contract"."Contract Form Code" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                Corporate No.=FIELD(Corporate No.));
+                                                   OnValidate=VAR
+                                                                lContactContract@1100281000 : Record 50059;
+                                                                lServiceHeader@1100281001 : Record 5900;
+                                                              BEGIN
+                                                                IF ("Contract Form Code" <> xRec."Contract Form Code") AND
+                                                                   (xRec."Contract Form Code" <> '') THEN BEGIN
+                                                                  lServiceHeader.SETCURRENTKEY("Service No.");
+                                                                  lServiceHeader.SETRANGE("Service No.","Service No.");
+                                                                  IF NOT lServiceHeader.ISEMPTY THEN
+                                                                    ERROR(Text006)
+                                                                END;
+                                                              END;
+
+                                                   OnLookup=VAR
+                                                              lContactContract@1100281000 : Record 50059;
+                                                            BEGIN
+                                                              lContactContract.SETCURRENTKEY("Contact No.", "Corporate No.");
+                                                              lContactContract.FILTERGROUP(2);
+                                                              lContactContract.SETRANGE("Contact No.","Contact No.");
+                                                              lContactContract.SETRANGE("Corporate No.","Corporate No.");
+                                                              lContactContract.FILTERGROUP(0);
+                                                              IF "Event Date" <> 0D THEN BEGIN
+                                                                lContactContract.SETFILTER("Expiration Date",'%1|>=%2',0D,"Event Date");
+                                                              END ELSE BEGIN
+                                                                lContactContract.SETFILTER("Expiration Date",'%1|>=%2',0D,WORKDATE);
+                                                              END;
+                                                              lContactContract."Contract Form Code" := "Contract Form Code";
+                                                              IF FORM.RUNMODAL(0, lContactContract) = ACTION::LookupOK THEN BEGIN
+                                                                IF ("Contract Form Code" <> lContactContract."Contract Form Code") AND
+                                                                   ("Contract Occurence No." <> lContactContract."Occurence No.") THEN BEGIN
+                                                                  VALIDATE("Contract Form Code", lContactContract."Contract Form Code");
+                                                                  VALIDATE("Contract Occurence No.", lContactContract."Occurence No.");
+                                                                END;
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Contract Form Code;
+                                                              FRA=Code formule] }
+    { 39  ;   ;Contract Occurence No.;Integer     ;TableRelation="Contact Contract"."Occurence No." WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                           Corporate No.=FIELD(Corporate No.),
+                                                                                                           Contract Form Code=FIELD(Contract Form Code));
+                                                   OnValidate=VAR
+                                                                lContactContract@1100281000 : Record 50059;
+                                                              BEGIN
+                                                                lContactContract.GET("Contact No.", "Corporate No.", "Contract Form Code", "Contract Occurence No.");
+                                                                IF  lContactContract."Member No." <> '' THEN
+                                                                  "Member No." := lContactContract."Member No.";
+                                                                "Contract Reference" := lContactContract."Contract Reference";
+                                                                "Deductible 1 (LCY)" := lContactContract."Deductible 1 (LCY)";
+                                                                "Deductible 2 (LCY)" := lContactContract."Deductible 2 (LCY)";
+                                                                lContactContract.CALCFIELDS("Occupier Nature Code","Residence Type Code",
+                                                                  "Housing Type Code","Property Type Code");
+                                                                "Occupier Nature" := lContactContract."Occupier Nature Code";
+                                                                "Residence Type" := lContactContract."Residence Type Code";
+                                                                "Housing Type" := lContactContract."Housing Type Code";
+                                                                "Property Type" := lContactContract."Property Type Code";
+                                                                IF "Event Date" <> 0D THEN
+                                                                  VALIDATE("Event Date");
+                                                              END;
+
+                                                   CaptionML=[ENU=Contract Occurence No.;
+                                                              FRA=Nø occurence formule];
+                                                   Editable=No }
+    { 42  ;   ;Deductible 1 (LCY)  ;Decimal       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Contract"."Deductible 1 (LCY)" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                     Contract Form Code=FIELD(Contract Form Code),
+                                                                                                                     Occurence No.=FIELD(Contract Occurence No.)));
+                                                   CaptionML=[ENU=Deductible 1 (LCY);
+                                                              FRA=Franchise 1];
+                                                   BlankZero=Yes;
+                                                   Editable=No }
+    { 43  ;   ;Deductible 2 (LCY)  ;Decimal       ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Contract"."Deductible 2 (LCY)" WHERE (Contact No.=FIELD(Contact No.),
+                                                                                                                     Contract Form Code=FIELD(Contract Form Code),
+                                                                                                                     Occurence No.=FIELD(Contract Occurence No.)));
+                                                   CaptionML=[ENU=Deductible 2 (LCY);
+                                                              FRA=Franchise 2];
+                                                   BlankZero=Yes;
+                                                   Editable=No }
+    { 44  ;   ;Member No.          ;Code20        ;OnValidate=VAR
+                                                                lContact@1100281000 : Record 5050;
+                                                              BEGIN
+                                                                //<<IMH06
+                                                                IF "Member No." = '' THEN
+                                                                  EXIT;
+                                                                IF "Contact No." = '' THEN BEGIN
+                                                                  lContact.SETCURRENTKEY("Member No.");
+                                                                  lContact.SETRANGE("Member No.","Member No.");
+                                                                  IF "Corporate No." <> '' THEN
+                                                                    lContact.SETRANGE("Corporate No.", "Corporate No.");
+                                                                  IF NOT lContact.ISEMPTY THEN BEGIN
+                                                                    lContact.FINDFIRST;
+                                                                    VALIDATE("Contact No.",lContact."No.");
+                                                                  END;
+                                                                END;
+                                                                {Desactiv‚ impact contact
+                                                                IF "Contact No." <> '' THEN BEGIN
+                                                                  IF lContact.GET("Contact No.") THEN BEGIN
+                                                                    IF lContact."Member No." = '' THEN BEGIN
+                                                                      lContact.VALIDATE("Member No.","Member No.");
+                                                                      lContact.MODIFY(TRUE);
+                                                                    END;
+                                                                  END;
+                                                                END;
+                                                                }
+                                                                //>>IMH06
+                                                              END;
+
+                                                   CaptionML=[ENU=Member No.;
+                                                              FRA=Nø b‚n‚ficiaire];
+                                                   Editable=No }
+    { 45  ;   ;Contract Reference  ;Code30        ;CaptionML=[ENU=Contract Reference;
+                                                              FRA=R‚f‚rence contrat] }
+    { 46  ;   ;Contributor         ;Text80        ;CaptionML=[ENU=Contributor;
+                                                              FRA=Intervenant] }
+    { 47  ;   ;Event Nature        ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5900),
+                                                                                  Field ID=CONST(50026));
+                                                   CaptionML=[ENU=Event Nature;
+                                                              FRA=Nature ‚vŠnement] }
+    { 48  ;   ;Event Description   ;Text80        ;CaptionML=[ENU=Event Description;
+                                                              FRA=Description ‚vŠnement] }
+    { 49  ;   ;Event Time          ;Time          ;OnValidate=BEGIN
+                                                                IF "Event Date" = 0D THEN
+                                                                  EXIT;
+                                                                CheckEventDate;
+                                                              END;
+
+                                                   CaptionML=[ENU=Event Date;
+                                                              FRA=Heure ‚vŠnement] }
+    { 50  ;   ;Last Service Order Type;Code10     ;TableRelation="Product Catalog"."Service Order Type" WHERE (Corporate No.=FIELD(Corporate No.),
+                                                                                                               Active=CONST(Yes));
+                                                   OnValidate=VAR
+                                                                lProdCatalog@1100281000 : Record 50060;
+                                                              BEGIN
+                                                                //<<IMH07.ST
+                                                                IF "Last Service Order Type" <> '' THEN BEGIN
+                                                                  lProdCatalog.GET("Corporate No.", "Last Service Order Type");
+                                                                  "Corporate Declaration" := lProdCatalog."Corporate Declaration";
+                                                                END;
+                                                                //>>IMH07.ST
+                                                              END;
+
+                                                   CaptionML=[ENU=Product;
+                                                              FRA=Produit] }
+    { 51  ;   ;Open File No.       ;Code20        ;CaptionML=[ENU=Open File No.;
+                                                              FRA=Nø de dossier t‚l‚ chiffrage] }
+    { 52  ;   ;Service Cause       ;Code20        ;TableRelation="Fault Reason Code".Code;
+                                                   OnValidate=VAR
+                                                                lServHeader@1100281000 : Record 5900;
+                                                                lServMgt@1100281001 : Codeunit 50064;
+                                                              BEGIN
+                                                                IF CurrFieldNo = FIELDNO("Service Cause") THEN
+                                                                  CALCFIELDS("Service Cause Description");
+                                                                lServHeader.SETCURRENTKEY("Service No.");
+                                                                lServHeader.SETRANGE("Service No.", "Service No.");
+                                                                lServHeader.SETFILTER(Status, '%1|%2', lServHeader.Status::Pending, lServHeader.Status::"In Process",
+                                                                  lServHeader.Status::"On Hold");  //IMH56
+                                                                IF lServHeader.FINDSET THEN
+                                                                  REPEAT
+                                                                    IF NOT lServMgt.ServOrderTypeAllowedForCause("Corporate No.", "Contract Form Code", "Service Cause",
+                                                                                                                 lServHeader."Service Order Type") THEN
+                                                                      ERROR(Text010, "Service Cause", lServHeader."Service Order Type");
+                                                                  UNTIL lServHeader.NEXT=0;
+
+                                                                //<<IMH54
+                                                                CampaignManagement.CheckServiceCause("Campaign No.", "Service Cause");
+                                                                //>>IMH54
+                                                              END;
+
+                                                   CaptionML=[ENU=Service Cause;
+                                                              FRA=Cause intervention] }
+    { 53  ;   ;Occupier Nature     ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50070));
+                                                   CaptionML=[ENU=Occupier Nature;
+                                                              FRA=Nature de l'occupant] }
+    { 54  ;   ;Residence Type      ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50071));
+                                                   CaptionML=[ENU=Residence Type;
+                                                              FRA=Type de r‚sidence] }
+    { 55  ;   ;Housing Type        ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50072));
+                                                   CaptionML=[ENU=Housing Type;
+                                                              FRA=Type d'habitation] }
+    { 56  ;   ;Property Type       ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5051),
+                                                                                  Field ID=CONST(50073));
+                                                   CaptionML=[ENU=Property Type;
+                                                              FRA=Type de propri‚t‚] }
+    { 57  ;   ;Contact E-mail      ;Text80        ;OnValidate=VAR
+                                                                lServHeader@1100281000 : Record 5900;
+                                                              BEGIN
+                                                                lServHeader.RESET;
+                                                                lServHeader.SETCURRENTKEY("Service No.");
+                                                                lServHeader.SETRANGE("Service No.","Service No.");
+                                                                IF lServHeader.FINDSET THEN
+                                                                  REPEAT
+                                                                    IF lServHeader."E-Mail" <> "Contact E-mail" THEN BEGIN
+                                                                      lServHeader."E-Mail" := "Contact E-mail";
+                                                                      lServHeader.MODIFY;
+                                                                    END;
+                                                                  UNTIL lServHeader.NEXT = 0;
+                                                              END;
+
+                                                   ExtendedDatatype=E-Mail;
+                                                   CaptionML=[ENU=Contact E-mail;
+                                                              FRA=E-mail] }
+    { 60  ;   ;No. Series          ;Code10        ;TableRelation="No. Series";
+                                                   CaptionML=[ENU=No. Series;
+                                                              FRA=Souches de nø] }
+    { 70  ;   ;Corporate Contact No.;Code20       ;OnLookup=VAR
+                                                              lMarketingSetup@1100281003 : Record 5079;
+                                                              lContact@1100281000 : Record 5050;
+                                                              lCorporateContact@1100281001 : Record 5050;
+                                                              lContactBusinessRelation@1100281002 : Record 5054;
+                                                            BEGIN
+                                                              lMarketingSetup.GET;
+                                                              lContactBusinessRelation.SETCURRENTKEY("Link to Table","No.");
+                                                              lContactBusinessRelation.SETRANGE("Link to Table",lContactBusinessRelation."Link to Table"::Customer);
+                                                              lContactBusinessRelation.SETRANGE("No.","Corporate No.");
+                                                              lContactBusinessRelation.SETRANGE("Business Relation Code",lMarketingSetup."Bus. Rel. Code for Customers");
+                                                              IF lContactBusinessRelation.ISEMPTY THEN
+                                                                EXIT;
+                                                              lContactBusinessRelation.FINDFIRST;
+                                                              lCorporateContact.GET(lContactBusinessRelation."Contact No."); //IMH30.ST
+                                                              lContact.SETCURRENTKEY("Company No.");
+                                                              lContact.FILTERGROUP(2);
+                                                              lContact.SETRANGE("Company No.",lContactBusinessRelation."Contact No.");
+                                                              lContact.SETRANGE("Company Name", lCorporateContact.Name); //IMH30.ST ajout car l'index liste commence par le nom
+                                                              lContact.SETRANGE(Type,lContact.Type::Person);
+                                                              lContact.SETRANGE("Mask To DGS", FALSE);  //imh58
+                                                              lContact.FILTERGROUP(0);
+                                                              lContact.SETFILTER("Corporate Region Code",'%1|%2','',"Corporate Region Code");
+                                                              //<<IMH30.ST
+                                                              ServiceMgtSetup.GET;
+                                                              IF ServiceMgtSetup."Corp. Contact Responsibility" <> '' THEN BEGIN
+                                                                lContact.SETFILTER("Job Responsibility Filter", ServiceMgtSetup."Corp. Contact Responsibility");
+                                                                lContact.CALCFIELDS("No. of Job Responsibilities");
+                                                                lContact.SETFILTER("No. of Job Responsibilities", '>%1', 0);
+                                                              END;
+                                                              //>>IMH30.ST
+                                                              IF FORM.RUNMODAL(0,lContact) = ACTION::LookupOK THEN BEGIN
+                                                                "Corporate Contact No." := lContact."No.";
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Corporate Contact No.;
+                                                              FRA=Nø contact grand compte] }
+    { 71  ;   ;Corporate Contact Name;Text50      ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact.Name WHERE (No.=FIELD(Corporate Contact No.)));
+                                                   CaptionML=[ENU=Corporate Contact Name;
+                                                              FRA=Nom contact grand compte];
+                                                   Editable=No }
+    { 80  ;   ;Service Header Exists;Boolean      ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Service Header" WHERE (Service No.=FIELD(Service No.)));
+                                                   CaptionML=[ENU=Service Header Exists;
+                                                              FRA=Ligne produit existe];
+                                                   Editable=No }
+    { 81  ;   ;Service Header Status Filter;Option;FieldClass=FlowFilter;
+                                                   CaptionML=[ENU=Service Header Status Filter;
+                                                              FRA=Filtre statut ligne produit];
+                                                   OptionCaptionML=[ENU=Pending,In Process,Finished,On Hold,,,Cancelled;
+                                                                    FRA=Suspendu,En cours,Termin‚,En attente,,,Annul‚];
+                                                   OptionString=Pending,In Process,Finished,On Hold,,,Cancelled }
+    { 82  ;   ;No. of Service Header;Integer      ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Service Header" WHERE (Service No.=FIELD(Service No.),
+                                                                                             Status=FIELD(Service Header Status Filter)));
+                                                   CaptionML=[ENU=No. of Service Header;
+                                                              FRA=Nombre de lignes produit];
+                                                   Editable=No }
+    { 90  ;   ;Address 3           ;Text50        ;CaptionML=[ENU=Address 3;
+                                                              FRA=Adresse (3Šme ligne)] }
+    { 120 ;   ;Status              ;Option        ;OnValidate=VAR
+                                                                lServHeader@1100281000 : Record 5900;
+                                                              BEGIN
+                                                                IF Status IN [Status::Finished, Status::Canceled] THEN BEGIN
+                                                                //<<IMH04.ST
+                                                                  lServHeader.SETCURRENTKEY("Service No.");
+                                                                  lServHeader.SETRANGE("Service No.", "Service No.");
+                                                                  lServHeader.SETFILTER(Status, '<>%1&<>%2', lServHeader.Status::Finished, lServHeader.Status::Cancelled);
+                                                                  IF NOT lServHeader.ISEMPTY THEN BEGIN
+                                                                    lServHeader.FINDFIRST;
+                                                                    ERROR(Text005, "Service No.", Status, lServHeader."No.");
+                                                                  END;
+                                                                //>>IMH04.ST
+                                                                  IF "Closed DateTime" = 0DT THEN
+                                                                    "Closed DateTime" := CURRENTDATETIME;
+                                                                END
+                                                                ELSE
+                                                                  "Closed DateTime" := 0DT;
+                                                              END;
+
+                                                   CaptionML=[ENU=Status;
+                                                              FRA=Statut];
+                                                   OptionCaptionML=[ENU=In Process,On Hold,Finished,Canceled;
+                                                                    FRA=En cours,En attente,Termin‚,Annul‚];
+                                                   OptionString=In Process,On Hold,Finished,Canceled }
+    { 121 ;   ;Closed DateTime     ;DateTime      ;CaptionML=[ENU=Closed DateTime;
+                                                              FRA=Date cl“ture];
+                                                   Editable=No }
+    { 200 ;   ;Comment             ;Boolean       ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Adv. Comment Line" WHERE (Source Table ID=CONST(50066),
+                                                                                                Source No.=FIELD(Service No.)));
+                                                   CaptionML=[ENU=Comment;
+                                                              FRA=Commentaires];
+                                                   Editable=No }
+    { 210 ;   ;Service Cause Description;Text30   ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Fault Reason Code".Description WHERE (Code=FIELD(Service Cause)));
+                                                   CaptionML=[ENU=Service Cause Description;
+                                                              FRA=D‚signation cause intervention];
+                                                   Editable=No }
+    { 211 ;   ;Campaign Description;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Campaign.Description WHERE (No.=FIELD(Campaign No.)));
+                                                   CaptionML=[ENU=Service Cause Description;
+                                                              FRA=D‚signation ‚vŠnement exceptionnel];
+                                                   Editable=No }
+    { 300 ;   ;DARVA Reference No. ;Code20        ;CaptionML=[ENU=DARVA Reference No.;
+                                                              FRA=Nø sinistre DARVA] }
+    { 301 ;   ;DARVA Source Member No.;Code20     ;CaptionML=[ENU=DARVA Source Member No.;
+                                                              FRA=Nø b‚n‚ficiaire origine] }
+    { 400 ;   ;Service Type        ;Option        ;CaptionML=[ENU=Service Type;
+                                                              FRA=Type de service];
+                                                   OptionCaptionML=[ENU=Beneficiairy,Expert;
+                                                                    FRA=B‚n‚ficiaire,Expert];
+                                                   OptionString=Beneficiairy,Expert }
+    { 50004;  ;Service Header Allowed;Boolean     ;InitValue=Yes;
+                                                   CaptionML=[ENU=Service Header Allowed;
+                                                              FRA=Ligne produit autoris‚e] }
+    { 50026;No;Cancel Reason Code  ;Code10        ;TableRelation=Code.Code WHERE (Table ID=CONST(5900),
+                                                                                  Field ID=CONST(50026));
+                                                   CaptionML=[ENU=Cancel Reason Code;
+                                                              FRA=Code motif annulation] }
+    { 50500;  ;Creation Date       ;DateTime      ;CaptionML=[ENU=Creation Date;
+                                                              FRA=Date de cr‚ation];
+                                                   Editable=No }
+    { 50501;  ;Creation User ID    ;Text30        ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Creation User ID;
+                                                              FRA=Utilisateur cr‚ation];
+                                                   Editable=No }
+    { 50502;  ;Last Modification Date;DateTime    ;CaptionML=[ENU=Last Modification Date;
+                                                              FRA=Date derniŠre modification];
+                                                   Editable=No }
+    { 50503;  ;Last Modification User ID;Text30   ;TableRelation="User Setup"."User ID";
+                                                   ValidateTableRelation=No;
+                                                   TestTableRelation=No;
+                                                   CaptionML=[ENU=Last Modification User ID;
+                                                              FRA=Utilisateur derniŠre modification];
+                                                   Editable=No }
+    { 50520;  ;Process Code        ;Code10        ;TableRelation=Process.Code;
+                                                   CaptionML=[ENU=Process Code;
+                                                              FRA=Code processus];
+                                                   Editable=No }
+    { 50521;  ;Process Status No.  ;Integer       ;TableRelation="Process Status"."Status No." WHERE (Process Code=FIELD(Process Code));
+                                                   OnValidate=VAR
+                                                                lProcessServiceMgt@1100281000 : Codeunit 50042;
+                                                              BEGIN
+                                                                lProcessServiceMgt.OnChangeProcessStatus(Rec);
+                                                              END;
+
+                                                   CaptionML=[ENU=Process Status No.;
+                                                              FRA=Nø statut processus];
+                                                   BlankZero=Yes;
+                                                   Editable=No }
+    { 50522;  ;Process Status Description;Text30  ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Process Status".Description WHERE (Process Code=FIELD(Process Code),
+                                                                                                          Status No.=FIELD(Process Status No.)));
+                                                   OnLookup=VAR
+                                                              lProcessStatusHistory@1100281000 : Record 50047;
+                                                            BEGIN
+                                                              lProcessStatusHistory.ListHistory(FALSE, DATABASE::Service,"Service No.", '', 0,0);
+                                                            END;
+
+                                                   CaptionML=[ENU=Status Description;
+                                                              FRA=Description statut];
+                                                   Editable=No }
+    { 50523;  ;User Next Step Available;Boolean   ;FieldClass=FlowField;
+                                                   CalcFormula=Exist("Process Step" WHERE (Process Code=FIELD(Process Code),
+                                                                                           Previous Status=FIELD(Process Status No.),
+                                                                                           Active=CONST(Yes),
+                                                                                           Manual User Step=CONST(Yes)));
+                                                   CaptionML=[ENU=User Next Step Available;
+                                                              FRA=Etape suivante disponible];
+                                                   Editable=No }
+    { 50525;  ;Job Title           ;Text30        ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Job Title" WHERE (No.=FIELD(Corporate Contact No.)));
+                                                   CaptionML=[ENU=Job Title;
+                                                              FRA=Fonction];
+                                                   Editable=No }
+    { 50526;  ;Organizational Level Code;Code10   ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup(Contact."Organizational Level Code" WHERE (No.=FIELD(Corporate Contact No.)));
+                                                   TableRelation="Organizational Level";
+                                                   CaptionML=[ENU=Organizational Level Code;
+                                                              FRA=Code niveau organisationnel];
+                                                   Editable=No }
+    { 50527;  ;First Job Responsibilities;Code10  ;FieldClass=FlowField;
+                                                   CalcFormula=Lookup("Contact Job Responsibility"."Job Responsibility Code" WHERE (Contact No.=FIELD(Corporate Contact No.)));
+                                                   CaptionML=FRA=Premiere fonction;
+                                                   Editable=No }
+    { 50602;  ;Sale Order Nb       ;Integer       ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Sales Header" WHERE (Document Type=CONST(Order),
+                                                                                           Service No.=FIELD(Service No.)));
+                                                   OnLookup=VAR
+                                                              lSalesHeader@1100281000 : Record 36;
+                                                              lCounter@1100281001 : Integer;
+                                                            BEGIN
+                                                              lSalesHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+                                                              lSalesHeader.SETRANGE("Service No.","Service No.");
+                                                              lSalesHeader.SETRANGE("Document Type",lSalesHeader."Document Type"::Order);
+                                                              lCounter := lSalesHeader.COUNT;
+                                                              CASE lCounter OF
+                                                                0 : ;
+                                                                1 : FORM.RUNMODAL(FORM::"Sales Order",lSalesHeader);
+                                                                ELSE FORM.RUNMODAL(FORM::"Sales List",lSalesHeader);
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Sale Order Nb;
+                                                              FRA=Nb commande vente];
+                                                   Editable=No }
+    { 50603;  ;Purchase Order Nb   ;Integer       ;FieldClass=FlowField;
+                                                   CalcFormula=Count("Purchase Header" WHERE (Document Type=CONST(Order),
+                                                                                              Service No.=FIELD(Service No.)));
+                                                   OnLookup=VAR
+                                                              lPurchaseHeader@1100281000 : Record 38;
+                                                              lCounter@1100281001 : Integer;
+                                                            BEGIN
+                                                              lPurchaseHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+                                                              lPurchaseHeader.SETRANGE("Service No.","Service No.");
+                                                              lPurchaseHeader.SETRANGE("Document Type",lPurchaseHeader."Document Type"::Order);
+                                                              lCounter := lPurchaseHeader.COUNT;
+                                                              CASE lCounter OF
+                                                                0 : ;
+                                                                1 : FORM.RUNMODAL(FORM::"Purchase Order",lPurchaseHeader);
+                                                                ELSE FORM.RUNMODAL(FORM::"Purchase List",lPurchaseHeader);
+                                                              END;
+                                                            END;
+
+                                                   CaptionML=[ENU=Purchase Order Nb;
+                                                              FRA=Nb commande achat];
+                                                   Editable=No }
+    { 56014;  ;Fusion Reference No.;Text30        ;CaptionML=[ENU=Reference No.;
+                                                              FRA=Nø r‚f‚rence Fusion] }
+    { 56030;  ;EAI Entry No.       ;Code20        ;CaptionML=[ENU=EAI Entry No.;
+                                                              FRA=Nø s‚quence EAI];
+                                                   Editable=No }
+    { 57010;  ;PMU Owner No.       ;Code10        ;CaptionML=FRA=Code ‚metteur PMU }
+    { 57011;  ;PMU Flux Type       ;Code10        ;CaptionML=FRA=Type flux PMU }
+    { 57013;  ;IMA Reference No.   ;Code30        ;CaptionML=[ENU=IMA Reference No.;
+                                                              FRA=Nø r‚f‚rence IMA] }
+  }
+  KEYS
+  {
+    {    ;Service No.                             ;Clustered=Yes }
+    {    ;Contact No.,Corporate No.                }
+    {    ;Contact Name,Corporate No.              ;KeyGroups=SearchCont }
+    {    ;Corporate No.,Status                     }
+    {    ;Contact No.,Event Date                   }
+    {    ;Reference No.,Corporate No.             ;KeyGroups=SearchServ }
+    {    ;Member No.,Corporate No.                 }
+    {    ;Creation Date                            }
+    {    ;IMA Reference No.,Corporate No.          }
+  }
+  FIELDGROUPS
+  {
+  }
+  CODE
+  {
+    VAR
+      PostCode@1100281000 : Record 225;
+      Text001@1100281004 : TextConst 'ENU=Event Date must be less or egal than today;FRA=La date d''‚vŠnement doit ˆtre inf‚rieure ou ‚gale … la date du jour';
+      Text002@1100281002 : TextConst 'ENU=The beneficiary has no active contracts;FRA=Le b‚n‚ficiaire n''a pas de formule active au %1';
+      Text003@1100281001 : TextConst 'ENU=Event date must be later than the contract start date. Do you want to continue ?;FRA=La date d''‚vŠnement est inf‚rieure … la date de d‚but de la formule. Souhaitez-vous continuer ?';
+      Text004@1100281003 : TextConst 'ENU=Event date must be less than the contract expiration date. Do you want to continue ?;FRA=La date d''‚vŠnement est sup‚rieure … la date d''expiration de la formule. Souhaitez-vous continuer ?';
+      Text005@1100281005 : TextConst 'ENU=Service %1 can''t have status %2 because product ligne %3 is not finished.;FRA=Le service %1 ne peut pas passer en statut %2 car la ligne produit %3 n''est pas termin‚e.';
+      Text006@1100281006 : TextConst 'ENU=Service Header Line exist, contract code can not be modified;FRA=La formule ne peut pas ˆtre modifi‚e car il existe des lignes produit';
+      ServiceMgtSetup@1100281007 : Record 5911;
+      NoSeriesMgt@1100281008 : Codeunit 396;
+      ServLog@1100281010 : Codeunit 50149;
+      PhoneStd@1100281015 : Codeunit 50099;
+      CallFrom@1100281012 : ' ,DARVA,FUSION';
+      HideMessage@1100281009 : Boolean;
+      DisableTest@1100281011 : Boolean;
+      Text007@1100281013 : TextConst 'ENU=Unvalid address. Can''t recognized address. Please complete your address.;FRA=Le format de l''adresse n''est pas valide. L''adresse ne peut pas ˆtre reconnue. Merci de v‚rifier votre saisie.';
+      Text008@1100281014 : TextConst 'ENU=Please fill phone no.;FRA=Vous devez saisir un nø de t‚l‚phone valide.';
+      Text009@1100281016 : TextConst 'ENU=Service %1 have already product %2.;FRA=Le service %1 contient d‚j… un produit %2.';
+      Text010@1100281017 : TextConst 'ENU=Cause %1 is not allowed for service order type %2;FRA=La cause %1 n''est pas autoris‚ pour le type produit %2';
+      Text011@1100281018 : TextConst 'ENU=Do you want to initialize the address beneficiary?;FRA=Souhaitez-vous r‚initialiser l''adresse du b‚n‚ficiaire?';
+      NoAutoStepToDARVA@1100281019 : Boolean;
+      Text012@1100281020 : TextConst 'ENU=The service is closed. Do you want to create the service header?;FRA=Le service est cl“tur‚. Souhaitez-vous cr‚er ligne produit?';
+      Text013@1100281021 : TextConst 'ENU=Action cancelled.;FRA=Action annul‚e.';
+      CampaignManagement@1100281022 : Codeunit 50206;
+      SkipAutoStep@1100281023 : Boolean;
+
+    PROCEDURE TouchRecord@1100281006(pInsert@1100281000 : Boolean);
+    BEGIN
+      IF pInsert THEN BEGIN
+        "Creation Date" := CURRENTDATETIME;
+        "Creation User ID" := USERID;
+      END;
+      "Last Modification Date" := CURRENTDATETIME;
+      "Last Modification User ID" := USERID;
+    END;
+
+    PROCEDURE GetNextServiceNo@1100281000() : Integer;
+    VAR
+      lService@1100281000 : Record 50066;
+    BEGIN
+      {lService.LOCKTABLE(TRUE);
+      IF lService.FINDLAST THEN
+        EXIT(lService."Service No." + 1);
+      EXIT(1);
+       }
+    END;
+
+    PROCEDURE CreateServiceHeader@1100281001(VAR pServiceHeader@1100281001 : Record 5900;pServiceOrderType@1100281000 : Code[10]) Returnvalue : Boolean;
+    VAR
+      lProductCatalog@1100281003 : Record 50060;
+      lServHeader@1100281010 : Record 5900;
+      lServiceHeaderDevice@1100281007 : Record 50072;
+      lServiceOrderType@1100281004 : Record 5903;
+      lCustomer@1100281009 : Record 18;
+      lProcessCode@1100281005 : Code[10];
+      lProcessStatus@1100281006 : Integer;
+      lServMgt@1100281008 : Codeunit 50064;
+      lToolsMgt@1100281011 : Codeunit 8016602;
+      lModified@1100281002 : Boolean;
+    BEGIN
+      //<<IMH48
+      //IF Status IN [Status::Finished, Status::Canceled] THEN
+      IF Status IN [Status::Canceled] THEN
+        FIELDERROR(Status);
+      //>>IMH48
+
+      //<<IMH53
+      IF GUIALLOWED THEN
+        IF Status = Status::Finished THEN
+          IF NOT CONFIRM(Text012) THEN
+            ERROR(Text013);
+      //>>IMH53
+
+      //<<IMH10
+      TESTFIELD("Service No.");
+      TESTFIELD("Event Date");
+
+      //<<IMH42.PC
+      IF NOT HideMessage THEN BEGIN
+      //>>IMH42.PC
+        //<<IMH38
+        TESTFIELD(Address);
+        TESTFIELD("Post Code");
+        lToolsMgt.CheckPostCode("Post Code","Country/Region Code",FIELDCAPTION("Post Code"));//IMH48
+        TESTFIELD(City);
+        //>>IMH38
+      END;
+
+      //<<IMH24
+      IF lCustomer.GET("Corporate No.") THEN
+        IF lCustomer."Region obligatory" THEN
+          TESTFIELD("Corporate Region Code");
+      //>>IMH24
+      //<<IMH12.ST
+      IF pServiceOrderType = '' THEN
+        IF NOT lServMgt.SelectServiceOrderType(Rec, pServiceOrderType) THEN
+          EXIT;
+      //>>IMH12.ST
+      //<<IMH36.ST
+      TestServOrderTypeFields(pServiceOrderType, NOT HideMessage, lModified); //IMH36.ST
+      IF GUIALLOWED AND (NOT HideMessage) THEN BEGIN
+        lServHeader.SETCURRENTKEY("Service No.");
+        lServHeader.SETRANGE("Service No.", "Service No.");
+        lServHeader.SETRANGE("Service Order Type", pServiceOrderType);
+        IF NOT lServHeader.ISEMPTY THEN
+          MESSAGE(Text009, "Service No.", pServiceOrderType);
+      END;
+      //>>IMH36.ST
+      pServiceHeader."Document Type" := pServiceHeader."Document Type"::Invoice;
+      pServiceHeader."No." := '';
+      pServiceHeader.VALIDATE("Service No.","Service No.");
+      pServiceHeader.VALIDATE("Service Order Type",pServiceOrderType);
+      //>>IMH10
+      //<<IMH44.PC
+      //lToolsMgt.CheckPostCode(pServiceHeader."Ship-to Post Code",pServiceHeader."Ship-to Country/Region Code",
+      //pServiceHeader.FIELDCAPTION("Ship-to Post Code"));//IMH48
+      //<<IMH43.PC
+      //>>IMH44.PC
+      IF pServiceHeader."Ship-to Phone" = '' THEN BEGIN
+        pServiceHeader."Ship-to Phone" := "Contact Phone No.";
+      END;
+      IF pServiceHeader."Ship-to Phone 2" = '' THEN BEGIN
+        pServiceHeader."Ship-to Phone 2" := "Contact Mobile Phone No.";
+      END;
+      //>>IMH43.PC
+      pServiceHeader.INSERT(TRUE);
+
+      //<<IMH14 isat.zw
+      pServiceHeader.VALIDATE("Default Team Code",
+               pServiceHeader.GetDefaultTeamCodeByServOrder(pServiceHeader));
+      //pServiceHeader.MODIFY(TRUE);
+      //>>IMH14 isat.zw
+      //<<IMH16 isat.zw
+      pServiceHeader.GetDefaultProcessStatusCode(lProcessCode, lProcessStatus);
+      IF lProcessCode <> '' THEN
+        pServiceHeader.VALIDATE("Process Code", lProcessCode);
+      IF lProcessStatus <> 0 THEN
+        pServiceHeader.VALIDATE("Process Status No.", lProcessStatus);
+      //<<IMH18
+      //pServiceHeader.MODIFY(TRUE);
+      pServiceHeader.MODIFY;
+      //>>IMH18
+      //>>IMH16 isat.zw
+
+      //<<IMH12.ST d‚sactiv‚
+      //COMMIT;
+      //>>IMH12.ST
+      //<<IMH20
+      IF lServiceOrderType.GET(pServiceOrderType) THEN BEGIN
+        IF lServiceOrderType."Electrical Failure" THEN BEGIN
+          IF NOT lServiceHeaderDevice.GET(pServiceHeader."No.") THEN BEGIN
+            lServiceHeaderDevice."Service Header No." := pServiceHeader."No.";
+            lServiceHeaderDevice.INSERT;
+          END;
+        END;
+      END;
+      //>>IMH20
+      //InsertIntervDescription(pServiceHeader);//IMH55 //IMH57 d‚sactiv‚
+      //<<IMH49.PC
+      IF NOT NoAutoStepToDARVA THEN BEGIN
+      //>>IMH49.PC
+        //<<IMH21.ST
+        IF AutoStep OR lModified THEN
+          MODIFY;
+        //>>IMH21.ST
+      END;
+      Returnvalue := TRUE;
+    END;
+
+    PROCEDURE GetContact@1100281002();
+    VAR
+      lContact@1100281000 : Record 5050;
+      lAltAddress@1100281001 : Record 5051;
+      lContactContract@1100281002 : Record 50059;
+      lCorporateRegion@1100281003 : Record 50058;
+      lCust@1100281004 : Record 18;
+      lMarketingSetup@1100281005 : Record 5079;
+    BEGIN
+      IF lContact.GET("Contact No.") THEN BEGIN
+        IF lContact.Name = '' THEN BEGIN
+          IF STRLEN(lContact."First Name" + ' ' + lContact.Surname) > 50 THEN BEGIN
+            "Contact Name" := lContact.Surname;
+          END ELSE BEGIN
+            "Contact Name" := lContact.Surname + ' ' + lContact."First Name";
+          END;
+        END ELSE BEGIN
+          "Contact Name" := lContact.Name;
+        END;
+        Address := lContact.Address;
+        "Address 2" := lContact."Address 2";
+        "Address 3" := lContact."Address 3";//IMH41
+        "Post Code" := lContact."Post Code";
+        City := lContact.City;
+        County := lContact.County; //IM02.ST
+        "Geo. Reference Code" := lContact."Geo. Reference Code";
+        "Country/Region Code" := lContact."Country/Region Code";
+        "Corporate No." := lContact."Corporate No.";
+        "Corporate Region Code" := lContact."Corporate Region Code";
+        "VIP Code" := lContact."VIP Code";
+        "Contact Salutation Code" := lContact."Salutation Code"; //IMH40.ST
+        "Contact E-mail" := lContact."E-Mail"; //IMH40.ST
+      //<<IMH36.ST
+        "Contact Phone No." := '';
+        ChangePhoneNo(lContact."Phone No.", lContact."Phone No. 2","Contact Phone No.");
+        "Contact Mobile Phone No." := '';
+        ChangePhoneNo(lContact."Mobile Phone No.", lContact."Mobile Phone No. 2","Contact Mobile Phone No.");
+      //>>IMH36.ST
+        // R‚cup‚ration de l'adresse principale
+        {
+        lAltAddress.SETRANGE("Contact No.","Contact No.");
+        lAltAddress.SETRANGE("Contact Address",TRUE);
+        IF lAltAddress.ISEMPTY THEN
+          EXIT;
+        lAltAddress.FINDFIRST;
+        }
+        lMarketingSetup.GET;
+        lAltAddress.GET("Contact No.", lMarketingSetup."Main Address Code");
+        VALIDATE("Alt. Address Code",lAltAddress.Code);
+        "Contract Form Code" := '';
+        "Contract Occurence No." := 0;
+        GetContactContract;
+        "Member No." := lContact."Member No."; //IMH06
+        //<<IMH13
+        // Gestion du contact principal
+        IF lContact."Corporate Region Code" <> '' THEN BEGIN
+          lCorporateRegion.SETRANGE("Corporate No.",lContact."Corporate No.");
+          lCorporateRegion.SETRANGE("Region Code",lContact."Corporate Region Code");
+          IF NOT lCorporateRegion.ISEMPTY THEN BEGIN
+            lCorporateRegion.FINDFIRST;
+            "Corporate Contact No." := lCorporateRegion."Main Contact No.";
+          END;
+        END;
+        //IF "Corporate Contact No." = '' THEN BEGIN
+         // IF lCust.GET("Corporate No.") THEN BEGIN
+         //   lCust.GetContactNo("Corporate Contact No.");
+         // END;
+        //END;
+        //>>IMH13
+      END ELSE BEGIN
+        "Contact Name" := '';
+        Address := '';
+        "Address 2" := '';
+        "Address 3" := '';
+        "Post Code" := '';
+        City := '';
+        County := '';
+        "Country/Region Code" := '';
+        "Corporate No." := '';
+        "Corporate Region Code" := '';
+        "VIP Code" := '';
+        "Alt. Address Code" := '';
+        "Contract Form Code" := '';
+        "Contract Occurence No." := 0;
+        "Member No." := '';//IMH06
+      //<<IMH36.ST
+        "Contact Phone No." := '';
+        "Contact Mobile Phone No." := '';
+      //>>IMH36.ST
+      END;
+    END;
+
+    PROCEDURE GetAltAddress@1100281003();
+    VAR
+      lAltAddress@1100281000 : Record 5051;
+    BEGIN
+      IF NOT lAltAddress.GET("Contact No.","Alt. Address Code") THEN
+        EXIT;
+      Address := lAltAddress.Address;
+      "Address 2" := lAltAddress."Address 2";
+      "Address 3" := lAltAddress."Address 3";//IMH41
+      County := lAltAddress.County; //IMH02.ST
+      City := lAltAddress.City;
+      "Post Code" := lAltAddress."Post Code";
+      //<<IMH41
+      IF "Post Code" = '' THEN
+        City := '';
+      //>>IMH41
+      "Country/Region Code" := lAltAddress."Country/Region Code";
+      //<<IMH51.ST
+      "Geo. Reference Code" := lAltAddress."Geo. Reference Code";
+      IF ("Geo. Reference Code" = '') AND ("Post Code" <> '') THEN
+        "Geo. Reference Code" := PostCode.GetGeoCode("Post Code", City);
+      //>>IMH51.ST
+      //<<IMH10
+      "Occupier Nature" := lAltAddress."Occupier Nature";
+      "Residence Type" := lAltAddress."Residence Type";
+      "Housing Type" := lAltAddress."Housing Type";
+      "Property Type" := lAltAddress."Property Type";
+      //>>IMH10
+      //<<IMH36.ST
+      ChangePhoneNo(lAltAddress."Phone No.", '',"Contact Phone No.");
+      ChangePhoneNo(lAltAddress."Mobile Phone No.", lAltAddress."Mobile Phone No. 2","Contact Mobile Phone No.");
+      //>>IMH36.ST
+    END;
+
+    PROCEDURE CheckEventDate@1100281007() rValue : Boolean;
+    VAR
+      lContactContract@1100281000 : Record 50059;
+    BEGIN
+      // controle de la date d'‚venement
+      rValue := TRUE;
+
+      IF "Event Date" > TODAY THEN
+        IF NOT HideMessage THEN //IMH27
+          ERROR(Text001)
+        ELSE
+          rValue := FALSE;
+
+      IF "Confidence Prior" THEN
+        EXIT;
+
+      lContactContract.SETCURRENTKEY("Contact No.","Corporate No.");
+      lContactContract.SETRANGE("Contact No.","Contact No.");
+      lContactContract.SETRANGE("Corporate No.","Corporate No.");
+      lContactContract.SETRANGE("Contract Form Code","Contract Form Code");
+      IF "Contract Occurence No." <> 0 THEN
+        lContactContract.SETRANGE("Occurence No.","Contract Occurence No.");
+      IF lContactContract.ISEMPTY THEN
+        EXIT;
+      lContactContract.FINDLAST;
+      IF lContactContract."Start Date" <> 0D THEN
+        IF "Event Date" < lContactContract."Start Date" THEN BEGIN
+          IF NOT HideMessage THEN BEGIN //IMH27
+            IF GUIALLOWED THEN
+              IF NOT CONFIRM(Text003) THEN ERROR('')
+            ELSE
+              rValue := FALSE;
+          END
+          ELSE
+            rValue := FALSE;
+        END;
+      IF lContactContract."Expiration Date" <> 0D THEN
+        IF "Event Date" > lContactContract."Expiration Date" THEN
+          IF NOT HideMessage THEN BEGIN//IMH27
+            IF GUIALLOWED THEN
+              IF NOT CONFIRM(Text004) THEN ERROR('')
+            ELSE
+              rValue := FALSE;
+          END
+          ELSE
+            rValue := FALSE;
+    END;
+
+    PROCEDURE _CheckContactContract@1100281004();
+    VAR
+      lContactContract@1100281000 : Record 50059;
+    BEGIN
+      // controle de l'occurrence : date d‚but date expir vs date evt
+      //VALIDATE("Alt. Address Code",lContactContract."Default Address Code");
+    END;
+
+    PROCEDURE GetContactContract@1100281005();
+    VAR
+      lContactContract@1100281000 : Record 50059;
+    BEGIN
+      // controle de l'occurrence : date d‚but date expir vs date evt
+      lContactContract.SETCURRENTKEY("Contact No.","Corporate No.");
+      lContactContract.SETRANGE("Contact No.","Contact No.");
+      lContactContract.SETRANGE("Corporate No.","Corporate No.");
+      IF "Event Date" <> 0D THEN BEGIN
+        lContactContract.SETFILTER("Expiration Date",'%1|>=%2',0D,"Event Date");
+        lContactContract.SETFILTER("Start Date",'%1|<=%2',0D,"Event Date");
+      END ELSE BEGIN
+        lContactContract.SETFILTER("Expiration Date",'%1|>=%2',0D,WORKDATE);
+      END;
+      IF lContactContract.ISEMPTY OR (lContactContract.COUNT > 1) THEN
+        EXIT;
+      lContactContract.FINDFIRST;
+      "Contract Form Code" := lContactContract."Contract Form Code";
+      "Contract Occurence No." := lContactContract."Occurence No.";
+      "Deductible 1 (LCY)" := lContactContract."Deductible 1 (LCY)";
+      "Deductible 2 (LCY)" := lContactContract."Deductible 2 (LCY)";
+      //VALIDATE("Alt. Address Code",lContactContract."Default Address Code");
+    END;
+
+    PROCEDURE CreateInteraction@10();
+    VAR
+      lSegmentLine@1000 : TEMPORARY Record 5077;
+    BEGIN
+      //IMH11 isat.zw
+      //<<IMH18
+      //lSegmentLine.CreateInteractionFromService(Rec);
+      lSegmentLine.CreateInteractionFromService(Rec,'');
+      //>>IMH18
+    END;
+
+    PROCEDURE OpenAltAddress@1100281008();
+    VAR
+      lAltAddress@1100281000 : Record 5051;
+    BEGIN
+      IF NOT lAltAddress.GET("Contact No.","Alt. Address Code") THEN
+        EXIT;
+      IF ISSERVICETIER THEN
+        PAGE.RUNMODAL(PAGE::"Contact Alt. Address Card",lAltAddress)
+      ELSE
+        FORM.RUNMODAL(FORM::"Contact Alt. Address Card",lAltAddress);
+    END;
+
+    PROCEDURE GetCorporateContactJobResp@1100281010() : Text[30];
+    VAR
+      lContactJobResponsibility@1100281000 : Record 5067;
+    BEGIN
+      lContactJobResponsibility.SETRANGE("Contact No.","Corporate Contact No.");
+      IF lContactJobResponsibility.ISEMPTY THEN
+       EXIT;
+      lContactJobResponsibility.FINDFIRST;
+      lContactJobResponsibility.CALCFIELDS("Job Responsibility Description");
+      EXIT(lContactJobResponsibility."Job Responsibility Description");
+    END;
+
+    PROCEDURE OnModify@1100281011(xRec@1100281000 : Record 50066);
+    VAR
+      lServiceHeader@1100281001 : Record 5900;
+      lRecUpdated@1100281002 : Boolean;
+    BEGIN
+      //IMH17
+      {ST d‚sactiv‚ car bloqu‚ par la saisie par description
+      IF (xRec."Campaign No." <> "Campaign No.") OR
+         (xRec."Event Date" <> "Event Date") OR
+         (xRec."Service Cause" <> "Service Cause") OR
+         (xRec."Reference No." <> "Reference No.") OR
+         (xRec."Occupier Nature" <> "Occupier Nature") OR
+         (xRec."Residence Type" <> "Residence Type") OR
+         (xRec."Housing Type" <> "Housing Type") OR
+         (xRec."Property Type" <> "Property Type")
+      THEN BEGIN
+      }
+        lServiceHeader.SETCURRENTKEY("Service No.");
+        lServiceHeader.SETRANGE("Service No.","Service No.");
+        IF lServiceHeader.ISEMPTY THEN
+          EXIT;
+        lServiceHeader.FINDSET(TRUE);
+        REPEAT
+          lRecUpdated := FALSE;
+          IF lServiceHeader."Campaign No." <> "Campaign No." THEN BEGIN
+            lServiceHeader.VALIDATE("Campaign No.", "Campaign No.");
+            lRecUpdated := TRUE;
+          END;
+          IF lServiceHeader."Event Date" <> "Event Date" THEN BEGIN
+            lServiceHeader.VALIDATE("Event Date", "Event Date");
+            lRecUpdated := TRUE;
+          END;
+
+          IF lServiceHeader."Service Cause" <> "Service Cause" THEN BEGIN
+            //<<IMH56 d‚sactiv‚
+            IF lServiceHeader.Status IN [lServiceHeader.Status::Pending, lServiceHeader.Status::"In Process",
+                  lServiceHeader.Status::"On Hold"] THEN BEGIN
+            //>>IMH56
+              lServiceHeader.VALIDATE("Service Cause", "Service Cause");
+              lRecUpdated := TRUE;
+            END;
+          END;
+          IF lServiceHeader."Reference No." <> "Reference No." THEN BEGIN
+            lServiceHeader.VALIDATE("Reference No.", "Reference No.");
+            lRecUpdated := TRUE;
+          END;
+          IF lServiceHeader."Occupier Nature" <> "Occupier Nature" THEN BEGIN
+            lServiceHeader.VALIDATE("Occupier Nature", "Occupier Nature");
+            lRecUpdated := TRUE;
+          END;
+          IF lServiceHeader."Residence Type" <> "Residence Type" THEN BEGIN
+            lServiceHeader.VALIDATE("Residence Type", "Residence Type");
+            lRecUpdated := TRUE;
+          END;
+          IF lServiceHeader."Housing Type" <> "Housing Type" THEN BEGIN
+            lServiceHeader.VALIDATE("Housing Type", "Housing Type");
+            lRecUpdated := TRUE;
+          END;
+          IF lServiceHeader."Property Type" <> "Property Type" THEN BEGIN
+            lServiceHeader.VALIDATE("Property Type", "Property Type");
+            lRecUpdated := TRUE;
+          END;
+          //<<IMH38
+          IF lServiceHeader."Corporate Region Code" <> "Corporate Region Code" THEN BEGIN
+            lServiceHeader.VALIDATE("Corporate Region Code", "Corporate Region Code");
+            lRecUpdated := TRUE;
+          END;
+          //>>IMH38
+
+          IF lRecUpdated THEN
+            lServiceHeader.MODIFY(TRUE);
+        UNTIL lServiceHeader.NEXT=0;
+      //END;
+    END;
+
+    PROCEDURE GetCodeDescription@1100281012(pTableID@1100281001 : Integer;pFieldID@1100281002 : Integer;pCode@1100281003 : Code[10]) : Text[50];
+    VAR
+      lCode@1100281000 : Record 50079;
+    BEGIN
+      //IMH19
+      IF lCode.GET(pTableID,pFieldID,pCode) THEN
+        EXIT(lCode.Description);
+    END;
+
+    PROCEDURE AutoStep@1100281009() : Boolean;
+    VAR
+      lProcessServMgt@1100281000 : Codeunit 50042;
+    BEGIN
+      //IMH21.ST
+      MODIFY;   //IMH60
+      EXIT(lProcessServMgt.TestAutoStep(Rec));
+    END;
+
+    PROCEDURE SetHideMessage@1100281013(pHideMessage@1100281000 : Boolean);
+    BEGIN
+      //IMH27
+      HideMessage := pHideMessage;
+    END;
+
+    PROCEDURE SetCallFrom@1100281016(pCallFrom@1100281000 : Integer);
+    BEGIN
+      //IMH35.ST
+      CallFrom := pCallFrom;
+    END;
+
+    PROCEDURE TestServOrderTypeFields@1100281019(pServOrderType@1100281000 : Code[10];pRaiseError@1100281002 : Boolean;VAR pRecUpdated@1100281004 : Boolean) : Boolean;
+    VAR
+      lServOrderType@1100281001 : Record 5903;
+      lPhoneNo@1100281003 : Text[50];
+    BEGIN
+      //IMH36.ST
+      IF pRaiseError THEN
+        pRaiseError := (CallFrom = CallFrom::" ");
+      IF NOT lServOrderType.GET(pServOrderType) THEN
+        EXIT;
+      IF lServOrderType."Geocoding Required" AND ("Geo. Reference Code" = '') THEN BEGIN
+      // Calcul du g‚ocodage
+        "Geo. Reference Code" := PostCode.GetGeoCode("Post Code", City); //IMH28.ST
+        pRecUpdated := TRUE;
+        IF "Geo. Reference Code" = '' THEN BEGIN
+          IF pRaiseError THEN
+            ERROR(Text007)
+          ELSE BEGIN
+            EXIT(FALSE);
+          END;
+        END;
+      END;
+      IF lServOrderType."Phone Required" THEN BEGIN
+        PhoneStd.SetHideMessage(TRUE);
+        IF "Contact Phone No." <> '' THEN BEGIN
+          lPhoneNo := "Contact Phone No.";
+          PhoneStd.ValidatePhoneNo(DATABASE::Service,FIELDNO("Contact Phone No."),
+                                   "Country/Region Code", lPhoneNo);
+          IF (lPhoneNo <> '') AND (lPhoneNo <> "Contact Phone No.") THEN BEGIN
+            "Contact Phone No." := lPhoneNo;
+            pRecUpdated := TRUE;
+          END;
+        END;
+        IF (lPhoneNo = '') AND ("Contact Mobile Phone No." <> '') THEN BEGIN
+          lPhoneNo := "Contact Mobile Phone No.";
+          PhoneStd.ValidatePhoneNo(DATABASE::Service,FIELDNO("Contact Mobile Phone No."),
+                                   "Country/Region Code", lPhoneNo);
+          IF (lPhoneNo <> '') AND (lPhoneNo <> "Contact Mobile Phone No.") THEN BEGIN
+            "Contact Mobile Phone No." := lPhoneNo;
+            pRecUpdated := TRUE;
+          END;
+        END;
+        IF lPhoneNo = '' THEN BEGIN
+          IF pRaiseError THEN
+            ERROR(Text008)
+          ELSE BEGIN
+            EXIT(FALSE);
+          END;
+        END;
+      END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE ChangePhoneNo@1100281015(pNewPhoneNo1@1100281000 : Text[30];pNewPhoneNo2@1100281001 : Text[30];VAR pToPhoneNo@1100281002 : Text[30]) : Boolean;
+    BEGIN
+      //IMH36.ST
+      IF (pNewPhoneNo1 <> '') AND (pNewPhoneNo1 <> pToPhoneNo) THEN BEGIN
+        pToPhoneNo := pNewPhoneNo1;
+        EXIT(TRUE);
+      END;
+      IF (pNewPhoneNo2 <> '') AND (pNewPhoneNo2 <> pToPhoneNo) THEN BEGIN
+        pToPhoneNo := pNewPhoneNo2;
+        EXIT(TRUE);
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE FindContract@1100281014() : Boolean;
+    VAR
+      lContContract@1100281001 : Record 50059;
+      lContContractAltAddr@1100281002 : Record 50039;
+      lTempContContract@1100281003 : TEMPORARY Record 50059;
+    BEGIN
+      //IMH39.ST
+      WITH lContContract DO BEGIN
+        SETRANGE("Contact No.", Rec."Contact No.");
+        SETRANGE("Corporate No.", Rec."Corporate No.");
+        SETFILTER("Start Date", '<=%1|=%2', Rec."Event Date", 0D);
+        SETFILTER("Expiration Date", '>=%1|=%2', Rec."Event Date", 0D);
+        IF FINDSET THEN
+          REPEAT
+            IF "Default Address Code" = Rec."Alt. Address Code" THEN BEGIN
+              lTempContContract := lContContract;
+              IF lTempContContract.INSERT(FALSE) THEN;
+            END
+            ELSE BEGIN
+              lContContract.SETRANGE("Contact Address Filter", Rec."Alt. Address Code");
+              lContContract.CALCFIELDS("Alt. Address Exists");
+              IF lContContract."Alt. Address Exists" THEN BEGIN
+                lTempContContract := lContContract;
+                IF lTempContContract.INSERT(FALSE) THEN;
+              END;
+            END;
+          UNTIL lContContract.NEXT=0;
+      END; // WITH
+      IF lTempContContract.ISEMPTY THEN
+        EXIT(FALSE);
+      IF lTempContContract.COUNT = 1 THEN BEGIN
+        lTempContContract.FINDFIRST;
+        "Contract Form Code" := lTempContContract."Contract Form Code";
+        VALIDATE("Contract Occurence No.", lTempContContract."Occurence No.");
+        EXIT(TRUE);
+      END;
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE SetAutoStepToDARVA@1100281017(pNoAutoStepToDARVA@1100281000 : Boolean);
+    BEGIN
+      // IMH49.PC
+      NoAutoStepToDARVA := pNoAutoStepToDARVA;
+    END;
+
+    PROCEDURE PhoneNoAssistEdit@1100281018(pPhoneNo@1100281000 : Text[30]);
+    VAR
+      lCTIMgt@1100281001 : Codeunit 50138;
+    BEGIN
+      // IMH50.PC
+      IF pPhoneNo <> '' THEN BEGIN
+        lCTIMgt.MakeCall(pPhoneNo);
+      END;
+    END;
+
+    PROCEDURE InsertIntervDescription@1000000000(VAR pServiceHeader@1000000002 : Record 5900);
+    VAR
+      lProductReason@1000000001 : Record 50065;
+      lIntervDescription@1000000000 : Record 50070;
+    BEGIN
+      //IMH55
+      IF NOT lProductReason.GET(pServiceHeader."Service Order Type"
+                  ,pServiceHeader."Corporate No.",lProductReason."Code Type"::FaultReason,"Service Cause") THEN
+        EXIT;
+
+      lIntervDescription."Service Header No." := pServiceHeader."No.";
+      lIntervDescription."Affected Location Code" := lProductReason."Default Affected Location Code";
+      lIntervDescription."Building Trade No." := lProductReason."Default Building Trade No.";
+      lIntervDescription."Speciality Code" := lProductReason."Default Speciality Code";
+      lIntervDescription.INSERT(TRUE);
+    END;
+
+    PROCEDURE SetSkipAutoStep@1100281052(pSkipAutoStep@1100281000 : Boolean);
+    BEGIN
+      // IMH59
+      SkipAutoStep := pSkipAutoStep;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH63 @d 23/05/14 @a ISAT.ZW @v IMH6.01.P010 @s PMU
+          @c Ajout Champ 57010 PMU Owner No. + 57011 PMU Flux Type + 57012 IMA Refecence NO
+          @c Ajout cle secondaire IMA Reference No.,Corporate No. */
+      /** @r IMH62 @d 16/04/14 @a ISAT.ZW @v IMH6.01.5071 @s Tri Service @h 5071
+          @c Ajout tri sur la date de cr‚ation */
+      /** @r IMH61 @d 20/08/13 @a ISAT.PC @v IMH6.01.351 @s JUILLET @h 3709
+          @c Ajout champ 50004, Service Header Allowed */
+      /** @r IMH60 @d 11/07/13 @a ISAT.ZW @v IMH6.01.351 @s JUILLET @h 3872 @c Modify avant autostep */
+      /** @r IMH59 @d 17/10/12 @a ISAT.ZW @v IMH6.01.224 @s NEP00006 @h 3702 @c Ajout SkipAutoStep */
+      /** @r IMH58 @d 21/06/12 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c evolution
+          @h 3610 @c Creation champ 50060 mask To DGS */
+      /** @r IMH57 @d 21/06/12 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @h 3398
+          @c Correction */
+      /** @r IMH56 @d 18/06/12 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c 2979
+          @c Champ cause intervention modifiable */
+      /** @r IMH55 @d 04/05/12 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @h 3398
+          @c Corps de metier, specialit‚ et lieu par defaut */
+      /** @r IMH54 @d 24/04/12 @a ISAT.ZW @v IMH6.01.013 @s EVC @h 3365 @c Contr“le Case intervention */
+      /** @r IMH53 @d 23/04/12 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @h 2717
+          @c Ajout message de confirmation pour cr‚ation de lp sur les service clos. */
+      /** @r IMH52 @d 14/03/12 @a ISAT.ST @v IMH6.01.105 @s Extranet qualit‚
+          @c AJout champ 400 Service Type + modification tablerelation Contact No. */
+      /** @r IMH51 @d 22/02/12 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c G‚ocodage adresse */
+      /** @r IMH50 @d 14/01/12 @a ISAT.PC @v IMH6.01.129 @s CTI @c Ajout fonction PhoneNoAssistEdit */
+      /** @r IMH49 @d 06/01/12 @a ISAT.PC @v IMH6.01.011 @s Gestion du service @c 2786 */
+      /** @r IMH48 @d 07/12/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c 2616
+          @c Supprimer le contr“le sur le statut clotur‚ pour la cr‚ation ligne produit */
+      /** @r IMH47 @d 25/11/11 @a ISAT.PC @v IMH6.01.011 @s Gestion du service @c ajout de champ 50630, EAI Entry No. */
+      /** @r IMH46 @d 14/11/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Ajout index "Member No." */
+      /** @r IMH45 @d 29/09/11 @a ISAT.ZW @v IMH6.01.162 @s Gestion du service @c Ajout code motif annulation */
+      /** @r IMH44 @d 27/09/11 @a ISAT.PC @v IMH6.01.162 @s Gestion du service @c En v‚rifie plus l'adresse de MEO ici */
+      /** @r IMH43 @d 26/09/11 @a ISAT.PC @v IMH6.01.162 @s Gestion du service @c Gestion des telephones */
+      /** @r IMH42 @d 19/09/11 @a ISAT.PC @v IMH6.01.162 @s DARVA @c gestion de la cr‚ation de la DT */
+      /** @r IMH41 @d 09/09/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Gestion CP vide
+          @c Ajout champ 90 Address 3*/
+      /** @r IMH40 @d 30/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Suivi code appelation */
+      /** @r IMH39 @d 29/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c FindContract */
+      /** @r IMH38 @d 29/08/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du services
+          @c Modif code region
+          @c Champs adresse obligatoire  */
+      /** @r IMH37 @d 27/08/11 @a ISAT.VA @v IMH6.01.011 @s Mise … jour des t‚l‚phones*/
+      /** @r IMH36 @d 11/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Remont‚e des t‚l‚phones, contr“les de donn‚es */
+      /** @r IMH35 @d 08/08/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Ajout SetCallFrom pour traitements particuliers interfaces */
+      /** @r IMH34 @d 25/07/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c Synchro Adresse service */
+      /** @r IMH33 @d 17/06/11 @a ISAT.ST @v IMH6.01.161 @s Log Service @c Appel sur les triggers de table */
+      /** @r IMH32 @d 10/06/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c Ajout champ No r‚f‚rence Fusion */
+      /** @r IMH31 @d 30/05/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Ajout Index Reference No.,Corporate No. */
+      /** @r IMH30 @d 27/05/11 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Lookup contact corporate */
+      /** @r IMH29 @d 19/05/11 @a ISAT.PC @v IMH6.01.146 @s Gestion facturation
+          @c Ajout champ 50602 Sales Order Nb
+          @c Ajout champ 50603 Purchase Order Nb */
+      /** @r IMH28 @d 09/05/11 @a ISAT.MA @v IMH6.01.134 @s Interface DARVA @c Ajout champ 300 DARVA Reference No. */
+      /** @r IMH27 @d 28/03/11 @a ISAT.ZW @v IMH6.01.136 @s Interface Fusion
+          @c Creation ligne FIle de message en creation et modification service
+          @c ajout HideMessage
+          @c Ajout cl‚ "Contact No.","Event Date" pour interface fusion*/
+      /** @r IMH26 @d 17/02/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Verrous - Suppresion champs 50510 "Locking Date" et 50511 "Locking User ID" et cl‚  */
+      /** @r IHM25 @d 10/02/11 @a ISAT.ZW @v IMH6.01.001 @s Normalisation des donn‚es
+          @c Associer les Pays au code postaux - descendre le code pays automatiquement*/
+      /** @r IMH24 @d 09/02/11 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service @c Region obligatoire */
+      /** @r IMH23 @d 31/01/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Urgent passe de booleen a option */
+      /** @r IMH22 @d 17/01/11 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Gestion OnDelete */
+      /** @r IMH21 @d 14/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout fonction AutoStep + appel DeleteSourceRec des process */
+      /** @r IMH20 @d 17/12/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Init. du nø contact CG */
+      /** @r IMH19 @d 14/12/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Ajout fonction recup. libell‚ code */
+      /** @r IMH18 @d 15/12/2010 @a ISAT.LLT @v IMH6.01.108 @s Interaction
+          @c Gestion modŠle
+          @c Correction */
+      /** @r IMH17 @d 14/12/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Gestion de l'affichage liste des campagnes
+          @c Gestion de la synchro avec ligne produit */
+      /** @r IMH16 @d 13/12/10 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service
+          @c code process par d‚faut en cr‚ation ligne produit */
+      /** @r IMH15 @d 07/12/10 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service
+          @c Ajout Champs 50520 + 50521 */
+      /** @r IMH14 @d 07/12/10 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service
+          @c code ‚quipe par d‚faut en cr‚ation ligne produit */
+      /** @r IMH13 @d 07/12/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Ajout de la cl‚ "Locking Date,Locking User ID" pour la gestion des verrous
+          @c Gestion du contact principal */
+      /** @r IMH12 @d 30/11/10 @a ISAT.ST @v IMH6.01.011 @s Gestion du service
+          @c Modif IMH10 */
+      /** @r IMH11 @d 30/11/10 @a ISAT.ZW @v IMH6.01.011 @s Gestion du service
+          @c Ajout fonciton create Interaction */
+      /** @r IMH10 @d 26/11/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Le type de produit d‚pend de la cause intervention */
+      /** @r IMH09 @d 17/11/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service
+          @c Ajout champ 49 Event Time
+          @c Interdiction de cr‚er un service si contact personne */
+      /** @r IMH08 @d 10/11/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Ajout index sur Corporate No. pour infopane GC */
+      /** @r IMH07 @d 05/11/10 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Suivi catalogue */
+      /** @r IMH06 @d 04/10/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Gestion Nø soci‚taire */
+      /** @r IMH05 @d 27/10/10 @a ISAT.ZW @v IMH6.01.013 @s Gestion des Corbeille @c Supprimer champ Nø action origine */
+      /** @r IMH04 @d 27/10/10 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Contr“le sur le changement de statut */
+      /** @r IMH03 @d 22/10/10 @a ISAT.ZW @v IMH6.01.013 @s Gestion des Corbeille @c Ajout Nø action origine */
+      /** @r IMH02 @d 21/10/10 @a ISAT.ST @v IMH6.01.011 @s Gestion du service @c Ajout County */
+      /** @r IMH01 @d 04/10/10 @a ISAT.LLT @v IMH6.01.011 @s Gestion du service @c Cr‚ation */
+    }
+    END.
+  }
+}

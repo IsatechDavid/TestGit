@@ -1,0 +1,173 @@
+OBJECT Codeunit 50091 Update Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=23/03/12;
+    Time=18:00:00;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lWindow@1100281001 : Dialog;
+            lField@1100281000 : Record 2000000041;
+            lTableNo@1100281002 : Integer;
+            lFieldNo@1100281003 : Integer;
+          BEGIN
+            IF FORM.RUNMODAL(FORM::Fields, lField) <> ACTION::LookupOK THEN
+              EXIT;
+
+            IF NOT CONFIRM(STRSUBSTNO(Text002, lField.FieldName, lField.TableName)) THEN
+              EXIT;
+            DropField(lField.TableNo, lField."No.", lField.FieldName);
+            MESSAGE(Text003);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU=Table %1 has changed. It can''t be auto processed.;FRA=La table %1 a chang‚ de nom. Il ne sera pas trait‚ automatiquement.';
+      Text002@1100281001 : TextConst 'ENU=Are-you sure dropping values for field %1 table %2;FRA=Etes-vous sur de vouloir effacer le champ %1 de la table %2 ?';
+      Text003@1100281002 : TextConst 'ENU=Values dropped.;FRA=Valeurs effac‚es.';
+
+    PROCEDURE DropField@1100281000(pTableID@1100281000 : Integer;pFieldId@1100281001 : Integer;pFieldName@1100281002 : Text[80]) : Boolean;
+    VAR
+      lRecRef@1100281003 : RecordRef;
+      lFieldRef@1100281004 : FieldRef;
+      lObject@1100281005 : Record 2000000001;
+      lField@1100281006 : Record 2000000041;
+      lCompany@1100281007 : Record 2000000006;
+      lNullFilter@1100281008 : Text[30];
+      lNullValue@1100281009 : Text[30];
+    BEGIN
+      IF NOT lObject.GET(lObject.Type::Table, '', pTableID) THEN
+        EXIT;
+
+      IF NOT lField.GET(pTableID, pFieldId) THEN
+        EXIT;
+      IF NOT lField.Enabled THEN
+        EXIT;
+
+      IF lField.FieldName <> pFieldName THEN BEGIN
+        MESSAGE(Text001, pFieldId, pTableID);
+        EXIT;
+      END;
+
+      lNullFilter := GetNullFilter(lField);
+      //lNullValue := GetNullValue(lField);
+      lCompany.FINDFIRST;
+      REPEAT
+        lRecRef.OPEN(pTableID, FALSE, lCompany.Name);
+        lFieldRef := lRecRef.FIELD(pFieldId);
+        lFieldRef.SETFILTER(lNullFilter);
+        IF NOT lRecRef.ISEMPTY THEN BEGIN
+          lRecRef.FINDSET(TRUE);
+          REPEAT
+            lFieldRef := lRecRef.FIELD(pFieldId);
+            ClearFieldValue(lField, lFieldRef);
+            lRecRef.MODIFY(FALSE);
+          UNTIL lRecRef.NEXT=0;
+          COMMIT;
+        END;
+        lRecRef.CLOSE;
+      UNTIL lCompany.NEXT=0;
+    END;
+
+    PROCEDURE GetNullFilter@1100281002(pField@1100281000 : Record 2000000041) : Text[30];
+    VAR
+      lDate@1100281001 : Record 2000000007;
+      lDateTimeFilter@1100281002 : Record 405;
+    BEGIN
+      WITH pField DO BEGIN
+        CASE Type OF
+          Type::Date : BEGIN
+      //     EXIT('<>' + GetNullValue(pField));
+           lDate.SETFILTER("Period Start", '<>%1', 0D);
+           EXIT(lDate.GETFILTER("Period Start"));
+          END;
+          Type::DateTime : BEGIN
+            lDateTimeFilter.SETFILTER("Date and Time", '<>%1', 0DT);
+            EXIT(lDateTimeFilter.GETFILTER("Date and Time"));
+          END;
+          Type::Time : BEGIN
+            lDateTimeFilter.SETFILTER(Time, '<>%1', 0T);
+            EXIT(lDateTimeFilter.GETFILTER(Time));
+          END;
+          Type::Decimal, Type::Integer, Type::Option, Type::BigInteger, Type::Duration : EXIT('<>' + GetNullValue(pField));
+          Type::Binary, Type::BLOB : ;
+          Type::Boolean : EXIT(STRSUBSTNO('<>%1',FALSE));
+          ELSE
+            EXIT('<>''''');
+        END; // CASE
+      END;
+    END;
+
+    PROCEDURE GetNullValue@1100281003(pField@1100281000 : Record 2000000041) : Text[30];
+    BEGIN
+      WITH pField DO BEGIN
+        CASE Type OF
+          Type::Date : EXIT('0d');
+          Type::DateTime : EXIT('0DT');
+          Type::Time : EXIT('0T');
+          Type::Decimal, Type::Integer, Type::Option, Type::BigInteger, Type::Duration : EXIT('0');
+          Type::Binary, Type::BLOB : ;
+          Type::Boolean : EXIT('FALSE');
+          ELSE
+            EXIT('');
+        END; // CASE
+      END;
+    END;
+
+    PROCEDURE ClearFieldValue@1100281001(pField@1100281001 : Record 2000000041;VAR pFieldRef@1100281000 : FieldRef);
+    BEGIN
+      WITH pField DO BEGIN
+        CASE Type OF
+          Type::Date :     pFieldRef.VALUE := 0D;
+          Type::DateTime : pFieldRef.VALUE := 0DT;
+          Type::Time :     pFieldRef.VALUE := 0T;
+          Type::Decimal, Type::Integer, Type::Option, Type::BigInteger, Type::Duration : pFieldRef.VALUE := 0;
+          Type::Binary, Type::BLOB : ;
+          Type::Boolean :  pFieldRef.VALUE := FALSE;
+          ELSE
+            pFieldRef.VALUE := '';
+        END; // CASE
+      END;
+    END;
+
+    PROCEDURE DropTable@1100281004(pTableID@1100281000 : Integer;pTableName@1100281002 : Text[80]) : Boolean;
+    VAR
+      lRecRef@1100281003 : RecordRef;
+      lFieldRef@1100281004 : FieldRef;
+      lObject@1100281005 : Record 2000000001;
+      lField@1100281006 : Record 2000000041;
+      lCompany@1100281007 : Record 2000000006;
+      lNullFilter@1100281008 : Text[30];
+      lNullValue@1100281009 : Text[30];
+    BEGIN
+      IF NOT lObject.GET(lObject.Type::Table, '', pTableID) THEN
+        EXIT;
+
+      IF lObject.Name <> pTableName THEN BEGIN
+        MESSAGE(Text001, pTableID);
+        EXIT;
+      END;
+
+      //lNullFilter := GetNullFilter(lField);
+      //lNullValue := GetNullValue(lField);
+      lCompany.FINDFIRST;
+      REPEAT
+        lRecRef.OPEN(pTableID, FALSE, lCompany.Name);
+        IF NOT lRecRef.ISEMPTY THEN BEGIN
+          lRecRef.DELETEALL;
+          COMMIT;
+        END;
+        lRecRef.CLOSE;
+      UNTIL lCompany.NEXT=0;
+    END;
+
+    BEGIN
+    END.
+  }
+}

@@ -1,0 +1,168 @@
+OBJECT Codeunit 50016 Coordinator Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/13;
+    Time=16:20:46;
+    Modified=Yes;
+    Version List=IMH6.01.08;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100281000 : TextConst 'ENU="Process Loading ";FRA=Chargement en cours..';
+      Text002@1100281001 : TextConst 'ENU=Delete sector from co-ordinator will desaffect this co-ordonator from provider''s sector.\Do you want to continue ?;FRA=La suppression du secteur d‚saffectera ce responsable de zone aux prestataires de ce secteur.\Souhaitez-vous continuer ?';
+
+    PROCEDURE GetNetworkPotential@1100281001(VAR pRec@1100281000 : TEMPORARY Record 50016;pDepartmentFilter@1100281002 : Text[250];pRegionalCoordinator@1100281006 : Code[20]);
+    VAR
+      lAbilityGeoProvider@1100281001 : Record 50016;
+      lDialog@1100281004 : Dialog;
+      lProvider@1100281005 : Record 50000;
+      lGeoRef@1100281003 : Record 50013;
+    BEGIN
+      // IMH03.ISAT.MA
+      // Rempli une table temporaire avec les comp‚tences g‚ographiques des prestataires
+      // li‚ au coordonnateur pass‚ en paramŠtre.
+
+      IF GUIALLOWED THEN
+        lDialog.OPEN(Text001);
+
+      lAbilityGeoProvider.COPYFILTERS(pRec);
+      pRec.RESET;
+      pRec.DELETEALL();
+
+      IF pRegionalCoordinator <> '' THEN
+      BEGIN
+        lProvider.SETCURRENTKEY("Regional Coordinator","Post Code");
+        lProvider.SETRANGE("Regional Coordinator",pRegionalCoordinator);
+      END;
+
+      IF lProvider.ISEMPTY THEN
+        EXIT;
+
+      IF pDepartmentFilter <> '' THEN
+      BEGIN
+        lGeoRef.SETFILTER("Area Code",pDepartmentFilter);
+      END;
+
+      lProvider.FINDFIRST;
+      REPEAT
+        lAbilityGeoProvider.SETRANGE("Provider No.",lProvider."No.");
+        IF NOT lAbilityGeoProvider.ISEMPTY THEN
+        BEGIN
+          lAbilityGeoProvider.FINDFIRST;
+          REPEAT
+            lGeoRef.SETRANGE(Code,lAbilityGeoProvider."End Ref. Geo. Code");
+            IF NOT lGeoRef.ISEMPTY THEN
+            BEGIN
+              WITH pRec DO
+              BEGIN
+                SETRANGE("End Ref. Geo. Code",lAbilityGeoProvider."End Ref. Geo. Code");
+                SETRANGE("Specialization Code",lAbilityGeoProvider."Specialization Code");
+                SETRANGE(Standard,lAbilityGeoProvider.Standard);
+                SETRANGE(Emergency,lAbilityGeoProvider.Emergency);
+                IF ISEMPTY THEN
+                BEGIN
+                  CLEAR(pRec);
+                  pRec := lAbilityGeoProvider;
+                  INSERT();
+                END;
+              END;
+            END;
+          UNTIL lAbilityGeoProvider.NEXT = 0;
+        END;
+      UNTIL lProvider.NEXT = 0;
+
+      pRec.RESET;
+      IF GUIALLOWED THEN
+        lDialog.CLOSE();
+    END;
+
+    PROCEDURE GetDepartmentFilter@1100281002() rValue : Text[250];
+    VAR
+      lAreas@1100281000 : Form 405;
+      lArea@1100281001 : Record 284;
+    BEGIN
+      // Retourne le filtre des d‚partements s‚lectionn‚s.
+
+      CLEAR(lAreas);
+      lAreas.LOOKUPMODE := TRUE;
+      IF lAreas.RUNMODAL <> ACTION::LookupOK THEN BEGIN
+        EXIT;
+      END;
+
+      lAreas.GetSelectedRec(lArea);
+      IF lArea.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      lArea.FINDSET;
+      rValue := lArea.Code;
+      WHILE lArea.NEXT <> 0 DO
+        rValue += '|' + lArea.Code;
+    END;
+
+    PROCEDURE GetProviderNb@1100281005(pRec@1100281000 : TEMPORARY Record 50016;pRegionalCoordinator@1100281006 : Code[20]) rValue : Integer;
+    VAR
+      lAbilityGeoProvider@1100281001 : Record 50016;
+      lProvider@1100281005 : Record 50000;
+    BEGIN
+      // IMH03.ISAT.MA
+      // Renvoi le nb de prestataires pour une sp‚cialit‚,  une r‚f. arriv‚e, standard ou non , urgent ou non.
+
+      rValue := 0;
+      IF pRegionalCoordinator <> '' THEN
+      BEGIN
+        lProvider.SETCURRENTKEY("Regional Coordinator","Post Code");
+        lProvider.SETRANGE("Regional Coordinator",pRegionalCoordinator);
+      END;
+
+      IF lProvider.ISEMPTY THEN
+        EXIT(rValue);
+
+      WITH pRec DO
+      BEGIN
+        lAbilityGeoProvider.SETRANGE("End Ref. Geo. Code","End Ref. Geo. Code");
+        lAbilityGeoProvider.SETRANGE("Specialization Code","Specialization Code");
+        lAbilityGeoProvider.SETRANGE(Standard,Standard);
+        lAbilityGeoProvider.SETRANGE(Emergency,Emergency);
+      END;
+
+      lProvider.FINDFIRST;
+      REPEAT
+        lAbilityGeoProvider.SETRANGE("Provider No.",lProvider."No.");
+        IF NOT lAbilityGeoProvider.ISEMPTY THEN
+             rValue += lAbilityGeoProvider.COUNT;
+      UNTIL lProvider.NEXT = 0;
+    END;
+
+    PROCEDURE GetProviderNbOut@1100281000(pRegionalCoordinator@1100281000 : Code[20]) rValue : Decimal;
+    VAR
+      lProvider@1100281001 : Record 50000;
+    BEGIN
+      rValue := 0;
+      IF pRegionalCoordinator <> '' THEN
+      BEGIN
+        lProvider.SETCURRENTKEY("Regional Coordinator","Post Code");
+        lProvider.SETRANGE("Regional Coordinator",pRegionalCoordinator);
+      END;
+      IF lProvider.ISEMPTY THEN
+        EXIT(rValue);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 14/10/13 @a ISAT.ST @v IMH6.01.353 @s Reorganisation region IMH @h 4760 @c Renommage CR / AR */
+      /** @r IMH03 @d 09/12/10 @a ISAT.MA @v IMH6.01.030 @s Gestion coordonnateur */
+      /** @r IMH02 @d 24/11/10 @a ISAT.NFO @v IMH6.01.030 @s Gestion coordonnateur @c Ajout potentialit‚ r‚seau  */
+      /** @r IMH01 @d 20/10/10 @a ISAT.MA @v IMH6.01.030 @s Gestion coordonnateur @c Creation */
+    }
+    END.
+  }
+}

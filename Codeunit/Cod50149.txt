@@ -1,0 +1,191 @@
+OBJECT Codeunit 50149 ServiceLogMgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=26/07/11;
+    Time=17:06:47;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ServUserLog@1100281000 : Record 50113;
+      Text100@1100281004 : TextConst 'ENU=Manual Tray Lines Creation;FRA=Cr‚ation activit‚s manuelles';
+      Text112@1100281005 : TextConst 'ENU=Completed Tray Lines;FRA=Activit‚s termin‚es';
+      Text113@1100281010 : TextConst 'ENU=Transferred Tray Lines;FRA=Activit‚s transf‚r‚es';
+      Text114@1100281011 : TextConst 'ENU=Canceled Tray Lines;FRA=Activit‚s annul‚es';
+      Text200@1100281006 : TextConst 'ENU=Opening of urgent service;FRA=Ouverture de services urgent';
+      Text201@1100281007 : TextConst 'ENU=Opening of non-urgent service;FRA=Ouverture de services non urgent';
+      Text240@1100281008 : TextConst 'ENU=Service Header creation %1;FRA=Cr‚ation lignes produit %1';
+      Text250@1100281009 : TextConst 'ENU=Service Header Modification;FRA=Modification lignes produit';
+      Text300@1100281001 : TextConst 'ENU=Urgent Provider Assignment;FRA=Prestataires assign‚s en urgent';
+      Text301@1100281002 : TextConst 'ENU=Non-Urgent Provider Assignment;FRA=Prestataires assign‚s en non urgent';
+      Text302@1100281012 : TextConst 'ENU=Intervention updated;FRA=Interventions modifi‚es';
+      Text400@1100281003 : TextConst 'ENU=Quotes Accepted;FRA=Devis valid‚s';
+
+    LOCAL PROCEDURE UpdateEventCount@1100281014(pEventID@1100281000 : Integer;pCode@1100281001 : Code[20]);
+    BEGIN
+      IF pEventID = 0 THEN
+        EXIT;
+      WITH ServUserLog DO BEGIN
+        RESET;
+        IF GET(USERID, pEventID, TODAY, pCode) THEN BEGIN
+          IF NOT IsExistEvent(pEventID) THEN BEGIN
+            "No. Of Events" += 1;
+            MODIFY;
+          END;
+        END
+        ELSE BEGIN
+          INIT;
+          "User ID" := USERID;
+          "Event ID" := pEventID;
+          "Event Date" := TODAY;
+          "Source ID" := pCode;
+          "Source Type" := GetSourceType(pEventID);
+          "Team Group Code" := GetUserTeamGroupCode;
+          "No. Of Events" := 1;
+          INSERT;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetUserTeamGroupCode@1100281007() : Code[10];
+    VAR
+      lApplMgt@1100281000 : Codeunit 1;
+      lTeamSalesperson@1100281002 : Record 5084;
+      lSalesperson@1100281001 : Code[10];
+    BEGIN
+      lSalesperson := lApplMgt.GetUserCode(1);
+      IF lSalesperson = '' THEN
+        EXIT;
+      WITH lTeamSalesperson DO BEGIN
+        SETCURRENTKEY("Salesperson Code");
+        SETRANGE("Salesperson Code", lSalesperson);
+        SETRANGE(Default, TRUE);
+        IF FINDFIRST THEN BEGIN
+          CALCFIELDS("Team Group");
+          EXIT("Team Group");
+        END;
+      END;
+    END;
+
+    PROCEDURE LogService@1100281009(pRec@1100281000 : Record 50066;pTrigger@1100281001 : 'Insert,Modify,Delete,Rename');
+    BEGIN
+      CASE pTrigger OF
+        pTrigger::Insert : BEGIN
+          IF pRec.Urgent = pRec.Urgent::Yes THEN
+            UpdateEventCount(200,'')
+          ELSE
+            UpdateEventCount(201,'');
+        END;
+      END;
+    END;
+
+    PROCEDURE LogServHeader@1100281012(pRec@1100281000 : Record 5900;pTrigger@1100281001 : 'Insert,Modify,Delete,Rename');
+    BEGIN
+      CASE pTrigger OF
+        pTrigger::Insert :
+          UpdateEventCount(240, pRec."Service Order Type");
+      END;
+      IF pRec."No." <> '' THEN
+        UpdateEventCount(250, pRec."No.");
+    END;
+
+    PROCEDURE LogIntervention@1100281001(pRec@1100281001 : Record 50075;pTrigger@1100281000 : 'Insert,Modify,Delete,Rename');
+    BEGIN
+      CASE pTrigger OF
+        pTrigger::Insert : BEGIN
+          IF pRec.Urgent THEN
+            UpdateEventCount(300,'')
+          ELSE
+            UpdateEventCount(301,'');
+        END;
+      END;
+      IF pRec."Service Header No." <> '' THEN
+        UpdateEventCount(250, pRec."Service Header No.");
+    END;
+
+    PROCEDURE LogQuote@1100281013(pRec@1100281000 : Record 50076;pTrigger@1100281001 : 'Insert,Modify,Delete,Rename');
+    BEGIN
+      IF pRec."Service Header No." <> '' THEN
+        UpdateEventCount(250, pRec."Service Header No.");
+    END;
+
+    PROCEDURE LogMinute@1100281015(pRec@1100281000 : Record 50084;pTrigger@1100281001 : 'Insert,Modify,Delete,Rename');
+    BEGIN
+      IF pRec."Service Header No." <> '' THEN
+        UpdateEventCount(250, pRec."Service Header No.");
+    END;
+
+    PROCEDURE LogTrayLine@1100281021(pRec@1100281000 : Record 50048;pTrigger@1100281001 : 'Insert,Modify,Delete,Rename');
+    BEGIN
+      CASE pTrigger OF
+        pTrigger::Insert :
+          IF pRec.Manual THEN
+            UpdateEventCount(100,'');
+      END;
+    END;
+
+    PROCEDURE ApproveQuote@1100281002();
+    BEGIN
+      UpdateEventCount(400,'');
+    END;
+
+    PROCEDURE CreateManualTrayLine@1100281003();
+    BEGIN
+      UpdateEventCount(100,'');
+    END;
+
+    PROCEDURE FinishTrayLine@1100281004(pStatus@1100281000 : Integer);
+    BEGIN
+      IF pStatus > 1 THEN
+        UpdateEventCount(110 + pStatus, '');
+    END;
+
+    PROCEDURE GetEventDesc@1100281000(pEventId@1100281000 : Integer;pCode@1100281001 : Code[20]) : Text[250];
+    BEGIN
+      CASE pEventId OF
+        100 : EXIT(Text100);
+        112 : EXIT(Text112);
+        113 : EXIT(Text113);
+        114 : EXIT(Text114);
+        200 : EXIT(Text200);
+        201 : EXIT(Text201);
+        240 : EXIT(STRSUBSTNO(Text240, pCode));
+        250 : EXIT(Text250);
+        300 : EXIT(Text300);
+        301 : EXIT(Text301);
+        400 : EXIT(Text400);
+      END; // CASE
+    END;
+
+    LOCAL PROCEDURE GetSourceType@1100281010(pEventId@1100281000 : Integer) : Integer;
+    BEGIN
+      WITH ServUserLog DO BEGIN
+        IF pEventId = 240 THEN
+          EXIT("Source Type"::ServOrderType);
+        IF pEventId = 250 THEN
+          EXIT("Source Type"::ServiceHeader);
+      END;
+    END;
+
+    PROCEDURE IsExistEvent@1100281005(pEventId@1100281000 : Integer) : Boolean;
+    BEGIN
+      // Recense les ‚venements de type existe (non agr‚g‚)
+      EXIT(pEventId IN [250]);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 10/06/11 @a ISAT.ST @v IMH6.01.161 @s Log Service @c Cr‚ation Objet */
+    }
+    END.
+  }
+}

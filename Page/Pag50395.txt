@@ -1,0 +1,427 @@
+OBJECT Page 50395 Load Charge Process Page
+{
+  OBJECT-PROPERTIES
+  {
+    Date=04/04/13;
+    Time=11:50:41;
+    Modified=Yes;
+    Version List=IMH6.01,LoadCharge;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Load Charge Process Page;
+               FRA=Page de mont‚e en charge];
+    SourceTable=Table2000000026;
+    DataCaptionExpr='Mont‚e en charge';
+    SourceTableView=SORTING(Number)
+                    WHERE(Number=CONST(1));
+    RefreshOnActivate=Yes;
+    OnOpenPage=BEGIN
+                 UserTable.SETRANGE(Used, FALSE);
+                 IF UserTable.FINDFIRST THEN BEGIN
+                   UserTable.Used := TRUE;
+                   UserTable.MODIFY;
+                   COMMIT;
+                 END;
+                 StartTimer;
+                 HideDialog := TRUE;
+                 DeadTime := CURRENTDATETIME + 3600000;
+               END;
+
+    ActionList=ACTIONS
+    {
+      { 1100281004;  ;ActionContainer;
+                      ActionContainerType=ActionItems }
+      { 1100281005;1 ;Action    ;
+                      CaptionML=[ENU=Start;
+                                 FRA=D‚marrer];
+                      Promoted=Yes;
+                      PromotedIsBig=Yes;
+                      Image=Start;
+                      PromotedCategory=Process;
+                      OnAction=BEGIN
+                                 StartTimer;
+                               END;
+                                }
+      { 1100281006;1 ;Action    ;
+                      CaptionML=[ENU=Stop;
+                                 FRA=Arret];
+                      Promoted=Yes;
+                      PromotedIsBig=Yes;
+                      Image=Cancel;
+                      PromotedCategory=Process;
+                      OnAction=BEGIN
+                                 StopTimer;
+                               END;
+                                }
+    }
+  }
+  CONTROLS
+  {
+    { 1100281000;;Container;
+                ContainerType=ContentArea }
+
+    { 1100281003;1;Group  ;
+                CaptionML=[ENU=General;
+                           FRA=G‚n‚ral];
+                GroupType=Group }
+
+    { 1100281002;2;Field  ;
+                CaptionML=[ENU=Time Intervale min.;
+                           FRA=Intervalle (sec)];
+                DecimalPlaces=0:0;
+                SourceExpr=SecondInter;
+                OnValidate=BEGIN
+                             GetTimeInter;
+                           END;
+                            }
+
+    { 1100281001;2;Field  ;
+                CaptionML=[ENU=Current Action;
+                           FRA=Action Courante];
+                SourceExpr=CurrentAction;
+                Editable=FALSE }
+
+    { 1100281007;2;Field  ;
+                CaptionML=[ENU=Current Values;
+                           FRA=Valeurs courante];
+                SourceExpr=CurrentValues }
+
+    { 1100281008;2;Field  ;
+                CaptionML=[ENU=Status;
+                           FRA=Statut];
+                SourceExpr=CurrentStatus;
+                Editable=FALSE }
+
+    { 1100281009;2;Field  ;
+                CaptionML=[ENU=Dead Time;
+                           FRA=Date de fin];
+                SourceExpr=DeadTime;
+                Editable=FALSE }
+
+  }
+  CODE
+  {
+    VAR
+      UserTable@1100281000 : Record 50135;
+      TaskTimer@1100281002 : Automation "{3B311C81-140E-11D5-8B18-00D0590B4EC5} 1.0:{3B311C92-140E-11D5-8B18-00D0590B4EC5}:'Navision Timer 1.0'.Timer" WITHEVENTS;
+      InContact@1100281001 : Boolean;
+      HideDialog@1100281008 : Boolean;
+      CurrentAction@1100281003 : Text[30];
+      CurrentStatus@1100281006 : Text[30];
+      CurrentValues@1100281007 : Text[250];
+      TimeInter@1100281004 : Integer;
+      ShowTimeInter@1100281005 : Decimal;
+      SecondInter@1000000000 : Integer;
+      DeadTime@1100281009 : DateTime;
+
+    LOCAL PROCEDURE CompleteSearchBeneficiary@1100281013();
+    VAR
+      lTempContactFilter@1000000013 : TEMPORARY Record 5050;
+      lTempContact@1000000002 : TEMPORARY Record 5050;
+      lContactSearchMgt@1000000001 : Codeunit 50097;
+      lTempText@1000000000 : Text[1024];
+    BEGIN
+      lTempContactFilter.RESET;
+      lTempContactFilter.SETFILTER("First Name",GenerateName);
+      IF NOT lContactSearchMgt.CheckSearchFields(lTempContactFilter,TRUE) THEN BEGIN
+        EXIT;
+      END;
+
+      lContactSearchMgt.CreateContactList(lTempContactFilter,lTempContact,lTempText);
+    END;
+
+    LOCAL PROCEDURE CompleteSearchService@1100281012();
+    VAR
+      lServiceFilter@1100281007 : Record 50066;
+      lServiceBuffer@1100281004 : TEMPORARY Record 50066;
+      lServiceHeader@1100281008 : Record 5900;
+      lServiceHeaderFilter@1000000012 : Record 5900;
+      lServiceInterventionLineFilter@1000000011 : Record 50075;
+      lServiceSearchMgt@1100281003 : Codeunit 50060;
+      lSearchType@1000000000 : Integer;
+      lTempText@1000000001 : Text[1024];
+      lResultCount@1000000002 : Integer;
+    BEGIN
+      lSearchType := RANDOM(2);
+      CASE lSearchType OF
+        1 : BEGIN   //recherche par Nø service
+          lServiceFilter.SETFILTER("Service No.",GenerateServiceNo);
+        END;
+        2 : BEGIN   //recherche par beneficiaire
+          lServiceFilter.SETFILTER("Contact No.", GenerateBeneNo);
+        END;
+      END;
+
+      IF NOT lServiceSearchMgt.CheckSearchServiceFields(lServiceFilter,TRUE) THEN BEGIN
+        EXIT;
+      END;
+      lServiceSearchMgt.CreateServiceList(lServiceFilter,lServiceBuffer,lTempText,lResultCount);
+    END;
+
+    LOCAL PROCEDURE CompleteSearchIntervention@1100281011();
+    VAR
+      lServiceInterventionLineFilter@1000000007 : Record 50075;
+      lServiceIntervLineCheckFilter@1100281013 : Record 50075;
+      lServiceInterventionLineBuffer@1100281009 : TEMPORARY Record 50075;
+      lService@1100281010 : Record 50066;
+      lServiceFilter@1000000012 : Record 50066;
+      lServiceHeaderFilter@1000000011 : Record 5900;
+      lServiceCode@1100281002 : Record 50040;
+      lContactBuffer@1100281008 : TEMPORARY Record 5050;
+      lContact@1100281007 : Record 5050;
+      lServiceSearchMgt@1100281006 : Codeunit 50060;
+      lTempText@1100281001 : Text[1024];
+      lContactLimit@1100281005 : Integer;
+      lNbContact@1100281004 : Integer;
+      lResultCount@1100281000 : Integer;
+      lToInsert@1100281003 : Boolean;
+      lGUID@1100281014 : GUID;
+      lSearchType@1000000013 : Integer;
+    BEGIN
+      lSearchType := RANDOM(3);
+      CASE lSearchType OF
+        1 : BEGIN   //recherche par Nø service
+          lServiceInterventionLineFilter.SETFILTER("Service No.",GenerateServiceNo);
+        END;
+        2 : BEGIN   //recherche par beneficiaire
+          lServiceInterventionLineFilter.SETFILTER("Contact No.",GenerateBeneNo);
+        END;
+        3 : BEGIN   //recherche par prestataire
+          lServiceInterventionLineFilter.SETFILTER("Provider No.",GenerateProviderNo);
+        END;
+      END;
+
+      IF NOT lServiceSearchMgt.CheckSearchServiceIntervFields(lServiceInterventionLineFilter,TRUE) THEN BEGIN
+        EXIT;
+      END;
+      lServiceSearchMgt.CreateServiceIntervList(lServiceInterventionLineFilter,lServiceInterventionLineBuffer,lTempText,lResultCount);
+    END;
+
+    LOCAL PROCEDURE ValidateServMinute@1000000001();
+    VAR
+      lServiceInterv@1000000000 : Record 50075;
+      lMinute@1000000001 : Record 50084;
+    BEGIN
+      IF UserTable."Minute Service No. Filter" = '' THEN
+        EXIT;
+      lServiceInterv.SETCURRENTKEY("Service No.","Service Header No.","Line No.");
+      lServiceInterv.SETFILTER("Service No.", UserTable."Minute Service No. Filter");
+      lServiceInterv.SETRANGE(Suspended, FALSE);
+      lServiceInterv.SETRANGE("Process Code", 'GESTION_PV');
+      lServiceInterv.SETRANGE("Process Status No.", 15);
+      IF lServiceInterv.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      IF lServiceInterv.FINDSET THEN
+        REPEAT
+          lMinute.SETRANGE("Service Header No.", lServiceInterv."Service Header No.");
+          lMinute.SETRANGE("Service Intervention Line No.", lServiceInterv."Line No.");
+          lMinute.SETFILTER("Receipt Date", '<>%1', 0D);
+          IF lMinute.FINDLAST THEN BEGIN
+            IF NOT lMinute."Post Minute" THEN BEGIN
+              lMinute.VALIDATE("Post Minute", TRUE);
+              lMinute.MODIFY(TRUE);
+              COMMIT;
+            END;
+          END;
+        UNTIL lServiceInterv.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE ValidateServQuote@1000000017();
+    VAR
+      lQuote@1000000000 : Record 50076;
+      lInterv@1000000001 : Record 50075;
+    BEGIN
+      IF UserTable."Quote Service No. Filter" = '' THEN
+        EXIT;
+      lQuote.SETFILTER("Service No.", UserTable."Quote Service No. Filter");
+      lQuote.SETFILTER("Creation Date", '>%1', CREATEDATETIME(010113D, 0T));
+      lQuote.SETRANGE("Process Code", 'TRAIT_DEV');
+      lQuote.SETRANGE("Process Status No.", 132);
+      IF lQuote.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      IF lQuote.FINDSET THEN
+        REPEAT
+          IF lInterv.GET(lQuote."Service Header No.", lQuote."Intervention Line No.") THEN BEGIN
+            IF lInterv."Intervention Status" = lInterv."Intervention Status"::InProgress THEN BEGIN
+              lQuote.VALIDATE("Process Code", 'TRAIT_DEV');
+              lQuote.VALIDATE("Process Status No.", 140);
+              lQuote.MODIFY(TRUE);
+              COMMIT;
+            END;
+          END;
+        UNTIL lQuote.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE GenerateName@1000000000() rValue : Text[30];
+    VAR
+      lContact@1000000003 : Record 5050;
+      lMaxValue@1000000000 : Integer;
+      i@1000000001 : Integer;
+      lChar@1000000002 : Char;
+      lRandom@1100281000 : Integer;
+    BEGIN
+      {
+      IF NOT InContact THEN BEGIN
+        lMaxValue := RANDOM(7);
+        FOR i := 1 TO lMaxValue DO BEGIN
+          lChar := RANDOM(26) + 96;
+          rValue += FORMAT(lChar);
+        END;
+        rValue := rValue + '*';
+      END ELSE BEGIN
+      }
+        lRandom := RANDOM(100000);
+        lContact.SETCURRENTKEY("Service Contact","Post Code",Name);
+        lContact.SETRANGE("Service Contact", lContact."Service Contact"::Beneficiary);
+        IF NOT lContact.ISEMPTY THEN BEGIN
+          IF lContact.NEXT(lRandom) <> 0 THEN BEGIN
+            rValue := lContact."First Name";
+          END;
+        END;
+      //END;
+      AddCurrentValues(rValue);
+      InContact := NOT InContact;
+    END;
+
+    LOCAL PROCEDURE GenerateServiceNo@1000000002() rValue : Text[30];
+    VAR
+      lService@1000000006 : Record 50066;
+      lRandom@1100281000 : Integer;
+    BEGIN
+      lRandom := RANDOM(100000);
+      IF lService.NEXT(lRandom) <> 0 THEN BEGIN
+        rValue := lService."Service No.";
+        AddCurrentValues(rValue);
+      END;
+    END;
+
+    LOCAL PROCEDURE GenerateBeneNo@1000000003() rValue : Text[30];
+    VAR
+      lContact@1000000003 : Record 5050;
+      lMaxValue@1000000000 : Integer;
+      i@1000000001 : Integer;
+      lChar@1000000002 : Char;
+      lRandom@1100281000 : Integer;
+    BEGIN
+      lRandom := RANDOM(100000);
+      lContact.SETCURRENTKEY("Service Contact","Post Code",Name);
+      lContact.SETRANGE("Service Contact", lContact."Service Contact"::Beneficiary);
+      IF NOT lContact.ISEMPTY THEN BEGIN
+        IF lContact.NEXT(lRandom) <> 0 THEN BEGIN
+          rValue := lContact."No.";
+          AddCurrentValues(rValue);
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GenerateProviderNo@1000000024() rValue : Text[30];
+    VAR
+      lProvider@1000000003 : Record 50000;
+      lRandom@1100281000 : Integer;
+    BEGIN
+      lRandom := RANDOM(18000);
+      IF lProvider.NEXT(lRandom) <> 0 THEN BEGIN
+        rValue := lProvider."No.";
+        AddCurrentValues(rValue);
+      END;
+    END;
+
+    LOCAL PROCEDURE StartTimer@1100281001();
+    BEGIN
+      CurrentStatus := 'Start';
+      GetTimeInter;
+      IF NOT HideDialog THEN BEGIN
+      //  MESSAGE(CurrentStatus);
+      END;
+      CurrPage.UPDATE;
+      CREATE(TaskTimer);
+      TaskTimer.Interval(TimeInter);
+      TaskTimer.Enabled(TRUE);
+    END;
+
+    LOCAL PROCEDURE StopTimer@1100281002();
+    BEGIN
+      TaskTimer.Enabled(FALSE);
+      CLEAR(TaskTimer);
+      CurrentStatus := 'Stop';
+      IF NOT HideDialog THEN BEGIN
+      //  MESSAGE(CurrentStatus);
+      END;
+      CurrPage.UPDATE;
+    END;
+
+    LOCAL PROCEDURE GetTimeInter@1100281000();
+    BEGIN
+      //TimerInter := ShowTimerInter * 60000;
+      IF SecondInter <> 0 THEN BEGIN
+        TimeInter := SecondInter * 1000;
+      END ELSE BEGIN
+        //TimeInter := 90000;
+        SecondInter := 30 + RANDOM(60);
+        TimeInter := SecondInter * 1000;
+        ShowTimeInter := SecondInter / 60;
+      END;
+    END;
+
+    LOCAL PROCEDURE AddCurrentValues@1100281003(pValue@1100281000 : Text[250]);
+    BEGIN
+      IF STRLEN(CurrentValues) <> 0 THEN BEGIN
+        IF STRLEN(CurrentValues + '-' + pValue) <= 250 THEN BEGIN
+          CurrentValues += '-' + pValue;
+        END;
+      END ELSE BEGIN
+        CurrentValues := pValue;
+      END;
+      CurrPage.UPDATE;
+    END;
+
+    EVENT TaskTimer@1100281002::Timer@1(Milliseconds@1100281000 : Integer);
+    VAR
+      lType@1100281001 : Integer;
+    BEGIN
+      IF DeadTime < CURRENTDATETIME THEN BEGIN
+        StopTimer;
+        EXIT;
+      END;
+      lType := RANDOM(20);
+      CurrentValues := '';
+      CASE lType OF
+        1,2,16 : BEGIN
+          CurrentAction := 'Rech. Benef.';
+          CompleteSearchBeneficiary;
+        END;
+        3,4,5,6,17 : BEGIN
+          CurrentAction := 'Rech. Service';
+          CompleteSearchService;
+        END;
+        7,8,9,10,11,12,18 : BEGIN
+          CurrentAction := 'Rech. Interv.';
+          CompleteSearchIntervention;
+        END;
+        13,14,15 : BEGIN
+          CurrentAction := 'Aucune Action';
+        END;
+        19 : BEGIN
+          CurrentAction := 'Validation PV';
+          ValidateServMinute;
+        END;
+        20 : BEGIN
+          CurrentAction := 'Validation Devis';
+          ValidateServQuote;
+        END;
+      END;
+    END;
+
+    EVENT TaskTimer@1100281002::TimerError@2(ErrorString@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    BEGIN
+    END.
+  }
+}

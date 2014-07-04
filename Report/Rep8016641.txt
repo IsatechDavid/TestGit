@@ -1,0 +1,1016 @@
+OBJECT Report 8016641 Rappr. bancaire : Test I56
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:17:47;
+    Modified=Yes;
+    Version List=ISA6.00;
+  }
+  PROPERTIES
+  {
+    OnPreReport=BEGIN
+                  FiltreRapprBqe := "Bank Acc. Reconciliation".GETFILTERS;
+                END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table273;
+        DataItemTableView=SORTING(Bank Account No.,Statement No.);
+        NewPagePerRecord=Yes;
+        OnAfterGetRecord=BEGIN
+                           IF "Statement Date" = 0D THEN
+                             ErreurAjout(STRSUBSTNO('%1 doit ˆtre sp‚cifi‚.',FIELDCAPTION("Statement Date")));
+
+                           TotalMntNonLettre := 0;
+                           TotalDiff := 0;
+                           TotalDiffpr := 0;
+                           Justificatif := 0;
+                           TotalRappPost := 0;
+                           TotalRappPostPre := 0;
+                           LigRapprBqe.RESET;
+                           LigRapprBqe.SETRANGE("Bank Account No.","Bank Account No.");
+                           LigRapprBqe.SETRANGE("Statement No.","Statement No.");
+                           LigRapprBqe.CALCSUMS("Statement Amount",Difference);
+
+                           IF LigRapprBqe."Statement Amount" <> "Statement Ending Balance" - "Balance Last Statement" THEN
+                             ErreurAjout(
+                               STRSUBSTNO(
+                                 '%1 n''est pas ‚gal au solde final.',FIELDCAPTION("Statement Ending Balance")));
+
+                           IF CpteBqe.GET("Bank Account No.") THEN BEGIN
+                             IF CpteBqe.Blocked THEN
+                               ErreurAjout(
+                                 STRSUBSTNO(
+                                   '%1 doit ˆtre %2 pour %3 %4.',
+                                   CpteBqe.FIELDCAPTION(Blocked),FALSE,CpteBqe.TABLECAPTION,"Bank Account No."));
+                               CpteBqe.SETRANGE(CpteBqe."Date Filter",0D,"Bank Acc. Reconciliation"."Statement Date");
+                               CpteBqe.CALCFIELDS(CpteBqe."Net Change");
+                               Justificatif := "Bank Acc. Reconciliation"."Statement Ending Balance";
+                               // total lignes non rapproch‚es … la date du relev‚
+                               EcrCpteBqe.RESET;
+                               EcrCpteBqe.SETCURRENTKEY("Bank Account No.","Posting Date","Document Type",Open,"Statement Status");
+                               EcrCpteBqe.SETRANGE("Bank Account No.","Bank Acc. Reconciliation"."Bank Account No.");
+                               EcrCpteBqe.SETRANGE("Posting Date",0D,"Bank Acc. Reconciliation"."Statement Date");
+                               EcrCpteBqe.SETRANGE("Statement Status",EcrCpteBqe."Statement Status"::Open);
+                               EcrCpteBqe.CALCSUMS(Amount);
+                               TotalMntNonLettre :=  EcrCpteBqe.Amount;
+                               Justificatif := Justificatif +  TotalMntNonLettre;
+                               // total diff‚rence relev‚
+                               LigRapprBqe.RESET;
+                               LigRapprBqe.SETCURRENTKEY("Bank Account No.","Statement No.","Statement Line No.");
+                               LigRapprBqe.SETRANGE("Bank Account No.","Bank Acc. Reconciliation"."Bank Account No.");
+                               LigRapprBqe.CALCSUMS(LigRapprBqe.Difference);
+                               TotalDiff := LigRapprBqe.Difference;
+                               Justificatif := Justificatif - TotalDiff;
+                               // total diff‚rence relev‚ pr‚c‚dent
+                               LigReleve.RESET;
+                               LigReleve.SETCURRENTKEY("Bank Account No.","Statement No.","Statement Line No.");
+                               LigReleve.SETRANGE("Bank Account No.","Bank Acc. Reconciliation"."Bank Account No.");
+                              IF LigReleve.FIND('-') THEN BEGIN
+                                 REPEAT
+                                   IF (LigReleve."Bank Account No." = 'B020') THEN BEGIN
+                                     IF (LigReleve."Statement No." <> '1') AND (LigReleve."Statement No." <> '2') AND (LigReleve."Statement No." <> '3') AND
+                                        (LigReleve."Statement No." <> '4') AND (LigReleve."Statement No." <> '7') THEN
+                                          TotalDiffpr := TotalDiffpr + LigReleve.Difference;
+                                      END
+                                   ELSE
+                                     IF (LigReleve."Bank Account No." = 'B030') THEN BEGIN
+                                        IF (LigReleve."Statement No." <> '1')
+                                         THEN
+                                          TotalDiffpr := TotalDiffpr + LigReleve.Difference;
+                                       END
+                                   ELSE
+                                     IF (LigReleve."Bank Account No." = 'B040') THEN BEGIN
+                                        IF (LigReleve."Statement No." <> '1') AND (LigReleve."Statement No." <> '2')
+                                         THEN
+                                          TotalDiffpr := TotalDiffpr + LigReleve.Difference;
+                                       END
+                                   ELSE
+                                      TotalDiffpr := TotalDiffpr + LigReleve.Difference;
+                                 UNTIL LigReleve.NEXT = 0;
+                               END;
+                               Justificatif := Justificatif - TotalDiffpr;
+                               // total des lignes rapproch‚es > date du relev‚
+                               EcrCpteBqe.RESET;
+                               EcrCpteBqe.SETCURRENTKEY("Bank Account No.","Posting Date","Statement No.");
+                               EcrCpteBqe.SETRANGE("Bank Account No.","Bank Acc. Reconciliation"."Bank Account No.");
+                               EcrCpteBqe.SETFILTER("Posting Date",'>%1',"Bank Acc. Reconciliation"."Statement Date");
+                               EcrCpteBqe.SETRANGE("Statement No.","Bank Acc. Reconciliation"."Statement No.");
+                               EcrCpteBqe.CALCSUMS(Amount);
+                               TotalRappPost :=  EcrCpteBqe.Amount;
+                               Justificatif := Justificatif - TotalRappPost;
+                               // total des lignes rapproch‚es des pr‚c‚dents relev‚s  > date du relev‚
+                               LigReleve.RESET;
+                               LigReleve.SETCURRENTKEY("Bank Account No.","Transaction Date");
+                               LigReleve.SETRANGE("Bank Account No.","Bank Acc. Reconciliation"."Bank Account No.");
+                               LigReleve.SETFILTER("Transaction Date",'>%1',"Bank Acc. Reconciliation"."Statement Date");
+                               LigReleve.CALCSUMS("Statement Amount");
+                               TotalRappPostPre :=  LigReleve."Statement Amount";
+                               Justificatif := Justificatif - TotalRappPostPre;
+
+                             END
+                                ELSE
+                               ErreurAjout(
+                                 STRSUBSTNO(
+                                   '%1 %2 n''existe pas.',
+                                   CpteBqe.TABLECAPTION,"Bank Account No."));
+                         END;
+
+        ReqFilterFields=Bank Account No.,Statement No.;
+      }
+      SECTIONS
+      {
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number)
+                          WHERE(Number=CONST(1));
+        DataItemVarName=CptrPage;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18600;
+            SectionHeight=1692;
+          }
+          CONTROLS
+          {
+            { 1   ;Label        ;0    ;0    ;7500 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Bank report;
+                                                                    FRA=Relev‚ bancaire] }
+            { 2   ;TextBox      ;15000;0    ;3150 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 3   ;TextBox      ;0    ;423  ;7500 ;423  ;SourceExpr=COMPANYNAME }
+            { 4   ;Label        ;16950;423  ;750  ;423  ;ParentControl=5 }
+            { 5   ;TextBox      ;17700;423  ;450  ;423  ;CaptionML=[ENU=page;
+                                                                    FRA=Page];
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 6   ;TextBox      ;15900;846  ;2250 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18600;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT((CurrReport.PAGENO = 1) AND (FiltreRapprBqe <> ''));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 7   ;TextBox      ;0    ;0    ;18150;423  ;SourceExpr="Bank Acc. Reconciliation".TABLENAME + ': '  + FiltreRapprBqe }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 8   ;TextBox      ;0    ;0    ;4500 ;423  ;FontBold=Yes;
+                                                         SourceExpr="Bank Acc. Reconciliation"."Bank Account No." + '   Relev‚ Nø ' + "Bank Acc. Reconciliation"."Statement No." }
+            { 32  ;TextBox      ;5400 ;0    ;4500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=CpteBqe.Name }
+            { 39  ;TextBox      ;10950;0    ;4500 ;423  ;FontBold=Yes;
+                                                         SourceExpr='  Devise : ' + CpteBqe."Currency Code" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=3384;
+          }
+          CONTROLS
+          {
+            { 33  ;TextBox      ;3150 ;423  ;1800 ;423  ;CaptionML=[ENU=Last report balance;
+                                                                    FRA=Solde dernier relev‚];
+                                                         SourceExpr="Bank Acc. Reconciliation"."Balance Last Statement" }
+            { 34  ;Label        ;0    ;423  ;3000 ;423  ;ParentControl=33;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 35  ;TextBox      ;3150 ;0    ;1200 ;423  ;FontBold=Yes;
+                                                         CaptionML=[ENU=Repor date;
+                                                                    FRA=Date relev‚];
+                                                         SourceExpr="Bank Acc. Reconciliation"."Statement Date" }
+            { 36  ;Label        ;0    ;0    ;3000 ;423  ;ParentControl=35;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 37  ;TextBox      ;3150 ;846  ;1800 ;423  ;CaptionML=[ENU=Final report balance;
+                                                                    FRA=Solde final du relev‚];
+                                                         SourceExpr="Bank Acc. Reconciliation"."Statement Ending Balance" }
+            { 38  ;Label        ;0    ;846  ;3000 ;423  ;ParentControl=37;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes }
+            { 40  ;TextBox      ;13350;2961 ;4500 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr=CpteBqe."Net Change" }
+            { 41  ;Label        ;6150 ;2961 ;5400 ;423  ;Visible=Yes;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Financial balance from;
+                                                                    FRA=Solde comptable au] }
+            { 53  ;Label        ;6150 ;1269 ;5400 ;423  ;Visible=Yes;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=" + financial not balanced lines from ";
+                                                                    FRA=" + Lignes compta non rapproch‚es au"] }
+            { 59  ;TextBox      ;13350;1269 ;4500 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TotalMntNonLettre }
+            { 60  ;TextBox      ;13350;423  ;4500 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TotalDiff }
+            { 61  ;Label        ;6150 ;423  ;5550 ;423  ;Visible=Yes;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=" - Bank lines difference";
+                                                                    FRA=" - Lignes banque diff‚rence"] }
+            { 62  ;Label        ;6150 ;0    ;5550 ;423  ;Visible=Yes;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Bak report balance;
+                                                                    FRA=Solde relev‚ banque] }
+            { 63  ;TextBox      ;13350;0    ;4500 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Final report balance;
+                                                                    FRA=Solde final du relev‚];
+                                                         SourceExpr="Bank Acc. Reconciliation"."Statement Ending Balance" }
+            { 64  ;Label        ;6150 ;846  ;5550 ;423  ;Visible=Yes;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=" - Last bank lines difference";
+                                                                    FRA=" - Lignes banque diff‚rence pr‚c‚dent"] }
+            { 65  ;TextBox      ;13350;846  ;4500 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TotalDiffpr }
+            { 66  ;TextBox      ;13350;2538 ;4500 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr=Justificatif }
+            { 67  ;Label        ;6150 ;2538 ;5400 ;423  ;Visible=Yes;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU="= Voucher";
+                                                                    FRA="= Justificatif"] }
+            { 1000000000;Label  ;6150 ;1692 ;5850 ;423  ;Visible=Yes;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=" - financial ledger entry not balanced in report,";
+                                                                    FRA=" - Ecritures comptables rapproch‚es sur ce relev‚ >  "] }
+            { 1000000001;TextBox;12000;1692 ;1350 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Bank Acc. Reconciliation"."Statement Date" }
+            { 1000000002;TextBox;13350;1692 ;4500 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TotalRappPost }
+            { 1000000003;TextBox;12000;1269 ;1350 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Bank Acc. Reconciliation"."Statement Date" }
+            { 1000000004;TextBox;11550;2961 ;1350 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Bank Acc. Reconciliation"."Statement Date" }
+            { 1000000036;Label  ;6150 ;2115 ;5850 ;423  ;Visible=Yes;
+                                                         VertAlign=Bottom;
+                                                         FontBold=No;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=" - financial ledger entry not balanced out report,";
+                                                                    FRA=" - Ecritures comptables rapproch‚es hors ce relev‚>  "] }
+            { 1000000037;TextBox;12000;2115 ;1350 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr="Bank Acc. Reconciliation"."Statement Date" }
+            { 1000000038;TextBox;13350;2115 ;4500 ;423  ;Visible=Yes;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TotalRappPostPre }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=EnTeteCptrErreur;
+        OnPreDataItem=BEGIN
+                        SETRANGE(Number,1,CptrErreur);
+                      END;
+
+        OnPostDataItem=BEGIN
+                         CptrErreur := 0;
+                       END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 68  ;Label        ;0    ;0    ;1500 ;423  ;ParentControl=69;
+                                                         FontBold=Yes }
+            { 69  ;TextBox      ;1650 ;0    ;16500;423  ;CaptionML=[ENU=Warning !;
+                                                                    FRA=Attention !];
+                                                         SourceExpr=TexteErreur[Number] }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table271;
+        DataItemTableView=SORTING(Bank Account No.,Posting Date,Document Type,Open)
+                          WHERE(Open=CONST(Yes),
+                                Statement Status=CONST(Open));
+        OnPreDataItem=BEGIN
+                        CurrReport.CREATETOTALS(Amount,"Debit Amount","Credit Amount");
+                      END;
+
+        OnAfterGetRecord=BEGIN
+
+                           IF "Bank Account Ledger Entry"."Posting Date" > "Bank Acc. Reconciliation"."Statement Date" THEN
+                                  CurrReport.SKIP;
+                         END;
+
+        DataItemLinkReference=Bank Acc. Reconciliation;
+        DataItemLink=Bank Account No.=FIELD(Bank Account No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=18600;
+            SectionHeight=2115;
+          }
+          CONTROLS
+          {
+            { 47  ;Label        ;4800 ;846  ;4500 ;846  ;Name=D‚signation;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 48  ;Label        ;3000 ;846  ;1500 ;846  ;Name=Nø document;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 49  ;Label        ;1800 ;846  ;1050 ;846  ;Name=Type;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 50  ;Label        ;0    ;846  ;1650 ;846  ;Name=Date comptabilisation;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 51  ;Label        ;0    ;0    ;9300 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU="";
+                                                                    FRA=Lignes comptabilit‚ non rapproch‚es] }
+            { 1000000017;Label  ;12600;1269 ;1800 ;423  ;Name=Montant;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Debit;
+                                                                    FRA=D‚bit] }
+            { 1000000018;Label  ;14550;1269 ;1800 ;423  ;Name=Montant;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Credit;
+                                                                    FRA=Cr‚dit] }
+            { 1000000019;Label  ;16500;1269 ;1800 ;423  ;Name=Montant;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Balance;
+                                                                    FRA=Solde] }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 55  ;TextBox      ;0    ;0    ;1500 ;423  ;SourceExpr="Posting Date" }
+            { 58  ;TextBox      ;1650 ;0    ;1050 ;423  ;SourceExpr="Document Type" }
+            { 42  ;TextBox      ;3000 ;0    ;1500 ;423  ;SourceExpr="Document No." }
+            { 52  ;TextBox      ;4800 ;0    ;7350 ;423  ;SourceExpr=Description }
+            { 1000000020;TextBox;14550;0    ;1800 ;423  ;SourceExpr="Credit Amount" }
+            { 1000000021;TextBox;12600;0    ;1800 ;423  ;SourceExpr="Debit Amount" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18600;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+            { 43  ;Label        ;10800;0    ;1500 ;423  ;FontBold=Yes;
+                                                         CaptionML=[ENU="";
+                                                                    FRA=Total] }
+            { 1000000022;TextBox;16500;0    ;1800 ;423  ;SourceExpr=Amount }
+            { 1000000023;TextBox;14550;0    ;1800 ;423  ;SourceExpr="Credit Amount" }
+            { 1000000024;TextBox;12600;0    ;1800 ;423  ;SourceExpr="Debit Amount" }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table274;
+        DataItemTableView=SORTING(Bank Account No.,Statement No.,Statement Line No.);
+        OnPreDataItem=BEGIN
+                        CurrReport.CREATETOTALS("Statement Amount","Applied Amount",Difference);
+                        TotalMontant := 0;
+                        TotalMntLettre := 0;
+                        TotalDiff := 0;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           MntLettre := 0;
+                           CASE Type OF
+                             Type::"Bank Account Ledger Entry":
+                               BEGIN
+                                 EcrCpteBqe.RESET;
+                                 EcrCpteBqe.SETCURRENTKEY("Bank Account No.",Open);
+                                 EcrCpteBqe.SETRANGE("Bank Account No.","Bank Account No.");
+                                 EcrCpteBqe.SETRANGE(Open,TRUE);
+                                 EcrCpteBqe.SETRANGE(
+                                   "Statement Status",EcrCpteBqe."Statement Status"::"Bank Acc. Entry Applied");
+                                 EcrCpteBqe.SETRANGE("Statement No.","Statement No.");
+                                 EcrCpteBqe.SETRANGE("Statement Line No.","Statement Line No.");
+                                 IF EcrCpteBqe.FIND('-') THEN
+                                   REPEAT
+                                     MntLettre := MntLettre + EcrCpteBqe.Amount;
+
+                                     EcrCheque.RESET;
+                                     EcrCheque.SETCURRENTKEY("Bank Account Ledger Entry No.");
+                                     EcrCheque.SETRANGE("Bank Account Ledger Entry No.",EcrCpteBqe."Entry No.");
+                                     EcrCheque.SETRANGE(EcrCheque.Open,TRUE);
+                                     IF EcrCheque.FIND('-') THEN
+                                       REPEAT
+                                         IF NOT EcrCheque.Open THEN
+                                           ErreurAjout(
+                                             STRSUBSTNO(
+                                               '%1 doit ˆtre %2 pour %3 %4.',
+                                               EcrCheque.FIELDNAME(Open),TRUE,
+                                               EcrCheque.TABLENAME,EcrCheque."Entry No."));
+                                         IF
+                                           EcrCheque."Statement Status" <>
+                                           EcrCheque."Statement Status"::"Bank Acc. Entry Applied"
+                                         THEN
+                                           ErreurAjout(
+                                             STRSUBSTNO(
+                                               '%1 doit ˆtre %2 pour %3 %4.',
+                                               EcrCheque.FIELDNAME("Statement Status"),
+                                               EcrCheque."Statement Status"::"Bank Acc. Entry Applied",
+                                               EcrCheque.TABLENAME,EcrCheque."Entry No."));
+                                         IF EcrCheque."Statement No." <> '' THEN
+                                           ErreurAjout(
+                                             STRSUBSTNO(
+                                               '%1 doit ˆtre %2 pour %3 %4.',
+                                               EcrCheque.FIELDNAME("Statement No."),'',
+                                               EcrCheque.TABLENAME,EcrCheque."Entry No."));
+                                         IF EcrCheque."Statement Line No." <> 0 THEN
+                                           ErreurAjout(
+                                             STRSUBSTNO(
+                                               '%1 doit ˆtre %2 pour %3 %4.',
+                                               EcrCheque.FIELDNAME("Statement Line No."),0,
+                                               EcrCheque.TABLENAME,EcrCheque."Entry No."));
+                                       UNTIL EcrCheque.NEXT = 0;
+                                   UNTIL EcrCpteBqe.NEXT = 0;
+                               END;
+                             Type::"Check Ledger Entry":
+                               BEGIN
+                                 EcrCheque.RESET;
+                                 EcrCheque.SETCURRENTKEY("Bank Account No.",Open);
+                                 EcrCheque.SETRANGE("Bank Account No.","Bank Account No.");
+                                 EcrCheque.SETRANGE(Open,TRUE);
+                                 EcrCheque.SETRANGE(
+                                   "Statement Status",EcrCheque."Statement Status"::"Check Entry Applied");
+                                 EcrCheque.SETRANGE("Statement No.","Statement No.");
+                                 EcrCheque.SETRANGE("Statement Line No.","Statement Line No.");
+                                 IF EcrCheque.FIND('-') THEN
+                                   REPEAT
+                                     MntLettre := MntLettre - EcrCheque.Amount;
+                                     EcrCpteBqe.GET(EcrCheque."Bank Account Ledger Entry No.");
+                                     IF NOT EcrCpteBqe.Open THEN
+                                       ErreurAjout(
+                                         STRSUBSTNO(
+                                           '%1 doit ˆtre %2 pour %3 %4.',
+                                           EcrCpteBqe.FIELDNAME(Open),TRUE,
+                                           EcrCpteBqe.TABLENAME,EcrCpteBqe."Entry No."));
+                                     IF
+                                       EcrCpteBqe."Statement Status" <>
+                                       EcrCpteBqe."Statement Status"::"Check Entry Applied"
+                                     THEN
+                                       ErreurAjout(
+                                         STRSUBSTNO(
+                                           '%1 doit ˆtre %2 pour %3 %4.',
+                                           EcrCpteBqe.FIELDNAME("Statement Status"),
+                                           EcrCpteBqe."Statement Status"::"Check Entry Applied",
+                                           EcrCpteBqe.TABLENAME,EcrCpteBqe."Entry No."));
+                                     IF EcrCpteBqe."Statement No." <> '' THEN
+                                       ErreurAjout(
+                                         STRSUBSTNO(
+                                           '%1 doit ˆtre %2 pour %3 %4.',
+                                           EcrCpteBqe.FIELDNAME("Statement No."),'',
+                                           EcrCpteBqe.TABLENAME,EcrCpteBqe."Entry No."));
+                                     IF EcrCpteBqe."Statement Line No." <> 0 THEN
+                                       ErreurAjout(
+                                         STRSUBSTNO(
+                                           '%1 doit ˆtre %2 pour %3 %4.',
+                                           EcrCpteBqe.FIELDNAME("Statement Line No."),0,
+                                           EcrCpteBqe.TABLENAME,EcrCpteBqe."Entry No."));
+                                   UNTIL EcrCheque.NEXT = 0;
+                               END;
+                             Type::Difference:
+                               TotalDiff := TotalDiff + "Statement Amount";
+                           END;
+                           IF "Applied Amount" <> MntLettre THEN
+                             ErreurAjout(STRSUBSTNO('%1 doit ˆtre %2.',FIELDNAME("Applied Amount"),MntLettre));
+                           TotalMontant := TotalMontant + "Statement Amount";
+                           TotalMntLettre := TotalMntLettre + MntLettre;
+                         END;
+
+        OnPostDataItem=BEGIN
+                         // Montant test
+                         IF TotalMontant <> TotalMntLettre + TotalDiff THEN
+                           ErreurAjout('Le lettrage est faux.');
+
+                         IF LigRapprBqe.Difference <> TotalDiff THEN
+                           ErreurAjout(
+                             STRSUBSTNO(
+                               'La diff‚rence totale est %1. Elle doit ˆtre %2.',LigRapprBqe.Difference,TotalDiff));
+                       END;
+
+        DataItemLinkReference=Bank Acc. Reconciliation;
+        DataItemLink=Bank Account No.=FIELD(Bank Account No.),
+                     Statement No.=FIELD(Statement No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=18600;
+            SectionHeight=2115;
+          }
+          CONTROLS
+          {
+            { 10  ;Label        ;0    ;846  ;1500 ;846  ;ParentControl=9;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 12  ;Label        ;2850 ;846  ;1500 ;846  ;ParentControl=11;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 14  ;Label        ;4500 ;846  ;4350 ;846  ;ParentControl=13;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 20  ;Label        ;11700;846  ;1050 ;846  ;ParentControl=19;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 16  ;Label        ;12750;846  ;1800 ;846  ;ParentControl=15;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 18  ;Label        ;14550;846  ;1800 ;846  ;ParentControl=17;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 24  ;Label        ;1650 ;846  ;1050 ;846  ;ParentControl=23;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 28  ;Label        ;16350;846  ;1800 ;846  ;ParentControl=26;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 56  ;Label        ;0    ;0    ;9300 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=FRA=Lignes rapproch‚es }
+            { 1000000005;Label  ;8850 ;846  ;1200 ;846  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Date compta }
+            { 1000000006;Label  ;10650;846  ;1050 ;846  ;HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Date valeur }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=1692;
+            OnPreSection=BEGIN
+                                 IF Detail AND NOT post1 THEN BEGIN
+                                    IF ("Bank Acc. Reconciliation Line"."Transaction Date" > "Bank Acc. Reconciliation"."Statement Date") THEN BEGIN
+                                                  CurrReport.SHOWOUTPUT(TRUE);
+                                                  post1:=TRUE;
+                                    END ELSE CurrReport.SHOWOUTPUT(FALSE);
+                                 END ELSE CurrReport.SHOWOUTPUT(FALSE);
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000042;TextBox;0    ;846  ;9150 ;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr='Ecritures rapproch‚es > '+FORMAT("Bank Acc. Reconciliation"."Statement Date") }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           IF NOT Detail THEN CurrReport.SHOWOUTPUT(FALSE);
+                                 Post := '';
+                                 IF (EcrCpteBqe."Posting Date" > "Bank Acc. Reconciliation"."Statement Date") THEN
+                                           Post := '**';
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 9   ;TextBox      ;0    ;0    ;1500 ;423  ;SourceExpr="Transaction Date" }
+            { 11  ;TextBox      ;2850 ;0    ;1500 ;423  ;SourceExpr="Document No." }
+            { 13  ;TextBox      ;4500 ;0    ;4500 ;423  ;SourceExpr=Description }
+            { 19  ;TextBox      ;11700;0    ;1050 ;423  ;SourceExpr="Applied Entries" }
+            { 17  ;TextBox      ;14550;0    ;1800 ;423  ;SourceExpr="Applied Amount" }
+            { 15  ;TextBox      ;12750;0    ;1800 ;423  ;SourceExpr="Statement Amount" }
+            { 23  ;TextBox      ;1650 ;0    ;1050 ;423  ;SourceExpr=Type }
+            { 26  ;TextBox      ;16350;0    ;1800 ;423  ;SourceExpr=Difference }
+            { 1000000007;TextBox;9000 ;0    ;1200 ;423  ;CaptionML=[ENU=Value Date;
+                                                                    FRA=Date compta];
+                                                         SourceExpr=EcrCpteBqe."Posting Date" }
+            { 1000000008;TextBox;10200;0    ;450  ;423  ;BorderStyle=Raised;
+                                                         FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Value Date;
+                                                                    FRA=Date compta];
+                                                         SourceExpr=Post }
+            { 1000000009;TextBox;10650;0    ;1050 ;423  ;SourceExpr="Value Date" }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18600;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18600;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+            { 1000000044;TextBox;12600;0    ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr=TotalRappPost }
+            { 1000000045;TextBox;5700 ;0    ;6600 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         FontBold=No;
+                                                         SourceExpr='Total > '+FORMAT("Bank Acc. Reconciliation"."Statement Date") }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18600;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+            { 93  ;Label        ;8400 ;0    ;3900 ;423  ;HorzAlign=Right;
+                                                         FontBold=Yes;
+                                                         CaptionML=FRA=Totaux rapproch‚s }
+            { 25  ;TextBox      ;14400;0    ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr="Applied Amount" }
+            { 29  ;TextBox      ;16350;0    ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr=Difference }
+            { 27  ;TextBox      ;12450;0    ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr="Statement Amount" }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=3;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=LigCptrErreur;
+        OnPreDataItem=BEGIN
+                        SETRANGE(Number,1,CptrErreur);
+                      END;
+
+        OnPostDataItem=BEGIN
+                         CptrErreur := 0;
+                       END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 96  ;Label        ;0    ;0    ;1500 ;423  ;ParentControl=97;
+                                                         FontBold=Yes }
+            { 97  ;TextBox      ;1650 ;0    ;16500;423  ;CaptionML=[ENU=Warning !;
+                                                                    FRA=Attention !];
+                                                         SourceExpr=TexteErreur[Number] }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table271;
+        DataItemTableView=SORTING(Bank Account No.,Posting Date,Statement No.,Statement Status);
+        DataItemVarName=Bank Acc Ledg Entry 2;
+        OnPreDataItem=BEGIN
+                        CurrReport.CREATETOTALS(Amount,"Debit Amount","Credit Amount");
+
+                            "Bank Acc Ledg Entry 2".RESET;
+                            "Bank Acc Ledg Entry 2".SETCURRENTKEY("Bank Account No.","Posting Date","Statement No.","Statement Status");
+                            "Bank Acc Ledg Entry 2".SETRANGE("Bank Account No.","Bank Acc. Reconciliation Line"."Bank Account No.");
+                            "Bank Acc Ledg Entry 2".SETFILTER("Posting Date",'>%1',"Bank Acc. Reconciliation"."Statement Date");
+                            "Bank Acc Ledg Entry 2".SETFILTER("Statement No.",'<>%1',"Bank Acc. Reconciliation Line"."Statement No.");
+                            "Bank Acc Ledg Entry 2".SETRANGE("Statement Status",EcrCpteBqe."Statement Status"::Closed);
+                      END;
+
+        DataItemLinkReference=Bank Acc. Reconciliation;
+        DataItemLink=Bank Account No.=FIELD(Bank Account No.);
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            SectionWidth=18600;
+            SectionHeight=1692;
+          }
+          CONTROLS
+          {
+            { 1000000031;Label  ;0    ;0    ;12750;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         CaptionML=[ENU=Last balanced lines reprot, ending date report;
+                                                                    FRA=Lignes rapproch‚es sur precedent relev‚ > date de fin de relev‚] }
+            { 1000000012;Label  ;14700;846  ;1800 ;423  ;Name=Montant;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Credit;
+                                                                    FRA=Cr‚dit] }
+            { 1000000013;Label  ;16500;846  ;1650 ;423  ;Name=Montant;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Balance;
+                                                                    FRA=Solde] }
+            { 1000000014;Label  ;12750;846  ;1800 ;423  ;Name=Montant;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=[ENU=Debit;
+                                                                    FRA=D‚bit] }
+            { 1000000015;Label  ;4800 ;423  ;4500 ;846  ;Name=D‚signation;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000016;Label  ;3000 ;423  ;1500 ;846  ;Name=Nø document;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000039;Label  ;1800 ;423  ;1050 ;846  ;Name=Type;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 1000000040;Label  ;0    ;423  ;1650 ;846  ;Name=Date comptabilisation;
+                                                         HorzAlign=Right;
+                                                         VertAlign=Bottom;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+            { 1000000025;TextBox;0    ;0    ;1500 ;423  ;SourceExpr="Posting Date" }
+            { 1000000026;TextBox;1650 ;0    ;1050 ;423  ;SourceExpr="Document Type" }
+            { 1000000027;TextBox;3000 ;0    ;1500 ;423  ;SourceExpr="Document No." }
+            { 1000000028;TextBox;4800 ;0    ;4500 ;423  ;SourceExpr=Description }
+            { 1000000029;TextBox;14700;0    ;1800 ;423  ;SourceExpr="Credit Amount" }
+            { 1000000030;TextBox;12750;0    ;1800 ;423  ;SourceExpr="Debit Amount" }
+            { 1000000010;TextBox;10650;0    ;1500 ;423  ;SourceExpr="Statement No." }
+            { 1000000011;Label  ;9300 ;0    ;1350 ;423  ;VertGlue=Top;
+                                                         ParentControl=1000000010;
+                                                         VertAlign=Center;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=18600;
+            SectionHeight=846;
+          }
+          CONTROLS
+          {
+            { 1000000032;Label  ;10800;0    ;1500 ;423  ;FontBold=Yes;
+                                                         CaptionML=[ENU=Total;
+                                                                    FRA=Total] }
+            { 1000000033;TextBox;12750;0    ;1800 ;423  ;SourceExpr="Debit Amount" }
+            { 1000000034;TextBox;14700;0    ;1800 ;423  ;SourceExpr="Credit Amount" }
+            { 1000000035;TextBox;16500;0    ;1650 ;423  ;SourceExpr=Amount }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=2;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        DataItemVarName=PiedPageCptrErreur;
+        OnPreDataItem=BEGIN
+                        SETRANGE(Number,1,CptrErreur);
+                      END;
+
+        OnPostDataItem=BEGIN
+                         CptrErreur := 0;
+                       END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=18600;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+            { 30  ;Label        ;0    ;0    ;1500 ;423  ;ParentControl=31;
+                                                         FontBold=Yes }
+            { 31  ;TextBox      ;1650 ;0    ;16500;423  ;CaptionML=[ENU=Warning !;
+                                                                    FRA=Attention !];
+                                                         SourceExpr=TexteErreur[Number] }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=7370;
+      Height=1210;
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 5   ;CheckBox     ;3850 ;220  ;440  ;440  ;ShowCaption=No;
+                                                   SourceExpr=Detail }
+      { 6   ;Label        ;440  ;220  ;3300 ;440  ;ParentControl=5;
+                                                   CaptionML=[ENU="";
+                                                              FRA=D‚tail lignes du relev‚] }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      CpteBqe@1000000000 : Record 270;
+      EcrCpteBqe@1000000001 : Record 271;
+      EcrCheque@1000000002 : Record 272;
+      LigRapprBqe@1000000003 : Record 274;
+      LigReleve@1000000004 : Record 276;
+      MntLettre@1000000005 : Decimal;
+      TotalMontant@1000000006 : Decimal;
+      TotalMntLettre@1000000007 : Decimal;
+      TotalDiff@1000000008 : Decimal;
+      TotalDiffpr@1000000009 : Decimal;
+      TotalRappPost@1000000016 : Decimal;
+      TotalRappPostPre@1000000018 : Decimal;
+      Justificatif@1000000010 : Decimal;
+      FiltreRapprBqe@1000000011 : Text[250];
+      CptrErreur@1000000012 : Integer;
+      TexteErreur@1000000013 : ARRAY [99] OF Text[250];
+      TotalMntNonLettre@1000000014 : Decimal;
+      Detail@1000000015 : Boolean;
+      post1@1000000019 : Boolean;
+      Post@1000000017 : Text[3];
+
+    LOCAL PROCEDURE ErreurAjout@1(Texte@1000000000 : Text[250]);
+    BEGIN
+      CptrErreur := CptrErreur + 1;
+      TexteErreur[CptrErreur] := Texte;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/01/11 @a ISAT.MA @v IMH6.01.040 @s Isatech+ */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

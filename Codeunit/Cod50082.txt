@@ -1,0 +1,318 @@
+OBJECT Codeunit 50082 Post Invoice Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=28/11/13;
+    Time=17:43:23;
+    Modified=Yes;
+    Version List=IMH6.01,SUPPORT;
+  }
+  PROPERTIES
+  {
+    TableNo=38;
+    Permissions=TableData 38=rm,
+                TableData 39=rm,
+                TableData 120=rim,
+                TableData 121=rim,
+                TableData 325=r,
+                TableData 5900=rim,
+                TableData 50012=r,
+                TableData 50137=r;
+    OnRun=BEGIN
+            IF NOT PostPurch(Rec) THEN
+              MODIFY;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text012@1100281000 : TextConst 'ENU=Impossible to deduct VAT posting group (VAT d‚duit %1);FRA=Impossible de d‚duire le groupe compta. produit TVA (taux TVA d‚duite %1)';
+
+    PROCEDURE PostPurch@1100281000(VAR pPurchHeader@1100281000 : Record 38) rValue : Boolean;
+    VAR
+      lInvoicingMatrixSetup@1100281004 : Record 50137;
+      lServiceHeader@1100281005 : Record 5900;
+      lPurchInvMgt@1100281007 : Codeunit 50080;
+      lCheckInvoiceMgt@1100281001 : Codeunit 50081;
+      lReleasePurchaseDocument@1100281003 : Codeunit 415;
+      lPurchPost@1100281002 : Codeunit 90;
+      lYes@1100281006 : TextConst 'ENU=YES;FRA=OUI';
+      lTempDec@1100281008 : Decimal;
+    BEGIN
+      rValue := FALSE;
+
+      IF (pPurchHeader."Service No." = '') OR (pPurchHeader."Service Header No." = '') THEN
+        EXIT;
+
+      pPurchHeader."Minutes Document No." := 0;
+      pPurchHeader."Minutes Line No." := 0;
+
+      IF NOT lCheckInvoiceMgt.CheckRecordConsistency(pPurchHeader) THEN
+        EXIT;
+
+      IF NOT lCheckInvoiceMgt.CheckInvoicable(pPurchHeader) THEN
+        EXIT;
+      {
+      IF NOT lCheckInvoiceMgt._CheckReceipt(pPurchHeader) THEN
+        EXIT;
+      IF NOT lCheckInvoiceMgt._CheckConsistency(pPurchHeader) THEN
+        EXIT;
+      }
+
+      //IMH07.ST
+      IF pPurchHeader."Reconciliation Reject Code" <> '' THEN BEGIN
+        pPurchHeader."Reconciliation Reject Code" := '';
+        pPurchHeader."Reconciliation Reject Detail" := '';
+        pPurchHeader.MODIFY;
+      END;
+      //>>IMH07.ST
+
+      // Affectation des lignes source
+      IF NOT lCheckInvoiceMgt.AffectSourceData(pPurchHeader, '', TRUE, FALSE) THEN
+        EXIT;
+      // Cr‚ation des lignes de factures
+      lPurchInvMgt.CreatePurchLine(pPurchHeader,
+                                   GetVATPostingSetup(pPurchHeader."VAT Bus. Posting Group",
+                                                      pPurchHeader."Enter Amount Including VAT",
+                                                      pPurchHeader."Enter Amount",
+                                                      lTempDec),
+                                   pPurchHeader."Enter Amount",
+                                   pPurchHeader."Deductible Amount", pPurchHeader."Depreciation Amount");
+      //<<IMH11.PC
+      //<<IMH12.PC
+      //IF lCheckInvoiceMgt.CheckVATDifference(pPurchHeader) THEN BEGIN
+      IF NOT lCheckInvoiceMgt.CheckVATDifference(pPurchHeader) THEN BEGIN
+      //>>IMH12.PC
+        EXIT;
+      END;
+      //>>IMH11.PC
+      {
+      // Extraction de la r‚ception vers la facture/avoir (renseignement des champs Receipt No. et Receipt Line No.)
+      IF pPurchHeader.Status <> pPurchHeader.Status::Open THEN
+        lReleasePurchaseDocument.Reopen(pPurchHeader);
+
+      IF NOT ImportRcptLine(pPurchHeader) THEN
+        EXIT;
+      }
+
+      // Lancement de la facture
+      //<<IMH06.ISAT.EBA
+      pPurchHeader.SetHideValidationDialog(TRUE);
+      pPurchHeader.VALIDATE("Posting Date",WORKDATE);
+      //>>IMH06.ISAT.EBA
+
+      lReleasePurchaseDocument.RUN(pPurchHeader);
+      //<<IMH11.PC
+      ApplyVATDifference(pPurchHeader);
+      //>>IMH11.PC
+      COMMIT;
+      // Validation de la facture
+      pPurchHeader.Invoice := TRUE;
+      lPurchPost.RUN(pPurchHeader);
+      pPurchHeader.Reconciled := TRUE;
+      pPurchHeader."Reconciliation Date" := WORKDATE;
+
+      //<<IMH03.isat.PC
+      // Suppression de la commande
+      IF pPurchHeader."Document Type" = pPurchHeader."Document Type"::Invoice THEN //IMH05.ST
+        IF pPurchHeader.DELETE(TRUE) THEN;
+      //>>IMH03.isat.PC
+
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE ImportRcptLine@1100281002(VAR pPurchHeader@1100281000 : Record 38) rValue : Boolean;
+    VAR
+      lPurchRcptHeader@1100281007 : Record 120;
+      lPurchRcptLine@1100281001 : Record 121;
+      lPurchRcptLine1@1100281006 : Record 121;
+      lPurchLine@1100281002 : Record 39;
+      lTempFromLineDim@1100281005 : TEMPORARY Record 357;
+      lTempToLineDim@1100281004 : TEMPORARY Record 357;
+      lDimMgt@1100281003 : Codeunit 408;
+      lVATPostingSetup@1100281009 : Code[20];
+      lVATFound@1100281008 : Decimal;
+      lAmountIncludingVAT@1100281010 : Decimal;
+    BEGIN
+      rValue := FALSE;
+
+      WITH lPurchRcptLine DO BEGIN
+        SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.");
+        SETRANGE("Service No.",pPurchHeader."Service No.");
+        SETRANGE("Service Header No.",pPurchHeader."Service Header No.");
+        SETRANGE("Intervention Line No.",pPurchHeader."Intervention Line No.");
+        //<<IMH04.ISAT.EBA
+        SETRANGE("Quantity Invoiced",0);
+        //>>IMH04.ISAT.EBA
+        SETFILTER(Quantity, '<>%1', 0); //IMH07.ST
+        IF ISEMPTY THEN
+          EXIT;
+        FINDSET;
+
+        //<<IMH05.ISAT.EBA
+        lPurchRcptHeader.GET("Document No.");
+        //>>IMH05.ISAT.EBA
+
+        REPEAT
+          lPurchLine.SETCURRENTKEY("Document Type","Receipt No.","Receipt Line No.");
+          lPurchLine.SETRANGE("Document Type",pPurchHeader."Document Type");
+          lPurchLine.SETRANGE("Receipt No.","Document No.");
+          lPurchLine.SETRANGE("Receipt Line No.","Line No.");
+          lPurchLine.SETRANGE("Document No.",pPurchHeader."No.");
+          IF lPurchLine.ISEMPTY THEN BEGIN
+            lPurchLine.SETRANGE("Receipt No.");
+            lPurchLine.SETRANGE("Receipt Line No.");
+            lPurchLine.SETCURRENTKEY("Document Type","Document No.","Line No.");
+            lPurchLine."Document Type" := pPurchHeader."Document Type";
+            lPurchLine."Document No." := pPurchHeader."No.";
+
+            lPurchRcptLine1 := lPurchRcptLine;
+            lPurchRcptLine1.InsertInvLineFromRcptLine(lPurchLine,lTempFromLineDim);
+            //lDimMgt.TransferTempToDimToDocDim(lTempToLineDim);
+            lDimMgt.MoveTempFromDimToTempToDim(lTempFromLineDim,lTempToLineDim);
+            lPurchLine.VALIDATE("Document Type",pPurchHeader."Document Type");
+            lPurchLine.VALIDATE("Document No.",pPurchHeader."No.");
+            //<<IMH08.PC
+            {
+            lPurchLine."Service No." := "Service No.";
+            lPurchLine."Service Header No." := "Service Header No.";
+            lPurchLine."Intervention Line No." := "Intervention Line No.";
+            lPurchLine."Corporate No." := "Corporate No.";
+            lPurchLine."Corporate Region Code" := "Corporate Region Code";
+            lPurchLine."Service Order Type" := "Service Order Type";
+            lPurchLine."Depreciation Amount" := "Depreciation Amount";
+            lPurchLine."Deductible Amount" := "Deductible Amount";
+            }
+            // on parcours les lignes, afin de letter la ligne de r‚ception avec la ligne d'avoir
+            lPurchLine."Service No." := "Service No.";
+            lPurchLine."Service Header No." := "Service Header No.";
+            lPurchLine."Intervention Line No." := "Intervention Line No.";
+            lPurchLine."Corporate No." := "Corporate No.";
+            lPurchLine."Corporate Region Code" := "Corporate Region Code";
+            lPurchLine."Service Order Type" := "Service Order Type";
+            IF Type = Type::Item THEN BEGIN
+              lVATPostingSetup :=
+                GetVATPostingSetup(
+                  lPurchLine."VAT Bus. Posting Group",
+                  pPurchHeader."Enter Amount Including VAT",
+                  pPurchHeader."Enter Amount",
+                  lVATFound);
+              IF lVATPostingSetup = '' THEN BEGIN
+                lPurchLine.VALIDATE("Direct Unit Cost",0);
+                lPurchLine.VALIDATE(Amount,0);
+                lPurchLine.VALIDATE("Qty. to Invoice",0);
+                lPurchLine.MODIFY(TRUE);
+                pPurchHeader."Reconciliation Reject Descr." := STRSUBSTNO(Text012,lVATFound);
+                pPurchHeader.MODIFY;
+                EXIT;
+              END;
+              lPurchLine.VALIDATE("Direct Unit Cost",pPurchHeader."Enter Amount");
+              lPurchLine.VALIDATE("Unit Price (LCY)",pPurchHeader."Enter Amount");
+              lPurchLine.VALIDATE("VAT Prod. Posting Group",lVATPostingSetup);
+              lPurchLine.VALIDATE("Depreciation Amount",pPurchHeader."Depreciation Amount");
+              lPurchLine.VALIDATE("Deductible Amount",pPurchHeader."Deductible Amount");
+              lAmountIncludingVAT := ROUND(lPurchLine."Unit Price (LCY)" * lPurchLine."VAT %" / 100,0.01);
+              IF lAmountIncludingVAT <> pPurchHeader."Enter Amount VAT" THEN BEGIN
+                lPurchLine.VALIDATE("VAT Difference",pPurchHeader."Enter Amount VAT" - lAmountIncludingVAT);
+              END;
+            END;
+            //>>IMH08.PC
+            lPurchLine.MODIFY(TRUE);
+          END;
+
+        UNTIL NEXT = 0;
+        lDimMgt.TransferTempToDimToDocDim(lTempToLineDim);
+        pPurchHeader."Corporate No." := "Corporate No.";
+        pPurchHeader."Corporate Region Code" := "Corporate Region Code";
+        //<<IMH05.ISAT.EBA
+        pPurchHeader."Service Header Voucher No." := lPurchRcptHeader."Service Header Voucher No.";
+        //>>IMH05.ISAT.EBA
+      END;
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetProviderAgreement@1100281001(pProviderNo@1100281000 : Code[20]) rValue : Boolean;
+    VAR
+      lProviderAgreement@1100281001 : Record 50012;
+    BEGIN
+      // Permet de savoir si un prestataire est agr‚‚ ou non
+      rValue := FALSE;
+
+
+      rValue := TRUE;
+    END;
+
+    PROCEDURE GetVATPostingSetup@1100281003(pVATBusPostingGroup@1100281003 : Code[10];pAmountInclVAT@1100281001 : Decimal;pAmountExclVAT@1100281002 : Decimal;VAR pVATFound@1100281005 : Decimal) : Code[10];
+    VAR
+      lVATPostingSetup@1100281000 : Record 325;
+      lTempVAT@1100281004 : Decimal;
+    BEGIN
+      // IMH08.PC
+      // Recherche du groupe de compta produit TVA
+      pVATFound := 0;
+      lTempVAT := ROUND(((pAmountInclVAT / pAmountExclVAT) - 1) * 100,0.01);
+
+      lVATPostingSetup.SETRANGE("VAT Bus. Posting Group",pVATBusPostingGroup);
+      lVATPostingSetup.SETRANGE("VAT %",lTempVAT-0.01, lTempVAT+0.01);
+      lVATPostingSetup.SETFILTER("VAT Prod. Posting Group", '<>%1','');
+      IF lVATPostingSetup.FINDFIRST THEN BEGIN
+        EXIT(lVATPostingSetup."VAT Prod. Posting Group");
+      END;
+      pVATFound := lTempVAT;
+    END;
+
+    LOCAL PROCEDURE ApplyVATDifference@1000000000(VAR pPurchaseHeader@1000000000 : Record 38);
+    VAR
+      lPurchaseLine@1000000001 : Record 39;
+      lAmountVAT@1000000002 : Decimal;
+    BEGIN
+      // IMH11.PC
+      // V‚rification si n‚cessite de diff‚rence de TVA
+
+      lAmountVAT := 0;
+
+      WITH lPurchaseLine DO BEGIN
+        SETRANGE("Document Type",pPurchaseHeader."Document Type");
+        SETRANGE("Document No.",pPurchaseHeader."No.");
+        SETRANGE(Type,Type::Item);
+        IF FINDSET THEN BEGIN
+          REPEAT
+            lAmountVAT += ("Amount Including VAT" - Amount);
+          UNTIL NEXT = 0;
+        END;
+
+        IF lAmountVAT <> pPurchaseHeader."Enter Amount VAT" THEN BEGIN
+          VALIDATE("VAT Difference",pPurchaseHeader."Enter Amount VAT" - lAmountVAT);
+          MODIFY;
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH12 @d 28/11/13 @a ISAT.PC @v IMH6.01.4351 @s Rapprochement @h 4351 @c Gestion de la diff‚rence de TVA */
+      /** @r IMH11 @d 21/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3760 */
+      /** @r IMH10 @d 19/10/12 @a ISAT.PC @v IMH6.01.219 @s NEP00010 @h 3730
+          @a Ajout permission TableData Purchase Header=rm,
+          @a Ajout permission TableData Purchase Line=rm,
+          @a Ajout permission TableData Purch. Rcpt. Header=rim,
+          @a Ajout permission TableData Purch. Rcpt. Line=rim,
+          @a Ajout permission TableData VAT Posting Setup=r,
+          @a Ajout permission TableData Service Header=rim,
+          @a Ajout permission TableData Provider Agreement=r,
+          @a Ajout permission TableData Invoicing Matrix Setup=r */
+      /** @r IMH09 @d 05/03/12 @a ISAT.ST @v IMH6.01.146 @s Gestion facturation @c Refonte rapprochement */
+      /** @r IMH08 @d 25/01/12 @a ISAT.PC @v IMH6.01.146 @s Cr‚ation
+          @c Correctif suite dysfonctionnement du moteur de rapprochement */
+      /** @r IMH07 @d 28/12/11 @a ISAT.ST @v IMH6.01.146 @s Gestion facturation @c Ajustement */
+      /** @r IMH06 @d 24/11/11 @a ISAT.EBA @v IMH6.01.146 @s Gestion facturation @c Ajustement */
+      /** @r IMH05 @d 27/10/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service */
+      /** @r IMH04 @d 06/10/11 @a ISAT.EBA @v IMH6.01.146 @s Gestion facturation @c Ajustement */
+      /** @r IMH03 @d 08/06/11 @a ISAT.PC @v IMH6.01.146 @s Gestion facturation @c Ajustement */
+      /** @r IMH02 @d 12/04/11 @a ISAT.PC @v IMH6.01.146 @s Gestion facturation @c Ajustement */
+      /** @r IMH01 @d 16/03/11 @a ISAT.LLT @v IMH6.01.145 @s Rapprochement facture @c Cr‚ation */
+    }
+    END.
+  }
+}

@@ -1,0 +1,365 @@
+OBJECT Codeunit 50003 Source Attachment Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/13;
+    Time=16:11:35;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1000000003 : TextConst 'ENU=Attachment has been delete;FRA=Le document joint a ‚t‚ supprim‚';
+      Text002@1000000002 : TextConst 'ENU=" ,Disk File,Embedded";FRA=" ,Dossier disque,Base de donn‚es"';
+      AttachMgt@1000000004 : Codeunit 50002;
+      AttachTreeviewMgt@1100481000 : Codeunit 50001;
+      Text009@1100281001 : TextConst 'ENU=Import Attachment;FRA=Importer document';
+      Text010@1100281000 : TextConst 'ENU=All Files (*.*)|*.*;FRA=Tous les fichiers (*.*)|*.*';
+      FolderMgt@1100281002 : Codeunit 50004;
+      Text011@1100281003 : TextConst 'ENU=\Doc;FRA=\Doc';
+
+    PROCEDURE CreateAttachmentFromForm@1100481003(VAR pAttachment@1100481004 : Record 50021);
+    VAR
+      lAttachmentBuffer@1100281000 : TEMPORARY Record 50021;
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      // Cr‚er un document joint … partir du formulaire de cr‚ation
+      lAttachmentBuffer.COPY(pAttachment);
+      lAttachmentBuffer."File Extension" := '';
+      SetAttachmentValues(lAttachmentBuffer, lRecRef);
+      AttachMgt.CreateAttachmentByWizard(lAttachmentBuffer,lRecRef);
+    END;
+
+    PROCEDURE CreateAttachment@1100281004(VAR pAttachment@1100281003 : Record 50021;pFileToImport@1100281002 : Text[500];VAR pAttachmentTemp@1100281008 : Record 5062);
+    VAR
+      lAttachmentBuffer@1100281001 : TEMPORARY Record 50021;
+      lRecRef@1100281000 : RecordRef;
+      lFileInStream@1100281004 : InStream;
+      lToFile@1100281005 : Text[500];
+      lFile@1100281006 : File;
+      lOutStream@1100281007 : OutStream;
+    BEGIN
+      // Cr‚er un document joint sans passer par le wizard
+      lAttachmentBuffer.COPY(pAttachment);
+
+      lAttachmentBuffer := pAttachment;
+      SetAttachmentValues(lAttachmentBuffer, lRecRef);
+
+      // Reconstitue la cl‚ d'accŠs … l'enregistrement
+      AttachMgt.CollectRecordKey(lAttachmentBuffer,lRecRef);
+      // Recup‚re l'arbo active
+      AttachTreeviewMgt.GetAttachTreeviewActive(
+        lRecRef,
+        lAttachmentBuffer."Attachment Treeview Code");
+      lAttachmentBuffer.VALIDATE("Attachment Treeview Code");
+      IF ISSERVICETIER THEN BEGIN
+        pAttachmentTemp.CALCFIELDS(Attachment);
+        IF NOT pAttachmentTemp.Attachment.HASVALUE THEN
+          pAttachmentTemp.Attachment.IMPORT(pFileToImport);
+        pAttachmentTemp.Attachment.CREATEINSTREAM(lFileInStream);
+      END;
+      AttachMgt.CreateAttachment(lAttachmentBuffer, lRecRef, pFileToImport, lFileInStream);
+
+      pAttachment := lAttachmentBuffer;
+    END;
+
+    PROCEDURE SetAttachmentValues@1100281005(VAR pAttachment@1100281007 : Record 50021;VAR pRecRef@1100281006 : RecordRef);
+    VAR
+      lProvider@1100281004 : Record 50000;
+      lContact@1100281003 : Record 5050;
+      lService@1100281002 : Record 50066;
+      lServiceHeader@1100281001 : Record 5900;
+      lServInterventionLine@1100281000 : Record 50075;
+      lServInterventionQuote@1100281005 : Record 50076;
+      lInteractionLogEntry@1100281008 : Record 5065;
+      lDocumentQueue@1100281009 : Record 50054;
+    BEGIN
+      WITH pAttachment DO BEGIN
+        pAttachment.FILTERGROUP(4);
+        IF (pAttachment.GETFILTERS = '') THEN BEGIN
+          pAttachment.FILTERGROUP(3);
+        END;
+        IF (pAttachment.GETFILTERS = '') THEN BEGIN
+          pAttachment.FILTERGROUP(2);
+        END;
+        IF (pAttachment.GETFILTERS = '') THEN BEGIN
+          pAttachment.FILTERGROUP(0);
+        END;
+        //"File Extension" := '';
+
+        // Prestataire
+        IF (GETFILTER("Provider No.") <> '') THEN BEGIN
+          lProvider.SETFILTER("No.",GETFILTER("Provider No."));
+          lProvider.FINDFIRST;
+          lProvider.SETRECFILTER;
+          pRecRef.GETTABLE(lProvider);
+          SetAttachBufferFromProvider(pAttachment,lProvider);
+          IF pAttachment."Referent Table No." <> DATABASE::Provider THEN
+            pAttachment."Referent Table No." := DATABASE::Provider;
+        END;
+
+        // CONTACT
+        IF (GETFILTER("Contact No.") <> '') THEN BEGIN
+          lContact.SETFILTER("No.",GETFILTER("Contact No."));
+          lContact.FINDFIRST;
+          lContact.SETRECFILTER;
+          pRecRef.GETTABLE(lContact);
+          SetAttachBufferFromContact(pAttachment,lContact);
+          IF pAttachment."Referent Table No." <> DATABASE::Contact THEN
+            pAttachment."Referent Table No." := DATABASE::Contact;
+        END;
+
+        // Service
+        IF (GETFILTER("Service No.") <> '') THEN BEGIN
+          lService.SETFILTER("Service No.",GETFILTER("Service No."));
+          lService.FINDFIRST;
+          lService.SETRECFILTER;
+          pRecRef.GETTABLE(lService);
+          SetAttachBufferFromService(pAttachment,lService);
+          IF pAttachment."Referent Table No." <> DATABASE::Service THEN
+            pAttachment."Referent Table No." := DATABASE::Service;
+        END;
+
+        //Ligne Produit
+        IF (GETFILTER("Service Document No.") <> '') THEN BEGIN
+          lServiceHeader.SETRANGE("Document Type", lServiceHeader."Document Type"::Invoice);
+          lServiceHeader.SETFILTER("No.",GETFILTER("Service Document No."));
+          lServiceHeader.FINDFIRST;
+          lServiceHeader.SETRECFILTER;
+          pRecRef.GETTABLE(lServiceHeader);
+          SetAttachBufferFromServHeader(pAttachment,lServiceHeader);
+          IF pAttachment."Referent Table No." <> DATABASE::"Service Header" THEN
+            pAttachment."Referent Table No." := DATABASE::"Service Header";
+        END;
+
+        // Intervention
+        IF (GETFILTER("Service Document No.") <> '')
+          AND (GETFILTER("Service Intervention Line No.") <> '')
+          AND (GETFILTER("Service Intervention Line No.") <> '0') THEN BEGIN
+          lServInterventionLine.SETFILTER("Service Header No.",GETFILTER("Service Document No."));
+          lServInterventionLine.SETFILTER("Line No.",GETFILTER("Service Intervention Line No."));
+          lServInterventionLine.FINDFIRST;
+          lServInterventionLine.SETRECFILTER;
+          pRecRef.GETTABLE(lServInterventionLine);
+          SetAttachBufferFrIntervention(pAttachment,lServInterventionLine);
+          IF pAttachment."Referent Table No." <> DATABASE::"Service Intervention Line" THEN
+            pAttachment."Referent Table No." := DATABASE::"Service Intervention Line";
+        END;
+
+        // Devis Intervention
+        IF (GETFILTER("Service Document No.") <> '') AND (GETFILTER("Service Intervention Line No.") <> '')
+          AND (GETFILTER("Intervention Quote Line No.") <> '') THEN BEGIN
+          lServInterventionQuote.SETFILTER("Service Header No.",GETFILTER("Service Document No."));
+          lServInterventionQuote.SETFILTER("Intervention Line No.",GETFILTER("Service Intervention Line No."));
+          lServInterventionQuote.SETFILTER("Line No.", GETFILTER("Intervention Quote Line No."));
+          lServInterventionQuote.FINDFIRST;
+          lServInterventionQuote.SETRECFILTER;
+          pRecRef.GETTABLE(lServInterventionQuote);
+          SetAttachBufferFrIntervQuote(pAttachment,lServInterventionQuote);
+          IF pAttachment."Referent Table No." <> DATABASE::"Service Intervention Quote" THEN
+            pAttachment."Referent Table No." := DATABASE::"Service Intervention Quote";
+        END;
+        //<<IMH02
+        // Interaction contact
+        IF (GETFILTER(pAttachment."Interaction Log Entry No.") <> '') THEN BEGIN
+          lInteractionLogEntry.SETCURRENTKEY("Entry No.");
+          lInteractionLogEntry.SETFILTER("Entry No.",pAttachment.GETFILTER("Interaction Log Entry No."));
+          lInteractionLogEntry.FINDFIRST;
+          lInteractionLogEntry.SETRECFILTER;
+          pRecRef.GETTABLE(lInteractionLogEntry);
+          SetAttachBufferFrInteracLogEnt(pAttachment,lInteractionLogEntry);
+          IF pAttachment."Referent Table No." <> DATABASE::"Interaction Log Entry" THEN
+            pAttachment."Referent Table No." := DATABASE::"Interaction Log Entry";
+        END;
+        //>>IMH02
+
+        // << IMH04 ISAT.EB
+        // Document Queue
+        IF pAttachment.GETFILTER("Referent Table No.") = FORMAT(DATABASE::"Document Queue") THEN BEGIN
+          lDocumentQueue.RESET;
+          lDocumentQueue.SETFILTER("Flow Code",pAttachment.GETFILTER("Key Code 1"));
+          lDocumentQueue.SETFILTER("Queue Type",pAttachment.GETFILTER("Key Integer 1"));
+          lDocumentQueue.SETFILTER("Entry No.",pAttachment.GETFILTER("Key Integer 2"));
+          lDocumentQueue.FINDFIRST;
+          lDocumentQueue.SETRECFILTER;
+          pRecRef.GETTABLE(lDocumentQueue);
+          IF pAttachment."Referent Table No." <> DATABASE::"Document Queue" THEN
+            pAttachment."Referent Table No." := DATABASE::"Document Queue";
+        END;
+        // >> IMH04 ISAT.EB
+
+        "Key Integer 1" := 0;
+        "Key Code 1" := '';
+        "Key Code 2" := '';
+        "Entry No." := 0;
+      END;
+    END;
+
+    PROCEDURE SetAttachBufferFromProvider@1100281002(VAR pAttachment@1100481001 : Record 50021;pProvider@1100481000 : Record 50000);
+    VAR
+      lRecRef@1100481002 : RecordRef;
+    BEGIN
+      // Information du Provider
+      pAttachment."Provider No." := pProvider."No.";
+    END;
+
+    PROCEDURE SetAttachBufferFromContact@1100481002(VAR pAttachment@1100481001 : Record 50021;pContact@1100481000 : Record 5050);
+    VAR
+      lRecRef@1100481002 : RecordRef;
+    BEGIN
+      // Information du contact
+      pAttachment."Contact No." := pContact."No.";
+    END;
+
+    PROCEDURE SetAttachBufferFromService@1100281000(VAR pAttachment@1100481001 : Record 50021;pService@1100481000 : Record 50066);
+    VAR
+      lRecRef@1100481002 : RecordRef;
+    BEGIN
+      // Information de la service
+      pAttachment."Service No." := pService."Service No.";
+    END;
+
+    PROCEDURE SetAttachBufferFromServHeader@1100281001(VAR pAttachment@1100481001 : Record 50021;pServHeader@1100481000 : Record 5900);
+    VAR
+      lRecRef@1100481002 : RecordRef;
+    BEGIN
+      // Information de la ligne produit
+      pAttachment."Service No." := pServHeader."Service No.";
+      pAttachment."Service Document No." := pServHeader."No.";
+    END;
+
+    PROCEDURE SetAttachBufferFrIntervention@1100281003(VAR pAttachment@1100481001 : Record 50021;pServInterventionLine@1100481000 : Record 50075);
+    VAR
+      lRecRef@1100481002 : RecordRef;
+    BEGIN
+      // Information de l'intervention
+      pAttachment."Service No." := pServInterventionLine."Service No.";
+      pAttachment."Service Document No." := pServInterventionLine."Service Header No.";
+      pAttachment."Service Intervention Line No." := pServInterventionLine."Line No.";
+    END;
+
+    PROCEDURE SetAttachBufferFrIntervQuote@1100281006(VAR pAttachment@1100481001 : Record 50021;pServInterventionQuote@1100481000 : Record 50076);
+    VAR
+      lRecRef@1100481002 : RecordRef;
+      lInterventionLine@1100281000 : Record 50075;
+    BEGIN
+      // Information de l'intervention
+      lInterventionLine.GET(pServInterventionQuote."Service Header No.", pServInterventionQuote."Intervention Line No.");
+      pAttachment."Service No." := lInterventionLine."Service No.";
+      pAttachment."Service Document No." := pServInterventionQuote."Service Header No.";
+      pAttachment."Service Intervention Line No." := pServInterventionQuote."Intervention Line No.";
+      pAttachment."Intervention Quote Line No." := pServInterventionQuote."Line No.";
+    END;
+
+    PROCEDURE SetAttachBufferFrInteracLogEnt@1100281011(VAR pAttachment@1100481001 : Record 50021;pInteractionLogEntry@1100481000 : Record 5065);
+    VAR
+      lRecRef@1100481002 : RecordRef;
+      lInteractionTemp@1100281000 : Record 5064;
+      lProvider@1100281001 : Record 50000;
+    BEGIN
+      // Information de la service
+      pAttachment."Interaction Log Entry No." := pInteractionLogEntry."Entry No.";
+      pAttachment."Service Document No." := pInteractionLogEntry."Service Header No.";
+      pAttachment."Service Intervention Line No." := pInteractionLogEntry."Intervention Line No.";
+      pAttachment."Service No." := pInteractionLogEntry."Service No.";
+      pAttachment."Intervention Quote Line No." := pInteractionLogEntry."Intervention Quote No.";
+      pAttachment."Provider No." := pInteractionLogEntry."Provider No.";
+      pAttachment."Contact No." := pInteractionLogEntry."Contact No.";
+      IF pInteractionLogEntry."Document Type" = pInteractionLogEntry."Document Type"::VisitProv THEN
+        pAttachment."Visit No." := pInteractionLogEntry."Document No.";
+
+      IF lInteractionTemp.GET(pInteractionLogEntry."Interaction Template Code") THEN
+        pAttachment.Modifiable := NOT lInteractionTemp."Attachment Read Only";
+      IF lProvider.GET(pInteractionLogEntry."Contact No.") THEN
+        pAttachment."Provider No." := lProvider."No.";
+    END;
+
+    PROCEDURE CreateAttachByIntervQuote@1100281007(VAR pServIntervQuote@1100281001 : Record 50076;VAR pTempAttachment@1100281000 : Record 5062);
+    VAR
+      lDocAttachmentFilter@1100281002 : Record 50021;
+    BEGIN
+      lDocAttachmentFilter.RESET;
+      lDocAttachmentFilter.SETRANGE("Service Document No.", pServIntervQuote."Service Header No.");
+      lDocAttachmentFilter.SETRANGE("Service Intervention Line No.", pServIntervQuote."Intervention Line No.");
+      lDocAttachmentFilter.SETRANGE("Intervention Quote Line No.", pServIntervQuote."Line No.");
+      lDocAttachmentFilter.Description := FolderMgt.GetCompletFileName(pTempAttachment."Storage Pointer");
+
+      //IF NOT ISSERVICETIER THEN
+        CreateAttachment(lDocAttachmentFilter, pTempAttachment."Storage Pointer", pTempAttachment)
+      //ELSE BEGIN
+      //  CreateAttachment(lDocAttachmentFilter, pTempAttachment."Storage Pointer", pTempAttachment);
+      //END;
+    END;
+
+    PROCEDURE CreateAttachFromInteraction@1100281008(VAR pDocAttachment@1100281003 : Record 50021;VAR pInteractionLogEntry@1100281001 : Record 5065;VAR pTempAttachment@1100281000 : Record 5062);
+    VAR
+      lDocAttachmentFilter@1100281002 : Record 50021;
+      lInteractionTemplate@1100281006 : Record 5064;
+      lFileName@1100281004 : Text[250];
+      lRBAutoMgt@1100281005 : Codeunit 419;
+    BEGIN
+      //IMH02
+      lDocAttachmentFilter.RESET;
+      lDocAttachmentFilter.FILTERGROUP(4);
+      lDocAttachmentFilter.SETRANGE("Interaction Log Entry No.", pInteractionLogEntry."Entry No.");
+      lDocAttachmentFilter."File Extension" := pTempAttachment."File Extension";
+      CASE TRUE OF
+      //<<IMH05.ST
+        pTempAttachment."Use Description" <> '' :
+          lDocAttachmentFilter.Description := pTempAttachment."Use Description";
+      //>>IMH05.ST
+        lInteractionTemplate.GET(pInteractionLogEntry."Interaction Template Code") :
+          lDocAttachmentFilter.Description := lInteractionTemplate.Description;
+      END;
+      IF lDocAttachmentFilter.Description = '' THEN
+        lDocAttachmentFilter.Description := FolderMgt.GetCompletFileName(pTempAttachment."Storage Pointer");
+      CreateAttachment2(lDocAttachmentFilter, pTempAttachment);
+      pDocAttachment := lDocAttachmentFilter;
+    END;
+
+    PROCEDURE CreateAttachment2@1100281012(VAR pAttachment@1100281003 : Record 50021;VAR pAttachmentTemp@1100281008 : Record 5062);
+    VAR
+      lAttachmentBuffer@1100281001 : TEMPORARY Record 50021;
+      lRecRef@1100281000 : RecordRef;
+      lFileInStream@1100281004 : InStream;
+      lToFile@1100281005 : Text[500];
+      lFile@1100281006 : File;
+      lOutStream@1100281007 : OutStream;
+    BEGIN
+      //IMH03.ST
+      lAttachmentBuffer.COPY(pAttachment);
+      lAttachmentBuffer := pAttachment;
+      SetAttachmentValues(lAttachmentBuffer, lRecRef);
+
+      // Reconstitue la cl‚ d'accŠs … l'enregistrement
+      AttachMgt.CollectRecordKey(lAttachmentBuffer,lRecRef);
+      // Recup‚re l'arbo active
+      AttachTreeviewMgt.GetAttachTreeviewActive(
+        lRecRef,
+        lAttachmentBuffer."Attachment Treeview Code");
+
+      lAttachmentBuffer.VALIDATE("Attachment Treeview Code");
+      AttachMgt.CreateAttachment2(lAttachmentBuffer, pAttachmentTemp, lRecRef);
+      pAttachment := lAttachmentBuffer;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 16/02/12 @a ISAT.ST @v IMH6.01.108 @s Gestion interaction @c Description par d‚faut */
+      /** @r IMH04 @d 23/08/11 @a ISAT.EB @v IMH6.01.165 @s Interface extranet prestataire
+          @c R‚vision SetAttachmentValues */
+      /** @r IMH03 @d 13/01/11 @a ISAT.ST @v IMH6.01.003 @s Attach. Management @c Finalisation sur interactions
+          @c Ajout CreateAttachment2 */
+      /** @r IMH02 @d 24/11/10 @a ISAT.LLT @v IMH6.01.003 @s Attach. Management @c Gestion Intercation contact */
+      /** @r IMH01 @d 23/09/10 @a ISAT.ZW @v IMH6.01.003 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

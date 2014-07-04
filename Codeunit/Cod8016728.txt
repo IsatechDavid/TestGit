@@ -1,0 +1,89 @@
+OBJECT Codeunit 8016728 EAI WS Receive
+{
+  OBJECT-PROPERTIES
+  {
+    Date=06/01/11;
+    Time=15:08:20;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            s@1100281000 : BigText;
+          BEGIN
+          END;
+
+  }
+  CODE
+  {
+
+    PROCEDURE SetXMLDoc@1100281000(pMessageType@1100281000 : Text[30];pMessageID@1100281001 : Text[30];pXML@1100281002 : BigText) : Boolean;
+    VAR
+      lEAIMQBufferManagement@1100281011 : Codeunit 8016708;
+      lRcvdMQBuffer@1100281010 : TEMPORARY Record 8016721;
+      lExchangeType@1100281009 : Record 8016717;
+      lEAIProcessAct@1100281008 : Record 8016714;
+      lEAIAct@1100281007 : Record 8016706;
+      lEAIProcess@1100281006 : Record 8016702;
+      lEAIMessageQueue@1100281005 : Record 8016704;
+      lProcessFind@1100281004 : Boolean;
+      lInStream@1100281003 : InStream;
+      lOutStream@1100281012 : OutStream;
+      lEAIRcvdValidationPostLine@1100281013 : Codeunit 8016727;
+    BEGIN
+      //Cette fonction placera le fichier XML dans la file d'attente correspondante au type de message
+
+      lEAIAct.SETCURRENTKEY("Message Type Code","Document Type Code","Document ID Code");
+      lEAIAct.SETRANGE("Message Type Code", pMessageType);
+
+      IF lEAIAct.ISEMPTY THEN
+        EXIT(FALSE);
+      lEAIAct.FINDFIRST;
+      lEAIProcessAct.SETCURRENTKEY("EAI Act Type Code","EAI Act Code");
+      lEAIProcessAct.SETRANGE("EAI Act Type Code", lEAIAct."EAI Act Type Code");
+      lEAIProcessAct.SETRANGE("EAI Act Code", lEAIAct.Code);
+
+      IF lEAIProcessAct.ISEMPTY THEN
+        EXIT(FALSE);
+      lEAIProcessAct.FINDFIRST;
+      lProcessFind := FALSE;
+      REPEAT
+        lEAIProcess.GET(lEAIProcessAct."EAI Process Code");
+        IF lEAIProcess.Activated THEN
+          lProcessFind := TRUE;
+      UNTIL (lEAIProcessAct.NEXT = 0) OR lProcessFind;
+
+      IF NOT lEAIMessageQueue.GET(lEAIProcess."EAI Message Queue Code") THEN
+        EXIT(FALSE);;
+
+      lRcvdMQBuffer."Act Priority" := lEAIAct."Act Priority";
+      lRcvdMQBuffer."EAI Act Code" := lEAIAct.Code;
+      lRcvdMQBuffer."EAI Act Type Code" := lEAIAct."EAI Act Type Code";
+      lRcvdMQBuffer."EAI NAS Code" := lEAIProcess."EAI NAS Code";
+      lRcvdMQBuffer."EAI Process Code" := lEAIProcess.Code;
+      lRcvdMQBuffer."EAI MQ Code" := lEAIMessageQueue.Code;
+      lRcvdMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+      IF pXML.LENGTH <> 0 THEN
+        pXML.WRITE(lOutStream);
+      CLEAR(lOutStream);
+
+      lRcvdMQBuffer."Message ID" := pMessageID;
+      lRcvdMQBuffer.Step := lRcvdMQBuffer.Step::Validation;
+      lRcvdMQBuffer.INSERT;
+
+      lEAIMQBufferManagement.CreateRcvdMQBufferToRcvdMQ(lRcvdMQBuffer);
+      //IMH01 isat.zw
+      IF lEAIAct."Auto. Posting" THEN
+        lEAIRcvdValidationPostLine.ValidateRcvdMQLine(lRcvdMQBuffer);
+
+      EXIT(TRUE);
+    END;
+
+    BEGIN
+    {
+      /** @r IHM01 @d 04/01/11 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Creation */
+    }
+    END.
+  }
+}

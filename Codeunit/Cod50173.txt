@@ -1,0 +1,119 @@
+OBJECT Codeunit 50173 DARVA Sent SDR61 Gen. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/09/11;
+    Time=17:33:13;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            lEAISentMQBuffer := Rec;
+            Code(lEAISentMQBuffer);
+            lEAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+            Rec := lEAISentMQBuffer;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIXMLDocMgt@1100281003 : Codeunit 8016713;
+      NASHandler@1100281008 : Codeunit 8016720;
+      DARVAXMLMgt@1100281009 : Codeunit 50154;
+
+    PROCEDURE Code@1100281001(VAR pEAISentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lEAIDocEntryMgt@1100281002 : Codeunit 8016707;
+      lXMLDocument@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLNewChild0@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild1@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild2@1100281007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild3@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild4@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild5@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIAct@1100281003 : Record 8016706;
+      lEAIPartner@1100281014 : Record 8016707;
+      lInStream@1100281005 : InStream;
+      lNameSpace@1100281006 : Text[250];
+      lIntervention@1100281017 : Record 50075;
+      lIntervention2@1100281019 : Record 50075;
+      lService@1100281016 : Record 50066;
+      lRecRef@1100281015 : RecordRef;
+      lServHeader@1100281011 : Record 5900;
+      lEAIPartnerCrossRef@1100281018 : Record 8016748;
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      lEAIPartner.GET(pEAISentMQBuffer."EAI Partner Code");
+      lRecRef.GETTABLE(lIntervention);
+      lRecRef.GET(pEAISentMQBuffer.RecordId);
+      lRecRef.SETTABLE(lIntervention);
+      lService.GET(lIntervention."Service No.");
+      lServHeader.GET(lServHeader."Document Type"::Invoice, lIntervention."Service Header No.");
+
+      lIntervention2.SETRANGE("Service Header No.",lServHeader."No.");
+      lIntervention2.SETFILTER("Line No.",STRSUBSTNO('<>%1',FORMAT(lIntervention."Line No.")));
+      lIntervention2.SETRANGE("Process Status No.",0,899);
+      IF NOT lIntervention2.ISEMPTY THEN
+        EXIT;
+
+      //Root Node
+      lXMLDocument.async := FALSE;
+      DARVAXMLMgt.SetType(1);
+      lXMLDocument.setProperty('SelectionNamespaces',DARVAXMLMgt.GetSelectionNameSpace);
+      DARVAXMLMgt.CreateWSHeader(lXMLDocument,lXMLNewChild2,lEAIPartner.Username,lEAIPartner.Password);
+
+      WITH EAIXMLDocMgt DO BEGIN
+        lNameSpace := DARVAXMLMgt.GetNameSpace(1);
+        AddElement(lXMLNewChild2,'sch:SoumettreSuiviDossierReparateurFinPrestationDemande','',lNameSpace,lXMLNewChild3);
+
+        lNameSpace := DARVAXMLMgt.GetNameSpace(2);
+        //context
+        DARVAXMLMgt.Sent_InsertContext(lEAIPartner, lXMLNewChild3);
+        //dossier
+        DARVAXMLMgt.Sent_InsertService(lEAIPartner, lService, lXMLNewChild3);
+        //Partenaire
+        DARVAXMLMgt.Sent_InsertPartners(lEAIPartner, lServHeader, lXMLNewChild3);
+
+        //SDR61
+        //<<IMH02.ZW
+        AddElement(lXMLNewChild3,'ns:suiviDossierReparateurFinPrestation','',lNameSpace,lXMLNewChild4);
+        //AddElement(lXMLNewChild3,'ns:suiviDossierFinPrestation','',lNameSpace,lXMLNewChild4);
+        //>>IMH02.ZW
+        // MotifFinMission = 10,11,12,13,99
+        lEAIPartnerCrossRef.INIT;
+        IF lEAIPartnerCrossRef.GetToCrossRef(
+             DATABASE::"Service Intervention Line",lIntervention.FIELDNO("Cancel Reason Code"),
+             lEAIPartner.Code,lIntervention."Cancel Reason Code",lEAIPartnerCrossRef)
+        THEN BEGIN
+          AddElement(lXMLNewChild4,'ns:motifFinMission',lEAIPartnerCrossRef."Partner Reference",lNameSpace,lXMLNewChild5);
+        END ELSE BEGIN
+          AddElement(lXMLNewChild4,'ns:motifFinMission','99',lNameSpace,lXMLNewChild5);
+        END;
+        lIntervention.CALCFIELDS("Cancel Reason");
+        AddElement(lXMLNewChild4,'ns:commentaireLibre',lIntervention."Cancel Reason",lNameSpace,lXMLNewChild5);
+      END; // WITH
+      CLEAR(pEAISentMQBuffer."XML Source");
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXMLDocument.save(lInStream);
+      IF NASHandler.IsDebug THEN
+        lXMLDocument.save(TEMPORARYPATH + 'EnvoiSDR61.xml'); // pour test
+    END;
+
+    BEGIN
+    {
+      /** @r IMH02 @d 15/09/11 @a ISAT.ZW @v IMH6.01.0134 @s DARVA Management @s
+          @c SDR61 : Soumettre Suivi Dossier Reparateur Fin Prestation Demande */
+      /** @r IMH01 @d 13/07/11 @a ISAT.MA @v IMH6.01.0134 @s DARVA Management @s Cr‚ation */
+    }
+    END.
+  }
+}

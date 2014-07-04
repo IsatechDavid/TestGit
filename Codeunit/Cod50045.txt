@@ -1,0 +1,331 @@
+OBJECT Codeunit 50045 Proc. Completness Task Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=03/04/14;
+    Time=14:14:56;
+    Modified=Yes;
+    Version List=IMH6.01,5005;
+  }
+  PROPERTIES
+  {
+    TableNo=50004;
+    Permissions=TableData 50004=rm;
+    OnRun=BEGIN
+            TestAutoStep(Rec);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProcessMgt@1100281000 : Codeunit 50040;
+      CurrRec@1100281001 : Record 50004;
+
+    PROCEDURE SelectNextStep@1100281000(VAR pRec@1100281000 : Record 50004);
+    VAR
+      lProcessStep@1100281001 : Record 50043;
+    BEGIN
+      { Commentaire VA
+      IF ProcessMgt.SelectNextStep(pRec."Process Code", pRec."Process Status No.", lProcessStep) THEN
+        IF StatusChangeAllowed(pRec, lProcessStep, TRUE, TRUE) THEN
+          PerformStatusChange(pRec, lProcessStep);
+      }
+    END;
+
+    PROCEDURE TestAutoStep@1100281001(VAR pRec@1100281000 : Record 50004) : Boolean;
+    VAR
+      lProcessStep@1100281002 : Record 50043;
+      lProcessAutoStep@1100281001 : Codeunit 50129;
+    BEGIN
+      { Commentaire VA
+      IF NOT ProcessMgt.SetAutoStepFilters(pRec."Process Code", pRec."Process Status No.", lProcessStep) THEN
+        EXIT;
+      lProcessStep.FINDFIRST;
+      REPEAT
+        IF StatusChangeAllowed(pRec, lProcessStep, FALSE, FALSE) THEN BEGIN
+          lProcessAutoStep.AddStep(lProcessStep); //IMH11.ST
+          PerformStatusChange(pRec, lProcessStep);
+          lProcessAutoStep.InitCU; //IMH11.ST
+          EXIT(TRUE);
+        END;
+      UNTIL lProcessStep.NEXT = 0;
+      EXIT(FALSE);
+      }
+    END;
+
+    LOCAL PROCEDURE StatusChangeAllowed@1100281002(pRec@1100281000 : Record 50004;pProcessStep@1100281004 : Record 50043;pRaiseError@1100281002 : Boolean;pFromUserStep@1100281001 : Boolean) : Boolean;
+    VAR
+      lProcessStepRequirement@1100281003 : Record 50045;
+      lCalendarCode@1100281006 : Code[10];
+      lProcess@1100281005 : Record 50041;
+    BEGIN
+      IF NOT pProcessStep.Active THEN
+        EXIT(FALSE);
+      IF (pFromUserStep AND pProcessStep."Enforce User Time Limit") OR (NOT pFromUserStep) THEN
+        //<<IMH07
+        IF pProcessStep."Use Calendar" THEN BEGIN
+          lProcess.GET(pProcessStep."Process Code");
+          lCalendarCode := lProcess."Base Calendar Code";
+        END;
+        IF NOT ProcessMgt.AllowStepChangeDelay(pProcessStep."Step Date Limit Formula", pProcessStep."Step Time Limit Formula",
+                                               DATABASE::"Completness Task",
+                                               pRec."Provider No.", pRec."Document Code", 0,0,
+                                               pRec."Creation Date", lCalendarCode, pRaiseError) THEN
+          EXIT(FALSE);
+        //>>IMH07
+      pProcessStep.SetRequirementFilter(lProcessStepRequirement);
+      EXIT(RequirementAllowed(lProcessStepRequirement, pRec, pRaiseError));
+    END;
+
+    LOCAL PROCEDURE ProcessActionAllowed@1100281009(pRec@1100281000 : Record 50004;pProcessAction@1100281004 : Record 50044;pRaiseError@1100281002 : Boolean) : Boolean;
+    VAR
+      lProcessStepRequirement@1100281003 : Record 50045;
+    BEGIN
+      pProcessAction.SetRequirementFilter(lProcessStepRequirement);
+      EXIT(RequirementAllowed(lProcessStepRequirement, pRec, pRaiseError));
+    END;
+
+    PROCEDURE RequirementAllowed@1100281010(VAR pRequirement@1100281002 : Record 50045;pRec@1100281001 : Record 50004;pRaiseError@1100281000 : Boolean) : Boolean;
+    VAR
+      lCompletnessTaskTemp@1100281006 : TEMPORARY Record 50004;
+      lLineResult@1100281003 : Boolean;
+      lCount@1100281004 : Integer;
+      lLastRequirement@1100281005 : Record 50045;
+      lRecRef@1100281007 : RecordRef;
+    BEGIN
+      IF pRequirement.ISEMPTY THEN
+        EXIT(TRUE);
+
+      lCompletnessTaskTemp := pRec;
+      lCompletnessTaskTemp.INSERT;
+      lRecRef.GETTABLE(lCompletnessTaskTemp);
+      EXIT(ProcessMgt.CheckRequirements(lRecRef,pRequirement,pRaiseError));
+    END;
+
+    LOCAL PROCEDURE PerformStatusChange@1100281003(VAR pRec@1100281001 : Record 50004;pProcessStep@1100281003 : Record 50043);
+    VAR
+      lProcessAction@1100281002 : Record 50044;
+    BEGIN
+      // Appel … partir du changement de statut utilisateur ou automatique
+      IF pProcessStep.ProcessActionExists(lProcessAction) THEN
+        ProcessAction(pRec, lProcessAction);
+
+      //Historique statut
+      { Commentaire VA
+      IF pRec."Process Code" <> pProcessStep."Next Process Code" THEN
+        pRec.VALIDATE("Process Code", pProcessStep."Next Process Code");
+      pRec.VALIDATE("Process Status No.", pProcessStep."Next Status");
+      }
+      CreateStatusHistoryLine(pRec, pProcessStep);
+      pRec.MODIFY(TRUE);
+    END;
+
+    PROCEDURE ProcessAction@1100281005(VAR pRec@1100281001 : Record 50004;VAR pProcessAction@1100281000 : Record 50044);
+    VAR
+      lProcessCurrentAction@1100281008 : Record 50046;
+      lProcessAction@1100281009 : Record 50044;
+    BEGIN
+      IF pProcessAction.FINDSET(FALSE) THEN
+        REPEAT
+          IF ProcessActionAllowed(pRec, pProcessAction, FALSE) THEN BEGIN
+            CreateCrrrentActionLine(lProcessCurrentAction, pRec, pProcessAction);
+          END;
+        UNTIL pProcessAction.NEXT = 0;
+
+      lProcessCurrentAction.RESET;
+      lProcessCurrentAction.SETCURRENTKEY(
+                  "Source Table ID","Source Key Code 1","Source Key Code 2","Source Key Integer 1","Source Key Integer 2","Action Order"
+      );
+      lProcessCurrentAction.SETRANGE("Source Table ID", DATABASE::"Completness Task");
+      lProcessCurrentAction.SETRANGE("Source Key Code 1", pRec."Provider No.");
+      lProcessCurrentAction.SETRANGE("Source Key Code 2", pRec."Document Code");
+      //<<IMH09.ST
+      IF pProcessAction.GETFILTER("Process Code") <> '' THEN
+        lProcessCurrentAction.SETFILTER("Process Code", pProcessAction.GETFILTER("Process Code"));
+      IF pProcessAction.GETFILTER("Source Action") <> '' THEN
+        lProcessCurrentAction.SETFILTER("Source Action", pProcessAction.GETFILTER("Source Action"));
+      IF pProcessAction.GETFILTER("Source Line No.") <> '' THEN
+        lProcessCurrentAction.SETFILTER("Source Line No.", pProcessAction.GETFILTER("Source Line No."));
+      //>>IMH09.ST
+
+      IF NOT lProcessCurrentAction.FINDSET THEN
+        EXIT;
+      CurrRec := pRec;
+      REPEAT
+        IF lProcessCurrentAction."Action Status" < lProcessCurrentAction."Action Status"::Realized THEN BEGIN
+          IF lProcessCurrentAction."Action Status" = lProcessCurrentAction."Action Status"::Init THEN BEGIN
+            lProcessCurrentAction."Action Status" := lProcessCurrentAction."Action Status"::Process;
+            lProcessCurrentAction.MODIFY(TRUE);
+          END;
+          WITH lProcessAction DO BEGIN
+            IF GET(lProcessCurrentAction."Process Code", lProcessCurrentAction."Source Action",
+                   lProcessCurrentAction."Source Line No.", lProcessCurrentAction."Action Line No.") THEN BEGIN
+              IF NOT "Suspend Action" THEN BEGIN
+                CASE "Action Type" OF
+                  "Action Type"::"Create Tray Line" :
+                    Act_CreateTrayLine(lProcessAction);
+                  "Action Type"::"Create Interaction" :
+                    Act_CreateInteract(lProcessAction);
+                  "Action Type"::"Run Object" :
+                    Act_RunObject(lProcessAction);
+                  "Action Type"::"Set Value" :
+                    Act_SetValue(lProcessAction);
+                  "Action Type"::"Run Function" :
+                    Act_RunFunction(lProcessAction);
+                END; // CASE
+              END;
+            END;
+            lProcessCurrentAction."Action Status" := lProcessCurrentAction."Action Status"::Realized;
+            lProcessCurrentAction.MODIFY(TRUE);
+          END; // WITH
+        END;
+      UNTIL lProcessCurrentAction.NEXT=0;
+
+      lProcessCurrentAction.DELETEALL;
+      pRec := CurrRec;
+    END;
+
+    PROCEDURE OnChangeProcessStatus@1100281006(VAR pRec@1100281000 : Record 50004);
+    VAR
+      lProcessAction@1100281001 : Record 50044;
+    BEGIN
+      // Appel … partir du validate du champ "Process Status" : on traite les actions arrivant … ce statut
+
+      { Commentaire VA
+      IF ProcessMgt.StatusActionExist(pRec."Process Code", pRec."Process Status No.", lProcessAction) THEN
+        ProcessAction(pRec, lProcessAction);
+      }
+    END;
+
+    PROCEDURE CreateStatusHistoryLine@1100281004(pRec@1100281001 : Record 50004;pProcessStep@1100281003 : Record 50043);
+    VAR
+      lProcessStatusHistory@1100281002 : Record 50047;
+    BEGIN
+      lProcessStatusHistory."Source Table ID" := DATABASE::"Completness Task";
+      lProcessStatusHistory."Source Key Code 1" := pRec."Provider No.";
+      lProcessStatusHistory."Source Key Code 2" := pRec."Document Code";
+      { Commentaire VA
+      lProcessStatusHistory."From Process Code" := pProcessStep."Process Code";
+      lProcessStatusHistory."From Status No." := pProcessStep."Previous Status";
+      lProcessStatusHistory."To Process Code" := pProcessStep."Next Process Code";
+      lProcessStatusHistory."To Status No." := pProcessStep."Next Status";
+      lProcessStatusHistory."Auto Process" := pProcessStep."Auto Process Step";
+      }
+      lProcessStatusHistory.INSERT(TRUE);
+    END;
+
+    PROCEDURE CreateCrrrentActionLine@1100281007(VAR pProcessCurrentAction@1100281002 : Record 50046;pRec@1100281001 : Record 50004;pProcessAction@1100281000 : Record 50044);
+    BEGIN
+      ProcessMgt.AddCurrActionLine(pProcessCurrentAction,
+                                   DATABASE::"Completness Task", pRec."Provider No.", pRec."Document Code", 0, 0,
+                                   pProcessAction);
+    END;
+
+    LOCAL PROCEDURE Act_CreateTrayLine@1100281008(pAction@1100281006 : Record 50044);
+    VAR
+      lTrayLineManagement@1100281003 : Codeunit 50050;
+      lTeamCode@1000000001 : Code[10];
+      lFilterTeamTrayTask@1000000000 : TEMPORARY Record 50129;
+    BEGIN
+      lTrayLineManagement.SetCallFrom(1);
+      IF pAction.GetUserInterf THEN COMMIT; //IMH06.ST
+      //<<IMH14
+      lTeamCode := pAction."Team Code";
+      IF lTeamCode = '' THEN BEGIN
+        lTeamCode := lTrayLineManagement.GetTeamByTask(pAction."Task Code", lFilterTeamTrayTask, '');
+      END;
+      IF NOT lTrayLineManagement.CreateTLFromCompletnessTask(
+          //CurrRec, pAction."Team Code", pAction."Task Code", pAction.GetUserInterf) THEN
+          CurrRec, lTeamCode, pAction."Task Code", pAction.GetUserInterf) THEN
+      //>>IMH14
+        IF NOT pAction.Optional THEN
+          ERROR('');
+    END;
+
+    LOCAL PROCEDURE Act_CreateInteract@1100281014(pAction@1100281000 : Record 50044);
+    VAR
+      lSegLine@1100281002 : TEMPORARY Record 5077;
+    BEGIN
+      pAction.TESTFIELD("Interaction Template Code");
+      CurrRec.MODIFY; //imh12.st
+      IF pAction.GetUserInterf THEN COMMIT; //IMH06.ST
+      lSegLine.SetHideWizard(pAction.GetInteractParam);
+      lSegLine."Process Code" := pAction."Process Code"; //IMH13.ST
+      IF NOT lSegLine.CreateInteracFromCompleteTask(CurrRec, pAction."Interaction Template Code") THEN
+        IF NOT pAction.Optional THEN
+          ERROR('');
+    END;
+
+    PROCEDURE Act_RunObject@1100281013(pAction@1100281000 : Record 50044);
+    VAR
+      lRec@1100281001 : Record 50004;
+    BEGIN
+      CASE pAction."Object Type" OF
+        pAction."Object Type"::Report : BEGIN
+          CurrRec.MODIFY;
+          lRec := CurrRec;
+          lRec.SETRECFILTER;
+          IF pAction."Use Request Form" THEN COMMIT;    //IMH10.ZW
+          REPORT.RUN(pAction."Object No.", pAction."Use Request Form", pAction."Use System Printer", lRec);
+          CurrRec.GET; // recharge le rec au cas o— le report le modifie
+        END;
+        pAction."Object Type"::Codeunit : BEGIN
+          lRec := CurrRec;
+          lRec.SETRECFILTER;
+          CODEUNIT.RUN(pAction."Object No.", lRec);
+          CurrRec := lRec; // recopie le rec au cas o— le codeunit le modifie
+        END;
+      END; // CASE
+    END;
+
+    PROCEDURE Act_SetValue@1100281015(pAction@1100281000 : Record 50044);
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      lRecRef.GETTABLE(CurrRec);
+      ProcessMgt.SetFieldValue(pAction, lRecRef);
+      lRecRef.SETTABLE(CurrRec);
+    END;
+
+    LOCAL PROCEDURE Act_RunFunction@1100281012(pAction@1100281000 : Record 50044);
+    VAR
+      lActFunction@1100281001 : Record 50085;
+      lRecRef@1100281002 : RecordRef;
+    BEGIN
+      lRecRef.GETTABLE(CurrRec);
+      IF NOT lActFunction.ActFunction(lRecRef,pAction) THEN
+      //<<IMH08.ST
+        IF NOT pAction.Optional THEN
+          ERROR('');
+      //>>IMH08.ST
+      lRecRef.SETTABLE(CurrRec);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH14 @d 26/03/14 @a ISAT.ZW @v IMH6.01.5005 @s Reorganisation DPS @h 5005
+          @c Ajout la gestion de team code par defaut */
+      /** @r IMH13 @d 06/12/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Suivi processus interactions */
+      /** @r IMH12 @d 02/09/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Modify avant cr‚ation interaction */
+      /** @r IMH11 @d 22/06/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Controle des boucles infinies */
+      /** @r IMH10 @d 12/05/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Ajout commit si Request form Report */
+      /** @r IMH09 @d 10/05/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Correctif enchainement d'actions */
+      /** @r IMH08 @d 31/03/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Mode optionel pour les actions */
+      /** @r IMH07 @d 14/03/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout gestion des celendriers pour le calcul de d‚lai processus */
+      /** @r IMH06 @d 18/02/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des status @c COMMIT before userinterface */
+      /** @r IMH05 @d 25/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des status
+          @c Ajout d'une autre option pour interactions
+          @c Test retour cr‚ation corbeille */
+      /** @r IMH04 @d 20/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts
+          @c Adaptations */
+      /** @r IMH03 @d 11/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Gestion des erreurs
+          @c Fonction Action */
+      /** @r IMH02 @d 31/12/10 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Finalisation */
+      /** @r IMH01 @d 09/12/10 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Creation Objet */
+    }
+    END.
+  }
+}

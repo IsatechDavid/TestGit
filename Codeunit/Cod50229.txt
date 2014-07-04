@@ -1,0 +1,178 @@
+OBJECT Codeunit 50229 EAI Rcvd SMS Generation Post
+{
+  OBJECT-PROPERTIES
+  {
+    Date=05/10/12;
+    Time=08:24:41;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016704;
+    SingleInstance=Yes;
+    OnRun=VAR
+            lText000@1100481000 : TextConst 'ENU=%1 - %2 : Receiving Message Queue Generating Handler started;FRA=%1 - %2 : D‚marrage du handler de g‚n‚ration de la file de r‚ception';
+          BEGIN
+            IF "Table No." = 0 THEN
+              EXIT;
+            IF Type <> Type::Receiving THEN
+              EXIT;
+
+            CurrentMessageQueue := Rec;
+            RunTimer;
+
+            MESSAGE(lText000,CurrentMessageQueue."EAI NAS Code",CurrentMessageQueue.Code);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAILogMgt@1100281004 : Codeunit 8016711;
+      CurrentMessageQueue@1100281001 : Record 8016704;
+      GenerationTimer@1100281002 : Automation "{3B311C81-140E-11D5-8B18-00D0590B4EC5} 1.0:{3B311C92-140E-11D5-8B18-00D0590B4EC5}:'Navision Timer 1.0'.Timer" WITHEVENTS;
+      IsRunning@1100281000 : Boolean;
+      i@1100481000 : Integer;
+      Text001@1100481001 : TextConst 'ENU=%1 messages have been hanlded.;FRA=%1 messages ont ‚t‚ int‚gr‚s.';
+
+    PROCEDURE ExchangeTypeLoop@1100281001();
+    VAR
+      lEAIMQExchangeType@1100281000 : Record 8016719;
+    BEGIN
+      lEAIMQExchangeType.SETCURRENTKEY("EAI MQ Code");
+      lEAIMQExchangeType.SETRANGE("EAI MQ Code",CurrentMessageQueue.Code);
+      IF lEAIMQExchangeType.FINDSET(FALSE,FALSE) THEN BEGIN
+       ExchangeTypePostLine(lEAIMQExchangeType);
+      END;
+    END;
+
+    PROCEDURE ExchangeTypePostLine@1100281002(VAR pEAIMQExchangeType@1100281001 : Record 8016719);
+    VAR
+      lNewRcvdMQBuffer@1100281002 : TEMPORARY Record 8016721;
+      lText000@1100481000 : TextConst 'ENU=%1 error CU %2 : %3.;FRA=%1 erreur CU %2 : %3.';
+    BEGIN
+      lNewRcvdMQBuffer."EAI MQ Code"  := CurrentMessageQueue.Code;
+      lNewRcvdMQBuffer."EAI NAS Code" := CurrentMessageQueue."EAI NAS Code";
+      // <<IMH01.ISAT.MA
+      lNewRcvdMQBuffer."EAI Exchange Type Code" := pEAIMQExchangeType."EAI Exchange Type Code";
+      lNewRcvdMQBuffer."EAI MQ Code" := pEAIMQExchangeType."EAI MQ Code";
+      // >>IMH01.ISAT.MA
+      IF NOT CODEUNIT.RUN(CODEUNIT::"EAI Rcvd Generation Act",lNewRcvdMQBuffer) THEN BEGIN
+        //Message erreur
+        EAILogMgt.AddErrorToRcvdLog(CurrentMessageQueue.Code,'','','','',COPYSTR(GETLASTERRORTEXT,1,250));
+      END;
+    END;
+
+    PROCEDURE MessageQueueLoop@1100481003();
+    VAR
+      lEAIMQBufferMgt@1100481002 : Codeunit 8016708;
+      lRcvdMQBuffer@1100481001 : TEMPORARY Record 8016721;
+      lRecRef@1100481000 : RecordRef;
+      lNbMsg@1100281000 : Integer;
+      lCountMsg@1100281001 : Integer;
+      lEAIActMgt@1100281002 : Codeunit 8016703;
+    BEGIN
+      //EAI02 : Traitement des messages
+
+      lEAIMQBufferMgt.SetFilterAndKeyOnRcvdMQ(
+        lRecRef,CurrentMessageQueue,lRcvdMQBuffer.Step::Generation,lRcvdMQBuffer.Status::Unprocessed);
+
+      //On limite le nombre de message trait‚ en mˆme temps
+      lNbMsg := CurrentMessageQueue."Max MQ Number per Loop";
+      IF lNbMsg = 0 THEN
+        lNbMsg := 50;
+
+      //EAI03 lRecRef.LOCKTABLE;
+      IF lRecRef.FINDSET(FALSE,FALSE) THEN BEGIN
+        REPEAT
+          //On passe par un Buffer
+          lEAIMQBufferMgt.TransferRecRefToRcvdMQBuffer(lRecRef,lRcvdMQBuffer);
+
+          //Traitement unitaire
+          IF lEAIActMgt.AutoValidate(lRcvdMQBuffer."EAI Act Type Code",lRcvdMQBuffer."EAI Act Code") THEN
+            MessageQueuePost(lRcvdMQBuffer);
+
+          //On enregistre le Buffer
+          lEAIMQBufferMgt.TransferRcvdMQBufferToRcvdMQ(lRcvdMQBuffer);
+
+          COMMIT;
+
+          lCountMsg += 1;
+
+        UNTIL (lRecRef.NEXT=0) OR (lCountMsg=lNbMsg);
+
+        EAILogMgt.AddInfoToRcvdLog(CurrentMessageQueue.Code,'','','','',STRSUBSTNO(Text001,FORMAT(lCountMsg)));
+
+      END;
+    END;
+
+    PROCEDURE MessageQueuePost@1100481002(VAR pRcvdMQBuffer@1100281001 : Record 8016721);
+    BEGIN
+      //EAI02
+      COMMIT; //N‚cessaire pour lancer le CodeUnit.Run avec valeur de retour (gestion des erreurs)
+      IF CODEUNIT.RUN(CODEUNIT::"EAI Rcvd Generation Post Line",pRcvdMQBuffer) THEN BEGIN
+        pRcvdMQBuffer.Step := pRcvdMQBuffer.Step::Validation;
+        pRcvdMQBuffer.Status := pRcvdMQBuffer.Status::Unprocessed;
+        pRcvdMQBuffer.MODIFY;
+      END ELSE BEGIN
+        pRcvdMQBuffer.Step := pRcvdMQBuffer.Step::Validation; // IMH02.ISAT.MA
+        pRcvdMQBuffer."Comment Status" := COPYSTR(GETLASTERRORTEXT,1,250);
+        pRcvdMQBuffer.Status := pRcvdMQBuffer.Status::Error;
+        pRcvdMQBuffer.MODIFY;
+        CLEARLASTERROR;
+      END;
+    END;
+
+    PROCEDURE RunTimer@1100281003();
+    BEGIN
+      IF CurrentMessageQueue."Timer Interval" = 0 THEN
+        CurrentMessageQueue."Timer Interval" := 60;
+
+      IF ISCLEAR(GenerationTimer) THEN
+        CREATE(GenerationTimer);
+
+      GenerationTimer.Interval(CurrentMessageQueue."Timer Interval" * 1000);
+      GenerationTimer.Enabled(TRUE);
+    END;
+
+    EVENT GenerationTimer@1100281002::Timer@1(Milliseconds@1100281000 : Integer);
+    BEGIN
+      IF NOT IsRunning THEN BEGIN
+        IsRunning := TRUE;
+        SELECTLATESTVERSION;
+        ExchangeTypeLoop();
+        //<<EAI02
+        COMMIT;
+        MessageQueueLoop;
+        //>>EAI02
+        IsRunning := FALSE;
+        COMMIT;
+      END;
+    END;
+
+    EVENT GenerationTimer@1100281002::TimerError@2(ErrorString@1100281000 : Text[1024]);
+    BEGIN
+      //ERROR HANDLING : TODO
+
+      EAILogMgt.AddErrorToRcvdLog(CurrentMessageQueue.Code,'','','','',COPYSTR(ErrorString,1,250));
+
+      IsRunning := FALSE;
+      RunTimer;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 01/10/12 @a ISAT.ML @v IMH6.01.213 @s Projet SMS @c Duplication Objet */
+      /** @r IMH01 @d 27/04/11 @a ISAT.MA @v IMH6.01.134 @s EAI Webservice @c Suivi du code type ‚change EAI dans le message Buffer */
+      /** @r EAI03 @d 09/09/10 @a ISAT.JR @v ISAEAI5.01.00.00 @s Moteur EAI @c plus de verrou pour limiter les deadlock */
+      /** @r EAI02 @d 09/09/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s D‚coupage du traitement
+          @c 1 - r‚ception des fichiers ; 2 - ‚tape de g‚n‚ration */
+      /** @r EAI01 @d 14/02/09 @a ISAT.EB @v ISAEAI5.01.00.00 @s Lancement des handlers
+          @c Handlers non single instance
+          @c Ajout message de lancement pour l'observateur d'‚vŠnements */
+      /** @r EAI00 @d 01/02/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Cr‚ation de l'objet */
+    }
+    END.
+  }
+}

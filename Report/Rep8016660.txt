@@ -1,0 +1,697 @@
+OBJECT Report 8016660 FA Disposals Report
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:22:46;
+    Modified=Yes;
+    Version List=ISA6.00,IMISAT6.00;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=FA Disposals Report;
+               FRA=Immo. - Etat des cessions];
+    OnPreReport=BEGIN
+                  NombreDeTypes := 6;
+                  LoiAmort.GET(CodeLoiAmort);
+                  EtatGenImmo.AppendFAPostingFilter("Fixed Asset",DateDebut,DateFin);
+                  FiltreImmo := "Fixed Asset".GETFILTERS;
+                  TexteTitrePrincipal := 'Etat des cessions';
+                  IF EtatsBudg THEN
+                    TexteTitrePrincipal := STRSUBSTNO('%1 %2',TexteTitrePrincipal,'(Etat budget)');
+                  TextLoiAmort := STRSUBSTNO('%1%2 %3',LoiAmort.TABLECAPTION,':',CodeLoiAmort);
+                  CreerTexteGroupeTotal;
+                  EtatGenImmo.ValidateDates(DateDebut,DateFin);
+                  FaireTexteDate;
+                  CreerTitre;
+                  IF ImprDetails THEN BEGIN
+                    NumImmo := "Fixed Asset".FIELDCAPTION("No.");
+                    DesignationImmo := "Fixed Asset".FIELDCAPTION(Description);
+                  END;
+                  Periode1 := Periode1::"Avant date d‚but";
+                  Periode2 := Periode2::"Solde p‚riode";
+                END;
+
+    Orientation=Landscape;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table5600;
+        OnPreDataItem=BEGIN
+                        CASE GroupeTotaux OF
+                          GroupeTotaux::"Classe immo.":
+                            SETCURRENTKEY("FA Class Code");
+                          GroupeTotaux::"Sous-classe immo.":
+                            SETCURRENTKEY("FA Subclass Code");
+                          GroupeTotaux::"Emplacement immo.":
+                            SETCURRENTKEY("FA Location Code");
+                          GroupeTotaux::"Immo. principale":
+                            SETCURRENTKEY("Component of Main Asset");
+                          GroupeTotaux::Departement:
+                            SETCURRENTKEY("Global Dimension 1 Code");
+                          GroupeTotaux::Dossier:
+                            SETCURRENTKEY("Global Dimension 2 Code");
+                          GroupeTotaux::"Groupe compta. immo.":
+                            SETCURRENTKEY("FA Posting Group");
+                        END;
+                        CurrReport.CREATETOTALS(PlanAmort."Proceeds on Disposal",PlanAmort."Gain/Loss");
+                      END;
+
+        OnAfterGetRecord=BEGIN
+
+                           IF NOT PlanAmort.GET("No.",CodeLoiAmort) THEN
+                             CurrReport.SKIP;
+                           IF PlanAmort."Acquisition Date">DateFin THEN
+                             CurrReport.SKIP;
+                           IF (PlanAmort."Disposal Date"=0D) OR (PlanAmort."Disposal Date">DateFin) THEN
+                             CurrReport.SKIP;
+                           PlanAmort.CALCFIELDS("Proceeds on Disposal","Gain/Loss");
+                           MontantAvant := 0;
+                           MontantFinal := 0;
+                           IF EtatsBudg THEN
+                             AmortBudg.Calculate(
+                               "No.",ExtrDateDebut(DateDebut),DateFin,CodeLoiAmort,MontantAvant,MontantFinal);
+
+                           i := 0;
+                           WHILE i < NombreDeTypes DO BEGIN
+                             i := i + 1;
+                             CASE i OF
+                               1: TypeCompta := PlanAmort.FIELDNO("Acquisition Cost");
+                               2: TypeCompta := PlanAmort.FIELDNO(Depreciation);
+                               3: TypeCompta := PlanAmort.FIELDNO("Write-Down");
+                               4: TypeCompta := PlanAmort.FIELDNO(Appreciation);
+                               5: TypeCompta := PlanAmort.FIELDNO("Custom 1");
+                               6: TypeCompta := PlanAmort.FIELDNO("Custom 2");
+                             END;
+                             IF DateDebut <= 01010000D THEN
+                               MontantsDebut[i] := 0
+                             ELSE
+                               MontantsDebut[i] := EtatGenImmo.CalcFAPostedAmount("No.",TypeCompta,Periode1,DateDebut,
+                                 DateFin,CodeLoiAmort,MontantAvant,MontantFinal,FALSE,TRUE);
+                               MontantsSoldePeriode[i] :=
+                                 EtatGenImmo.CalcFAPostedAmount(
+                                   "No.",TypeCompta,Periode2,DateDebut,DateFin,
+                                   CodeLoiAmort,MontantAvant,MontantFinal,FALSE,TRUE);
+                             IF ExtrCessionPeriode THEN
+                               MontantsCession[i] := -(MontantsDebut[i] + MontantsSoldePeriode[i])
+                             ELSE
+                              MontantsCession[i] := 0;
+                             IF i >= 3 THEN
+                               AjouterTypeCompta(i - 3);
+                           END;
+                           FOR j := 1 TO NombreDeTypes DO
+                             MontantsFinTotal[j] := MontantsDebut[j] + MontantsSoldePeriode[j] + MontantsCession[j];
+                           ValeurComptableEnDateFin := 0;
+                           ValeurComptableEnDateDebut := 0;
+                           FOR j := 1 TO NombreDeTypes DO BEGIN
+                             ValeurComptableEnDateFin := ValeurComptableEnDateFin + MontantsFinTotal[j];
+                             ValeurComptableEnDateDebut := ValeurComptableEnDateDebut + MontantsDebut[j];
+                           END;
+                         END;
+
+        ReqFilterFields=No.,FA Class Code,FA Subclass Code,Budgeted Asset,FA Posting Group;
+        GroupTotalFields=FA Class Code,FA Subclass Code,Global Dimension 1 Code,Global Dimension 2 Code,FA Location Code,Component of Main Asset,FA Posting Group;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=24900;
+            SectionHeight=1692;
+          }
+          CONTROLS
+          {
+            { 33  ;TextBox      ;0    ;0    ;10000;423  ;FontSize=8;
+                                                         FontBold=Yes;
+                                                         SourceExpr=TexteTitrePrincipal }
+            { 32  ;TextBox      ;0    ;846  ;7500 ;423  ;SourceExpr=COMPANYNAME }
+            { 34  ;TextBox      ;17400;0    ;7500 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=FORMAT(TODAY,0,4) }
+            { 35  ;TextBox      ;17400;846  ;7500 ;423  ;HorzAlign=Right;
+                                                         SourceExpr=USERID }
+            { 36  ;TextBox      ;24450;423  ;450  ;423  ;CaptionML=FRA=Page;
+                                                         SourceExpr=CurrReport.PAGENO }
+            { 37  ;Label        ;23700;423  ;750  ;423  ;ParentControl=36 }
+            { 69  ;TextBox      ;0    ;423  ;7500 ;423  ;SourceExpr=TextLoiAmort }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=24900;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT((CurrReport.PAGENO = 1) AND (FiltreImmo <> ''));
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 28  ;TextBox      ;0    ;0    ;18150;423  ;SourceExpr="Fixed Asset".TABLECAPTION + ': ' + FiltreImmo }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=24900;
+            SectionHeight=423;
+          }
+          CONTROLS
+          {
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=24900;
+            SectionHeight=2115;
+          }
+          CONTROLS
+          {
+            { 16  ;TextBox      ;0    ;0    ;5400 ;423  ;SourceExpr=GroupeNomCode }
+            { 2   ;TextBox      ;0    ;846  ;1500 ;1269 ;VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         SourceExpr=NumImmo }
+            { 3   ;TextBox      ;1650 ;846  ;3750 ;1269 ;VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         SourceExpr=DesignationImmo }
+            { 8   ;Label        ;5550 ;846  ;1500 ;1269 ;ParentControl=6;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes }
+            { 10  ;Label        ;7200 ;846  ;1800 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Base amortissable (valeur achat) }
+            { 15  ;Label        ;9450 ;846  ;1200 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Base de calcul dot N }
+            { 20  ;Label        ;11100;846  ;1500 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Date amortis- sement }
+            { 40  ;Label        ;12750;846  ;1050 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Mode amortis- sement }
+            { 43  ;Label        ;13950;846  ;900  ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Dur‚e en mois }
+            { 68  ;Label        ;15150;846  ;1200 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Cumul N-1 }
+            { 70  ;Label        ;16800;846  ;1200 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Dotation N }
+            { 71  ;Label        ;18600;846  ;1050 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Cumul N }
+            { 72  ;Label        ;19950;846  ;1350 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Valeur r‚siduelle }
+            { 7   ;Label        ;21900;846  ;900  ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=Prix de vente }
+            { 9   ;Label        ;23400;846  ;1050 ;1269 ;HorzAlign=Right;
+                                                         VertAlign=Top;
+                                                         FontBold=Yes;
+                                                         MultiLine=Yes;
+                                                         CaptionML=FRA=+ ou - VALUE }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Header;
+            PrintOnEveryPage=Yes;
+            SectionWidth=24900;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT((GroupeTotaux = 0) OR NOT ImprDetails);
+                         END;
+
+          }
+          CONTROLS
+          {
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupHeader;
+            SectionWidth=24900;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CreerGroupeTitre;
+                           CurrReport.SHOWOUTPUT(ImprDetails AND (GroupeTotaux <> 0))
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 26  ;TextBox      ;0    ;423  ;5400 ;423  ;FontBold=Yes;
+                                                         SourceExpr=GroupeTitre }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=24900;
+            SectionHeight=423;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(ImprDetails);
+                         END;
+
+            OnPostSection=BEGIN
+                            MAJTotaux;
+                          END;
+
+          }
+          CONTROLS
+          {
+            { 1   ;TextBox      ;0    ;0    ;1500 ;423  ;HorzAlign=Left;
+                                                         SourceExpr="No." }
+            { 5   ;TextBox      ;1650 ;0    ;3750 ;423  ;SourceExpr=Description }
+            { 62  ;TextBox      ;9150 ;0    ;1800 ;423  ;SourceExpr=ValeurComptableEnDateDebut;
+                                                         AutoFormatType=1 }
+            { 6   ;TextBox      ;5550 ;0    ;1500 ;423  ;SourceExpr=Immo."FA Posting Group" }
+            { 12  ;TextBox      ;7200 ;0    ;1800 ;423  ;SourceExpr=MontantsDebut[1];
+                                                         AutoFormatType=1 }
+            { 23  ;TextBox      ;11100;0    ;1500 ;423  ;SourceExpr=PlanAmort."Depreciation Starting Date" }
+            { 25  ;TextBox      ;12750;0    ;1050 ;423  ;SourceExpr=FORMAT(PlanAmort."Depreciation Method") }
+            { 45  ;TextBox      ;13950;0    ;750  ;423  ;DecimalPlaces=0:0;
+                                                         SourceExpr=PlanAmort."No. of Depreciation Months" }
+            { 67  ;TextBox      ;14850;0    ;1650 ;423  ;SourceExpr=MontantsDebut[2];
+                                                         AutoFormatType=1 }
+            { 73  ;TextBox      ;19950;0    ;1500 ;423  ;SourceExpr=ValeurComptableEnDateFin;
+                                                         AutoFormatType=1 }
+            { 74  ;TextBox      ;18300;0    ;1500 ;423  ;SourceExpr=MontantsFinTotal[2];
+                                                         AutoFormatType=1 }
+            { 75  ;TextBox      ;16650;0    ;1500 ;423  ;SourceExpr=MontantsSoldePeriode[2];
+                                                         AutoFormatType=1 }
+            { 11  ;TextBox      ;21600;0    ;1500 ;423  ;SourceExpr=PlanAmort."Proceeds on Disposal";
+                                                         AutoFormatType=1 }
+            { 17  ;TextBox      ;23250;0    ;1650 ;423  ;SourceExpr=PlanAmort."Gain/Loss";
+                                                         AutoFormatType=1 }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=GroupFooter;
+            SectionWidth=24900;
+            SectionHeight=846;
+            OnPreSection=BEGIN
+                           CurrReport.SHOWOUTPUT(GroupeTotaux <> 0);
+                           CreerGroupeTotaux;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 27  ;TextBox      ;0    ;423  ;6900 ;423  ;FontBold=Yes;
+                                                         SourceExpr='Sous-total' + ': ' + GroupeTitre+' '+GroupeCompte }
+            { 13  ;TextBox      ;7200 ;423  ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr=GrouperMontantsDebut[1];
+                                                         AutoFormatType=1 }
+            { 51  ;TextBox      ;14850;423  ;1650 ;423  ;FontBold=Yes;
+                                                         SourceExpr=GrouperMontantsDebut[2];
+                                                         AutoFormatType=1 }
+            { 54  ;TextBox      ;16650;423  ;1500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=GrouperMontantsSoldePeriode[2];
+                                                         AutoFormatType=1 }
+            { 60  ;TextBox      ;18300;423  ;1500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=MontantsFinTotal[2];
+                                                         AutoFormatType=1 }
+            { 63  ;TextBox      ;9150 ;423  ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr=ValeurComptableEnDateDebut;
+                                                         AutoFormatType=1 }
+            { 66  ;TextBox      ;19950;423  ;1500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=ValeurComptableEnDateFin;
+                                                         AutoFormatType=1 }
+            { 18  ;TextBox      ;21600;423  ;1500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=PlanAmort."Proceeds on Disposal";
+                                                         AutoFormatType=1 }
+            { 21  ;TextBox      ;23250;423  ;1650 ;423  ;FontBold=Yes;
+                                                         SourceExpr=PlanAmort."Gain/Loss";
+                                                         AutoFormatType=1 }
+            { 1000000001;Shape  ;0    ;0    ;24900;423  ;ShapeStyle=HorzLine }
+          }
+           }
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            SectionWidth=24900;
+            SectionHeight=1269;
+            OnPreSection=BEGIN
+                           CreerTotaux;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 38  ;Label        ;0    ;423  ;1500 ;423  ;FontBold=Yes;
+                                                         CaptionML=FRA=Total }
+            { 14  ;TextBox      ;7200 ;423  ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr=TotalMontantsDebut[1];
+                                                         AutoFormatType=1 }
+            { 52  ;TextBox      ;14850;423  ;1650 ;423  ;FontBold=Yes;
+                                                         SourceExpr=TotalMontantsDebut[2];
+                                                         AutoFormatType=1 }
+            { 55  ;TextBox      ;16650;423  ;1500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=TotalMontantsSoldePeriode[2];
+                                                         AutoFormatType=1 }
+            { 61  ;TextBox      ;18300;423  ;1500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=MontantsFinTotal[2];
+                                                         AutoFormatType=1 }
+            { 64  ;TextBox      ;9150 ;423  ;1800 ;423  ;FontBold=Yes;
+                                                         SourceExpr=ValeurComptableEnDateDebut;
+                                                         AutoFormatType=1 }
+            { 4   ;TextBox      ;19950;423  ;1500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=ValeurComptableEnDateFin;
+                                                         AutoFormatType=1 }
+            { 19  ;TextBox      ;21600;423  ;1500 ;423  ;FontBold=Yes;
+                                                         SourceExpr=PlanAmort."Proceeds on Disposal";
+                                                         AutoFormatType=1 }
+            { 22  ;TextBox      ;23250;423  ;1650 ;423  ;FontBold=Yes;
+                                                         SourceExpr=PlanAmort."Gain/Loss";
+                                                         AutoFormatType=1 }
+            { 1000000000;Shape  ;0    ;0    ;24900;423  ;ShapeStyle=HorzLine }
+            { 1000000002;Shape  ;0    ;846  ;24900;423  ;ShapeStyle=HorzLine }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=6160;
+      Height=4290;
+      SaveValues=Yes;
+      OnOpenForm=BEGIN
+                   IF CodeLoiAmort = '' THEN BEGIN
+                     ParamImmo.GET;
+                     CodeLoiAmort := ParamImmo."Default Depr. Book";
+                   END;
+                 END;
+
+    }
+    CONTROLS
+    {
+      { 1   ;Label        ;0    ;1760 ;3300 ;440  ;ParentControl=2 }
+      { 2   ;TextBox      ;3410 ;1760 ;2750 ;440  ;CaptionML=FRA=Sous-totaux;
+                                                   SourceExpr=GroupeTotaux }
+      { 12  ;Label        ;0    ;660  ;3300 ;440  ;ParentControl=14 }
+      { 13  ;Label        ;0    ;1210 ;3300 ;440  ;ParentControl=15 }
+      { 14  ;TextBox      ;3410 ;660  ;1650 ;440  ;CaptionML=FRA=Date d‚but;
+                                                   SourceExpr=DateDebut }
+      { 15  ;TextBox      ;3410 ;1210 ;1650 ;440  ;CaptionML=FRA=Date fin;
+                                                   SourceExpr=DateFin }
+      { 18  ;Label        ;0    ;2310 ;3300 ;440  ;ParentControl=21 }
+      { 21  ;CheckBox     ;3410 ;2310 ;440  ;440  ;ShowCaption=No;
+                                                   CaptionML=FRA=Imprimer par immobilisation;
+                                                   SourceExpr=ImprDetails }
+      { 3   ;TextBox      ;3410 ;110  ;2750 ;440  ;CaptionML=FRA=Lois d'amortissement;
+                                                   SourceExpr=CodeLoiAmort;
+                                                   TableRelation="Depreciation Book" }
+      { 4   ;Label        ;0    ;110  ;3300 ;440  ;ParentControl=3 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      ParamImmo@1000000000 : Record 5603;
+      LoiAmort@1000000001 : Record 5611;
+      PlanAmort@1000000002 : Record 5612;
+      Immo@1000000003 : Record 5600;
+      ParamTypeComptaImmo@1000000004 : Record 5604;
+      EtatGenImmo@1000000005 : Codeunit 5626;
+      AmortBudg@1000000006 : Codeunit 5615;
+      CodeLoiAmort@1000000007 : Code[10];
+      FiltreImmo@1000000008 : Text[250];
+      TexteTitrePrincipal@1000000009 : Text[100];
+      TextLoiAmort@1000000010 : Text[50];
+      GroupeNomCode@1000000011 : Text[50];
+      GroupeTitre@1000000012 : Text[50];
+      GroupeCompte@1000000046 : Text[50];
+      NumImmo@1000000013 : Text[50];
+      DesignationImmo@1000000014 : Text[50];
+      GroupeTotaux@1000000015 : ' ,Classe immo.,Sous-classe immo.,Emplacement immo.,Immo. principale,Departement,Dossier,Groupe compta. immo.';
+      TexteTitre@1000000016 : ARRAY [10] OF Text[50];
+      MontantsDebut@1000000017 : ARRAY [6] OF Decimal;
+      MontantsSoldePeriode@1000000018 : ARRAY [6] OF Decimal;
+      MontantsCession@1000000019 : ARRAY [6] OF Decimal;
+      GrouperMontantsDebut@1000000020 : ARRAY [6] OF Decimal;
+      GrouperMontantsSoldePeriode@1000000021 : ARRAY [6] OF Decimal;
+      GrouperMontantsCession@1000000022 : ARRAY [6] OF Decimal;
+      TotalMontantsDebut@1000000023 : ARRAY [6] OF Decimal;
+      TotalMontantsSoldePeriode@1000000024 : ARRAY [6] OF Decimal;
+      TotalMontantsCession@1000000025 : ARRAY [6] OF Decimal;
+      MontantsFinTotal@1000000026 : ARRAY [6] OF Decimal;
+      ValeurComptableEnDateDebut@1000000027 : Decimal;
+      ValeurComptableEnDateFin@1000000028 : Decimal;
+      i@1000000029 : Integer;
+      j@1000000030 : Integer;
+      NombreDeTypes@1000000031 : Integer;
+      TypeCompta@1000000032 : Integer;
+      Periode1@1000000033 : 'Avant date d‚but,Solde p‚riode,En date fin';
+      Periode2@1000000034 : 'Avant date d‚but,Solde p‚riode,En date fin';
+      DateDebut@1000000035 : Date;
+      DateFin@1000000036 : Date;
+      ImprDetails@1000000037 : Boolean;
+      EtatsBudg@1000000038 : Boolean;
+      MontantAvant@1000000039 : Decimal;
+      MontantFinal@1000000040 : Decimal;
+      DateAcquisition@1000000041 : Date;
+      DateCession@1000000042 : Date;
+      TexteDebut@1000000043 : Text[30];
+      TexteFin@1000000044 : Text[30];
+      PlanAmortissement@1000000045 : Record 5612;
+      FAPostingGroup@1000000047 : Record 5606;
+
+    LOCAL PROCEDURE AjouterTypeCompta@29(TypeCompta@1000000000 : 'D‚pr‚ciation,R‚‚valuation,Param. 1,Param. 2');
+    VAR
+      i@1000000001 : Integer;
+      j@1000000002 : Integer;
+    BEGIN
+      i := TypeCompta + 3;
+      WITH ParamTypeComptaImmo DO BEGIN
+        CASE TypeCompta OF
+          TypeCompta::D‚pr‚ciation:
+            GET(CodeLoiAmort,"FA Posting Type"::"Write-Down");
+          TypeCompta::R‚‚valuation:
+            GET(CodeLoiAmort,"FA Posting Type"::Appreciation);
+          TypeCompta::"Param. 1":
+            GET(CodeLoiAmort,"FA Posting Type"::"Custom 1");
+          TypeCompta::"Param. 2":
+            GET(CodeLoiAmort,"FA Posting Type"::"Custom 2");
+        END;
+        IF "Depreciation Type" THEN
+          j := 2
+        ELSE IF "Acquisition Type" THEN
+          j := 1;
+      END;
+      IF j > 0 THEN BEGIN
+        MontantsDebut[j] := MontantsDebut[j] + MontantsDebut[i];
+        MontantsDebut[i] := 0;
+        MontantsSoldePeriode[j] := MontantsSoldePeriode[j] + MontantsSoldePeriode[i];
+        MontantsSoldePeriode[i] := 0;
+        MontantsCession[j] := MontantsCession[j] + MontantsCession[i];
+        MontantsCession[i] := 0;
+      END;
+    END;
+
+    LOCAL PROCEDURE PasserEnreg@5() : Boolean;
+    BEGIN
+      DateAcquisition := PlanAmort."Acquisition Date";
+      DateCession := PlanAmort."Disposal Date";
+      EXIT(
+        "Fixed Asset".Inactive OR
+        (DateAcquisition = 0D) OR
+        (DateAcquisition > DateFin) AND (DateFin > 0D) OR
+        (DateCession > 0D) AND (DateCession < DateDebut))
+    END;
+
+    LOCAL PROCEDURE ExtrCessionPeriode@11() : Boolean;
+    BEGIN
+      IF DateCession > 0D THEN
+        IF (DateFin = 0D) OR (DateCession <= DateFin) THEN
+          EXIT(TRUE);
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE CreerTexteGroupeTotal@6();
+    BEGIN
+      CASE GroupeTotaux OF
+        GroupeTotaux::"Classe immo.":
+          GroupeNomCode := "Fixed Asset".FIELDCAPTION("FA Class Code");
+        GroupeTotaux::"Sous-classe immo.":
+          GroupeNomCode := "Fixed Asset".FIELDCAPTION("FA Subclass Code");
+        GroupeTotaux::"Emplacement immo.":
+          GroupeNomCode := "Fixed Asset".FIELDCAPTION("FA Location Code");
+        GroupeTotaux::"Immo. principale":
+          GroupeNomCode := "Fixed Asset".FIELDCAPTION("Main Asset/Component");
+        GroupeTotaux::Departement:
+          GroupeNomCode := "Fixed Asset".FIELDCAPTION("Global Dimension 1 Code");
+        GroupeTotaux::Dossier:
+          GroupeNomCode := "Fixed Asset".FIELDCAPTION("Global Dimension 2 Code");
+        GroupeTotaux::"Groupe compta. immo.":
+          GroupeNomCode:="Fixed Asset".FIELDCAPTION("FA Posting Group");
+      END;
+      IF GroupeNomCode <> '' THEN
+        GroupeNomCode := STRSUBSTNO('%1%2 %3','Sous-totaux',':',GroupeNomCode);
+    END;
+
+    LOCAL PROCEDURE FaireTexteDate@3();
+    BEGIN
+      TexteDebut := STRSUBSTNO('%1',DateDebut - 1);
+      TexteFin := STRSUBSTNO('%1',DateFin);
+    END;
+
+    LOCAL PROCEDURE CreerTitre@9();
+    VAR
+      DsTextePeriode@1000000000 : Text[30];
+      TexteCession@1000000001 : Text[30];
+    BEGIN
+      DsTextePeriode := 'dans la p‚riode';
+      TexteCession := 'Cession';
+      TexteTitre[1] := STRSUBSTNO('%1 %2',PlanAmort.FIELDCAPTION("Acquisition Cost"),TexteDebut);
+      TexteTitre[2] := STRSUBSTNO('%1 %2','Ajout',DsTextePeriode);
+      TexteTitre[3] := STRSUBSTNO('%1 %2',TexteCession,DsTextePeriode);
+      TexteTitre[4] := STRSUBSTNO('%1 %2',PlanAmort.FIELDCAPTION("Acquisition Cost"),TexteFin);
+      TexteTitre[5] := STRSUBSTNO('%1 %2',PlanAmort.FIELDCAPTION(Depreciation),TexteDebut);
+      TexteTitre[6] := STRSUBSTNO('%1 %2',PlanAmort.FIELDCAPTION(Depreciation),DsTextePeriode);
+      TexteTitre[7] := STRSUBSTNO(
+        '%1 %2 %3',TexteCession,PlanAmort.FIELDCAPTION(Depreciation),DsTextePeriode);
+      TexteTitre[8] :=  STRSUBSTNO('%1 %2',PlanAmort.FIELDCAPTION(Depreciation),TexteFin);
+      TexteTitre[9] :=  STRSUBSTNO('%1 %2',PlanAmort.FIELDCAPTION("Book Value"),TexteDebut);
+      TexteTitre[10] := STRSUBSTNO('%1 %2',PlanAmort.FIELDCAPTION("Book Value"),TexteFin);
+    END;
+
+    LOCAL PROCEDURE CreerGroupeTitre@1();
+    BEGIN
+      FOR j := 1 TO NombreDeTypes DO BEGIN
+         GrouperMontantsDebut[j] := 0;
+         GrouperMontantsSoldePeriode[j] := 0;
+         GrouperMontantsCession[j] := 0;
+      END;
+      WITH "Fixed Asset" DO BEGIN
+        CASE GroupeTotaux OF
+          GroupeTotaux::"Classe immo.":
+              GroupeTitre := "FA Class Code";
+          GroupeTotaux::"Sous-classe immo.":
+            GroupeTitre := "FA Subclass Code";
+          GroupeTotaux::"Emplacement immo.":
+            GroupeTitre := "FA Location Code";
+          GroupeTotaux::"Immo. principale":
+            BEGIN
+              Immo."Main Asset/Component" := Immo."Main Asset/Component"::"Main Asset";
+              GroupeTitre :=
+                STRSUBSTNO('%1 %2',Immo."Main Asset/Component","Component of Main Asset");
+              IF "Component of Main Asset" = '' THEN
+                GroupeTitre := STRSUBSTNO('%1 %2',GroupeTitre,'*****');
+            END;
+          GroupeTotaux::Departement:
+            GroupeTitre := "Global Dimension 1 Code";
+          GroupeTotaux::Dossier:
+            GroupeTitre := "Global Dimension 2 Code";
+          GroupeTotaux::"Groupe compta. immo.":
+            BEGIN
+              GroupeTitre := "FA Posting Group";
+              IF FAPostingGroup.GET("FA Posting Group") THEN
+                GroupeCompte := FAPostingGroup."Acquisition Cost Account";
+            END;
+        END;
+      END;
+      IF GroupeTitre = '' THEN
+        GroupeTitre := '*****';
+    END;
+
+    LOCAL PROCEDURE MAJTotaux@10();
+    BEGIN
+      FOR j := 1 TO NombreDeTypes DO BEGIN
+        GrouperMontantsDebut[j] := GrouperMontantsDebut[j] + MontantsDebut[j];
+        GrouperMontantsSoldePeriode[j] := GrouperMontantsSoldePeriode[j] + MontantsSoldePeriode[j];
+        GrouperMontantsCession[j] := GrouperMontantsCession[j] + MontantsCession[j];
+        TotalMontantsDebut[j] := TotalMontantsDebut[j] + MontantsDebut[j];
+        TotalMontantsSoldePeriode[j] := TotalMontantsSoldePeriode[j] + MontantsSoldePeriode[j];
+        TotalMontantsCession[j] := TotalMontantsCession[j] + MontantsCession[j];
+      END;
+    END;
+
+    LOCAL PROCEDURE CreerGroupeTotaux@4();
+    BEGIN
+      FOR j := 1 TO NombreDeTypes DO
+        MontantsFinTotal[j] :=
+          GrouperMontantsDebut[j] + GrouperMontantsSoldePeriode[j] + GrouperMontantsCession[j];
+      ValeurComptableEnDateFin := 0;
+      ValeurComptableEnDateDebut := 0;
+      FOR j := 1 TO NombreDeTypes DO BEGIN
+        ValeurComptableEnDateFin := ValeurComptableEnDateFin + MontantsFinTotal[j];
+        ValeurComptableEnDateDebut := ValeurComptableEnDateDebut + GrouperMontantsDebut[j];
+      END;
+    END;
+
+    LOCAL PROCEDURE CreerTotaux@7();
+    BEGIN
+      FOR j := 1 TO NombreDeTypes DO
+        MontantsFinTotal[j] :=
+          TotalMontantsDebut[j] + TotalMontantsSoldePeriode[j] + TotalMontantsCession[j];
+      ValeurComptableEnDateFin := 0;
+      ValeurComptableEnDateDebut := 0;
+      FOR j := 1 TO NombreDeTypes DO BEGIN
+        ValeurComptableEnDateFin := ValeurComptableEnDateFin + MontantsFinTotal[j];
+        ValeurComptableEnDateDebut := ValeurComptableEnDateDebut + TotalMontantsDebut[j];
+      END;
+    END;
+
+    LOCAL PROCEDURE ExtrDateDebut@8(DateDebut@1000000000 : Date) : Date;
+    BEGIN
+      IF DateDebut <= 01010000D THEN
+        EXIT(0D)
+      ELSE
+        EXIT(DateDebut - 1);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 06/07/11 @a ISAT.ST @v IMH6.01.151 @s Immobilisation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

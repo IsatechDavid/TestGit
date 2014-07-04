@@ -1,0 +1,283 @@
+OBJECT Codeunit 50017 Copy Provider Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=07/05/13;
+    Time=16:43:48;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ToCopyProvider@1100281006 : Boolean;
+      ToCopySpeciality@1100281004 : Boolean;
+      ToCopyQualification@1100281003 : Boolean;
+      ToCopyAgrement@1100281002 : Boolean;
+      ToCopyAbilityGeo@1100281001 : Boolean;
+      ToCopyStatGroup@1100281000 : Boolean;
+      Text001@1100281005 : TextConst 'ENU=You must affect a Provider No.;FRA=Vous devez saisir un Nø prestataire';
+      NewProvider@1100281007 : Code[20];
+
+    PROCEDURE SetProperties@1100281000(pToCopyProvider@1100281005 : Boolean;pToCopySpeciality@1100281000 : Boolean;pToCopyQualification@1100281001 : Boolean;pToCopyAgrement@1100281002 : Boolean;pToCopyAbilityGeo@1100281004 : Boolean;pToCopyStatGroup@1100281003 : Boolean;pNewProvider@1100281006 : Code[20]);
+    BEGIN
+      // D‚fini les options de copie.
+
+      ToCopyProvider := pToCopyProvider;
+      ToCopySpeciality := pToCopySpeciality;
+      ToCopyQualification := pToCopyQualification;
+      ToCopyAgrement := pToCopyAgrement;
+      ToCopyAbilityGeo := pToCopyAbilityGeo;
+      ToCopyStatGroup := pToCopyStatGroup;
+      NewProvider := pNewProvider;
+    END;
+
+    PROCEDURE Copy@1100281001(pFromProviderNo@1100281000 : Code[20]);
+    VAR
+      lFromProvider@1100281002 : Record 50000;
+      lToProvider@1100281003 : Record 50000;
+    BEGIN
+      // Copie un prestataire vers un nouveau prestataire.
+
+      IF pFromProviderNo = '' THEN
+        ERROR(Text001);
+
+      lFromProvider.GET(pFromProviderNo);
+      IF ToCopyProvider THEN
+      BEGIN
+        lToProvider.TRANSFERFIELDS(lFromProvider);
+        lToProvider."No." := NewProvider;
+        lToProvider."Process Code" := '';  //IMH03
+        lToProvider."Process Status No." := 0;    //IMH03
+        //<<IMH04
+        lToProvider."Recruitment Date" := 0D;
+        lToProvider."Recruitment Origin" := '';
+        lToProvider."Planified Visit Date" :=0D ;
+        lToProvider."Next Visit interlocutor" := '';
+        lToProvider."Visit Last Date" := 0D;
+        lToProvider."Last Visit Reason Code" := '';
+        lToProvider."Last Visit interlocutor" := '';
+        lToProvider."Facilitator Visit Last Date" := 0D;
+        lToProvider."Planified Facilit. Visit Date" := 0D;
+        //<<IMH04
+      END ELSE
+      BEGIN
+        WITH lToProvider DO
+        BEGIN
+          Status := Status::Prospect;
+          Category := lFromProvider.Category;
+          "Main Specialization Code" := lFromProvider."Main Specialization Code";
+          Priority := lFromProvider.Priority;
+          "General Company" := lFromProvider."General Company";
+          "Renovation Company" := lFromProvider."Renovation Company";
+          "Temp. Exclusion" := FALSE;
+          "Temp. Exclusion Reason Code" := '';
+          "Temp. Exclusion Start Date" := 0D;
+          "Temp. Exclusion End Date" := 0D;
+          Exclusion := FALSE;
+          "Exclusion Reason Code" := '';
+          "Exclusion Date" := 0D;
+          "Black List" := FALSE;
+          "Black List Reason Code" := '';
+          "Black List Date" := 0D;
+          IF ToCopyStatGroup THEN
+            "Statistics Group No." := lFromProvider."Statistics Group No.";
+        END;
+      END;
+      lToProvider.INSERT(TRUE);
+
+      // Copie les donn‚es des autres tables li‚es … un prestataire
+      IF ToCopyProvider THEN
+      BEGIN
+        CopyContact(pFromProviderNo,lToProvider."No.");
+        CopyCalendar(pFromProviderNo,lToProvider."No.");
+      END;
+      IF ToCopySpeciality THEN
+       CopySpeciality(pFromProviderNo,lToProvider."No.");
+      IF ToCopyQualification THEN
+        CopyQualification(pFromProviderNo,lToProvider."No.");
+      IF ToCopyAgrement THEN
+        CopyAgreement(pFromProviderNo,lToProvider."No.");
+      IF ToCopyAbilityGeo THEN
+       CopyAbilityGeo(pFromProviderNo,lToProvider."No.");
+
+      // Ouvre la fiche du nouveau prestataire
+      COMMIT;
+      FORM.RUNMODAL(FORM::"Provider Card",lToProvider);
+    END;
+
+    LOCAL PROCEDURE CopyContact@1100281012(pFromProviderNo@1100281001 : Code[20];pToProviderNo@1100281000 : Code[20]);
+    VAR
+      lFromContact@1100281002 : Record 5050;
+      lToContact@1100281003 : Record 5050;
+    BEGIN
+      // Copie des contacts personnes li‚ … un prestataire vers un autre prestataire.
+
+      lFromContact.SETCURRENTKEY("Company Name","Company No.",Type,Name,"Service Contact");
+      lFromContact.SETRANGE("Company No.",pFromProviderNo);
+      lFromContact.SETRANGE(Type,lFromContact.Type::Person);
+      lFromContact.SETRANGE("Service Contact",lFromContact."Service Contact"::Provider);
+      IF lFromContact.ISEMPTY THEN
+        EXIT;
+
+      lFromContact.FINDSET;
+      REPEAT
+        lToContact.TRANSFERFIELDS(lFromContact);
+        lToContact."No." := '';
+        lToContact."Company No." := pToProviderNo;
+        lToContact.INSERT(TRUE);
+      UNTIL lFromContact.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE CopyCalendar@1100281013(pFromProviderNo@1100281001 : Code[20];pToProviderNo@1100281000 : Code[20]);
+    VAR
+      lFromCalendar@1100281002 : Record 50007;
+      lToCalendar@1100281003 : Record 50007;
+    BEGIN
+      // Copie les Calendriers prestataires d'un prestataire vers un autre prestataire.
+
+      lFromCalendar.SETCURRENTKEY("Provider No.");
+      lFromCalendar.SETRANGE("Provider No.",pFromProviderNo);
+      IF lFromCalendar.ISEMPTY THEN
+        EXIT;
+
+      lFromCalendar.FINDSET;
+      REPEAT
+        lToCalendar.TRANSFERFIELDS(lFromCalendar);
+        lToCalendar."Provider No." := pToProviderNo;
+        lToCalendar.INSERT(TRUE);
+      UNTIL lFromCalendar.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE CopySpeciality@1100281002(pFromProviderNo@1100281001 : Code[20];pToProviderNo@1100281000 : Code[20]);
+    VAR
+      lFromProviderSpecialization@1100281002 : Record 50006;
+      lToProviderSpecialization@1100281003 : Record 50006;
+    BEGIN
+      // Copie les sp‚cialisations prestataires d'un prestataire vers un autre prestataire.
+
+      lFromProviderSpecialization.SETCURRENTKEY("Provider No.");
+      lFromProviderSpecialization.SETRANGE("Provider No.",pFromProviderNo);
+      IF lFromProviderSpecialization.ISEMPTY THEN
+        EXIT;
+      lFromProviderSpecialization.FINDSET;
+      REPEAT
+        lToProviderSpecialization := lFromProviderSpecialization;
+        lToProviderSpecialization."Provider No." := pToProviderNo;
+        lToProviderSpecialization.INSERT(TRUE);
+      UNTIL lFromProviderSpecialization.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE CopyQualification@1100281003(pFromProviderNo@1100281001 : Code[20];pToProviderNo@1100281000 : Code[20]);
+    VAR
+      lFromProviderQualification@1100281002 : Record 50008;
+      lToProviderQualification@1100281003 : Record 50008;
+    BEGIN
+      // Copie les qualifications prestataires d'un prestataire vers un autre prestataire.
+
+      lFromProviderQualification.SETCURRENTKEY("Provider No.");
+      lFromProviderQualification.SETRANGE("Provider No.",pFromProviderNo);
+      IF lFromProviderQualification.ISEMPTY THEN
+        EXIT;
+      lFromProviderQualification.FINDSET;
+      REPEAT
+        lToProviderQualification := lFromProviderQualification;
+        lToProviderQualification."Provider No." := pToProviderNo;
+        lToProviderQualification.INSERT;
+      UNTIL lFromProviderQualification.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE CopyAgreement@1100281004(pFromProviderNo@1100281002 : Code[20];pToProviderNo@1100281003 : Code[20]);
+    VAR
+      lFromProviderAgreement@1100281004 : Record 50012;
+      lToProviderAgreement@1100281005 : Record 50012;
+      lFromSpeAgreement@1100281000 : Record 50023;
+      lToSpeAgreement@1100281001 : Record 50023;
+    BEGIN
+      // Copie les agr‚ments d'un prestataire vers un autre prestataire.
+
+      lFromProviderAgreement.SETCURRENTKEY("Provider No.");
+      lFromProviderAgreement.SETRANGE("Provider No.",pFromProviderNo);
+      IF lFromProviderAgreement.ISEMPTY THEN
+        EXIT;
+      lFromProviderAgreement.FINDSET;
+      REPEAT
+        lToProviderAgreement := lFromProviderAgreement;
+        lToProviderAgreement."Provider No." := pToProviderNo;
+        lToProviderAgreement.INSERT;
+      UNTIL lFromProviderAgreement.NEXT = 0;
+
+      lFromSpeAgreement.SETCURRENTKEY("Provider No.");
+      lFromSpeAgreement.SETRANGE("Provider No.",pFromProviderNo);
+      IF lFromSpeAgreement.ISEMPTY THEN
+        EXIT;
+      lFromSpeAgreement.FINDSET;
+      REPEAT
+        lToSpeAgreement := lFromSpeAgreement;
+        lToSpeAgreement."Provider No." := pToProviderNo;
+        lToSpeAgreement.INSERT;
+      UNTIL lFromSpeAgreement.NEXT = 0;
+    END;
+
+    LOCAL PROCEDURE CopyAbilityGeo@1100281005(pFromProviderNo@1100281001 : Code[20];pToProviderNo@1100281000 : Code[20]);
+    VAR
+      lFromAbilityGeoProvider@1100281002 : Record 50016;
+      lFromAbilityGeoProviderSetup@1100281006 : Record 50033;
+      lToAbilityGeoProvider@1100281003 : Record 50016;
+      lToAbilityGeoProviderSetup@1100281007 : Record 50033;
+      lFromAbilityCampGeoProvider@1100281004 : Record 50015;
+      lToAbilityCampGeoProvider@1100281005 : Record 50015;
+    BEGIN
+      // Copie les comp‚tences g‚ographiques d'un prestataire vers un autre prestataire.
+      //<<IMH02
+      lFromAbilityGeoProviderSetup.SETCURRENTKEY("Provider No.");
+      lFromAbilityGeoProviderSetup.SETRANGE("Provider No.",pFromProviderNo);
+      IF lFromAbilityGeoProviderSetup.ISEMPTY THEN
+        EXIT;
+      lFromAbilityGeoProviderSetup.FINDSET;
+      REPEAT
+        lToAbilityGeoProviderSetup := lFromAbilityGeoProviderSetup;
+        lToAbilityGeoProviderSetup."Provider No." := pToProviderNo;
+        lToAbilityGeoProviderSetup.INSERT;
+      UNTIL lFromAbilityGeoProviderSetup.NEXT = 0;
+      //>>IMH02
+
+      lFromAbilityGeoProvider.SETCURRENTKEY("Provider No.");
+      lFromAbilityGeoProvider.SETRANGE("Provider No.",pFromProviderNo);
+      IF lFromAbilityGeoProvider.ISEMPTY THEN
+        EXIT;
+      lFromAbilityGeoProvider.FINDSET;
+      REPEAT
+        lToAbilityGeoProvider := lFromAbilityGeoProvider;
+        lToAbilityGeoProvider."Provider No." := pToProviderNo;
+        lToAbilityGeoProvider.INSERT;
+      UNTIL lFromAbilityGeoProvider.NEXT = 0;
+
+      lFromAbilityCampGeoProvider.SETCURRENTKEY("Campaign No.","Provider No.");
+      lFromAbilityCampGeoProvider.SETRANGE("Provider No.",pFromProviderNo);
+      IF lFromAbilityCampGeoProvider.ISEMPTY THEN
+        EXIT;
+      lFromAbilityCampGeoProvider.FINDSET;
+      REPEAT
+        lToAbilityCampGeoProvider := lFromAbilityCampGeoProvider;
+        lToAbilityCampGeoProvider."Provider No." := pToProviderNo;
+        lToAbilityCampGeoProvider.INSERT;
+      UNTIL lFromAbilityCampGeoProvider.NEXT = 0;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 07/05/13 @a ISAT.ZW @v IMH6.01.334 @s MAI @h 4160 @c ne pas dupliquer les champs d'onglet visite*/
+      /** @r IMH03 @d 17/05/11 @a ISAT.LLT @v IMH6.01.020 @s Gestion prestataire @c statut processus par d‚faut --> Prospect */
+      /** @r IMH02 @d 17/11/10 @a ISAT.LLT @v IMH6.01.020 @s Gestion prestataire @c Correction copie comp. g‚o. */
+      /** @r IMH01 @d 20/10/10 @a ISAT.MA @v IMH6.01.020 @s Gestion prestataire @c Creation */
+    }
+    END.
+  }
+}

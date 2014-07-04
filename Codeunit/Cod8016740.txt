@@ -1,0 +1,705 @@
+OBJECT Codeunit 8016740 EAI Sent EDI Action
+{
+  OBJECT-PROPERTIES
+  {
+    Date=30/04/13;
+    Time=14:31:48;
+    Modified=Yes;
+    Version List=ISAEAI1.02;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100481001 : TextConst 'ENU=%1 %2 %3 does not exist.;FRA=%1 %2 %3 n''existe pas.';
+      Error002@1100481000 : TextConst 'ENU=%1 %2 has no settings for EAI Act %3.;FRA=Le %1 %2 n''est pas configur‚ pour l''acte EAI %3.';
+      Error003@1100481002 : TextConst 'ENU=No %2 found for EAI Act %2.;FRA=Aucun %1 trouv‚ pour %2 %3.';
+      EAIActMgt@1180044000 : Codeunit 8016703;
+      Error004@1100481005 : TextConst 'ENU=No %2 found for EAI Act %2.;FRA=Le document a d‚j… ‚t‚ envoy‚ par EDI.';
+
+    PROCEDURE Create_SALES_HANMOV_Message@1100481001(pInvtPick@1100481000 : Record 5766;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIPartnerMgt@1100481007 : Codeunit 8016706;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lEAIActVersion@1180044000 : Record 8016713;
+      lSalesHeader@1100481004 : Record 36;
+      lRecRef@1100481006 : RecordRef;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF NOT ReadEDISetup THEN
+        EXIT;
+
+      IF (EDISetup."HANMOV Act Type Code" = '') OR
+         (EDISetup."HANMOV Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("HANMOV Act Type Code");
+          EDISetup.TESTFIELD("HANMOV Act Code");
+        END ELSE
+          EXIT;
+
+      pInvtPick.TESTFIELD(Type,pInvtPick.Type::"Invt. Pick");
+
+      CASE pInvtPick."Source Document" OF
+        pInvtPick."Source Document"::"Sales Order":
+        BEGIN
+          IF NOT lSalesHeader.GET(pInvtPick."Source Subtype",pInvtPick."Source No.") THEN
+            EXIT;
+
+          //On force l'envoi du document mˆme si d‚j… envoy‚
+          IF NOT pReSendIfNeeded THEN
+            IF lEAIDocEntryMgt.IsDocAlreadySend(
+               DATABASE::"Sales Header",lSalesHeader."Document Type",lSalesHeader."No.",
+               EDISetup."HANMOV Act Type Code",EDISetup."HANMOV Act Code")
+            THEN
+              IF pShowError THEN
+                ERROR(Error004)
+              ELSE
+                EXIT(FALSE);
+
+          //on v‚rifie que le magasin est param‚tr‚ pour l'act EAI (prestation externe)
+          IF NOT lEAIPartnerMgt.GetEAIPartner(lSalesHeader."Responsibility Center",lSalesHeader."Location Code",lEAIPartner)
+          THEN
+            IF pShowError THEN
+              ERROR(Error003,lEAIPartner.TABLECAPTION,lSalesHeader."Responsibility Center",lSalesHeader."Location Code")
+            ELSE
+              EXIT(FALSE);
+        END;
+      END; //end case
+
+      //on v‚rifie que le partenaire EAI est param‚tr‚ pour l'act EAI
+      lEAIAct.GET(EDISetup."HANMOV Act Type Code",EDISetup."HANMOV Act Code");
+      IF EDITools.GetGLNByEAIPartner(lEAIPartner.Code,lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,lEAIPartner.TABLECAPTION,lEAIPartner.Code,EDISetup."HANMOV Act Code")
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pInvtPick);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,EDISetup."HANMOV Act Type Code",EDISetup."HANMOV Act Code");
+
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_SALES_DESADV_Message@1100481000(pSalesShipmentHeader@1100481000 : Record 110;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lSalesHeader@1100481004 : Record 36;
+      lRecRef@1100481006 : RecordRef;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."SALES DESADV Act Type Code" = '') OR
+         (EDISetup."SALES DESADV Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("SALES DESADV Act Type Code");
+          EDISetup.TESTFIELD("SALES DESADV Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EDISetup."SALES DESADV Act Type Code",EDISetup."SALES DESADV Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+              DATABASE::"Sales Shipment Header",0,pSalesShipmentHeader."No.",
+              lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //on v‚rifie que le client livr‚ … est param‚tr‚ pour l'act EAI
+      IF EDITools.GetGLNByCustomer(pSalesShipmentHeader."Ship-to Code",lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(
+             Error002,pSalesShipmentHeader.FIELDCAPTION("Ship-to Code"),pSalesShipmentHeader."Ship-to Code",
+             EDISetup."SALES DESADV Act Code")
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pSalesShipmentHeader);
+      InsertEAIMessageQueue(lRecRef,'',EDISetup."SALES DESADV Act Type Code",EDISetup."SALES DESADV Act Code");
+
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_SALES_INVOIC_Message@1100481006(pSalesInvoiceHeader@1100481000 : Record 112;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIPartnerMgt@1100481007 : Codeunit 8016706;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lSalesHeader@1100481004 : Record 36;
+      lRecRef@1100481006 : RecordRef;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."SALES INVOIC Act Type Code" = '') OR
+         (EDISetup."SALES INVOIC Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("SALES INVOIC Act Type Code");
+          EDISetup.TESTFIELD("SALES INVOIC Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EDISetup."SALES INVOIC Act Type Code",EDISetup."SALES INVOIC Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+           DATABASE::"Sales Invoice Header",0,pSalesInvoiceHeader."No.",
+           lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //on v‚rifie que le client factur‚ … est param‚tr‚ pour l'act EAI
+      IF EDITools.GetGLNByCustomer(pSalesInvoiceHeader."Bill-to Customer No.",lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,pSalesInvoiceHeader.FIELDCAPTION("Bill-to Customer No."),pSalesInvoiceHeader."Bill-to Customer No.",lEAIAct.
+      Code)
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pSalesInvoiceHeader);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code);
+
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_TRANSFER_DESADV_Message@1100481004(pTransferShipmentHeader@1100481000 : Record 5744;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIPartnerMgt@1100481007 : Codeunit 8016706;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lRecRef@1100481006 : RecordRef;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."TRANSFER DESADV Act Type Code" = '') OR
+         (EDISetup."TRANSFER DESADV Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("TRANSFER DESADV Act Type Code");
+          EDISetup.TESTFIELD("TRANSFER DESADV Act Code");
+        END ELSE
+          EXIT;
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+           DATABASE::"Transfer Shipment Header",0,pTransferShipmentHeader."No.",
+           EDISetup."TRANSFER DESADV Act Type Code",EDISetup."TRANSFER DESADV Act Code")
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //on v‚rifie que le magasin est param‚tr‚ pour l'act EAI (prestation externe)
+      IF NOT lEAIPartnerMgt.GetEAIPartner('',pTransferShipmentHeader."Transfer-to Code",lEAIPartner)
+      THEN
+        IF pShowError THEN
+          ERROR(Error003,lEAIPartner.TABLECAPTION,'',pTransferShipmentHeader."Transfer-to Code")
+        ELSE
+          EXIT(FALSE);
+
+      //on v‚rifie que le partenaire EAI est param‚tr‚ pour l'act EAI
+      lEAIAct.GET(EDISetup."TRANSFER DESADV Act Type Code",EDISetup."TRANSFER DESADV Act Code");
+      IF EDITools.GetGLNByEAIPartner(lEAIPartner.Code,lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,lEAIPartner.TABLECAPTION,lEAIPartner.Code,lEAIAct.Code)
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pTransferShipmentHeader);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code);
+
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_PURCHASE_ORDER_Message@1100481007(pPurchHeader@1100481000 : Record 38;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIPartnerMgt@1100481007 : Codeunit 8016706;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lRecRef@1100481006 : RecordRef;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."PURCHASE ORDER Act Type Code" = '') OR
+         (EDISetup."PURCHASE ORDER Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("PURCHASE ORDER Act Type Code");
+          EDISetup.TESTFIELD("PURCHASE ORDER Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EDISetup."PURCHASE ORDER Act Type Code",EDISetup."PURCHASE ORDER Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+           DATABASE::"Purchase Header",pPurchHeader."Document Type",pPurchHeader."No.",
+           lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //on v‚rifie que le magasin est param‚tr‚ pour l'act EAI (prestation externe)
+      IF NOT lEAIPartnerMgt.GetEAIPartner(pPurchHeader."Responsibility Center",pPurchHeader."Location Code",lEAIPartner)
+      THEN
+        IF pShowError THEN
+          ERROR(Error003,lEAIPartner.TABLECAPTION,pPurchHeader."Responsibility Center",pPurchHeader."Location Code")
+        ELSE
+          EXIT(FALSE);
+
+      IF EDITools.GetGLNByEAIPartner(lEAIPartner.Code,lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,lEAIPartner.TABLECAPTION,lEAIPartner.Code,lEAIAct.Code)
+        ELSE
+          EXIT(FALSE);
+
+      //on v‚rifie que le Fournisseur est param‚tr‚ pour l'act EAI
+      IF EDITools.GetGLNByVendor(pPurchHeader."Buy-from Vendor No.",lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,pPurchHeader.FIELDCAPTION("Buy-from Vendor No."),pPurchHeader."Buy-from Vendor No.",lEAIAct.Code)
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pPurchHeader);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code);
+
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_PURCHASE_DESADV_Message@1100481005(pInvtPutAway@1100481000 : Record 5766;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIPartnerMgt@1100481007 : Codeunit 8016706;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lRecRef@1100481006 : RecordRef;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."PURCHASE DESADV Act Type Code" = '') OR
+         (EDISetup."PURCHASE DESADV Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("PURCHASE DESADV Act Type Code");
+          EDISetup.TESTFIELD("PURCHASE DESADV Act Code");
+        END ELSE
+          EXIT;
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+           DATABASE::"Purchase Header",pInvtPutAway."Source Subtype",pInvtPutAway."Source No.",
+           EDISetup."PURCHASE DESADV Act Type Code",EDISetup."PURCHASE DESADV Act Code")
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //on v‚rifie que le magasin est param‚tr‚ pour l'act EAI (prestation externe)
+      IF NOT lEAIPartnerMgt.GetEAIPartner('',pInvtPutAway."Location Code",lEAIPartner)
+      THEN
+        IF pShowError THEN
+          ERROR(Error003,lEAIPartner.TABLECAPTION,'',pInvtPutAway."Location Code")
+        ELSE
+          EXIT(FALSE);
+
+      //on v‚rifie que le partenaire EAI est param‚tr‚ pour l'act EAI
+      lEAIAct.GET(EDISetup."PURCHASE DESADV Act Type Code",EDISetup."PURCHASE DESADV Act Code");
+      IF EDITools.GetGLNByEAIPartner(lEAIPartner.Code,lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,lEAIPartner.TABLECAPTION,lEAIPartner.Code,lEAIAct.Code)
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pInvtPutAway);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code);
+
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    LOCAL PROCEDURE ReadEDISetup@1100481003() : Boolean;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF EDISetup.GET THEN
+      BEGIN
+        EDISetup.LOCKTABLE;
+        EDISetup.FINDFIRST;
+        EXIT(TRUE);
+      END ELSE
+        EXIT(FALSE);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE AutoSendMessage@1100481002() : Boolean;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF ReadEDISetup THEN
+        EXIT(EDISetup."Auto. Message Creation")
+      ELSE
+        EXIT(FALSE)
+      }
+      //>>IMH01.PC
+    END;
+
+    LOCAL PROCEDURE InsertEAIMessageQueue@1100481014(pRecRef@1100481008 : RecordRef;pEAIPartner@1100481000 : Code[20];pEAIActType@1100481009 : Code[20];pEAIAct@1100481007 : Code[20]);
+    VAR
+      lEAIProcessMgt@1100481006 : Codeunit 8016702;
+      lEAIMQBufferMgt@1100281006 : Codeunit 8016708;
+      lEAIActMgt@1100281003 : Codeunit 8016703;
+      lEAIMessageQueue@1100481005 : Record 8016704;
+      lEAIMessageQueueBuffer@1100481002 : TEMPORARY Record 8016720;
+      lEAIAct@1100481004 : Record 8016706;
+      lEAIProcessAct@1100481010 : Record 8016714;
+    BEGIN
+      //<<IMH01.PC
+      {
+      // cr‚ation d'un message dans la file d'attente d'‚mission de synchro
+      lEAIAct.GET(pEAIActType,pEAIAct);
+
+      lEAIProcessMgt.GetProcessActFromEAIAct(lEAIAct,lEAIProcessAct);
+      lEAIActMgt.GetMQFromEAIAct(lEAIAct,lEAIMessageQueue);
+
+      lEAIMessageQueueBuffer.INIT;
+
+      lEAIMessageQueueBuffer.RecordId := pRecRef.RECORDID;
+
+      lEAIMessageQueueBuffer."EAI Act Type Code" := pEAIActType;
+      lEAIMessageQueueBuffer."EAI Act Code"      := pEAIAct;
+      lEAIMessageQueueBuffer."EAI Partner Code"  := pEAIPartner;
+      lEAIMessageQueueBuffer."Act Priority"      := lEAIAct."Act Priority";
+      lEAIMessageQueueBuffer."EAI MQ Code"       := lEAIMessageQueue.Code;
+      lEAIMessageQueueBuffer."EAI NAS Code"      := lEAIMessageQueue."EAI NAS Code";
+
+      lEAIMessageQueueBuffer."EAI Process Code"  := lEAIProcessAct."EAI Process Code";
+
+      lEAIMessageQueueBuffer."Date Creation" := WORKDATE;
+      lEAIMessageQueueBuffer."Time Creation" := TIME;
+      lEAIMessageQueueBuffer."User Creation" := USERID;
+
+      lEAIMessageQueueBuffer.INSERT;
+
+      //Sauvegarde dans la file de message
+      lEAIMQBufferMgt.InsertSentBufferToMQ(lEAIMessageQueue,lEAIMessageQueueBuffer);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_SALES_CRMEMO_Message@1100481008(pSalesCrMemoHeader@1100481000 : Record 114;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIPartnerMgt@1100481007 : Codeunit 8016706;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lSalesHeader@1100481004 : Record 36;
+      lRecRef@1100481006 : RecordRef;
+    BEGIN
+      //<<IMH01.PC
+      {
+      //<<EAI01 ISAT.PB
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."SALES CRMEMO Act Type Code" = '') OR
+         (EDISetup."SALES CRMEMO Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("SALES CRMEMO Act Type Code");
+          EDISetup.TESTFIELD("SALES CRMEMO Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EDISetup."SALES CRMEMO Act Type Code",EDISetup."SALES CRMEMO Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+           DATABASE::"Sales Cr.Memo Header",0,pSalesCrMemoHeader."No.",
+           lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //on v‚rifie que le client factur‚ … est param‚tr‚ pour l'act EAI
+      IF EDITools.GetGLNByCustomer(pSalesCrMemoHeader."Bill-to Customer No.",lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,pSalesCrMemoHeader.FIELDCAPTION("Bill-to Customer No."),pSalesCrMemoHeader."Bill-to Customer No.",lEAIAct.Code)
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pSalesCrMemoHeader);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code);
+
+      EXIT(TRUE);
+      //>>EAI01 ISAT.PB
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_PRODAT_Message@1180044001(pEAIActsBySource@1100481000 : Record 8016749;pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIPartnerMgt@1100481007 : Codeunit 8016706;
+      lEAIPartner@1100481008 : Record 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lRecRef@1100481006 : RecordRef;
+      lCustomer@1180044000 : Record 18;
+      lVendor@1180044001 : Record 23;
+    BEGIN
+      //<<IMH01.PC
+      {
+      //<<EAI02
+      //GenŠre un message PRODAT dans la file
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."PRODAT Act Type Code" = '') OR
+         (EDISetup."PRODAT Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("PRODAT Act Type Code");
+          EDISetup.TESTFIELD("PRODAT Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EDISetup."PRODAT Act Type Code",EDISetup."PRODAT Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+           DATABASE::"EDI Items By Source",0,pEAIActsBySource."Source No.",
+           lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+
+      //Insertion dans la file d'‚mission
+      CASE pEAIActsBySource."Source Type" OF
+        pEAIActsBySource."Source Type"::Customer :
+          BEGIN
+            //on v‚rifie que le "Source No." … est param‚tr‚ pour l'act EAI
+            IF EDITools.GetGLNByCustomer(pEAIActsBySource."Source No.",lEAIAct,TRUE) = '' THEN
+              IF pShowError THEN
+                ERROR(Error002,pEAIActsBySource.FIELDCAPTION("Source No."),pEAIActsBySource."Source No.",lEAIAct.Code)
+              ELSE
+                EXIT(FALSE);
+
+            lCustomer.GET(pEAIActsBySource."Source No.");
+            lRecRef.GETTABLE(lCustomer);
+          END;
+        pEAIActsBySource."Source Type"::Vendor :
+          BEGIN
+            //on v‚rifie que le "Source No." … est param‚tr‚ pour l'act EAI
+            IF EDITools.GetGLNByVendor(pEAIActsBySource."Source No.",lEAIAct,TRUE) = '' THEN
+              IF pShowError THEN
+                ERROR(Error002,pEAIActsBySource.FIELDCAPTION("Source No."),pEAIActsBySource."Source No.",lEAIAct.Code)
+              ELSE
+                EXIT(FALSE);
+
+            lVendor.GET(pEAIActsBySource."Source No.");
+            lRecRef.GETTABLE(lVendor);
+          END;
+        pEAIActsBySource."Source Type"::"EAI Partner" :
+          BEGIN
+            lEAIPartner.GET(pEAIActsBySource."Source No.");
+            lRecRef.GETTABLE(lEAIPartner);
+          END;
+      END;
+
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,lEAIAct."EAI Act Type Code",lEAIAct.Code);
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_IFCSUM_Message@1180044000(pShowError@1100481002 : Boolean;pReSendIfNeeded@1100481001 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481005 : Codeunit 8016707;
+      lEAIAct@1100481003 : Record 8016706;
+      lRecRef@1100481006 : RecordRef;
+      lCustomer@1180044000 : Record 18;
+      lVendor@1180044001 : Record 23;
+    BEGIN
+      //<<IMH01.PC
+      {
+      // GMS02 GenŠre un message IFCSUM dans la file
+
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."IFCSUM Act Type Code" = '') OR
+         (EDISetup."IFCSUM Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("IFCSUM Act Type Code");
+          EDISetup.TESTFIELD("IFCSUM Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EDISetup."IFCSUM Act Type Code",EDISetup."IFCSUM Act Code");
+
+      //On force l'envoi du document mˆme si d‚j… envoy‚
+      IF NOT pReSendIfNeeded THEN
+        IF lEAIDocEntryMgt.IsDocAlreadySend(
+          DATABASE::"Posted Transport Out Header",0,pPostedTransportOutHeader."No.",
+           lEAIAct."EAI Act Type Code",lEAIAct.Code)
+        THEN
+          IF pShowError THEN
+            ERROR(Error004)
+          ELSE
+            EXIT(FALSE);
+
+      //on v‚rifie que le Fournisseur (transporteur) est param‚tr‚ pour l'act EAI
+      IF EDITools.GetGLNByVendor(pPostedTransportOutHeader."Vendor No.",lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,pPostedTransportOutHeader.FIELDCAPTION("Vendor No."),pPostedTransportOutHeader."Vendor No.",lEAIAct.Code)
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pPostedTransportOutHeader);
+      InsertEAIMessageQueue(lRecRef,'',EDISetup."IFCSUM Act Type Code",EDISetup."IFCSUM Act Code");
+
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE Create_INVRPT_Message@1180044002(pItemJournalLine@1100481001 : Record 83;pLocationCode@1100481002 : Code[10];pShowError@1100481003 : Boolean;pReSendIfNeeded@1100481000 : Boolean) : Boolean;
+    VAR
+      lEAIDocEntryMgt@1100481008 : Codeunit 8016707;
+      lEAIPartnerMgt@1100481007 : Codeunit 8016706;
+      lEAIPartner@1180044000 : Record 8016707;
+      lEAIAct@1100481005 : Record 8016706;
+      lRecRef@1100481004 : RecordRef;
+      lItemJournalLine@1100481009 : Record 83;
+    BEGIN
+      //<<IMH01.PC
+      {
+      // GMS03 GenŠre un message IFCSUM dans la file
+
+      IF NOT ReadEDISetup THEN
+        EXIT(FALSE);
+
+      IF (EDISetup."INVRPT Act Type Code" = '') OR
+         (EDISetup."INVRPT Act Code" = '')
+      THEN
+        IF pShowError THEN BEGIN
+          EDISetup.TESTFIELD("INVRPT Act Type Code");
+          EDISetup.TESTFIELD("INVRPT Act Code");
+        END ELSE
+          EXIT;
+
+      lEAIAct.GET(EDISetup."INVRPT Act Type Code",EDISetup."INVRPT Act Code");
+
+      //on v‚rifie que le magasin est param‚tr‚ pour l'act EAI (prestation externe)
+
+      IF NOT lEAIPartnerMgt.GetEAIPartner('',pLocationCode,lEAIPartner)
+      THEN
+        IF pShowError THEN
+          ERROR(Error003,lEAIPartner.TABLECAPTION,'',pLocationCode)
+        ELSE
+          EXIT(FALSE);
+
+      //on v‚rifie que le partenaire EAI est param‚tr‚ pour l'act EAI
+      lEAIAct.GET(EDISetup."INVRPT Act Type Code",EDISetup."INVRPT Act Code");
+      IF EDITools.GetGLNByEAIPartner(lEAIPartner.Code,lEAIAct,TRUE) = '' THEN
+        IF pShowError THEN
+          ERROR(Error002,lEAIPartner.TABLECAPTION,lEAIPartner.Code,lEAIAct.Code)
+        ELSE
+          EXIT(FALSE);
+
+      //Insertion dans la file d'‚mission
+      lRecRef.GETTABLE(pItemJournalLine);
+      InsertEAIMessageQueue(lRecRef,lEAIPartner.Code,EDISetup."INVRPT Act Type Code",EDISetup."INVRPT Act Code");
+
+      EXIT(TRUE);
+      }
+      //>>IMH01.PC
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 17/04/13 @a ISAT.PC @v IMH6.01.346 @s Hotfix 33494 @c Disable code */
+      /** @r GMS03 @d 20/10/10 @a ISAT.MGI @v GMS5.01.00.40 @s EDI Management
+          @c Fonction Create_INVRPT_Message */
+      /** @r GMS02 @d 30/08/10 @a ISAT.MGI @v GMS5.01.00.44 @s Transport
+          @c Fonction Create_IFCSUM_Message */
+      /** @r GMS01 @d 19/11/09 @a ISAT.PB @v GMS5.01.00.40 @s Ajout fonction
+          @c Fonction Create_PRODAT_Message */
+      /** @r EAI01 @d 21/09/09 @a ISAT.PB @v ISAEAI5.01.01.00 @s Ajout fonction
+          @c Fonction Create_SALES_CRMEMO_Message */
+      /** @r EAI00 @d 18/02/09 @a ISAT.JR @v ISAEAI5.01.01.00 @s Cr‚ation de l'objet */
+    }
+    END.
+  }
+}

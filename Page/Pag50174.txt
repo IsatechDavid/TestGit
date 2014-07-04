@@ -1,0 +1,959 @@
+OBJECT Page 50174 Html Page
+{
+  OBJECT-PROPERTIES
+  {
+    Date=23/05/14;
+    Time=12:06:05;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.P011;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Html Page;
+               FRA=Page html];
+    SourceTable=Table50006;
+    PageType=NavigatePage;
+    SourceTableTemporary=Yes;
+    OnInit=BEGIN
+             ViewOnly := TRUE;
+           END;
+
+    OnClosePage=VAR
+                  lQCMgt@1100281000 : Codeunit 50027;
+                BEGIN
+
+                  CASE MapCode OF
+                    'FICHECQ': BEGIN
+                       //lQCMgt.CalculateScore(QualityControlNo,QualityControlLineNo);
+                    END;
+                  END;
+                END;
+
+    ActionList=ACTIONS
+    {
+      { 1100481000;  ;ActionContainer;
+                      Name=<Action1100481000>;
+                      ActionContainerType=NewDocumentItems }
+      { 1100481001;1 ;Action    ;
+                      CaptionML=FRA=GO;
+                      Promoted=Yes;
+                      InFooterBar=Yes;
+                      PromotedIsBig=Yes;
+                      PromotedCategory=Process;
+                      RunFormMode=View }
+    }
+  }
+  CONTROLS
+  {
+    { 1   ;    ;Container ;
+                CaptionML=ENU=General;
+                ContainerType=ContentArea }
+
+    { 3   ;1   ;Field     ;
+                Name=Browser;
+                SourceExpr=HTML;
+                ControlAddIn=[FreddyK.BrowserControl;PublicKeyToken=58e587b763c2f132];
+                OnControlAddIn=VAR
+                                 lAbiGeoMgt@1100281002 : Codeunit 50011;
+                                 str@1000 : Text[100];
+                                 i@1003 : Integer;
+                               BEGIN
+                                 CASE MapCode OF
+                                   'FICHECQ': BEGIN
+                                     UpdateQualityControlSheet(Data);
+                                   END;
+                                   'ZONE': BEGIN
+                                     IF ContentCode = 'GROUP' THEN
+                                       MESSAGE(Text004)
+                                     ELSE BEGIN
+                                       IF ContentCode = 'CAMP' THEN
+                                         lAbiGeoMgt.UpdateAbiCampGeo(CampaignNo,Data)
+                                       ELSE IF ContentCode = 'CAMPPROV' THEN
+                                         lAbiGeoMgt.UpdateAbiCampGeoProvider(CampaignNo,ProviderNo,Data)
+                                       ELSE IF CampaignNo = '' THEN
+                                         lAbiGeoMgt.UpdateAbiGeoProvider(ProviderNo,SpecializationCode,Data,Urgent);
+                                       MESSAGE(Text001);
+                                     END;
+                                   END;
+                                 END;
+                               END;
+                                }
+
+  }
+  CODE
+  {
+    VAR
+      ProviderSetup@1100281015 : Record 50011;
+      PSRB@1100281009 : TEMPORARY Record 51000;
+      MapCode@1100281010 : Code[10];
+      ContentCode@1100281003 : Code[20];
+      HTML@1000 : BigText;
+      VALUE@1001 : Decimal;
+      URL@1100481000 : Text[1024];
+      TT@1009 : Codeunit 419;
+      ProviderNo@1100281000 : Code[20];
+      GroupNo@1100281018 : Code[20];
+      SpecializationCode@1100281001 : Code[10];
+      QualityControlNo@1100281011 : Code[10];
+      QualityControlLineNo@1100281012 : Integer;
+      CampaignNo@1100281013 : Code[20];
+      ViewOnly@1100281002 : Boolean;
+      Text001@1100281004 : TextConst 'ENU="Updated ";FRA=Mise … jour effectu‚e';
+      Urgent@1100281005 : Boolean;
+      Text002@1100281006 : TextConst 'ENU="You must specify the operating address of the provider ";FRA=Vous devez pr‚ciser l''adresse op‚rationnelle du pr‚stataire';
+      Text003@1100281007 : TextConst 'ENU="You must update the table containing the GEOCONCEPT code ";FRA="Vous devez mettre … jour la table contenant le code GEOCONCEPT "';
+      Points@1100281008 : BigText;
+      IsGetProviderSetup@1100281014 : Boolean;
+      SearchAround@1100281016 : Boolean;
+      DistanceKm@1100281017 : Integer;
+      Text004@1100281019 : TextConst 'ENU=You can not update data from the statistical grouping;FRA=Vous ne pouvez-pas mettre … jour les donn‚es du groupement statistique';
+      Text005@1100281020 : TextConst 'ENU=File %1 create error.;FRA=Erreur … la cr‚ation du fichier %1.';
+      PointToShow@1100281021 : Text[80];
+      HtmlMgt@1000000000 : Codeunit 50121;
+      CRLF@1000000001 : Text[2];
+      Text006@1100281022 : TextConst 'ENU=You must define at least one geographical reference;FRA=Vous devez definir au moins une comp‚tence g‚ographique';
+
+    PROCEDURE SetMap@1100281007(pMapCode@1100281000 : Code[10];pMapContent@1100281001 : Code[10]);
+    BEGIN
+      MapCode := pMapCode;
+      ContentCode := pMapContent;
+    END;
+
+    PROCEDURE LoadProviderSearch@1100281029(VAR pPSRB@1100281000 : TEMPORARY Record 51000);
+    VAR
+      i@1100281001 : Integer;
+      str@1100281002 : Text[1024];
+      lAbiGeoProvider@1100281005 : Record 50016;
+      lGeoCode@1100281006 : Code[6];
+      lAbiGeoProviderSetup@1100281008 : Record 50033;
+      lSetupExist@1100281009 : Boolean;
+      lStartGeoCode@1100281010 : Code[10];
+      lProviderSearchMgt@1100281011 : Codeunit 50000;
+      lDistance@1100281012 : Decimal;
+      lDistanceInt@1100281016 : Integer;
+      lProviderSpecialization@1100281013 : Record 50006;
+      lCount@1100281015 : Integer;
+      j@1100281014 : Integer;
+      lAllSpec@1100281017 : Boolean;
+      lBigText@1100281003 : BigText;
+    BEGIN
+      PSRB.RESET;
+      PSRB.DELETEALL;
+      IF pPSRB.FINDSET THEN
+        REPEAT
+          PSRB := pPSRB;
+          PSRB.INSERT;
+        UNTIL pPSRB.NEXT = 0;
+      MapCode := 'POINT';
+      ContentCode := 'PROVIDERSEARCH';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE LoadProviderSearch2@1100281003(VAR pResultBuff2@1100281000 : TEMPORARY Record 51006;pServHdr@1100281007 : Record 5900);
+    VAR
+      i@1100281001 : Integer;
+      str@1100281002 : Text[1024];
+      lAbiGeoProvider@1100281005 : Record 50016;
+      lGeoCode@1100281006 : Code[6];
+      lAbiGeoProviderSetup@1100281008 : Record 50033;
+      lSetupExist@1100281009 : Boolean;
+      lStartGeoCode@1100281010 : Code[10];
+      lProviderSearchMgt@1100281011 : Codeunit 50000;
+      lDistance@1100281012 : Decimal;
+      lDistanceInt@1100281016 : Integer;
+      lProviderSpecialization@1100281013 : Record 50006;
+      lCount@1100281015 : Integer;
+      j@1100281014 : Integer;
+      lAllSpec@1100281017 : Boolean;
+      lBigText@1100281003 : BigText;
+      lProvSearchMgt@1100281004 : Codeunit 50284;
+      lGeoRef@1100281018 : Record 50013;
+      lPostCode@1100281019 : Record 225;
+    BEGIN
+      //IMH14.ST
+      PSRB.RESET;
+      PSRB.DELETEALL;
+      lProvSearchMgt.LoadPSRBuffer(PSRB, pResultBuff2);
+      IF pServHdr."No." <> '' THEN BEGIN
+        // Affichage donn‚es service
+        IF lGeoRef.GET(pServHdr."Ship-to Geo. Reference Code") THEN BEGIN
+          SetPointToShow(STRSUBSTNO('%1,%2',lGeoRef."Latitude Lambert 2E",lGeoRef."Longitude Lambert 2E"));
+        END ELSE BEGIN
+          lPostCode.SETRANGE(Code, pServHdr."Ship-to Post Code");
+          lPostCode.SETRANGE(City, pServHdr."Ship-to City");
+          IF NOT lPostCode.FINDFIRST THEN BEGIN
+            lPostCode.SETRANGE(City);
+            lPostCode.SETRANGE("City 2", pServHdr."Ship-to City");
+          END;
+          IF lPostCode.FINDFIRST THEN BEGIN
+            SetPointToShow(STRSUBSTNO('%1,%2',lPostCode."Latitude Lambert 2E",lPostCode."Longitude Lambert 2E"));
+          END;
+        END;
+      END;
+
+      MapCode := 'POINT';
+      ContentCode := 'PROVIDERSEARCH';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE LoadProviderMap@1100281001(pProviderNo@1100281000 : Code[20];pSpecializationCode@1100281001 : Code[10];pViewOnly@1100281002 : Boolean;pCampaignNo@1100281003 : Code[20];pUrgent@1100281004 : Boolean);
+    VAR
+      lBigText@1100281005 : BigText;
+    BEGIN
+      ProviderNo := pProviderNo;
+      SpecializationCode := pSpecializationCode;
+      ViewOnly := pViewOnly;
+      CampaignNo := pCampaignNo;
+      Urgent := pUrgent;
+      MapCode := 'ZONE';
+      ContentCode := 'PROVIDER';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE LoadGroupMap@1100281014(pGroupNo@1100281000 : Code[20];pSpecializationCode@1100281001 : Code[10];pViewOnly@1100281002 : Boolean;pCampaignNo@1100281003 : Code[20];pUrgent@1100281004 : Boolean);
+    VAR
+      lBigText@1100281005 : BigText;
+    BEGIN
+      GroupNo := pGroupNo;
+      SpecializationCode := pSpecializationCode;
+      ViewOnly := pViewOnly;
+      CampaignNo := pCampaignNo;
+      Urgent := pUrgent;
+      MapCode := 'ZONE';
+      ContentCode := 'GROUP';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE LoadNetworkFacilitatorVisit@1100281009(pSearchAround@1100281000 : Boolean;pDistanceKm@1100281002 : Integer);
+    VAR
+      lBigText@1100281001 : BigText;
+    BEGIN
+      MapCode := 'POINT';
+      ContentCode := 'NETWORKFAC';
+      SearchAround := pSearchAround;
+      DistanceKm := pDistanceKm;
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE SetQualityControlParameters@1100281000(pQualityControlNo@1100281000 : Code[10];pQualityControlLineNo@1100281001 : Integer);
+    VAR
+      lBigText@1100281002 : BigText;
+    BEGIN
+      QualityControlNo := pQualityControlNo;
+      QualityControlLineNo := pQualityControlLineNo;
+      MapCode := 'FICHECQ';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE LoadCampaignServices@1100281015(pCampaignNo@1100281000 : Code[20]);
+    VAR
+      lBigText@1100281001 : BigText;
+    BEGIN
+      CampaignNo := pCampaignNo;
+      MapCode := 'ZONE';
+      ContentCode := 'CAMPSERVICES';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE LoadCampaignMap@1100281020(pCampaignNo@1100281000 : Code[20]);
+    VAR
+      lBigText@1100281001 : BigText;
+      lAbiCampGeo@1100281002 : Record 50086;
+    BEGIN
+      lAbiCampGeo.SETRANGE("Campaign No.",pCampaignNo);
+      IF lAbiCampGeo.ISEMPTY() THEN ERROR(Text006);
+      CampaignNo := pCampaignNo;
+      MapCode := 'ZONE';
+      ContentCode := 'CAMP';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE LoadCampaignProviderMap@1100281021(pCampaignNo@1100281000 : Code[20];pProviderNo@1100281002 : Code[20]);
+    VAR
+      lBigText@1100281001 : BigText;
+    BEGIN
+      CampaignNo := pCampaignNo;
+      ProviderNo := pProviderNo;
+      MapCode := 'ZONE';
+      ContentCode := 'CAMPPROV';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE LoadCampaignSearch@1100281006(pCampaignNo@1100281000 : Code[20]);
+    VAR
+      lBigText@1100281002 : BigText;
+      lCampSpeArea@1100281003 : Record 50036;
+      lPostCode@1100281007 : Record 225;
+      i@1100281004 : Integer;
+      lLongitude@1100281005 : Integer;
+      lLatitude@1100281006 : Integer;
+    BEGIN
+      CampaignNo := pCampaignNo;
+      {PSRB.DELETEALL();
+      IF pPSRB.FINDSET() THEN
+        REPEAT
+          PSRB := pPSRB;
+          PSRB.INSERT();
+        UNTIL pPSRB.NEXT()=0;
+      }
+      MapCode := 'ZONE';
+      ContentCode := 'CAMPSEARCH';
+      Load(MapCode,lBigText);
+    END;
+
+    PROCEDURE genZoneCamprovInsert@1000000000(VAR pOutStream@1000000000 : OutStream);
+    VAR
+      lAbiCampGeoProv@1000000001 : Record 50015;
+    BEGIN
+      lAbiCampGeoProv.SETRANGE("Campaign No.",CampaignNo);
+      lAbiCampGeoProv.SETRANGE("Provider No.",ProviderNo);
+      lAbiCampGeoProv.SETRANGE(Exclusion,FALSE);
+      IF lAbiCampGeoProv.FINDSET() THEN
+        REPEAT
+          pOutStream.WRITETEXT('g_preselectedObjectIds += ''' + lAbiCampGeoProv."End Ref. Geo. Code" + ';'';');
+          pOutStream.WRITETEXT();
+        UNTIL lAbiCampGeoProv.NEXT() = 0;
+    END;
+
+    PROCEDURE genZoneCampInsert@1000000003(VAR pOutStream@1000000000 : OutStream);
+    VAR
+      lAbiCampGeo@1000000002 : Record 50086;
+    BEGIN
+      lAbiCampGeo.SETRANGE("Campaign No.",CampaignNo);
+      lAbiCampGeo.SETRANGE(Exclusion,FALSE);
+      IF lAbiCampGeo.FINDSET() THEN
+        REPEAT
+          pOutStream.WRITETEXT('g_preselectedObjectIds += ''' + lAbiCampGeo."End Ref. Geo. Code" + ';'';');
+          pOutStream.WRITETEXT();
+        UNTIL lAbiCampGeo.NEXT() = 0;
+    END;
+
+    PROCEDURE genZoneProviderInsert@1000000006(VAR pOutStream@1000000000 : OutStream);
+    VAR
+      lAbiGeoProvider@1000000001 : Record 50016;
+      lEndRef@1000000002 : Code[20];
+      lOperatingAddressCode@1000000003 : Code[20];
+      lAbiGeoMgt@1000000004 : Codeunit 50011;
+    BEGIN
+      //IF CampaignNo = '' THEN BEGIN
+        lAbiGeoProvider.RESET();
+        lAbiGeoProvider.SETRANGE("Provider No.",ProviderNo);
+        //<<IMH05.ST
+        IF Urgent THEN BEGIN
+          lAbiGeoProvider.SETRANGE(Emergency,TRUE);
+          lAbiGeoProvider.SETRANGE("Emergency Exclusion",FALSE);
+        END ELSE BEGIN
+          lAbiGeoProvider.SETRANGE(Standard, TRUE);
+          lAbiGeoProvider.SETRANGE("Standard Exclusion",FALSE);
+        END;
+        //>>IMH05.ST
+        IF (SpecializationCode <> '') THEN
+          lAbiGeoProvider.SETRANGE("Specialization Code",SpecializationCode);
+        IF lAbiGeoProvider.FINDSET() THEN BEGIN
+          REPEAT
+            IF lEndRef <> lAbiGeoProvider."End Ref. Geo. Code" THEN BEGIN
+              pOutStream.WRITETEXT('g_preselectedObjectIds += ''' + lAbiGeoProvider."End Ref. Geo. Code" + ';'';');
+              pOutStream.WRITETEXT();
+              lEndRef := lAbiGeoProvider."End Ref. Geo. Code";
+            END;
+          UNTIL lAbiGeoProvider.NEXT() = 0;
+        END ELSE BEGIN
+          lOperatingAddressCode := lAbiGeoMgt.GetProviderRefGeoCode(ProviderNo);
+          IF lOperatingAddressCode = '' THEN
+            ERROR(Text002) ELSE
+          BEGIN
+            pOutStream.WRITETEXT('g_preselectedObjectIds += ''' + lOperatingAddressCode + ';'';');
+            pOutStream.WRITETEXT();
+          END;
+
+        END;
+      {END ELSE BEGIN
+        lAbilityCampGeoProvider.RESET();
+        lAbilityCampGeoProvider.SETRANGE("Provider No.",ProviderNo);
+        lAbilityCampGeoProvider.SETRANGE("Campaign No.",CampaignNo);
+        lAbilityCampGeoProvider.SETRANGE(Exclusion,FALSE);
+        //IF (SpecializationCode <> '') THEN
+        IF lAbilityCampGeoProvider.FINDSET() THEN BEGIN
+          REPEAT
+            IF lEndRef <> lAbiGeoProvider."End Ref. Geo. Code" THEN BEGIN
+              pOutStream.WRITETEXT('g_preselectedObjectIds += ''' + lAbiGeoProvider."End Ref. Geo. Code" + ';'';');
+              pOutStream.WRITETEXT();
+              lEndRef := lAbiGeoProvider."End Ref. Geo. Code";
+            END;
+          UNTIL lAbilityCampGeoProvider.NEXT() = 0;
+        END;
+      }
+    END;
+
+    PROCEDURE genCampSearchInsert2@1100281022(VAR pOutStream@1100281000 : OutStream);
+    VAR
+      lCampProvSetup@1100281001 : Record 50034;
+      lServiceHeader@1100281003 : Record 5900;
+      lInterDesc@1100281004 : Record 50070;
+      i@1100281002 : Integer;
+    BEGIN
+      i := 1;
+      // affichage des services avec interventions … assigner
+      lServiceHeader.SETRANGE("Campaign No.",CampaignNo);
+      lServiceHeader.SETRANGE(Status,lServiceHeader.Status::"In Process");
+      IF lServiceHeader.FINDSET() THEN
+        REPEAT
+           lInterDesc.SETRANGE("Service Header No.",lServiceHeader."No.");
+           IF NOT lInterDesc.ISEMPTY() THEN
+              HtmlMgt.AddCampServiceFlag(lServiceHeader,pOutStream,'SmallBluePoint',i);
+        UNTIL lServiceHeader.NEXT()=0;
+      lCampProvSetup.SETRANGE("Campaign No.",CampaignNo);
+      IF lCampProvSetup.FINDSET() THEN
+        REPEAT
+          // Affichage des prestataires ne pouvant plus ˆtre contact‚s
+          IF lCampProvSetup."Campaign Exclusion" OR
+            (lCampProvSetup."Interv. Maximum" = lCampProvSetup."Current Service Interv. Count") THEN BEGIN
+            //AddCampProviderFlag(lCampProvSetup."Provider No.",pOutStream,'showImage.do?name=RED',i);
+            HtmlMgt.AddCampProviderFlag(lCampProvSetup."No.",CampaignNo,pOutStream,'SmallRedPoint',i);
+          END ELSE BEGIN
+          // Affichage des prestataires d‚j… contact‚.
+            //AddCampProviderFlag(lCampProvSetup."Provider No.",pOutStream,'showImage.do?name=RED-GREEN',i);
+           HtmlMgt.AddCampProviderFlag(lCampProvSetup."No.",CampaignNo,pOutStream,'SmallGreenPoint',i);
+          END;
+        UNTIL lCampProvSetup.NEXT()= 0;
+    END;
+
+    PROCEDURE genFicheCQ@1100281023(VAR pOutStream@1100281000 : OutStream);
+    VAR
+      i@1100281001 : Integer;
+      lQualityControlSheet@1100281003 : Record 50093;
+      lQualityControlSheet2@1100281002 : Record 50093;
+      lHtmlPage@1100281004 : Record 50149;
+    BEGIN
+
+      i:= 0;
+      lQualityControlSheet.RESET();
+      lQualityControlSheet.SETRANGE("Quality Control No.",QualityControlNo);
+      lQualityControlSheet.SETRANGE("Quality Control Line No.",QualityControlLineNo);
+      IF lQualityControlSheet.ISEMPTY() THEN BEGIN
+        lQualityControlSheet.RESET();
+        lQualityControlSheet.SETRANGE("Quality Control No.",'');
+        IF lQualityControlSheet.FINDSET() THEN
+          REPEAT
+            lQualityControlSheet2 := lQualityControlSheet;
+            lQualityControlSheet2."Quality Control No." := QualityControlNo;
+            lQualityControlSheet2."Quality Control Line No." := QualityControlLineNo;
+            lQualityControlSheet2.Unknown := TRUE;
+            lQualityControlSheet2.INSERT();
+          UNTIL lQualityControlSheet.NEXT()=0;
+      END;
+      lQualityControlSheet.RESET();
+      lQualityControlSheet.SETRANGE("Quality Control No.",QualityControlNo);
+      lQualityControlSheet.SETRANGE("Quality Control Line No.",QualityControlLineNo);
+      IF lQualityControlSheet.FINDSET() THEN
+        REPEAT
+          i += 1;
+          IF lQualityControlSheet.Type = lQualityControlSheet.Type::Title THEN BEGIN
+            pOutStream.WRITETEXT('<tr style="font-family:Tahoma;font-size:x-small;font-weight:bold" border=1 >');
+            pOutStream.WRITETEXT('<td style="visibility:hidden; width:0px"> ' + lQualityControlSheet."Question No." + '</td>');
+            pOutStream.WRITETEXT(lHtmlPage.IBM2Ansi('<td> ' + lQualityControlSheet.Question + '</td>'));
+            pOutStream.WRITETEXT(lHtmlPage.IBM2Ansi('<td> Inacceptable </td>'));
+            pOutStream.WRITETEXT(lHtmlPage.IBM2Ansi('<td colspan="2"> Si "inacceptable" un commentaire est obligatoire </td>'));
+            pOutStream.WRITETEXT(lHtmlPage.IBM2Ansi('<td> Donn‚e inconnue </td>'));
+            pOutStream.WRITETEXT('<td> Acceptable </td>');
+            pOutStream.WRITETEXT('<td> Bon </td>');
+            pOutStream.WRITETEXT(lHtmlPage.IBM2Ansi('<td> TrŠs bon </td>'));
+          END ELSE IF lQualityControlSheet.Type = lQualityControlSheet.Type::YesNo THEN BEGIN
+            pOutStream.WRITETEXT('<tr style="font-family:Tahoma;font-size:x-small" border=1 >');
+            pOutStream.WRITETEXT('<td style="visibility:hidden; width:0px id="col1" > ' +
+            lQualityControlSheet."Question No." + '</td>');
+            pOutStream.WRITETEXT(lHtmlPage.IBM2Ansi('<td>'+ lQualityControlSheet.Question +'</td>'));
+            pOutStream.WRITETEXT('<td><input type="radio" onclick="javascript:line(this);"  id="col3" name="radio'+
+            FORMAT(i) +'" ' + HtmlMgt.FormatChecked(lQualityControlSheet.Yes) + ' />Oui</td>');
+           // MESSAGE('%1 %2 Yes : %3',QualityControlNo,QualityControlLineNo,FormatChecked(lQualityControlSheet.Yes));
+            pOutStream.WRITETEXT(
+            lHtmlPage.IBM2Ansi('<td><input type="radio" onclick="javascript:line(this);" id="col4" name="radio'+
+              FORMAT(i) +'" ' + HtmlMgt.FormatChecked(lQualityControlSheet.Unknown) +  ' />Donn‚e inconnue</td>'));
+            pOutStream.WRITETEXT('<td><input type="radio" onclick="javascript:line(this);" id="col5" name="radio'+
+            FORMAT(i) +'" ' + HtmlMgt.FormatChecked(lQualityControlSheet.No) +  ' />Non</td>');
+            pOutStream.WRITETEXT(lHtmlPage.IBM2Ansi('<td id="col6"> Pourquoi </td>'));
+            pOutStream.WRITETEXT('<td colspan=3><textarea id="col7" style="font-family:Tahoma;font-size:x-small" ' +
+            ' onblur="javascript:line(this);" rows=4 COLS=20>'
+            + GetAdvComment(lQualityControlSheet."Question No.")
+            +'</Textarea></td>');
+          END ELSE BEGIN
+            pOutStream.WRITETEXT('<tr style="font-family:Tahoma;font-size:x-small" border=1 >');
+            pOutStream.WRITETEXT('');
+            pOutStream.WRITETEXT('<td id="col1" style="visibility:hidden; width:0px"> ' +
+            lQualityControlSheet."Question No." + '</td>');
+            pOutStream.WRITETEXT('');
+            pOutStream.WRITETEXT('<td id="col2">'+ lHtmlPage.IBM2Ansi(lQualityControlSheet.Question) +'</td>');
+            pOutStream.WRITETEXT('');
+            pOutStream.WRITETEXT('<td><input type="radio" id="col3" onclick="javascript:line(this);" name="radio'+
+            FORMAT(i) +'" ' + HtmlMgt.FormatChecked(lQualityControlSheet.Unacceptable)  +' /></td>');
+            pOutStream.WRITETEXT('');
+            pOutStream.WRITETEXT('<td colspan=2><textarea id="col4" style="font-family:Tahoma;font-size:x-small" ' +
+            ' onblur="javascript:line(this);" rows=3 COLS=20>'+
+            GetAdvComment(lQualityControlSheet."Question No.") + '</Textarea></td>');
+            pOutStream.WRITETEXT('');
+            pOutStream.WRITETEXT('<td><input type="radio" onclick="javascript:line(this);" id="col5" name="radio'
+              + FORMAT(i) +'" ' + HtmlMgt.FormatChecked(lQualityControlSheet.Unknown)  +' /></td>');
+            pOutStream.WRITETEXT('');
+            pOutStream.WRITETEXT('<td><input type="radio" onclick="javascript:line(this);" id="col6" name="radio'
+              + FORMAT(i) +'" ' + HtmlMgt.FormatChecked(lQualityControlSheet.Acceptable) +' /></td>');
+            pOutStream.WRITETEXT('');
+            pOutStream.WRITETEXT('<td><input type="radio" onclick="javascript:line(this);" id="col7" name="radio'
+              + FORMAT(i) +'" ' + HtmlMgt.FormatChecked(lQualityControlSheet.Good) +' /></td>');
+            pOutStream.WRITETEXT('');
+            pOutStream.WRITETEXT('<td><input type="radio" onclick="javascript:line(this);" id="col8" name="radio'
+              + FORMAT(i) +'" ' + HtmlMgt.FormatChecked(lQualityControlSheet."Very Good")  +' /></td>');
+            pOutStream.WRITETEXT('');
+          END;
+          pOutStream.WRITETEXT('</tr>');
+        UNTIL lQualityControlSheet.NEXT()=0;
+    END;
+
+    PROCEDURE UpdateQualityControlSheet@1100281002(pData@1100281000 : BigText);
+    VAR
+      lQualityControlSheet@1100281004 : Record 50093;
+      lCol@1100281003 : ARRAY [20] OF Text[255];
+      i@1100281002 : Integer;
+      lPos@1100281001 : Integer;
+      lstr@1100281005 : Text[255];
+      lLineNo@1100281006 : Integer;
+      lComment@1100281007 : Text[80];
+    BEGIN
+      i := 0;
+      pData.GETSUBTEXT(lstr,pData.LENGTH,1);
+      IF lstr <> ';' THEN pData.ADDTEXT(';');
+      lPos := pData.TEXTPOS(';');
+
+      WHILE lPos > 0 DO BEGIN
+        i += 1;
+        pData.GETSUBTEXT(lstr, 1,lPos-1);
+        lCol[i] := lstr;
+        pData.GETSUBTEXT(pData,lPos+1);
+        lPos := pData.TEXTPOS(';');
+      END;
+      lComment := '';
+      lQualityControlSheet.SETRANGE("Quality Control No.",QualityControlNo);
+      lQualityControlSheet.SETRANGE("Quality Control Line No.",QualityControlLineNo);
+
+      lQualityControlSheet.SETRANGE("Question No.",lCol[2]);
+      IF lQualityControlSheet.FINDSET() THEN BEGIN
+        CASE lQualityControlSheet.Type OF
+          lQualityControlSheet.Type::YesNo : BEGIN
+            lQualityControlSheet.Yes := (lCol[4] = 'true');
+            lQualityControlSheet.Unknown := (lCol[5] = 'true');
+            lQualityControlSheet.No := (lCol[6] = 'true');
+            lComment := lCol[8];
+          END;
+          lQualityControlSheet.Type::Question : BEGIN
+            lQualityControlSheet.Unacceptable := (lCol[4] = 'true');
+            lQualityControlSheet.Unknown := (lCol[6] = 'true');
+            lQualityControlSheet.Acceptable := (lCol[7] = 'true');
+            lQualityControlSheet.Good := (lCol[8] = 'true');
+            lQualityControlSheet."Very Good" := (lCol[9] = 'true');
+            lComment := lCol[5];
+          END;
+        END;
+        lQualityControlSheet.MODIFY();
+        SetAdvComment(QualityControlNo,QualityControlLineNo,lCol[2],lComment);
+      END;
+    END;
+
+    PROCEDURE GetAdvComment@1100281004(pQuestionNo@1100281001 : Code[10]) : Text[250];
+    VAR
+      lAdvCommentLine@1100281000 : Record 50056;
+    BEGIN
+      lAdvCommentLine.RESET();
+      lAdvCommentLine.SETRANGE("Source Table ID",50093);
+      lAdvCommentLine.SETRANGE("Source No.",QualityControlNo);
+      lAdvCommentLine.SETRANGE("Source No. 2",QualityControlNo);
+      lAdvCommentLine.SETRANGE("Source No. 3",QualityControlLineNo);
+      lAdvCommentLine.SETRANGE("Source No. 4",pQuestionNo);
+      lAdvCommentLine.SETRANGE("Line No.",10000);
+      IF lAdvCommentLine.FINDFIRST() THEN BEGIN
+      //  MESSAGE(lAdvCommentLine.Comment);
+        EXIT(lAdvCommentLine.Comment);
+      END;
+    END;
+
+    PROCEDURE SetAdvComment@1100281005(pQCNo@1100281000 : Code[10];pQCLineNo@1100281001 : Integer;pQCQuestionNo@1100281002 : Code[10];pComment@1100281004 : Text[80]);
+    VAR
+      lAdvCommentLine@1100281003 : Record 50056;
+    BEGIN
+      lAdvCommentLine.RESET();
+      lAdvCommentLine.SETRANGE("Source Table ID",50093);
+      lAdvCommentLine.SETRANGE("Source No.",pQCNo);
+      lAdvCommentLine.SETRANGE("Source No. 2",pQCNo);
+      lAdvCommentLine.SETRANGE("Source No. 3",pQCLineNo);
+      lAdvCommentLine.SETRANGE("Source No. 4",pQCQuestionNo);
+      lAdvCommentLine.SETRANGE("Line No.",10000);
+      IF lAdvCommentLine.FINDSET() THEN BEGIN
+        lAdvCommentLine.Comment := pComment;
+        lAdvCommentLine.MODIFY();
+      END ELSE BEGIN
+        lAdvCommentLine."Source Table ID" := 50093;
+        lAdvCommentLine."Source No." := pQCNo;
+        lAdvCommentLine."Source No. 2" := pQCNo;
+        lAdvCommentLine."Source No. 3" := pQCLineNo;
+        lAdvCommentLine."Source No. 4" := pQCQuestionNo;
+        lAdvCommentLine."Line No." := 10000;
+        lAdvCommentLine.Comment := pComment;
+        lAdvCommentLine.INSERT();
+      END;
+    END;
+
+    PROCEDURE SetPointToShow@1100281016(pPointToShow@1100281000 : Text[80]);
+    BEGIN
+      PointToShow := pPointToShow;
+    END;
+
+    PROCEDURE WriteHtmlFile@1100481003(VAR pUrl@1100481000 : Text[1024];pCode@1100281000 : Code[10];pBigText@1100281017 : BigText);
+    VAR
+      lHtmlPage@1100281007 : Record 50149;
+      lAbiGeoProvider@1100281006 : Record 50016;
+      lAbilityCampGeoProvider@1100281005 : Record 50015;
+      lPostCode@1100281002 : Record 225;
+      lMarketingSetup@1100281001 : Record 5079;
+      lContactAltAddr@1100281008 : Record 5051;
+      lProvider@1100281011 : Record 50000;
+      lProviderBuffer@1100281024 : TEMPORARY Record 50000;
+      lCampSpecArea@1100281016 : Record 50036;
+      lProviderSetup@1100281018 : Record 50011;
+      lServiceHeader@1100281020 : Record 5900;
+      lNetFacVisit@1100281023 : Record 50105;
+      lAbilityGeoSearchBuffer@1100281026 : TEMPORARY Record 51001;
+      lPostCodeBuffer@1100281027 : TEMPORARY Record 225;
+      lLatitude@1100281009 : Integer;
+      lLongitude@1100281010 : Integer;
+      lFile@1100481001 : File;
+      lOutStream@1100481002 : OutStream;
+      lLine@1100481004 : Text[1024];
+      i@1100481005 : Integer;
+      TEMP@1100481003 : BigText;
+      lAbiGeoMgt@1100281003 : Codeunit 50011;
+      lAscii@1100281014 : Codeunit 50119;
+      lProviderSearchMgt@1100281025 : Codeunit 50000;
+      lText@1100281013 : Text[30];
+      lAddressOK@1100281019 : Boolean;
+      lX@1100281021 : Integer;
+      lY@1100281022 : Integer;
+      lEndRef@1000000000 : Code[20];
+    BEGIN
+
+      lProviderSetup.GET();
+      lFile.WRITEMODE := TRUE;
+      lFile.TEXTMODE := TRUE;
+      CRLF[1] := 13;
+      CRLF[2] := 13;
+      i := 0;
+      IF FILE.EXISTS(pUrl) THEN
+        FILE.ERASE(pUrl);
+      IF lFile.CREATE(pUrl) THEN BEGIN
+        lFile.CREATEOUTSTREAM(lOutStream);
+        lHtmlPage.RESET();
+        lHtmlPage.SETRANGE("Map Code",pCode);
+        IF lHtmlPage.FINDSET() THEN BEGIN
+          REPEAT
+            IF (MapCode = 'ZONE') AND (ContentCode = 'PROVIDER') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+              genZoneProviderInsert(lOutStream);
+            //<<IMH06 isat.nfo
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'PROVIDER')AND (lHtmlPage.Html = '<INSERT2>') THEN BEGIN
+              HtmlMgt.AddProviderFlag2(ProviderNo,lOutStream,'start.gif',i,-1,ContentCode);
+            //>>IMH06 isat.nfo
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'CAMP') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+              genZoneCampInsert(lOutStream);
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'CAMP') AND (lHtmlPage.Html = '<INSERT2>') THEN BEGIN
+              lOutStream.WRITETEXT('return;');
+              lOutStream.WRITETEXT();
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'CAMPPROV') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+              genZoneCamprovInsert(lOutStream);
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'CAMPPROV') AND (lHtmlPage.Html = '<INSERT2>') THEN BEGIN
+              lOutStream.WRITETEXT('return;');
+              lOutStream.WRITETEXT();
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'CAMPSERVICES') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+                lOutStream.WRITETEXT('g_preselectedObjectIds += ''' + lAbiGeoProvider."End Ref. Geo. Code" + ';'';');
+                lOutStream.WRITETEXT();
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'GROUP') AND (lHtmlPage.Html = '<INSERT2>') THEN BEGIN
+              //<<IMH11.PC
+              //lOutStream.WRITETEXT('return;');
+              //lOutStream.WRITETEXT();
+              IF GroupNo <> '' THEN BEGIN
+                HtmlMgt.AddStatGroupFlag(GroupNo,lOutStream,'start.gif',i,-1,ContentCode);
+              END ELSE BEGIN
+                lOutStream.WRITETEXT('return;');
+                lOutStream.WRITETEXT();
+              END;
+              //>>IMH11.PC
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'GROUP') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+            //ZHE
+              IF GroupNo <> '' THEN BEGIN
+                lAbiGeoProvider.RESET();
+                lProvider.SETCURRENTKEY("Statistics Group No.");
+                lProvider.SETRANGE("Statistics Group No.", GroupNo);
+                IF lProvider.FINDFIRST THEN
+                  REPEAT
+                    lAbiGeoProvider.SETRANGE("Provider No.", lProvider."No.");
+      //<<IMH05.ST
+                    //lAbiGeoProvider.SETRANGE("Standard Exclusion",FALSE);
+                    //lAbiGeoProvider.SETRANGE(lAbiGeoProvider.Emergency,Urgent);
+                    IF Urgent THEN BEGIN
+                      lAbiGeoProvider.SETRANGE(Emergency,TRUE);
+                      lAbiGeoProvider.SETRANGE("Emergency Exclusion",FALSE);
+                    END ELSE BEGIN
+                      lAbiGeoProvider.SETRANGE(Standard, TRUE);
+                      lAbiGeoProvider.SETRANGE("Standard Exclusion",FALSE);
+                    END;
+      //>>IMH05.ST
+                    IF (SpecializationCode <> '') THEN
+                      lAbiGeoProvider.SETRANGE("Specialization Code",SpecializationCode);
+                    IF lAbiGeoProvider.FINDFIRST THEN BEGIN
+                      REPEAT
+                        IF lEndRef <> lAbiGeoProvider."End Ref. Geo. Code" THEN BEGIN
+                          lOutStream.WRITETEXT('g_preselectedObjectIds += ''' + lAbiGeoProvider."End Ref. Geo. Code" + ';'';');
+                          lOutStream.WRITETEXT();
+                          lEndRef := lAbiGeoProvider."End Ref. Geo. Code";
+                        END;
+                      UNTIL lAbiGeoProvider.NEXT() = 0;
+                    END;
+                  UNTIL lProvider.NEXT = 0;
+              END;
+              //<<IMH11.PC
+              {
+                ELSE BEGIN
+                lAbilityCampGeoProvider.RESET();
+                lProvider.SETCURRENTKEY("Statistics Group No.");
+                lProvider.SETRANGE("Statistics Group No.", GroupNo);
+                IF lProvider.FINDFIRST THEN
+                  REPEAT
+                    lAbilityCampGeoProvider.SETRANGE("Provider No.",lProvider."No.");
+                    lAbilityCampGeoProvider.SETRANGE("Campaign No.",CampaignNo);
+                    lAbilityCampGeoProvider.SETRANGE(Exclusion,FALSE);
+                    //IF (SpecializationCode <> '') THEN
+
+                    IF lAbilityCampGeoProvider.FINDSET() THEN BEGIN
+                      REPEAT
+                        IF lEndRef <> lAbiGeoProvider."End Ref. Geo. Code" THEN BEGIN
+                          lOutStream.WRITETEXT('g_preselectedObjectIds += ''' + lAbiGeoProvider."End Ref. Geo. Code" + ';'';');
+                          lOutStream.WRITETEXT();
+                          lEndRef := lAbiGeoProvider."End Ref. Geo. Code";
+                        END;
+                      UNTIL lAbilityCampGeoProvider.NEXT() = 0;
+                    END;
+                  UNTIL lProvider.NEXT = 0;
+              END;
+              }
+              //>>IMH11.PC
+            END ELSE IF (MapCode = 'POINT') AND (ContentCode = 'PROVIDERSEARCH') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+              lMarketingSetup.GET();
+              lMarketingSetup.TESTFIELD("Main Address Code");
+              i := 1;
+              //<<IMH13
+              HtmlMgt.SetSkipClearChekPos(TRUE);
+              HtmlMgt.ClearCheckPos;
+              //>>IMH13
+              IF PSRB.FINDSET() THEN BEGIN
+                IF PSRB."Service Header No." <> '' THEN BEGIN
+                  lServiceHeader.SETRANGE("Document Type",lServiceHeader."Document Type"::Invoice);
+                  lServiceHeader.SETRANGE(lServiceHeader."No.",PSRB."Service Header No.");
+                  IF lServiceHeader.FINDFIRST() THEN BEGIN
+                    lAbiGeoMgt.GetGeoCodeServiceHeader(lServiceHeader,lX,lY);
+                    IF lX <> 0 THEN BEGIN
+                      HtmlMgt.CheckPos(lX,lY);   //IMH13
+                        lOutStream.WRITETEXT('/* ' + lServiceHeader."No." + ' ' + lServiceHeader.Name + ' */');
+                      lOutStream.WRITETEXT(
+                        'obj = DynMapCreateObject('+ FORMAT(lX)+
+                        ',' + FORMAT(lY) +', ''' + FORMAT(0) +''', ''' + lServiceHeader.Name +''',''' + lServiceHeader."Name 2" +
+                        //<<IMH12
+                        //'<BR/>'+lServiceHeader."Ship-to Address" + '<BR/>'+ lServiceHeader."Ship-to City" +''', 0, 0,'+
+                        '<BR/>'+ReplaceSpecHtmlChar(lServiceHeader."Ship-to Address") +
+                        '<BR/>'+ lServiceHeader."Ship-to City" +''', 0, 0,'+
+                        //>>IMH12
+                        '''' + lProviderSetup."Geoconcept Map Address" + '/images/end.gif'');');
+                      lOutStream.WRITETEXT();
+                      lOutStream.WRITETEXT('Objects.push(obj);');
+                      lOutStream.WRITETEXT();
+                      //<<IMHXX isat.nfo
+                      lOutStream.WRITETEXT('DynMapShowPoint(dynMap,'+FORMAT(lX)+','+FORMAT(lY)+',8,"' +
+                      lProviderSetup."Geoconcept Map Address" + '/images/target.gif");');
+                      lOutStream.WRITETEXT();
+                      //>>IMHXX isat.nfo
+                    END;
+                  END;
+                END ELSE BEGIN
+                  IF PointToShow <> '' THEN BEGIN
+                    lOutStream.WRITETEXT(
+                      'obj = DynMapCreateObject('+ PointToShow +
+                      ', ''' + FORMAT(0) +''', ''' + lServiceHeader.Name +''',''' + lServiceHeader."Name 2" +
+                      //<<IMH12
+                      //''+lServiceHeader."Ship-to Address" + ''+ lServiceHeader."Ship-to City" +''', 0, 0,'+
+                      ''+ReplaceSpecHtmlChar(lServiceHeader."Ship-to Address") + ''+ lServiceHeader."Ship-to City" +''', 0, 0,'+
+                      //>>IMH12
+                      '''' + lProviderSetup."Geoconcept Map Address" + '/images/end.gif'');');
+                    lOutStream.WRITETEXT();
+                    lOutStream.WRITETEXT('Objects.push(obj);');
+                    lOutStream.WRITETEXT();
+                    lOutStream.WRITETEXT('DynMapShowPoint(dynMap,'+PointToShow+', 8, "'+
+                                         lProviderSetup."Geoconcept Map Address" + '/images/target.gif");');
+                    lOutStream.WRITETEXT();
+                  END ELSE BEGIN
+                    lOutStream.WRITETEXT();
+                    HtmlMgt.GetProviderCoordinates(PSRB."Provider No.",lProvider,lLatitude,lLongitude);
+                    lOutStream.WRITETEXT();
+                    lOutStream.WRITETEXT('DynMapShowPoint(dynMap,'+FORMAT(lLatitude) + ',' + FORMAT(lLongitude)+', 8, "'+
+                                         lProviderSetup."Geoconcept Map Address" + '/images/target.gif");');
+                  END;
+                END;
+                REPEAT
+                  HtmlMgt.AddProviderFlag(PSRB."Provider No.",lOutStream,'start.gif',i,PSRB.Distance,ContentCode);
+                UNTIL PSRB.NEXT() =0;
+              END;
+            END ELSE IF (MapCode = 'POINT') AND (ContentCode = 'NETWORKFAC') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+
+              lNetFacVisit.RESET();
+              lNetFacVisit.SETRANGE("No.",UPPERCASE(USERID));
+              i := 1;
+              IF lNetFacVisit.FINDSET() THEN BEGIN
+                REPEAT
+                  lProviderBuffer."No." := lNetFacVisit."Provider No.";
+                  lProviderBuffer.INSERT();
+                  HtmlMgt.AddProviderFlag(lNetFacVisit."Provider No.",lOutStream,'start.gif',i,-1,ContentCode);
+
+                UNTIL lNetFacVisit.NEXT() =0;
+              END;
+              // Recherche des prestataires … moins de x km
+              IF SearchAround THEN BEGIN
+                IF lNetFacVisit.FINDSET() THEN BEGIN
+                  REPEAT
+                    IF NOT lPostCodeBuffer.GET(lNetFacVisit."Provider Post Code",lNetFacVisit."Provider City") THEN BEGIN
+                      lProviderSearchMgt.GetInseeByDistanceKm(
+                        lProviderSearchMgt.GetGeoCode(lNetFacVisit."Provider Post Code",lNetFacVisit."Provider City"),
+                        DistanceKm,
+                        lAbilityGeoSearchBuffer,
+                        FALSE);
+                      IF lAbilityGeoSearchBuffer.FINDSET() THEN BEGIN
+                        REPEAT
+                          lContactAltAddr.RESET();
+                          lContactAltAddr.SETRANGE("Geo. Reference Code",lAbilityGeoSearchBuffer."Ref. Geo. Code");
+                          IF lContactAltAddr.FINDFIRST() THEN BEGIN
+                            IF NOT lProviderBuffer.GET(lContactAltAddr."Contact No.") THEN BEGIN
+                              HtmlMgt.AddProviderFlag(lContactAltAddr."Contact No.",lOutStream,'end.gif',i,-1,ContentCode);
+                              lProviderBuffer."No." := lContactAltAddr."Contact No.";
+                              lProviderBuffer.INSERT();
+                            END;
+                          END;
+                        UNTIL lAbilityGeoSearchBuffer.NEXT() = 0;
+                      END;
+                      lPostCodeBuffer.Code :=lNetFacVisit."Provider Post Code";
+                      lPostCodeBuffer.City := lNetFacVisit."Provider City";
+                      lPostCodeBuffer.INSERT();
+                    END;
+                  UNTIL lNetFacVisit.NEXT() =0;
+                END;
+              END;
+            END ELSE IF (MapCode = 'FICHECQ') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+              genFicheCQ(lOutStream);
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'CAMPSEARCH') AND (lHtmlPage.Html = '<INSERT>') THEN BEGIN
+              genZoneCampInsert(lOutStream);
+            END ELSE IF (MapCode = 'ZONE') AND (ContentCode = 'CAMPSEARCH') AND (lHtmlPage.Html = '<INSERT2>') THEN BEGIN
+              genCampSearchInsert2(lOutStream);
+            END ELSE BEGIN
+              IF STRPOS(lHtmlPage.Html,'<URLGEOCONCEPT>')>0 THEN
+                lHtmlPage.Html := HtmlMgt.Replace(lHtmlPage.Html, '<URLGEOCONCEPT>', lProviderSetup."Geoconcept Map Address");
+              lOutStream.WRITETEXT(lHtmlPage.IBM2Ansi(lHtmlPage.Html));
+            END;
+
+            lOutStream.WRITETEXT();
+          UNTIL lHtmlPage.NEXT()=0;
+        END;
+        lFile.CLOSE();
+      END
+      ELSE
+        MESSAGE(Text005, pUrl);
+    END;
+
+    PROCEDURE Load@1100481000(pMAPCode@1100281002 : Text[30];pBigText@1100281003 : BigText) : BigInteger;
+    VAR
+      TEMP@1100481001 : BigText;
+      lHtmlPage@1100481000 : Record 50149;
+      lFile@1100481002 : File;
+      lInstream@1100481003 : InStream;
+      lWSH@1100281000 : Automation "{F935DC20-1CF0-11D0-ADB9-00C04FD58A0B} 1.0:{72C24DD5-D70A-438B-8A42-98424B88AFB8}:'Windows Script Host Object Model'.WshShell";
+      lProviderSetup@1100281001 : Record 50011;
+      lUrl@1000000001 : Text[1024];
+    BEGIN
+      MapCode := pMAPCode;
+      CLEAR(TEMP);
+      //CREATE(lWSH, TRUE,TRUE);
+      lProviderSetup.GET();
+      lProviderSetup.TESTFIELD("NST Temporary Folder");
+      lUrl :=
+        FORMAT(lProviderSetup."NST Temporary Folder") + '\HTML' +
+        USERID + '.html';
+        //FORMAT(lWSH.ExpandEnvironmentStrings('%USERNAME%')) + '.html';
+
+      IF EXISTS(lUrl) THEN BEGIN
+        ERASE(lUrl);
+      END;
+
+      lHtmlPage.RESET();
+      lHtmlPage.SETRANGE("Map Code",pMAPCode);
+      IF lHtmlPage.ISEMPTY() THEN
+        ERROR(Text003);
+      WriteHtmlFile(lUrl,pMAPCode,pBigText);
+
+      DOWNLOAD(lUrl,'','<TEMP>','',lUrl);
+      TEMP.ADDTEXT('<html>');
+      TEMP.ADDTEXT('<head></head>');
+      TEMP.ADDTEXT('<body>');
+      TEMP.ADDTEXT('<iframe src="' + lUrl + '" style="width:900px; height:700px;" frameborder="0"></iframe>');
+      TEMP.ADDTEXT('</body>');
+      TEMP.ADDTEXT('</html>');
+      HTML := TEMP;
+    END;
+
+    PROCEDURE ReplaceSpecHtmlChar@1000000001(pText@1000000000 : Text[1024]) rValue : Text[1024];
+    VAR
+      lLength@1000000001 : Integer;
+      lCount@1000000002 : Integer;
+      lrValueCount@1000000004 : Integer;
+      lChar@1000000003 : Char;
+    BEGIN
+      //<<IMH12
+      lLength := STRLEN(pText);
+      lChar := 39;
+      lrValueCount := 1;
+      FOR lCount := 1 TO lLength DO BEGIN
+        IF pText[lCount] = lChar THEN BEGIN
+          rValue[lrValueCount] := '\';
+          lrValueCount += 1;
+        END;
+        rValue[lrValueCount] := pText[lCount];
+        lrValueCount += 1;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH14 @d 16/05/14 @a ISAT.ST @v IMH6.01.P011 @s New Provider Search @h 5118
+          @c Ajout LoadProviderSearch2 */
+      /** @r IMH13 @d 30/04/13 @a ISAT.ZW @v IMH6.03.345 @s Recherche prestataire @h 4384
+          @c Gestion affichage drapeau beneiciaire */
+      /** @r IMH12 @d 30/04/13 @a ISAT.ZW @v IMH6.03.345 @s Recherche prestataire @h 4389
+          @c Remplacer le caractŠre "'" de adresse*/
+      /** @r IMH11 @d 14/05/12 @a ISAT.PC @v IMH6.01.102 @s Recherche prestataire @h 2421
+          @c Ajout d'un drapeau pour chaque prestataire d'un groupe statistique */
+      /** @r IMH10 @d 09/12/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire @c Ajout d'un point en recherche ligne produit */
+      /** @r IMH09 @d 30/11/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire
+          @c G‚olocation a la ville si la g‚olocation g‚oconce ne donne rien */
+      /** @r IMH08 @d 17/10/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire @c Remise en plage de la table html page line */
+      /** @r IMH07 @d 13/10/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire @c modif. recheche coordonn‚es dans AddProviderFlag2 */
+      /** @r IMH06 @d 08/09/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire
+          @c Ajout du drapeau prestataire sur la carte Ajout de la fonction AddProviderFlag2 */
+      /** @r IMH05 @d 07/07/11 @a ISAT.ST @v IMH6.01.102 @s Recherche prestataire @c Correction vision carte standard */
+      /** @r IMH04 @d 31/03/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire @c prise en compte du paramŠtre
+          @c "Provider Setup"."Geoconcept Map Address" en cas de modification de l'url geoconcept  */
+      /** @r IMH03 @d 28/03/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire @c Limitation de nombre de cartes */
+      /** @r IMH02 @d 18/01/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire @c Gestion du paramŠtre campaignNo */
+      /** @r IMH01 @d 12/01/11 @a ISAT.NFO @v IMH6.01.102 @s Recherche prestataire @c Cr‚ation objet */
+    }
+    END.
+  }
+}

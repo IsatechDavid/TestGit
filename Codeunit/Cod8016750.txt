@@ -1,0 +1,246 @@
+OBJECT Codeunit 8016750 EAI Sent MQ Action 1
+{
+  OBJECT-PROPERTIES
+  {
+    Date=16/02/09;
+    Time=11:41:32;
+    Version List=ISAEAI1.00;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAISynchroMgt@1100281002 : Codeunit 8016705;
+      TempToSyncTable@1100281000 : TEMPORARY Record 8016708;
+      EAISetupRead@1100281001 : Boolean;
+
+    PROCEDURE GetTableTriggerMask@5(TableNumber@1000 : Integer) : Integer;
+    VAR
+      EAISetup@1100281000 : Record 8016700;
+      lSynchroGroupTable@1100281001 : Record 8016710;
+      ResultMask@1001 : Integer;
+    BEGIN
+      IF TableNumber IN
+         [DATABASE::"Change Log Entry",DATABASE::"Change Log Setup",
+          DATABASE::"Change Log Setup (Table)",DATABASE::"Change Log Setup (Field)"]
+      THEN
+         EXIT(0);
+
+      IF COMPANYNAME = '' THEN
+        EXIT(0);
+
+      IF NOT EAISetupRead THEN BEGIN
+        IF EAISetup.GET THEN;
+        EAISetupRead := TRUE;
+      END;
+
+      IF NOT EAISetup.Activated THEN
+        EXIT(0);
+
+      //On d‚termine le Result Mask de la table
+      IF NOT TempToSyncTable.GET(TableNumber) THEN
+      BEGIN
+        WITH lSynchroGroupTable DO
+        BEGIN
+          SETCURRENTKEY("To Synchronize Table No.");
+          SETRANGE("To Synchronize Table No.",TableNumber);
+          IF FINDFIRST THEN
+          BEGIN
+
+            TempToSyncTable.INIT;
+            TempToSyncTable."Table No." := TableNumber;
+
+            REPEAT
+
+              ResultMask := 0;
+              IF "On Insert" = "On Insert"::Yes THEN
+                ResultMask := 1;
+              IF ("On Modify" = "On Modify"::"Selected Fields") OR
+                 ("On Modify" = "On Modify"::"All Fields")
+              THEN
+                ResultMask := ResultMask + 2 + 8; // also rename
+              IF "On Delete" <> "On Delete"::No THEN
+                ResultMask := ResultMask + 4;
+
+              IF ResultMask > TempToSyncTable.Priority THEN
+                TempToSyncTable.Priority := ResultMask;
+
+            UNTIL lSynchroGroupTable.NEXT = 0;
+
+            TempToSyncTable.INSERT;
+
+          END;
+        END;
+
+      END;
+
+      //On utilise le champs "priorit‚" de la table temp pour conserv‚ le Result Mask
+      EXIT(TempToSyncTable.Priority);
+    END;
+
+    PROCEDURE LogInsertion@1100481000(VAR pRecRef@1100481000 : RecordRef);
+    BEGIN
+      // Ex‚cution chaque fois qu'une insertion est effectu‚e dans une table
+      IF NOT SetActionOnTableActive(pRecRef,pRecRef,0) THEN
+        EXIT;
+    END;
+
+    PROCEDURE LogModification@1100481001(VAR pRecRef@1100481000 : RecordRef;VAR pxRecRef@1100481001 : RecordRef);
+    BEGIN
+      // Ex‚cution chaque fois qu'une modification est effectu‚e dans une table
+      IF NOT SetActionOnTableActive(pRecRef,pxRecRef,1) THEN
+        EXIT;
+    END;
+
+    PROCEDURE LogDeletion@1100481002(VAR pRecRef@1100481001 : RecordRef);
+    BEGIN
+      // Ex‚cution chaque fois qu'une suppression est effectu‚e dans une table
+      IF NOT SetActionOnTableActive(pRecRef,pRecRef,2) THEN
+        EXIT;
+    END;
+
+    PROCEDURE LogRename@1100481003(VAR pRecRef@1100481001 : RecordRef;VAR pxRecRef@1100481000 : RecordRef);
+    BEGIN
+      // Ex‚cution chaque fois qu'un renommage est effectu‚e dans une table
+      IF NOT SetActionOnTableActive(pRecRef,pxRecRef,3) THEN
+        EXIT;
+    END;
+
+    PROCEDURE SetActionOnTableActive@1100481004(pRecRef@1100481000 : RecordRef;pxRecRef@1100481005 : RecordRef;pActionType@1100481001 : 'Insert,Modify,Delete,Rename') : Boolean;
+    VAR
+      lSynchroGroup@1100481007 : Record 8016709;
+      lSynchroGroupTable@1100481002 : Record 8016710;
+      IsActive@1100481004 : Boolean;
+      Curr_ActionType@1100481006 : Integer;
+    BEGIN
+      // g‚nŠre la mise en file d'attente de message les actes EAI … ex‚cuter pour une action sur une table
+
+      WITH lSynchroGroupTable DO
+      BEGIN
+        SETCURRENTKEY("To Synchronize Table No.");
+        SETRANGE("To Synchronize Table No.",pRecRef.NUMBER);
+        IF FINDFIRST THEN
+          REPEAT
+            // y a-t-il un filtre sur la table
+            IF EAISynchroMgt.IsActionOnFilterActive(lSynchroGroupTable,pRecRef) THEN BEGIN
+              lSynchroGroup.GET("Synchro Group Code");
+              IsActive := FALSE;
+              CASE pActionType OF
+                pActionType::Insert:
+                  IsActive := ("On Insert" = "On Insert"::Yes);
+                pActionType::Modify:
+                  IF ("On Modify" = "On Modify"::"Selected Fields") AND
+                    (lSynchroGroup."Partner Format" = lSynchroGroup."Partner Format"::XML) THEN
+                      IsActive := EAISynchroMgt.IsExistActionOnFieldActive(lSynchroGroupTable,pRecRef)
+                  ELSE
+                    IsActive := ("On Modify" = "On Modify"::"All Fields");
+                pActionType::Delete:
+                  IsActive := ("On Delete" = "On Delete"::Yes);
+                pActionType::Rename:
+                  IsActive := ("On Rename" <> "On Rename"::No);
+              END;
+
+              IF IsActive THEN BEGIN
+
+                // cr‚ation d'un message de synchro
+                Curr_ActionType := pActionType;
+                IF pActionType = pActionType::Rename THEN
+                  IF ("On Rename" = "On Rename"::"Delete/Insert") THEN
+                    Curr_ActionType := 2; // suppression
+                InsertMsgEAIActToExecute(
+                  lSynchroGroupTable,
+                  pRecRef,
+                  pxRecRef,
+                  Curr_ActionType);
+
+                IF pActionType = pActionType::Rename THEN
+                  IF ("On Rename" = "On Rename"::"Delete/Insert") THEN BEGIN
+                    Curr_ActionType := 0; // insertion
+                    InsertMsgEAIActToExecute(
+                      lSynchroGroupTable,
+                      pRecRef,
+                      pxRecRef,
+                      pActionType);
+                  END;
+              END;
+          END;
+        UNTIL lSynchroGroupTable.NEXT = 0;
+
+      END;
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InsertMsgEAIActToExecute@1100481014(pSynchroGroupTable@1100481005 : Record 8016710;pRecRef@1100481008 : RecordRef;pxRecRef@1100481007 : RecordRef;pActionType@1100481006 : 'Insert,Modify,Delete,Rename');
+    VAR
+      lEAIMQBufferMgt@1100281006 : Codeunit 8016708;
+      lEAIActMgt@1100281003 : Codeunit 8016703;
+      lMessageQueueBuffer@1100481002 : TEMPORARY Record 8016720;
+      lPartnerSynchroGroup@1100481010 : Record 8016718;
+      lSynchroGroup@1100281000 : Record 8016709;
+      lAct@1100281001 : Record 8016706;
+      lToSyncTable@1100281002 : Record 8016708;
+      lMQ@1100281009 : Record 8016704;
+      lFromRecRef@1100281010 : RecordRef;
+      lToRecRef@1100281011 : RecordRef;
+      lGenerationCodeunit@1100281008 : Integer;
+    BEGIN
+      // cr‚ation d'un message dans la file d'attente d'‚mission de synchro
+
+      // recherche des partenaires
+      lPartnerSynchroGroup.SETCURRENTKEY("EAI Synchro Group Code");
+      lPartnerSynchroGroup.SETRANGE("EAI Synchro Group Code",pSynchroGroupTable."Synchro Group Code");
+      IF lPartnerSynchroGroup.FINDFIRST THEN
+        REPEAT
+          //Cr‚ation d'un message par partenaire
+          lSynchroGroup.GET(pSynchroGroupTable."Synchro Group Code");
+          lAct.GET(pSynchroGroupTable."EAI Act Type Code",pSynchroGroupTable."EAI Act Code");
+          lToSyncTable.GET(pSynchroGroupTable."To Synchronize Table No.");
+
+          lMessageQueueBuffer.INIT;
+
+          lMessageQueueBuffer."Synchro Group Code"        := pSynchroGroupTable."Synchro Group Code";
+          lMessageQueueBuffer."To Synchronize Table No."  := pSynchroGroupTable."To Synchronize Table No.";
+          lMessageQueueBuffer."Synchro Group Table Alias" := pSynchroGroupTable."Synchro Group Table Alias";
+          lMessageQueueBuffer."Table Action Type"         := pActionType;
+          lMessageQueueBuffer."Table Priority"            := lToSyncTable.Priority;
+
+          lMessageQueueBuffer.RecordId := pRecRef.RECORDID;
+          lMessageQueueBuffer.xRecordId := pxRecRef.RECORDID;
+
+          lMessageQueueBuffer."EAI Partner Code"  := lPartnerSynchroGroup."EAI Partner Code";
+          lMessageQueueBuffer."EAI Act Type Code" := pSynchroGroupTable."EAI Act Type Code";
+          lMessageQueueBuffer."EAI Act Code"      := pSynchroGroupTable."EAI Act Code";
+          lMessageQueueBuffer."Act Priority"      := lAct."Act Priority";
+          lMessageQueueBuffer."EAI Process Code"  := lSynchroGroup."EAI Process Code";
+
+          lMessageQueueBuffer."Date Creation" := WORKDATE;
+          lMessageQueueBuffer."Time Creation" := TIME;
+          lMessageQueueBuffer."User Creation" := USERID;
+
+          lEAIActMgt.GetMQFromEAIAct(lAct,lMQ);
+          lMessageQueueBuffer."EAI MQ Code"  := lMQ.Code;
+          lMessageQueueBuffer."EAI NAS Code" := lMQ."EAI NAS Code";
+
+          lMessageQueueBuffer.INSERT;
+
+          //Sauvegarde dans la file de message
+          lEAIMQBufferMgt.InsertSentBufferToMQ(lMQ,lMessageQueueBuffer);
+
+          IF lMessageQueueBuffer.DELETE THEN;
+
+        UNTIL lPartnerSynchroGroup.NEXT = 0 ;
+    END;
+
+    BEGIN
+    {
+      /** @r EAI00 @d 03/12/08 @a ISAT.MGI @v ISAEAI5.01.01.00 @s Cr‚ation de l'objet
+                @c pr‚pare le message de synchro sur une action d'un enregistrement dans une table */
+    }
+    END.
+  }
+}

@@ -1,0 +1,474 @@
+OBJECT Page 50323 Net. Visit Planning Browser
+{
+  OBJECT-PROPERTIES
+  {
+    Date=28/03/12;
+    Time=16:19:48;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Net. Visit Planning Browser;
+               FRA=Navig. planning visite r‚seau];
+    SourceTable=Table2000000026;
+    PageType=CardPart;
+    SourceTableTemporary=Yes;
+    OnInit=BEGIN
+             CRLF[1] := 13;
+             CRLF[2] := 13;
+           END;
+
+    ActionList=ACTIONS
+    {
+      { 1100481000;  ;ActionContainer;
+                      Name=<Action1100481000>;
+                      ActionContainerType=NewDocumentItems }
+      { 1100481001;1 ;Action    ;
+                      CaptionML=FRA=GO;
+                      Promoted=Yes;
+                      InFooterBar=Yes;
+                      PromotedIsBig=Yes;
+                      PromotedCategory=Process;
+                      RunFormMode=View }
+    }
+  }
+  CONTROLS
+  {
+    { 1   ;    ;Container ;
+                CaptionML=ENU=General;
+                ContainerType=ContentArea }
+
+    { 3   ;1   ;Field     ;
+                Name=Browser;
+                SourceExpr=BigTextMap;
+                ControlAddIn=[FreddyK.BrowserControl;PublicKeyToken=58e587b763c2f132] }
+
+  }
+  CODE
+  {
+    VAR
+      NetworkVisitBuffer@1000000006 : TEMPORARY Record 50105;
+      ProviderSetup@1100281015 : Record 50011;
+      Text001@1100281004 : TextConst 'ENU="Updated ";FRA=Mise … jour effectu‚e';
+      Text002@1100281006 : TextConst 'ENU="You must specify the operating address of the provider ";FRA=Vous devez pr‚ciser l''adresse op‚rationnelle du pr‚stataire';
+      Text003@1100281007 : TextConst 'ENU="You must update the table containing the GEOCONCEPT code ";FRA="Vous devez mettre … jour la table contenant le code GEOCONCEPT "';
+      Text004@1100281019 : TextConst 'ENU=You can not update data from the statistical grouping;FRA=Vous ne pouvez-pas mettre … jour les donn‚es du groupement statistique';
+      Text005@1100281020 : TextConst 'ENU=File %1 create error.;FRA=Erreur … la cr‚ation du fichier %1.';
+      GetProviderSetupOK@1000000000 : Boolean;
+      CRLF@1000000003 : Text[2];
+      Text006@1000000004 : TextConst 'ENU=Unavailable Map;FRA=Carte indisponible';
+      Text007@1000000005 : TextConst 'ENU=Save map file is unavailable;FRA=Fichier de sauvegarde de la carte impossible … cr‚er';
+      PictureText@1000000001 : TextConst 'FRA="showImage.do?name="';
+      BigTextMap@1000000002 : BigText;
+      CentralLatitude@1000000007 : Integer;
+      CentralLongitude@1000000008 : Integer;
+      ToolsMgt@1100281000 : Codeunit 8016602;
+
+    PROCEDURE SetNetworkVisit@1000000001(pPlanningNo@1000000000 : Code[20]);
+    VAR
+      lNetworkVisit@1000000001 : Record 50105;
+    BEGIN
+      // Fournir la liste des prestataire … afficher sur la carte
+      CLEAR(BigTextMap);
+      IF pPlanningNo = '' THEN BEGIN
+        EXIT;
+      END;
+
+      NetworkVisitBuffer.RESET;
+      NetworkVisitBuffer.DELETEALL;
+      WITH lNetworkVisit DO BEGIN
+        SETCURRENTKEY("Planning No.","Visit Date","Visit Time");
+        SETRANGE("Planning No.",pPlanningNo);
+        IF FINDSET THEN BEGIN
+          REPEAT
+            NetworkVisitBuffer.SETCURRENTKEY("Provider No.");
+            NetworkVisitBuffer.SETRANGE("Provider No.","Provider No.");
+            IF NetworkVisitBuffer.ISEMPTY THEN BEGIN
+              NetworkVisitBuffer := lNetworkVisit;
+              NetworkVisitBuffer.INSERT;
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE SetPlanningKey@1000000003(pGeoReferenceCode@1000000000 : Code[10]);
+    VAR
+      lGeographicalReference@1000000001 : Record 50013;
+    BEGIN
+      IF lGeographicalReference.GET(pGeoReferenceCode) THEN BEGIN
+        CentralLatitude := lGeographicalReference."Latitude Lambert 2E";
+        CentralLongitude := lGeographicalReference."Longitude Lambert 2E";
+      END;
+    END;
+
+    PROCEDURE CreateMapFile@1100481000();
+    VAR
+      lFileNameMap@1000000000 : Text[1024];
+    BEGIN
+      // Cr‚er le fichier HMTL … destination du navigateur
+
+      lFileNameMap := WriteHtmlFile;
+
+      CLEAR(BigTextMap);
+      DOWNLOAD(lFileNameMap,'','<TEMP>','',lFileNameMap);
+      BigTextMap.ADDTEXT('<html>');
+      BigTextMap.ADDTEXT('<head></head>');
+      BigTextMap.ADDTEXT('<body>');
+      BigTextMap.ADDTEXT('<iframe src="' + lFileNameMap + '" style="width:900px; height:700px;" frameborder="0"></iframe>');
+      BigTextMap.ADDTEXT('</body>');
+      BigTextMap.ADDTEXT('</html>');
+    END;
+
+    LOCAL PROCEDURE WriteHtmlFile@1100481003() rValue : Text[1024];
+    VAR
+      lHtmlPage@1100281007 : Record 50149;
+      lMapFilename@1000000000 : Text[1024];
+      lFile@1000000001 : File;
+      lOutStream@1000000002 : OutStream;
+      lIndex@1000000003 : Integer;
+      lFlagPicture@1000000004 : Text[1024];
+    BEGIN
+      // Permet de g‚n‚rer un fichier qui sera traduit en carte dans le navigateur
+      rValue := '';
+
+      GetProviderSetup;
+      WITH lHtmlPage DO BEGIN
+        RESET;
+        SETRANGE("Map Code",ProviderSetup."Flag Map");
+        IF ISEMPTY THEN BEGIN
+          MESSAGE(Text006);
+          EXIT;
+        END;
+        lMapFilename := CreateMapFilePath;
+
+        lFile.WRITEMODE := TRUE;
+        lFile.TEXTMODE := TRUE;
+        IF FILE.EXISTS(lMapFilename) THEN BEGIN
+          FILE.ERASE(lMapFilename);
+        END;
+        IF NOT lFile.CREATE(lMapFilename) THEN BEGIN
+          MESSAGE(Text005,lMapFilename);
+          EXIT;
+        END;
+        rValue := lMapFilename;
+
+        lFile.CREATEOUTSTREAM(lOutStream);
+        lIndex := 0;
+        FINDSET;
+        REPEAT
+          CASE Html OF
+            // Ajout des points sur la carte
+            '<INSERT>' : BEGIN
+              {
+              // Centrage de la carte sur la ville cl‚
+              lOutStream.WRITETEXT(
+                'DynMapShowPoint(dynMap,' +
+                FORMAT(CentralLatitude) + ',' +
+                FORMAT(CentralLongitude) + ', 8,''' +
+                ProviderSetup."Geoconcept Map Address" + '/images/target.gif' + ''')');
+              lOutStream.WRITETEXT;
+              }
+              NetworkVisitBuffer.RESET;
+              IF NetworkVisitBuffer.FINDSET THEN BEGIN
+                // Centrage de la carte sur la premiŠre adresse … visiter
+                GetCoordinateByCityCP(
+                  CentralLatitude,
+                  CentralLongitude,
+                  NetworkVisitBuffer."Provider Address" + ' ' + NetworkVisitBuffer."Provider Address 2",
+                  NetworkVisitBuffer."Provider Post Code",
+                  NetworkVisitBuffer."Provider City");
+                lOutStream.WRITETEXT(
+                  'DynMapShowPoint(dynMap,' +
+                  FORMAT(CentralLatitude) + ',' +
+                  FORMAT(CentralLongitude) + ', 8,''' +
+                  ProviderSetup."Geoconcept Map Address" + '/images/target.gif' + ''')');
+                lOutStream.WRITETEXT;
+                REPEAT
+                  IF NetworkVisitBuffer."Visit Confirmed" THEN BEGIN
+                    CASE NetworkVisitBuffer.Type OF
+                      NetworkVisitBuffer.Type::Facilitator : lFlagPicture := PictureText + 'PurplePushPin';
+                      NetworkVisitBuffer.Type::"Camp. Recruitment" : lFlagPicture := PictureText + 'GreenPushPin';
+                      NetworkVisitBuffer.Type::Claim : lFlagPicture := PictureText + 'RedPushPin';
+                      NetworkVisitBuffer.Type::"Quality Control" : lFlagPicture := PictureText + 'OrangePushPin';
+                      NetworkVisitBuffer.Type::Recruitment : lFlagPicture := PictureText + 'PinkPushPin';
+                      NetworkVisitBuffer.Type::Formation : lFlagPicture := PictureText + 'MarronPushPin';
+                      NetworkVisitBuffer.Type::"TH Control" : lFlagPicture := PictureText + 'BluePushPin';
+                    END;
+                  END ELSE BEGIN
+                    CASE NetworkVisitBuffer.Type OF
+                      NetworkVisitBuffer.Type::Facilitator : lFlagPicture := PictureText + 'PurplePoint';
+                      NetworkVisitBuffer.Type::"Camp. Recruitment" : lFlagPicture := PictureText + 'GreenPoint';
+                      NetworkVisitBuffer.Type::Claim : lFlagPicture := PictureText + 'RedPoint';
+                      NetworkVisitBuffer.Type::"Quality Control" : lFlagPicture := PictureText + 'OrangePoint';
+                      NetworkVisitBuffer.Type::Recruitment : lFlagPicture := PictureText + 'PinkPoint';
+                      NetworkVisitBuffer.Type::Formation : lFlagPicture := PictureText + 'MarronPoint';
+                      NetworkVisitBuffer.Type::"TH Control" : lFlagPicture := PictureText + 'BluePoint';
+                    END;
+                  END;
+                  AddProviderFlag(
+                    NetworkVisitBuffer,
+                    lOutStream,
+                    lFlagPicture,
+                    lIndex);
+                  lIndex += 1;
+                UNTIL NetworkVisitBuffer.NEXT = 0;
+              END;
+            END;
+            // Ecriture de la structure de la page
+            ELSE BEGIN
+              IF STRPOS(Html,'<URLGEOCONCEPT>') > 0 THEN BEGIN
+                Html := Replace(Html, '<URLGEOCONCEPT>',ProviderSetup."Geoconcept Map Address");
+              END;
+              lOutStream.WRITETEXT(IBM2Ansi(Html));
+            END;
+          END;
+          lOutStream.WRITETEXT;
+        UNTIL NEXT = 0;
+        lFile.CLOSE;
+      END;
+    END;
+
+    LOCAL PROCEDURE AddProviderFlag@1100281010(pNetworkVisit@1000000000 : Record 50105;VAR pOutStream@1100281001 : OutStream;pImage@1100281009 : Text[50];VAR pIndex@1100281008 : Integer);
+    VAR
+      lProvider@1000000002 : Record 50000;
+      lContactAltAddress@1100281003 : Record 5051;
+      lLatitude@1100281004 : Integer;
+      lLongitude@1100281005 : Integer;
+      lUseProvider@1000000001 : Boolean;
+    BEGIN
+      // Permet d'ajout un flag dans la carte
+
+      GetProviderSetup;
+      pNetworkVisit.CALCFIELDS("Provider Status");
+      GetCoordinateByCityCP(
+        lLatitude,
+        lLongitude,
+        pNetworkVisit."Provider Address" + ' ' + pNetworkVisit."Provider Address 2",
+        pNetworkVisit."Provider Post Code",
+        pNetworkVisit."Provider City");
+      pOutStream.WRITETEXT(
+        'obj = DynMapCreateObject(' + FORMAT(lLatitude) + ',' + FORMAT(lLongitude) + ', ''' + FORMAT(pIndex) +
+        ''', ''' +
+        Convert2UTF8(pNetworkVisit."Provider Name") +
+        ''',''' +
+        EncodeAddress(
+          pNetworkVisit."Provider No.",
+          pNetworkVisit."Provider Name",
+          pNetworkVisit."Provider Address",
+          pNetworkVisit."Provider City",
+          FORMAT(pNetworkVisit."Provider Status"),
+          pNetworkVisit."Provider Phone No.",
+          pNetworkVisit."Provider Mobile Phone No.",
+          FORMAT(pNetworkVisit.Type)) +
+        ''', 0, 0,''' + ProviderSetup."Geoconcept Map Address" + '/Image/' + pImage + ''');');
+      pOutStream.WRITETEXT;
+      pOutStream.WRITETEXT('Objects.push(obj);');
+      pOutStream.WRITETEXT;
+    END;
+
+    LOCAL PROCEDURE GetProviderCoordinates@1100281012(pProviderNo@1100281004 : Code[20];VAR pContactAltAddress@1000000000 : Record 5051;VAR pLatitude@1100281003 : Integer;VAR pLongitude@1100281002 : Integer) rValue : Boolean;
+    VAR
+      lProvider@1100281011 : Record 50000;
+      lContactAltAddress@1100281010 : Record 5051;
+      lPostCode@1100281009 : Record 225;
+      lMarketingSetup@1000000001 : Record 5079;
+      lGeographicalReference@1000000002 : Record 50013;
+      lAbiGeoMgt@1100281008 : Codeunit 50011;
+    BEGIN
+      // Permet d'avoir la latitude et la longitude
+
+      rValue := FALSE;
+      pLongitude := -1;
+      pLatitude := -1;
+
+      WITH pContactAltAddress DO BEGIN
+        RESET;
+        SETRANGE("Contact No.",pProviderNo);
+        SETRANGE("Geo. Reference Address",TRUE);
+        IF FINDFIRST THEN BEGIN
+          pLatitude := Latitude;
+          pLongitude := Longitude;
+
+          IF (pLatitude = -1) AND (pLongitude = -1) THEN BEGIN
+            GetProviderSetup;
+            IF ProviderSetup."Geoconcept Activate Search" THEN BEGIN
+              lAbiGeoMgt.GeoCodeContactAltAddr(pContactAltAddress);
+              pLatitude := Latitude;
+              pLongitude := Longitude;
+            END;
+          END;
+
+          IF (pLatitude = -1) AND (pLongitude = -1) THEN BEGIN
+            IF "Geo. Reference Code" <> '' THEN BEGIN
+              IF lGeographicalReference.GET("Geo. Reference Code") THEN BEGIN
+                pLatitude := lGeographicalReference."Latitude Lambert 2E";
+                pLongitude := lGeographicalReference."Longitude Lambert 2E";
+              END;
+            END;
+          END;
+
+          IF (pLatitude = -1) AND (pLongitude = -1) THEN BEGIN
+            GetCoordinateByCityCP(pLatitude,pLongitude,Address + ' ' + "Address 2","Post Code",City);
+          END;
+        END;
+      END;
+      rValue := (pLatitude <> -1) AND (pLongitude <> -1);
+    END;
+
+    LOCAL PROCEDURE EncodeAddress@1100281017(pNo@1100281005 : Code[20];pName@1100281000 : Text[80];pAddress1@1100281001 : Text[80];pCity@1100281003 : Text[80];pStatus@1100281006 : Text[30];pPhoneNo@1100281002 : Text[30];pMobilePhoneNo@1100281004 : Text[30];pType@1100281007 : Text[30]) rValue : Text[1024];
+    BEGIN
+      // Normalise l'adresse
+
+      rValue := '';
+      IF pNo <> '' THEN BEGIN
+        rValue += Encode(pNo) + '<BR/>';
+      END;
+      rValue += Encode(pName) + '<BR/>';
+      IF pAddress1 <> '' THEN BEGIN
+        rValue += UPPERCASE(Encode(pAddress1)) + '<BR/>';
+      END;
+      IF pCity <> '' THEN BEGIN
+        rValue += Encode(pCity) + '<BR/>';
+      END;
+      IF pStatus <> '' THEN BEGIN
+        rValue += Encode(pStatus) + '<BR/>';
+      END;
+      IF pPhoneNo <> '' THEN BEGIN
+        rValue += Encode(pPhoneNo) + '<BR/>';
+      END;
+      IF pMobilePhoneNo <> ''  THEN BEGIN
+        rValue += Encode(pMobilePhoneNo) + '<BR/>';
+      END;
+      IF pType <> '' THEN BEGIN
+        rValue += Encode(pType) + '<BR/>';
+      END;
+    END;
+
+    LOCAL PROCEDURE Convert2UTF8@1100281026(pText@1100281000 : Text[1024]) : Text[1024];
+    VAR
+      lChar@1100281001 : ARRAY [2] OF Char;
+      lInChar@1000000002 : Char;
+      i@1100281002 : Integer;
+      j@1100281005 : Integer;
+      k@1100281006 : Integer;
+      lPos@1000000001 : Integer;
+      lIntChar@1000000000 : Integer;
+      lOutText@1100281004 : Text[1024];
+      lUTF8@1100281007 : Text[1024];
+      lSearchChar@1100281009 : Text[30];
+    BEGIN
+      // Convertit le pText dans la norme UTF8
+
+      lChar[1] := 195;
+      lChar[2] := 169;
+
+      lUTF8 := '… ƒÆ„†‘‡Š‚ˆ‰¡Œ‹Ð¤•¢“ä”ö›—£–ìç˜';
+      FOR i := 1 TO STRLEN(pText) DO BEGIN
+        j += 1;
+        lInChar := pText[i];
+        k := pText[i];
+        lSearchChar[1] := pText[i];
+        lPos := STRPOS(lUTF8,lSearchChar);
+        IF lPos > 0 THEN BEGIN
+          lOutText[j] += lChar[1];
+          j += 1;
+          lOutText[j] += 159 + lPos;
+        END ELSE BEGIN
+          lIntChar := lInChar;
+          IF lIntChar = 201 THEN
+            lOutText[j] += '`'
+          ELSE IF lIntChar = 39 THEN
+            lOutText[j] += '`'
+          ELSE
+            lOutText[j] += lInChar;
+        END;
+      END;
+      Replace(lOutText,'’','''');
+      EXIT(lOutText);
+    END;
+
+    LOCAL PROCEDURE Encode@1100281019(pText@1100281000 : Text[255]) : Text[255];
+    VAR
+      lString@1100281002 : Text[255];
+      lNewString@1100281003 : Text[255];
+      lPos@1000000000 : Integer;
+    BEGIN
+      lString := pText;
+      lPos := STRPOS(lString, '''');
+      WHILE lPos <> 0 DO BEGIN
+        lNewString += COPYSTR(lString,1,lPos-1) + '\''';
+        lString := COPYSTR(lString, lPos+1);
+        lPos := STRPOS(lString, '''');
+      END;
+      lNewString += COPYSTR(lString,1);
+      EXIT(Convert2UTF8(lNewString));
+    END;
+
+    LOCAL PROCEDURE Replace@1100281013(pText@1100281000 : Text[1024];pOldText@1100281004 : Text[256];pNewText@1100281005 : Text[256]) : Text[255];
+    VAR
+      lPos@1100281001 : Integer;
+      lString@1100281002 : Text[1024];
+      lNewString@1100281003 : Text[1024];
+    BEGIN
+      lString := pText;
+      lPos := STRPOS(lString,pOldText);
+      WHILE lPos <> 0 DO BEGIN
+        lNewString += COPYSTR(lString,1,lPos - 1) + pNewText;
+        lString := COPYSTR(lString,lPos + STRLEN(pOldText),STRLEN(lString) - lPos - STRLEN(pOldText) + 1);
+        lPos := STRPOS(lString,pOldText);
+      END;
+      lNewString += COPYSTR(lString,1);
+      EXIT(lNewString);
+    END;
+
+    LOCAL PROCEDURE CreateMapFilePath@1000000000() rValue : Text[1024];
+    BEGIN
+      // Cr‚e le chemin pour stock‚ le fichier contenant la carte
+      GetProviderSetup;
+      ProviderSetup.TESTFIELD("NST Temporary Folder");
+      rValue :=
+        FORMAT(ProviderSetup."NST Temporary Folder") + '\HTML' +
+        USERID + '.html';
+    END;
+
+    LOCAL PROCEDURE GetCoordinateByCityCP@1000000002(VAR pLatitude@1000000003 : Integer;VAR pLongitude@1000000004 : Integer;pAddress@1000000007 : Text[250];pPostCode@1000000005 : Code[20];pCity@1000000006 : Text[30]);
+    VAR
+      lPostCode@1000000001 : Record 225;
+      lGeographicalReference@1000000002 : Record 50013;
+      lAbilityGeoMgt@1000000008 : Codeunit 50011;
+      lGeoRefCode@1000000000 : Code[10];
+    BEGIN
+      // Retrouve les coordonn‚es en fonction de l'adresse + code postal + ville
+
+      lAbilityGeoMgt.GetGeoCodeWS(pAddress,pPostCode,pCity,pLatitude,pLongitude);
+
+      IF (pLatitude = 0) AND (pLongitude = 0) THEN BEGIN
+        lGeoRefCode := lPostCode.GetGeoCode(pPostCode,pCity);
+        IF lGeoRefCode <> '' THEN BEGIN
+          IF lGeographicalReference.GET(lGeoRefCode) THEN BEGIN
+            pLatitude := lGeographicalReference."Latitude Lambert 2E";
+            pLongitude := lGeographicalReference."Longitude Lambert 2E";
+          END;
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetProviderSetup@1100281011();
+    BEGIN
+      IF GetProviderSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      ProviderSetup.GET;
+      GetProviderSetupOK := TRUE;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 20/02/12 @a ISAT.PC @v IMH6.01.115 @s Visite Animation Reseau @c Cr‚ation */
+    }
+    END.
+  }
+}

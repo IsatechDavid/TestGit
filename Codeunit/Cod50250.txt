@@ -1,0 +1,169 @@
+OBJECT Codeunit 50250 MATMUT Page SDR99 Gen.
+{
+  OBJECT-PROPERTIES
+  {
+    Date=03/10/13;
+    Time=12:13:13;
+    Modified=Yes;
+    Version List=IMH6.01,MATMUT01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lService@1000000002 : Record 50066;
+            lServiceHeader@1000000001 : Record 5900;
+            lServiceInterventionLine@1000000004 : Record 50075;
+            lXmlDoc@1000000000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+            lOutStream@1000000003 : OutStream;
+          BEGIN
+            CLEAR(lXmlDoc);
+            CREATE(lXmlDoc);
+
+            lService.GET("Service No.");
+            lServiceHeader.GET(lServiceHeader."Document Type"::Invoice,"Service Header No.");
+            lServiceInterventionLine.GET("Service Header No.","Act Priority");
+            //<<IMH01.ACO
+            //GenerateXMLSDR99NewDT(lXmlDoc,lService,lServiceHeader,lServiceInterventionLine);
+            GenerateXMLSDR99NewDT(lXmlDoc,lService,lServiceHeader,lServiceInterventionLine, Rec);
+            //>>IMH01.ACO
+            CLEAR("XML Source");
+            "XML Source".CREATEOUTSTREAM(lOutStream);
+            lXmlDoc.save(lOutStream);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      InterfaceSetup@1000000000 : Record 50139;
+      EAISetup@1000000002 : Record 8016700;
+      GetSetupOK@1000000001 : Boolean;
+
+    LOCAL PROCEDURE GenerateXMLSDR99NewDT@1100281010(VAR pXMLDocument@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";pService@1000000000 : Record 50066;pServiceHeader@1000000001 : Record 5900;pServiceIntervLine@1000000002 : Record 50075;VAR pEAISentMQBuffer@1000000006 : Record 8016720);
+    VAR
+      lEAIPartner@1100281005 : Record 8016707;
+      lEAIXMLDocMgt@1100281001 : Codeunit 8016713;
+      lDARVAXMLMgt@1100281002 : Codeunit 50252;
+      lXMLNewChild3@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild4@1100281013 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild5@1100281012 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lNameSpace@1100281003 : Text[250];
+      lBigText@1100281015 : BigText;
+      lXMLNewChild2@1000000003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lSchURL@1000000005 : Text[150];
+      lNsURL@1000000004 : Text[150];
+    BEGIN
+      GetSetup;
+      lEAIPartner.GET(InterfaceSetup."DARVA EAI Partner Code");
+      pXMLDocument.async := FALSE;
+
+      //<<IMH01.ACO
+      //lSchURL := 'http://www.darva.com/ws/ird/reparateur/v1/schema';
+      //lNsURL := 'http://www.darva.com/ws/datatype/v1';
+      pEAISentMQBuffer.GetNamespaceFromExchangeType(lSchURL,lNsURL);
+      lDARVAXMLMgt.SetSendURL(lSchURL,lNsURL);
+      //>>IMH01.ACO
+
+      lDARVAXMLMgt.SetType(1);
+      pXMLDocument.setProperty('SelectionNamespaces',lDARVAXMLMgt.GetSelectionNameSpace);
+      //<<IMH01.ACO
+      //lDARVAXMLMgt.CreateWSHeader(pXMLDocument,lXMLNewChild2,lEAIPartner.Username,lEAIPartner.Password);
+      lDARVAXMLMgt.CreateWSHeader(pXMLDocument,lXMLNewChild2,lEAIPartner.Username,lEAIPartner.Password, lSchURL, lNsURL);
+      //>>IMH01.ACO
+      WITH lEAIXMLDocMgt DO BEGIN
+        lNameSpace := lDARVAXMLMgt.GetNameSpace(1);
+        AddElement(lXMLNewChild2,'sch:SoumettreSuiviDossierReparateurCommentaireDemande','',lNameSpace,lXMLNewChild3);
+
+        lNameSpace := lDARVAXMLMgt.GetNameSpace(2);
+        //context
+        lDARVAXMLMgt.Sent_InsertContext(lEAIPartner,lXMLNewChild3);
+        //dossier
+        lDARVAXMLMgt.Sent_InsertService(lEAIPartner,pService,lXMLNewChild3);
+        //Partenaire
+        lDARVAXMLMgt.Sent_InsertPartners(lEAIPartner,pServiceHeader,lXMLNewChild3);
+        AddElement(lXMLNewChild3,'ns:suiviDossierReparateurCommentaire','',lNameSpace,lXMLNewChild4);
+
+        GetCommentSDR99NewDT(lBigText,pServiceHeader,pServiceIntervLine);
+        AddBigTextElement(lXMLNewChild4,'ns:commentaireLibre',lBigText,lNameSpace,lXMLNewChild5);
+      END;
+    END;
+
+    LOCAL PROCEDURE GetCommentSDR99NewDT@1100281013(VAR pBigText@1100281000 : BigText;pServiceHeader@1100281003 : Record 5900;pServiceIntervLine@1000000001 : Record 50075);
+    VAR
+      lProvider@1100281005 : Record 50000;
+      lText005@1100281008 : TextConst 'FRA="(%1 - %2 - %3) "';
+      lText006@1100281006 : TextConst 'FRA="(Raison sociale - Nø agr‚ment - Corps de m‚tier assign‚) "';
+      lText007@1100281001 : TextConst 'ENU=Thanks to resend new DT wtih following working lot :;FRA="Merci de nous transmettre une nouvelle demande de travaux avec les lot de travaux suivants : "';
+      lServiceInterventionLine@1000000000 : Record 50075;
+    BEGIN
+      GetSetup;
+
+      pBigText.ADDTEXT(lText007);
+      pBigText.ADDTEXT(lText006);
+
+      lServiceInterventionLine := pServiceIntervLine;
+      lServiceInterventionLine.SETRECFILTER;
+      lServiceInterventionLine.SETRANGE("Line No.");
+      lServiceInterventionLine.SETRANGE("Service Header No.",pServiceHeader."No.");
+      lServiceInterventionLine.SETFILTER("Intervention Status",'<>%1',lServiceInterventionLine."Intervention Status"::Cancel);
+      IF lServiceInterventionLine.FINDSET THEN BEGIN
+        REPEAT
+          lProvider.GET(lServiceInterventionLine."Provider No.");
+          lServiceInterventionLine.CALCFIELDS("Building Trade Description");
+          pBigText.ADDTEXT(
+            STRSUBSTNO(
+              lText005,
+              lProvider.Name,
+              GetAgreementSDR99(pServiceHeader,lServiceInterventionLine),
+              lServiceInterventionLine."Building Trade Description"));
+        UNTIL lServiceInterventionLine.NEXT = 0;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetAgreementSDR99@1000000005(pServiceHeader@1000000000 : Record 5900;pIntervention@1000000001 : Record 50075) : Code[10];
+    VAR
+      lProviderAgreement@1100281000 : Record 50012;
+      lCorporateRegion@1100281001 : Record 50058;
+    BEGIN
+      lProviderAgreement.SETCURRENTKEY("Detail Corporate No.","Detail Corporate Region Code");
+      lProviderAgreement.SETRANGE("Detail Corporate No.",pServiceHeader."Corporate No.");
+      lProviderAgreement.SETRANGE("Detail Corporate Region Code",pServiceHeader."Corporate Region Code");
+      lProviderAgreement.SETRANGE("Provider No.",pIntervention."Provider No.");
+      IF lProviderAgreement.ISEMPTY THEN BEGIN
+        lProviderAgreement.SETRANGE("Detail Corporate Region Code");
+      END;
+      IF NOT lProviderAgreement.ISEMPTY THEN BEGIN
+        IF lProviderAgreement.FINDFIRST THEN BEGIN
+          EXIT(lProviderAgreement."Agreement No.");
+        END;
+      END ELSE BEGIN
+        lCorporateRegion.SETRANGE("Corporate No.",pServiceHeader."Corporate No.");
+        lCorporateRegion.SETRANGE("Region Code",pServiceHeader."Corporate Region Code");
+        IF lCorporateRegion.COUNT = 1 THEN BEGIN
+          lCorporateRegion.FINDFIRST;
+          EXIT(lCorporateRegion."SDR64 Provider No.");
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetSetup@1100281001();
+    BEGIN
+      IF GetSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      InterfaceSetup.GET;
+      EAISetup.GET;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 02/10/13 @a ISAT.ACO @v IMH6.01.348 @h DARVA MATMUT Lot 1 @h 4751
+          @c Renseignement des URL xmlns:sch et xmlns:ns de l'enveloppe SOAP selon le grand compte
+          @c DARVA XML Management pointe vers DARVA XML Management MATMUT */
+      /** @r IMH00 @d 21/08/13 @a ISAT.ACO @v IMH6.01.348 @s Darva MATMUT Lot 1 @c Cr‚ation */
+    }
+    END.
+  }
+}

@@ -1,0 +1,236 @@
+OBJECT Codeunit 50118 EXT In. PV
+{
+  OBJECT-PROPERTIES
+  {
+    Date=19/01/11;
+    Time=16:39:29;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Error001@1100281001 : TextConst 'ENU=XML Stream is not well formated.;FRA=Le flux XML n''est pas bien format‚.';
+      Error002@1100281000 : TextConst 'ENU=XML Node %1 unfound.;FRA=Noeud XML %1 non trouv‚.';
+      Error003@1100281002 : TextConst 'ENU=The field should not be empty.;FRA=Le champ %1 ne doit pas ˆtre vide.';
+      EXTInFunctions@1100281003 : Codeunit 50102;
+
+    LOCAL PROCEDURE Code@1008844003(VAR pEAIRcvdMQBuffer@1008844001 : Record 8016721);
+    VAR
+      lEAIXMLDocMgt@1108844004 : Codeunit 8016713;
+      lEAIDocumentEntryMgt@1100281001 : Codeunit 8016707;
+      lXMLDocument@1008844005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLDocumentNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lOutStream@1008844004 : OutStream;
+      lRecRef@1008844000 : RecordRef;
+      lEAIAct@1108844005 : Record 8016706;
+      lTempIntervLine@1108844001 : TEMPORARY Record 50075;
+      lIntervLine@1100281005 : Record 50075;
+      lTempIntervMinute@1100281003 : TEMPORARY Record 50084;
+      lNewIntervMinute@1100281006 : Record 50084;
+      lTempDocAttach@1100281004 : TEMPORARY Record 50021;
+      lNewDocAttach@1100281002 : Record 50021;
+      lTempBlob@1100281007 : TEMPORARY Record 99008535;
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+      pEAIRcvdMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+      lXMLDocument.load(lOutStream);
+
+      lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Code");
+
+      //Lecture du document XML
+      lEAIXMLDocMgt.ReadXMLDocuments(lXMLDocument,lXMLDocumentNode);
+
+
+      //lecture intervention line
+      ReadXMLIntervention(lXMLDocumentNode,lTempIntervLine);
+
+      //lecture service
+      ReadXMLService(lXMLDocumentNode,lTempIntervLine);
+
+      //lecture suivi
+      ReadXMLIntervMinute(lXMLDocumentNode,lTempIntervMinute);
+
+      //Lecture Document joint
+      EXTInFunctions.ReadXMLDocAttach(lXMLDocumentNode, lTempDocAttach, lTempBlob);
+
+      //Mettre … jour suivi
+      lIntervLine.GET(lTempIntervLine."Service Header No.", lTempIntervLine."Line No.");
+      lTempIntervMinute."Service Header No." := lIntervLine."Service Header No.";
+      lTempIntervMinute."Service Intervention Line No." := lIntervLine."Line No.";
+      ProcessIntervMinute(lTempIntervMinute, lNewIntervMinute, lTempDocAttach, lTempBlob);
+
+      //cr‚ation suivi de document
+      lEAIDocumentEntryMgt.AddEntryFromRcvdBuffer(
+         DATABASE::"Service Intervention Line",0,lTempIntervLine."Service Header No.",'',
+         lTempIntervLine."Line No.", pEAIRcvdMQBuffer);
+
+      //Identifiant de la commande (ou derniŠre commande si allotie)
+      lRecRef.GETTABLE(lIntervLine);
+      pEAIRcvdMQBuffer.RecordId := lRecRef.RECORDID;
+    END;
+
+    PROCEDURE ReadXMLIntervention@1100281000(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewInterventionLine@1100281000 : Record 50075);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLDocIntervNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Intervention',lXMLDocIntervNode) THEN
+          ERROR(Error002,'Intervention');
+
+        //---TODO----  Identifiant unique de l'intervention
+        IF FindFirstNode(lXMLDocIntervNode,'InterventionId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'InterventionId');
+        END ELSE
+          ERROR(Error002,'InterventionId');
+
+
+        //Code intervention dans GSH
+        IF FindFirstNode(lXMLDocIntervNode,'GSH_NumeroIntervention',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'GSH_NumeroIntervention');
+          pNewInterventionLine."Line No." := lToolsMgt.TextToInteger(lXMLNodeFound.text)
+        END ELSE
+          ERROR(Error002,'GSH_NumeroIntervention');
+       END;
+    END;
+
+    PROCEDURE ReadXMLService@1100281015(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewInterventionLine@1100281000 : Record 50075);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLDocServNode@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'Service',lXMLDocServNode) THEN
+          ERROR(Error002,'Service');
+
+        //---TODO----  Identifiant unique de l'intervention
+        IF FindFirstNode(lXMLDocServNode,'ServiceId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'ServiceId');
+        END ELSE
+          ERROR(Error002,'GSH_NumeroIntervention');
+
+        //Code intervention dans GSH
+        IF FindFirstNode(lXMLDocServNode,'GSH_ReferenceService',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'GSH_ReferenceService');
+          pNewInterventionLine."Service Header No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pNewInterventionLine."Service Header No."))
+        END ELSE
+          ERROR(Error002,'GSH_ReferenceService');
+       END;
+    END;
+
+    PROCEDURE ReadXMLIntervMinute@1100281001(pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNewIntervMinute@1100281000 : Record 50084);
+    VAR
+      lToolsMgt@1100281013 : Codeunit 8016602;
+      lEAIXMLMgt@1100281012 : Codeunit 8016710;
+      lEAIXMLDocMgt@1100281011 : Codeunit 8016713;
+      lXMLNodeFound@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lText001@1100281001 : TextConst 'ENU=Address should not be empty.;FRA=Au moins une des trois adresses doit ˆtre renseign‚e.';
+      lXMLIntervMinuteNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lHasAddress@1100281003 : Boolean;
+    BEGIN
+      //--------TODO---------
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT FindFirstNode(pXMLDocumentNode,'PvFinTravaux',lXMLIntervMinuteNode) THEN
+          ERROR(Error002,'PvFinTravaux');
+
+        //Identifiant unique du Pv de fin de travaux Extranet
+        IF FindFirstNode(lXMLIntervMinuteNode,'PvFinTravauxId',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'PvFinTravauxId');
+        END ELSE
+          ERROR(Error002,'PvFinTravauxId');
+        //Code du type de PV de fin de travaux
+        IF FindFirstNode(lXMLIntervMinuteNode,'codeTypePV',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'codeTypePV');
+          pNewIntervMinute.Type := lToolsMgt.TextToInteger(lXMLNodeFound.text);
+        END ELSE
+          ERROR(Error002,'codeTypePV');
+        //Indifcateur si le PV a ‚t‚ sign‚ avec des r‚serves
+        IF FindFirstNode(lXMLIntervMinuteNode,'IndicateurReservePV',lXMLNodeFound) THEN
+        BEGIN
+          IF lXMLNodeFound.text = '' THEN
+            ERROR(Error003,'IndicateurReservePV');
+          pNewIntervMinute.Reserves := lToolsMgt.TextToBoolean(lXMLNodeFound.text);
+        END ELSE
+          ERROR(Error002,'IndicateurReservePV');
+        //Date de r‚ception du PV de fin de travaux
+        IF FindFirstNode(lXMLIntervMinuteNode,'DateReceptionPv',lXMLNodeFound) THEN
+        BEGIN
+          pNewIntervMinute."Receipt Date" := DT2DATE(lToolsMgt.TextToDateTime(lXMLNodeFound.text));
+        END;
+      END;
+    END;
+
+    PROCEDURE ProcessIntervMinute@1100281003(VAR pTempIntervMinute@1100281001 : Record 50084;VAR pNewIntervMinute@1100281000 : Record 50084;VAR pDocAttach@1100281009 : Record 50021;VAR pTempBlob@1100281008 : TEMPORARY Record 99008535);
+    VAR
+      lDocAttach@1100281002 : Record 50021;
+      lSourceAttachmentMgt@1100281003 : Codeunit 50003;
+      lTmpAttach@1100281006 : TEMPORARY Record 5062;
+      lRBAutoMgt@1100281005 : Codeunit 419;
+      lTempFileName@1100281004 : Text[250];
+    BEGIN
+      //TODO -----
+      pNewIntervMinute.INIT;
+      pNewIntervMinute.VALIDATE("Service Header No.", pTempIntervMinute."Service Header No.");
+      pNewIntervMinute.VALIDATE("Service Intervention Line No.", pTempIntervMinute."Service Intervention Line No.");
+      //---TODO pNewIntervMinute."Document No."
+      pNewIntervMinute.VALIDATE(Type, pTempIntervMinute.Type);
+      pNewIntervMinute.VALIDATE(Reserves, pTempIntervMinute.Reserves);
+      pNewIntervMinute.VALIDATE("Receipt Date", pTempIntervMinute."Receipt Date");
+      pNewIntervMinute.INSERT(TRUE);
+
+      pTempBlob.CALCFIELDS(Blob);
+      IF NOT ISSERVICETIER THEN BEGIN
+        lTempFileName := lRBAutoMgt.ClientTempFileName('',pDocAttach."File Extension");
+        pTempBlob.Blob.EXPORT(lTempFileName);
+        lTmpAttach."Storage Pointer" := lTempFileName;
+      END ELSE
+        lTmpAttach.Attachment := pTempBlob.Blob;
+      lTmpAttach.INSERT;
+
+      lDocAttach.SETRANGE("Service Document No.", pTempIntervMinute."Service Header No.");
+      lDocAttach.SETRANGE("Service Intervention Line No.", pTempIntervMinute."Service Intervention Line No.");
+      lSourceAttachmentMgt.CreateAttachment(lDocAttach, lTempFileName, lTmpAttach);
+
+      lDocAttach.GET(lDocAttach."Referent Table No.", lDocAttach."Key Integer 1", lDocAttach."Key Integer 2",
+                     lDocAttach."Key Code 1", lDocAttach."Key Code 2", lDocAttach."Entry No.");
+
+      lDocAttach.Description := pDocAttach.Description;
+      lDocAttach."Creation Date" := pDocAttach."Creation Date";
+      lDocAttach.MODIFY(FALSE);
+    END;
+
+    BEGIN
+    {
+      /** @r IHM01 @d 18/01/11 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Creation */
+    }
+    END.
+  }
+}

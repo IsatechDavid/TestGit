@@ -1,0 +1,131 @@
+OBJECT Codeunit 8016734 EAI Sent Synchro Validat. Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/02/09;
+    Time=16:18:00;
+    Version List=ISAEAI1.00;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lSentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            CALCFIELDS("XML Source");
+            IF NOT "XML Source".HASVALUE THEN
+            BEGIN
+              EXIT;
+            END ELSE BEGIN
+              lSentMQBuffer := Rec;
+              lSentMQBuffer."XML Source" := "XML Source";
+              lSentMQBuffer.INSERT;
+
+              Code(lSentMQBuffer);
+
+              Rec := lSentMQBuffer;
+            END;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIExchangeTypeMgt@1100281000 : Codeunit 8016712;
+      Error001@1100281001 : TextConst 'ENU=No %1 found.;FRA=Aucun %1 trouv‚.';
+      Error002@1100281002 : TextConst 'ENU=XML Stream empty.;FRA=Stream XML vide.';
+
+    LOCAL PROCEDURE Code@1100281000(VAR pSentMQBuffer@1100281000 : Record 8016720);
+    VAR
+      lEAIMQBufferMgt@1100281003 : Codeunit 8016708;
+      lReturnExchangeType@1100281001 : Record 8016719;
+      lExchangeType@1100281002 : Record 8016717;
+    BEGIN
+      IF NOT EAIExchangeTypeMgt.GetExchangeTypePerSendMQ(pSentMQBuffer,lReturnExchangeType) THEN
+        ERROR(Error001,lReturnExchangeType.TABLECAPTION);
+
+      lExchangeType.GET(lExchangeType.Type::Outbound,lReturnExchangeType."EAI Exchange Type Code");
+
+      CASE lExchangeType."Bus Type" OF
+
+        lExchangeType."Bus Type"::File : SendToXMLFile(pSentMQBuffer,lReturnExchangeType);
+
+        lExchangeType."Bus Type"::Database: SendToDatabase(pSentMQBuffer,lReturnExchangeType);
+
+      END;
+    END;
+
+    LOCAL PROCEDURE SendToXMLFile@202(VAR pSentMQBuffer@1100281000 : Record 8016720;pMQExchangeType@1100281003 : Record 8016719);
+    VAR
+      lExchangeType@1100281004 : Record 8016717;
+      lXMLDocOut@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lInStream@1100281001 : InStream;
+      lNameFile@1000000003 : Text[250];
+      lSendPath@1000000001 : Text[260];
+    BEGIN
+      //SendToXMLFile : on cr‚e le fichier XML dans le r‚pertoire sp‚cifi‚
+
+      lExchangeType.GET(lExchangeType.Type::Outbound,pMQExchangeType."EAI Exchange Type Code");
+      lExchangeType.TESTFIELD("Bus Type",lExchangeType."Bus Type"::File);
+
+      CLEAR(lXMLDocOut);
+      CREATE(lXMLDocOut);
+
+      pSentMQBuffer.CALCFIELDS("XML Source");
+      pSentMQBuffer."XML Source".CREATEINSTREAM(lInStream);
+      lXMLDocOut.load(lInStream);
+
+      lSendPath := lExchangeType."Outgoing Queue Label";
+      pSentMQBuffer."File Name" := GetUniqueFileName(lSendPath + '\' + pSentMQBuffer."Synchro Group Table Alias",'xml');
+
+      lXMLDocOut.save(pSentMQBuffer."File Name");
+    END;
+
+    LOCAL PROCEDURE SendToDatabase@1000000002(VAR pSentMQBuffer@1100281001 : Record 8016720;pMQExchangeType@1100281000 : Record 8016719);
+    VAR
+      lExchangeType@1100281004 : Record 8016717;
+      lPartner@1100281005 : Record 8016707;
+    BEGIN
+      //SendToDatabase : on cr‚e directement l'enregistrement dans la soci‚t‚ param‚tr‚e
+
+      lExchangeType.GET(lExchangeType.Type::Outbound,pMQExchangeType."EAI Exchange Type Code");
+      lExchangeType.TESTFIELD("Bus Type",lExchangeType."Bus Type"::Database);
+
+      lPartner.GET(pMQExchangeType."EAI Partner Code");
+      lPartner.CALCFIELDS("Internal Company");
+      lPartner.TESTFIELD("Internal Company",TRUE);
+
+      ERROR('TO DO');
+    END;
+
+    LOCAL PROCEDURE GetUniqueFileName@9(FileName@1000000000 : Text[250];Ext@1000000001 : Text[5]) ReturnFileName : Text[250];
+    VAR
+      I@1001 : Integer;
+      DocNo@1002 : Text[30];
+    BEGIN
+      I := 0;
+
+      REPEAT
+        IF I <> 0 THEN
+          DocNo := '_'+FORMAT(I);
+
+        ReturnFileName :=  FileName
+                         + FORMAT(TODAY,0,'<Year4><Month,2><Day,2>')
+                         + FORMAT(TIME,0,'<Hours24,2><Filler Character,0><Minutes,2><Seconds,2>')
+                         + DocNo
+                         + '.'+Ext;
+
+        IF NOT EXISTS(ReturnFileName) THEN
+          EXIT;
+
+        I := I +1;
+      UNTIL I=9999;
+    END;
+
+    BEGIN
+    {
+      /** @r EAI00 @d 01/02/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Cr‚ation de l'objet */
+    }
+    END.
+  }
+}

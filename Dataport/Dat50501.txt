@@ -1,0 +1,181 @@
+OBJECT Dataport 50501 Mantis 4133
+{
+  OBJECT-PROPERTIES
+  {
+    Date=30/11/12;
+    Time=10:07:35;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    Import=Yes;
+    ShowStatus=No;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table2000000026;
+        AutoSave=No;
+        AutoUpdate=No;
+        AutoReplace=No;
+        DataItemTableView=SORTING(Number);
+        OnPreDataItem=BEGIN
+                        WDialog.OPEN(Text002);
+
+                        StartDate := CURRENTDATETIME;
+                        TotalCounter := COUNT;
+                        ModuloCounter := ROUND(TotalCounter * 1 / 100,1,'>');
+                        CurrentCounter := 0;
+                        WDialog.UPDATE(1,FORMAT(StartDate));
+                        WDialog.UPDATE(2,Text001);
+                        CommitCounter := 0;
+                        FileName := 'C:\Users\ISAT-SB\Documents\Lignes factur‚es.txt';
+
+                        IF NOT FileToExport.CREATE(FileName) THEN BEGIN
+                          ERROR(Text005 + FileName);
+                        END;
+
+                        FileToExport.TEXTMODE(TRUE);
+                        FileToExport.WRITEMODE(TRUE);
+                        FileToExport.CREATEOUTSTREAM(OutStreamToFile);
+                      END;
+
+        OnAfterImportRecord=VAR
+                              lSalesHeader@1100281006 : Record 36;
+                              lSalesHeader2@1100281000 : Record 36;
+                              lSalesLine@1100281005 : Record 37;
+                              lSalesShipmentHeader@1100281004 : Record 110;
+                              lSalesShipmentLine@1100281007 : Record 111;
+                              lReleaseSalesDoc@1100281003 : Codeunit 414;
+                              lTextLine@1100281002 : Text[400];
+                              lOKToDelete@1100281001 : Boolean;
+                              lTiretPos@1100281008 : Integer;
+                            BEGIN
+                              CurrentCounter += 1;
+                              IF CurrentCounter MOD ModuloCounter = 1 THEN BEGIN
+                                IF GUIALLOWED THEN BEGIN
+                                  WDialog.UPDATE(3,ROUND(CurrentCounter / TotalCounter * 9999,1,'>'));
+                                END;
+                              END;
+
+                              lSalesHeader.RESET;
+                              lSalesHeader.SETCURRENTKEY("Service No.","Service Header No.","Intervention Line No.","Quote Line No.");
+                              IF COPYSTR(ServiceHeaderNo,1,3) = '000' THEN BEGIN
+                                lTiretPos := STRPOS(ServiceHeaderNo,'-');
+                                IF lTiretPos <> 0 THEN BEGIN
+                                  lSalesHeader.SETRANGE("Service No.",COPYSTR(ServiceHeaderNo,1,lTiretPos - 1));
+                                END ELSE BEGIN
+                                  lSalesHeader.SETRANGE("Service No.",ServiceHeaderNo);
+                                END;
+                              END ELSE BEGIN
+                                lSalesHeader.SETRANGE("Service No.",COPYSTR(ServiceHeaderNo,1,6));
+                              END;
+                              lSalesHeader.SETRANGE("Service Header No.",ServiceHeaderNo);
+                              lSalesHeader.SETRANGE("Shipment Date",151112D);
+                              IF lSalesHeader.ISEMPTY THEN BEGIN
+                                CurrDataport.SKIP;
+                              END;
+                              IF lSalesHeader.FINDSET THEN BEGIN
+                                REPEAT
+                                  lOKToDelete := TRUE;
+                                  lSalesShipmentHeader.RESET;
+                                  lSalesShipmentHeader.SETCURRENTKEY("Order No.");
+                                  lSalesShipmentHeader.SETRANGE("Order No.",lSalesHeader."No.");
+                                  IF lSalesShipmentHeader.FINDSET THEN BEGIN
+                                    REPEAT
+                                      lSalesShipmentLine.SETRANGE("Document No.",lSalesShipmentHeader."No.");
+                                      IF lSalesShipmentLine.FINDSET THEN BEGIN
+                                        REPEAT
+                                          IF lSalesShipmentLine.Quantity > 0 THEN BEGIN
+                                            IF lSalesShipmentLine."Quantity Invoiced" = 0 THEN BEGIN
+                                               ProcessNonInvoicedOrders(lSalesShipmentLine)
+                                            END ELSE BEGIN
+                                              lOKToDelete := FALSE;
+                                              lTextLine := '';
+                                              lTextLine += lSalesHeader."No."+'; ';
+                                              lTextLine += lSalesHeader."Service No."+'; ';
+                                              lTextLine += lSalesHeader."Service Header No."+'; ';
+                                              lTextLine += lSalesHeader."Corporate No."+'; ';
+                                              lTextLine += lSalesHeader."Service Order Type"+'; ';
+                                              lTextLine += lSalesHeader."Corporate Region Code"+'; ';
+                                              OutStreamToFile.WRITETEXT(lTextLine);
+                                              OutStreamToFile.WRITETEXT;
+                                            END;
+                                          END;
+                                        UNTIL lSalesShipmentLine.NEXT = 0;
+                                      END;
+                                    UNTIL lSalesShipmentHeader.NEXT = 0;
+                                  END;
+                                  IF lOKToDelete THEN BEGIN
+                                    lSalesHeader2 := lSalesHeader;
+                                    lReleaseSalesDoc.PerformManualReopen(lSalesHeader2);
+                                    lSalesHeader2.DELETE(TRUE);
+                                  END;
+                                UNTIL lSalesHeader.NEXT = 0;
+                              END;
+                            END;
+
+      }
+      FIELDS
+      {
+        {      ;     ;ServiceHeaderNo      }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      ServiceHeaderNo@1100281000 : Code[20];
+      WDialog@1100281009 : Dialog;
+      TotalCounter@1100281008 : Integer;
+      ModuloCounter@1100281007 : Integer;
+      CurrentCounter@1100281006 : Integer;
+      CommitCounter@1100281005 : Integer;
+      StartDate@1100281004 : DateTime;
+      EndDate@1100281003 : DateTime;
+      Text010@1100281026 : TextConst 'ENU=You must enter a File Name.;FRA=Vous devez entrer un nom de fichier.';
+      Text004@1100281025 : TextConst 'ENU="Customer No.;Document type;Document No;Amount;Posting date;Service No.;Service Header No.;Corporate No.;Service Order Type;Corporate Region Code;Reference No.";FRA="No Client;Type doc;No Document;Montant;Date comptabilisation;No Service;No Ligne Service;No grand compte;Type produit;Code region grand compte;No evenement"';
+      Text005@1100281024 : TextConst 'ENU=File Creation Error;FRA="Erreur de cr‚ation fichier  "';
+      Text006@1100281023 : TextConst 'ENU=DUPLICATE;FRA=DOUBLON';
+      Text007@1100281022 : TextConst 'ENU=ORDER;FRA=COMMANDE';
+      Text008@1100281021 : TextConst 'ENU=INVOICE;FRA=FACTURE';
+      Text009@1100281020 : TextConst 'ENU=Please select a posting date;FRA=Veuillez selectionner SVP une date de comptabilisation';
+      Text001@1100281012 : TextConst 'ENU=Automatic Application ID;FRA=Annulation exp‚dition';
+      Text002@1100281011 : TextConst 'ENU=Start Date : #1###################\Process #2###########\@3@@@@@@@@@@@@@@@@@@@@;FRA=Date d‚but : #1###################\Traitement #2###################\@3@@@@@@@@@@@@@@@@@@@@';
+      Text003@1100281010 : TextConst 'ENU=Start : %1\End : %2;FRA=D‚but : %1\Fin : %2';
+      FileToExport@1100281019 : File;
+      OutStreamToFile@1100281017 : OutStream;
+      FileName@1100281016 : Text[200];
+      DocType@1100281014 : 'Quote,Blanket Order,Order,Invoice,Return Order,Credit Memo,Posted Shipment,Posted Invoice,Posted Return Receipt,Posted Credit Memo';
+
+    PROCEDURE ProcessNonInvoicedOrders@1000000001(VAR pSalesShipmentLine@1000000002 : Record 111);
+    VAR
+      lSalesShipmentLine@1100281000 : Record 111;
+      lUndoSalesShipment@1000000003 : Codeunit 5815;
+    BEGIN
+      lSalesShipmentLine.COPY(pSalesShipmentLine);
+      lSalesShipmentLine.MARK(TRUE);
+      lUndoSalesShipment.SetHideDialog(TRUE);
+      lUndoSalesShipment.RUN(lSalesShipmentLine);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 26/11/12 @a ISAT.SB @v IMH6.01.212 @h 4133 @s Annulation exp‚dition + suppression cde si non factur‚e. */
+    }
+    END.
+  }
+}

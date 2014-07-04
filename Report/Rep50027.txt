@@ -1,0 +1,294 @@
+OBJECT Report 50027 DAS2
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/09/12;
+    Time=15:10:03;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    BottomMargin=0;
+    LeftMargin=0;
+    OnPreReport=BEGIN
+                  IF DateFilter = '' THEN
+                    ERROR(Text000);
+                END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table23;
+        DataItemTableView=SORTING(No.);
+        NewPagePerRecord=Yes;
+        PrintOnlyIfDetail=Yes;
+        OnAfterGetRecord=BEGIN
+                           Buffer.RESET;
+                           Buffer.DELETEALL;
+
+                           VendLedgEntry.SETCURRENTKEY("Vendor No.","Posting Date","Currency Code");
+                           VendLedgEntry.SETRANGE("Vendor No.","No.");
+                           VendLedgEntry.SETFILTER("Posting Date",DateFilter);
+                           VendLedgEntry.SETRANGE("Document Type",VendLedgEntry."Document Type"::Invoice,VendLedgEntry."Document Type"::"Credit Memo");
+                           IF VendLedgEntry.FINDSET THEN BEGIN
+                             REPEAT
+                               DtldVendLedgEntry.SETCURRENTKEY("Vendor Ledger Entry No.","Entry Type","Posting Date");
+                               DtldVendLedgEntry.SETRANGE("Vendor Ledger Entry No.",VendLedgEntry."Entry No.");
+                               DtldVendLedgEntry.SETRANGE("Entry Type",DtldVendLedgEntry."Entry Type"::Application);
+                               DtldVendLedgEntry.SETFILTER("Posting Date",DateFilter);
+                               DtldVendLedgEntry.SETRANGE("Document Type",DtldVendLedgEntry."Document Type"::Payment);
+                               DtldVendLedgEntry.SETRANGE(Unapplied,FALSE);
+                               IF DtldVendLedgEntry.FINDFIRST THEN BEGIN
+                                 GLEntry.RESET;
+                                 GLEntry.SETCURRENTKEY("Transaction No.");
+                                 GLEntry.SETRANGE("Transaction No.",VendLedgEntry."Transaction No.");
+                                 IF GLEntry.FINDSET THEN BEGIN
+                                   REPEAT
+                                     GLAccount.GET(GLEntry."G/L Account No.");
+                                     IF GLAccount."Include Entries For DAS 2" THEN BEGIN
+                                       Buffer.SETRANGE("Entry No.",GLAccount."Account Nature");
+                                       IF Buffer.FINDFIRST THEN BEGIN
+                                         Buffer.Amount := Buffer.Amount + GLEntry.Amount + GLEntry."VAT Amount";
+                                         Buffer.MODIFY;
+                                       END ELSE BEGIN
+                                         Buffer."Entry No." := GLAccount."Account Nature";
+                                         Buffer.Description := SELECTSTR(GLAccount."Account Nature" + 1,Text001);
+                                         Buffer.Amount := GLEntry.Amount + GLEntry."VAT Amount";
+                                         Buffer.INSERT;
+                                       END;
+                                     END;
+                                   UNTIL GLEntry.NEXT = 0;
+                                 END;
+
+                               END;
+                             UNTIL VendLedgEntry.NEXT = 0;
+                           END;
+                         END;
+
+        ReqFilterFields=No.;
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Footer;
+            PrintOnEveryPage=Yes;
+            PlaceInBottom=Yes;
+            SectionWidth=19500;
+            SectionHeight=2538;
+            OnPreSection=BEGIN
+                           CurrentPage := CurrentPage + 1;
+                         END;
+
+          }
+          CONTROLS
+          {
+            { 1000000001;TextBox;14400;0    ;900  ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         SourceExpr=TotalPage }
+            { 1000000003;TextBox;12600;0    ;900  ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         SourceExpr=CurrentPage }
+          }
+           }
+      }
+       }
+    { PROPERTIES
+      {
+        DataItemIndent=1;
+        DataItemTable=Table2000000026;
+        DataItemTableView=SORTING(Number);
+        OnPreDataItem=BEGIN
+                        NbRec := Buffer.COUNT;
+                        IF NbRec = 0 THEN
+                          CurrReport.BREAK;
+
+                        CLEAR(Desc);
+                        CLEAR(Amt);
+                        Cpt := 0;
+
+                        Buffer.RESET;
+                        IF Buffer.FINDSET THEN BEGIN
+                          REPEAT
+                            IF (MinAmt = 0) OR (Buffer.Amount >= MinAmt ) THEN BEGIN
+                              Cpt := Cpt + 1;
+                              Desc[Cpt] := Buffer.Description;
+                              Amt[Cpt] := ROUND(Buffer.Amount,1,'<');
+                            END;
+                          UNTIL Buffer.NEXT = 0;
+                        END;
+
+                        IF (NbRec MOD 4) = 0 THEN
+                          NbIteration := NbRec DIV 4
+                        ELSE
+                          NbIteration := (NbRec DIV 4) + 1;
+
+                        SETRANGE(Number,1,NbIteration);
+
+                        IF (NbIteration MOD 3) = 0 THEN
+                          TotalPage := NbIteration DIV 3 + 1
+                        ELSE
+                          TotalPage := (NbIteration DIV 3) + 2;
+
+
+                        CurrentPage := 1;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+
+                           Cpt1 := Number * 4 - 3;
+                           Cpt2 := Number * 4 - 2;
+                           Cpt3 := Number * 4 - 1;
+                           Cpt4 := Number * 4;
+
+                           //IF (Number MOD 3) = 1 THEN
+                             //CurrentPage := CurrentPage + 1;
+                         END;
+
+      }
+      SECTIONS
+      {
+        { PROPERTIES
+          {
+            SectionType=Body;
+            SectionWidth=19500;
+            SectionHeight=8180;
+          }
+          CONTROLS
+          {
+            { 1000000002;TextBox;5400 ;846  ;11700;846  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Vendor.Name }
+            { 1000000004;TextBox;5400 ;2115 ;11700;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Vendor.Address }
+            { 1000000006;TextBox;6300 ;2538 ;10800;846  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Vendor."Address 2" }
+            { 1000000010;TextBox;4050 ;3384 ;1500 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Vendor."Post Code" }
+            { 1000000000;TextBox;4050 ;4230 ;4500 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Vendor."Occupation Code" }
+            { 1000000008;TextBox;7650 ;3384 ;4500 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Vendor.City }
+            { 1000000014;TextBox;12600;4230 ;4500 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Vendor."Registration No." }
+            { 1000000012;TextBox;16950;3384 ;1500 ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Vendor."Country/Region Code" }
+            { 1000000005;TextBox;1650 ;6345 ;2250 ;846  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Amt[Cpt1] }
+            { 1000000007;TextBox;600  ;6345 ;750  ;846  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Desc[Cpt1] }
+            { 1000000009;TextBox;1650 ;7191 ;2250 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Amt[Cpt2] }
+            { 1000000011;TextBox;600  ;7191 ;750  ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Desc[Cpt2] }
+            { 1000000013;TextBox;5400 ;6345 ;2250 ;846  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Amt[Cpt3] }
+            { 1000000015;TextBox;5400 ;7191 ;2250 ;423  ;HorzAlign=Right;
+                                                         FontSize=8;
+                                                         BlankZero=Yes;
+                                                         SourceExpr=Amt[Cpt4] }
+            { 1000000016;TextBox;4200 ;6345 ;900  ;846  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Desc[Cpt3] }
+            { 1000000017;TextBox;4200 ;7191 ;900  ;423  ;HorzAlign=Left;
+                                                         FontSize=8;
+                                                         SourceExpr=Desc[Cpt4] }
+          }
+           }
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 1000000000;TextBox;3630 ;330  ;2750 ;440  ;CaptionML=[ENU=Date Filter;
+                                                              FRA=Filtre date];
+                                                   SourceExpr=DateFilter;
+                                                   OnValidate=VAR
+                                                                ApplicationManagement@1001 : Codeunit 1;
+                                                                Vendor2@1000000001 : Record 23;
+                                                              BEGIN
+                                                                IF ApplicationManagement.MakeDateFilter(DateFilter) = 0 THEN;
+                                                                Vendor2.SETFILTER("Date Filter",DateFilter);
+                                                                DateFilter := Vendor2.GETFILTER("Date Filter");
+                                                              END;
+
+                                                   OnAfterValidate=BEGIN
+                                                                     RequestOptionsForm.UPDATE;
+                                                                   END;
+                                                                    }
+      { 1000000001;Label  ;220  ;330  ;3300 ;440  ;ParentControl=1000000000 }
+      { 1000000002;TextBox;3630 ;880  ;2750 ;440  ;CaptionML=[ENU=Minimum Amount;
+                                                              FRA=Montant minimum];
+                                                   SourceExpr=MinAmt }
+      { 1000000003;Label  ;220  ;880  ;3300 ;440  ;ParentControl=1000000002 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      GLAccount@1000000001 : Record 15;
+      GLEntry@1000000000 : Record 17;
+      VendLedgEntry@1000000005 : Record 25;
+      DtldVendLedgEntry@1000000007 : Record 380;
+      Buffer@1000000012 : TEMPORARY Record 382;
+      DateFilter@1000000002 : Text[30];
+      MinAmt@1000000003 : Decimal;
+      Text000@1000000004 : TextConst 'ENU=Enter the Filter Date.;FRA=Saisissez le filtre date.';
+      Amt@1000000008 : ARRAY [50] OF Integer;
+      Desc@1000000009 : ARRAY [50] OF Code[30];
+      Cpt@1000000010 : Integer;
+      NbRec@1000000011 : Integer;
+      NbIteration@1000000013 : Integer;
+      Cpt1@1000000014 : Integer;
+      Cpt2@1000000015 : Integer;
+      Cpt3@1000000016 : Integer;
+      Cpt4@1000000017 : Integer;
+      Text001@1000000018 : TextConst 'FRA=" ,H,C,CO,R,JP,DA,DI,AR"';
+      TotalPage@1000000006 : Integer;
+      CurrentPage@1000000019 : Integer;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 10/12/10 @a ISAT.VA @v IMH6.01.140 @s DAS @c Creation */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

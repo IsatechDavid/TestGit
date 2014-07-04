@@ -1,0 +1,788 @@
+OBJECT Codeunit 8016713 EAI XML Document Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/10/13;
+    Time=16:10:47;
+    Modified=Yes;
+    Version List=ISAEAI1.02,MATMUT01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIXmlMgt@1100281000 : Codeunit 8016710;
+      EAITools@1100281014 : Codeunit 8016700;
+      Tools@1100281001 : Codeunit 8016602;
+      ROOT@1100481011 : TextConst 'FRA=MESSAGE';
+      MESSAGE_HEADER@1100481000 : TextConst 'FRA=MESSAGE_HEADER';
+      MESSAGE_TYPE@1100281003 : TextConst 'ENU=MESSAGE_TYPE;FRA=MESSAGE_TYPE';
+      MESSAGE_DATE@1100481004 : TextConst 'FRA=DATE';
+      MESSAGE_TIME@1100481005 : TextConst 'FRA=TIME';
+      SENDER@1100481007 : TextConst 'FRA=SENDER';
+      RECIPIENT@1100481006 : TextConst 'FRA=RECIPIENT';
+      DOCUMENT_TYPE@1100281004 : TextConst 'ENU=DOCUMENT_TYPE;FRA=DOCUMENT_TYPE';
+      DOCUMENT_ID@1100481003 : TextConst 'FRA=ID_DOCUMENT';
+      DOCUMENTS@1100281005 : TextConst 'ENU=DOCUMENTS;FRA=DOCUMENTS';
+      DOCUMENT@1100281006 : TextConst 'ENU=DOCUMENT;FRA=DOCUMENT';
+      TO_COMPANY@1100281011 : TextConst 'ENU=TO_COMPANY;FRA=TO_COMPANY';
+      FROM_COMPANY@1100281007 : TextConst 'ENU=FROM_COMPANY;FRA=FROM_COMPANY';
+      PROCESS_TYPE@1100281008 : TextConst 'ENU=PROCESS_TYPE;FRA=PROCESS_TYPE';
+      DOCUMENT_HEADER@1100481002 : TextConst 'ENU=DOCUMENT_HEADER;FRA=HEADER';
+      DOCUMENT_LINES@1100481001 : TextConst 'FRA=LINES';
+      DOCUMENT_CHARGES@1180044000 : TextConst 'FRA=CHARGES';
+      TABLE_ID@1100281009 : TextConst 'ENU=TABLE_ID;FRA=TABLE_ID';
+      PRIORITY@1100281010 : TextConst 'ENU=PRIORITY;FRA=PRIORITY';
+      KEY@1100281015 : TextConst 'ENU=KEY;FRA=KEY';
+      OLD_KEY@1100281017 : TextConst 'ENU=OLD_KEY;FRA=OLD_KEY';
+      FIELDS@1100281016 : TextConst 'ENU=FIELDS;FRA=FIELDS';
+      FIELD_NO@1100281013 : TextConst 'ENU=FieldNo;FRA=FieldNo';
+      TABLE_NO@1100281012 : TextConst 'ENU=TableNo;FRA=TableNo';
+      Error001@1100481008 : TextConst 'FRA=La balise root n''a pu ˆtre cr‚‚e.';
+      Error002@1100481009 : TextConst 'FRA=La balise %1 est introuvable.';
+      Error003@1100481010 : TextConst 'FRA=La balise %1 n''a pu ˆtre ajout‚e au flux XML.';
+      SkipGetInfoMsgHdrFonction@1100281002 : Integer;
+      GLSetup@1100281019 : Record 98;
+      SynchroIMAService@1100281018 : Boolean;
+
+    PROCEDURE WriteXMLMessageHeader@1000000000(VAR pXMLDocument@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";VAR pXMLMessageHeaderNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pSentMsgBuffer@1000000000 : Record 8016720;pNameSpace@1000000001 : Text[50]);
+    VAR
+      lXMLNewChild@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIAct@1100281005 : Record 8016706;
+      VarKeyRef@1100481002 : KeyRef;
+      VarFieldRef@1100481001 : FieldRef;
+      NodeName@1100281004 : Text[250];
+      NodeValue@1100281003 : Text[250];
+      i@1100481000 : Integer;
+    BEGIN
+      IF ISCLEAR(pXMLDocument) THEN
+        CREATE(pXMLDocument);
+
+      WITH EAIXmlMgt DO BEGIN
+
+      //  pNameSpace := FormatNodeName(UPPERCASE(pSentMsgBuffer."Synchro Group Table Alias"));
+        pNameSpace := '';
+        IF NOT pXMLDocument.loadXML('<?xml version="1.0" encoding="ISO-8859-1" ?><' + ROOT + '/>') THEN
+          ERROR(Error001);
+
+        pXMLMessageHeaderNode := pXMLDocument.documentElement;
+
+        IF NOT IsAddElement(pXMLMessageHeaderNode,MESSAGE_HEADER,'',pNameSpace,lXMLNewChild) THEN
+          EXIT;
+        pXMLMessageHeaderNode := lXMLNewChild;
+
+        //Gestion de l'acte
+        lEAIAct.GET(pSentMsgBuffer."EAI Act Type Code",pSentMsgBuffer."EAI Act Code");
+        IF lEAIAct."Message Type Code"<>'' THEN
+          IF NOT IsAddElement(pXMLMessageHeaderNode,MESSAGE_TYPE,lEAIAct."Message Type Code",pNameSpace,lXMLNewChild) THEN
+            ERROR(Error003,MESSAGE_TYPE);
+        IF lEAIAct."Document Type Code"<>'' THEN
+          IF NOT IsAddElement(pXMLMessageHeaderNode,DOCUMENT_TYPE,lEAIAct."Document Type Code",pNameSpace,lXMLNewChild) THEN
+            ERROR(Error003,DOCUMENT_TYPE);
+        IF lEAIAct."Document ID Code"<>'' THEN
+          IF NOT IsAddElement(pXMLMessageHeaderNode,DOCUMENT_ID,lEAIAct."Document ID Code",pNameSpace,lXMLNewChild) THEN
+            ERROR(Error003,DOCUMENT_ID);
+
+        //infos g‚n‚ral
+        IF NOT IsAddElement(pXMLMessageHeaderNode,MESSAGE_DATE,Tools.DateToText(pSentMsgBuffer."Date Creation"),pNameSpace,lXMLNewChild)
+        THEN
+          ERROR(Error003,MESSAGE_DATE);
+        IF NOT IsAddElement(pXMLMessageHeaderNode,MESSAGE_TIME,Tools.TimeToText(pSentMsgBuffer."Time Creation"),pNameSpace,lXMLNewChild)
+        THEN
+          ERROR(Error003,MESSAGE_TIME);
+
+      END;
+    END;
+
+    PROCEDURE WriteXMLRecipient@1100481002(VAR pXMLMessageHeaderNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1000000001 : Text[50];pGLNRecipient@1100481003 : Code[20]);
+    VAR
+      lXMLNewChild@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLMessageHeaderNode,RECIPIENT,pGLNRecipient,pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,RECIPIENT);
+
+      END;
+    END;
+
+    PROCEDURE WriteXMLSender@1100481003(VAR pXMLMessageHeaderNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1000000001 : Text[50];pGLNSender@1100481003 : Code[20]);
+    VAR
+      lXMLNewChild@1100481000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLMessageHeaderNode,SENDER,pGLNSender,pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,SENDER);
+
+      END;
+    END;
+
+    PROCEDURE WriteXMLDocuments@1100281008(VAR pXMLRootNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pXMLReturnDocumentsNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pNameSpace@1000000001 : Text[50]);
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLRootNode,DOCUMENTS,'',pNameSpace,pXMLReturnDocumentsNode) THEN
+          ERROR(Error003,DOCUMENTS);
+
+      END;
+    END;
+
+    PROCEDURE WriteXMLDocument@1100281009(VAR pXMLDocumentsNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";VAR pXMLReturnDocumentNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNameSpace@1000000001 : Text[50]);
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLDocumentsNode,DOCUMENT,'',pNameSpace,pXMLReturnDocumentNode) THEN
+          ERROR(Error003,DOCUMENT);
+
+      END
+    END;
+
+    PROCEDURE WriteXMLDocHeader@1100481008(VAR pXMLDocumentNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pXMLReturnDocHeaderNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNameSpace@1000000001 : Text[50]);
+    VAR
+      lXMLNewChild@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLDocumentNode,DOCUMENT_HEADER,'',pNameSpace,pXMLReturnDocHeaderNode) THEN
+          ERROR(Error003,DOCUMENT_HEADER);
+
+      END;
+    END;
+
+    PROCEDURE WriteXMLDocLine@1100481009(VAR pXMLDocHeaderNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";VAR pXMLReturnDocLineNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNameSpace@1000000001 : Text[50]);
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLDocHeaderNode,DOCUMENT_LINES,'',pNameSpace,pXMLReturnDocLineNode) THEN
+          ERROR(Error003,DOCUMENT_LINES);
+
+      END;
+    END;
+
+    PROCEDURE WriteXMLDocCharge@1180044001(VAR pXMLDocHeaderNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";VAR pXMLReturnDocLineNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pNameSpace@1000000001 : Text[50]);
+    BEGIN
+      //GMS02
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLDocHeaderNode,DOCUMENT_CHARGES,'',pNameSpace,pXMLReturnDocLineNode) THEN
+          ERROR(Error003,DOCUMENT_LINES);
+
+      END;
+    END;
+
+    PROCEDURE WriteXMLKeys@1100481006(VAR pXMLCurrNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pRecRef@1100481005 : RecordRef;pNameSpace@1100481003 : Text[100]);
+    VAR
+      lXMLNewChild@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      VarKeyRef@1100481002 : KeyRef;
+      VarFieldRef@1100481001 : FieldRef;
+      NodeName@1100281004 : Text[250];
+      NodeValue@1100281003 : Text[250];
+      i@1100481000 : Integer;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLCurrNode,KEY,'',pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,KEY);
+
+        //<<IMH03.ISAT.EBA
+        IF SynchroIMAService THEN
+          AddAttribute(lXMLNewChild,TABLE_NO,FORMAT(DATABASE::Customer))
+        ELSE
+        //>>IMH03.ISAT.EBA
+        AddAttribute(lXMLNewChild,TABLE_NO,FORMAT(pRecRef.NUMBER));
+
+        pXMLCurrNode := lXMLNewChild;
+
+        VarKeyRef := pRecRef.KEYINDEX(1);
+        FOR i := 1 TO VarKeyRef.FIELDCOUNT DO BEGIN
+          VarFieldRef := pRecRef.FIELDINDEX(i);
+          NodeName  := FormatNodeName(VarFieldRef.NAME);
+          NodeValue := FormatValue(VarFieldRef.VALUE);
+          IF NOT IsAddElement(pXMLCurrNode,NodeName,NodeValue,pNameSpace,lXMLNewChild) THEN
+            EXIT;
+          AddAttribute(lXMLNewChild,FIELD_NO,FORMAT(VarFieldRef.NUMBER));
+        END;
+
+      END;
+
+      pXMLCurrNode := pXMLCurrNode.parentNode;
+    END;
+
+    PROCEDURE WriteXMLOldKeys@1100281007(VAR pXMLCurrNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pRecRef@1100481005 : RecordRef;pNameSpace@1100481003 : Text[100]);
+    VAR
+      lXMLNewChild@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      VarKeyRef@1100481002 : KeyRef;
+      VarFieldRef@1100481001 : FieldRef;
+      NodeName@1100281004 : Text[250];
+      NodeValue@1100281003 : Text[250];
+      i@1100481000 : Integer;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLCurrNode,OLD_KEY,'',pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,OLD_KEY);
+
+        //<<IMH03.ISAT.EBA
+        IF SynchroIMAService THEN
+          AddAttribute(lXMLNewChild,TABLE_NO,FORMAT(DATABASE::Customer))
+        ELSE
+        //>>IMH03.ISAT.EBA
+        AddAttribute(lXMLNewChild,TABLE_NO,FORMAT(pRecRef.NUMBER));
+
+        pXMLCurrNode := lXMLNewChild;
+
+        VarKeyRef := pRecRef.KEYINDEX(1);
+        FOR i := 1 TO VarKeyRef.FIELDCOUNT DO BEGIN
+          VarFieldRef := pRecRef.FIELDINDEX(i);
+          NodeName  := FormatNodeName(VarFieldRef.NAME);
+          NodeValue := FormatValue(VarFieldRef.VALUE);
+          IF NOT IsAddElement(pXMLCurrNode,NodeName,NodeValue,pNameSpace,lXMLNewChild) THEN
+            EXIT;
+          AddAttribute(lXMLNewChild,FIELD_NO,FORMAT(VarFieldRef.NUMBER));
+        END;
+
+      END;
+
+      pXMLCurrNode := pXMLCurrNode.parentNode;
+    END;
+
+    PROCEDURE WriteXMLFields@1100481007(VAR pXMLCurrNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pSynchroGroupTable@1100281001 : Record 8016710;pRecRef@1100481003 : RecordRef;pNameSpace@1100481002 : Text[50];pAllFields@1100481004 : Boolean);
+    VAR
+      lEAISynchroMgt@1100281005 : Codeunit 8016705;
+      lXMLNewChild@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      varFieldRef@1100481001 : FieldRef;
+      NodeName@1100281004 : Text[250];
+      NodeValue@1100281003 : Text[250];
+      i@1100481000 : Integer;
+      lToSync@1180044000 : Boolean;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT IsAddElement(pXMLCurrNode,FIELDS,'',pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,FIELDS);
+
+        //<<IMH03.ISAT.EBA
+        IF SynchroIMAService THEN
+          AddAttribute(lXMLNewChild,TABLE_NO,FORMAT(DATABASE::Customer))
+        ELSE
+        //>>IMH03.ISAT.EBA
+        AddAttribute(lXMLNewChild,TABLE_NO,FORMAT(pRecRef.NUMBER));
+
+        pXMLCurrNode := lXMLNewChild;
+
+        FOR i := 1 TO pRecRef.FIELDCOUNT DO BEGIN
+          varFieldRef := pRecRef.FIELDINDEX(i);
+          IF EAITools.IsNormalField(pRecRef.NUMBER,varFieldRef.NUMBER) THEN BEGIN
+      //<<EAI02
+      //      IF pAllFields OR
+      //         lEAISynchroMgt.IsActionOnFieldActive(pSynchroGroupTable,pRecRef.NUMBER,varFieldRef.NUMBER)
+      //      THEN BEGIN
+            lToSync := pAllFields;
+            IF NOT lToSync THEN
+              lToSync := lEAISynchroMgt.IsActionOnFieldActive(pSynchroGroupTable,pRecRef.NUMBER,varFieldRef.NUMBER);
+            IF lToSync THEN
+            BEGIN
+      //>>EAI02
+              NodeName  := FormatNodeName(varFieldRef.NAME);
+              NodeValue := FormatValue(varFieldRef.VALUE);
+              IF NOT IsAddElement(pXMLCurrNode,NodeName,NodeValue,pNameSpace,lXMLNewChild) THEN EXIT;
+              AddAttribute(lXMLNewChild,FIELD_NO,FORMAT(varFieldRef.NUMBER));
+            END;
+          END;
+        END;
+      END;
+
+      pXMLCurrNode := pXMLCurrNode.parentNode;
+    END;
+
+    PROCEDURE ReadXMLMessageHeader@1100481001(pXMLDocument@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";VAR pXMLReturnMessageHeader@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode") : Boolean;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindRootNode(pXMLDocument,pXMLReturnMessageHeader) THEN
+          ERROR(Error002,'ROOT');
+
+        IF NOT FindFirstNode(pXMLReturnMessageHeader,MESSAGE_HEADER,pXMLReturnMessageHeader) THEN
+          ERROR(Error002,MESSAGE_HEADER);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLRecipient@1100481005(pXMLDocument@1100481000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";VAR pReturnXMLRecipientNode@1100481003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode") : Boolean;
+    VAR
+      lXMLMessageHeaderNode@1100481002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        ReadXMLMessageHeader(pXMLDocument,lXMLMessageHeaderNode);
+
+        IF NOT FindFirstNode(lXMLMessageHeaderNode,RECIPIENT,pReturnXMLRecipientNode) THEN
+          ERROR(Error002,RECIPIENT);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLSender@1100481010(pXMLDocument@1100481000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";VAR pReturnXMLRecipientNode@1100481003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode") : Boolean;
+    VAR
+      lXMLMessageHeaderNode@1100481002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        ReadXMLMessageHeader(pXMLDocument,lXMLMessageHeaderNode);
+
+        IF NOT FindFirstNode(lXMLMessageHeaderNode,SENDER,pReturnXMLRecipientNode) THEN
+          ERROR(Error002,SENDER);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLDocuments@1100281003(VAR pXMLDocument@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";VAR pXMLDocumentsNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode") : Boolean;
+    VAR
+      lXMLCurrNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindRootNode(pXMLDocument,lXMLCurrNode) THEN
+          EXIT;
+
+        IF NOT FindFirstNode(lXMLCurrNode,DOCUMENTS,pXMLDocumentsNode) THEN
+          ERROR(Error002,DOCUMENTS);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLDocument@1100281006(VAR pXMLDocumentsNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pXMLDocumentNodeList@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList") : Boolean;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindNodes(pXMLDocumentsNode,DOCUMENT,pXMLDocumentNodeList) THEN
+          ERROR(Error002,DOCUMENT);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLDocHeader@1100481012(VAR pXMLDocumentNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pXMLDocHeaderNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode") : Boolean;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindFirstNode(pXMLDocumentNode,DOCUMENT_HEADER,pXMLDocHeaderNode) THEN
+          ERROR(Error002,DOCUMENT_HEADER);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLDocLines@1100481013(VAR pXMLDocumentNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pXMLDocumentLinesNodeList@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList") : Boolean;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindNodes(pXMLDocumentNode,DOCUMENT_LINES,pXMLDocumentLinesNodeList) THEN
+          ERROR(Error002,DOCUMENT_LINES);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLKeys@1100281001(pXMLCurrNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pRecRef@1100281000 : RecordRef);
+    VAR
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lTableNo@1100281002 : Integer;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindFirstNode(pXMLCurrNode,KEY,lXMLNewNode) THEN
+          ERROR(Error002,KEY);
+
+        EVALUATE(lTableNo,EAIXmlMgt.FindNodeAttribute(lXMLNewNode,TABLE_NO));
+        //<<GMS03
+        pRecRef.CLOSE;
+        //>>GMS03
+        pRecRef.OPEN(lTableNo);
+
+        UpdateRecordByXML(lXMLNewNode,pRecRef);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLOldKeys@1100281005(pXMLCurrNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pRecRef@1100281000 : RecordRef);
+    VAR
+      lXMLNewNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lTableNo@1100281002 : Integer;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindFirstNode(pXMLCurrNode,OLD_KEY,lXMLNewNode) THEN
+          ERROR(Error002,OLD_KEY);
+
+        EVALUATE(lTableNo,EAIXmlMgt.FindNodeAttribute(lXMLNewNode,TABLE_NO));
+        pRecRef.OPEN(lTableNo);
+
+        UpdateRecordByXML(lXMLNewNode,pRecRef);
+
+      END;
+    END;
+
+    PROCEDURE ReadXMLFields@1100281002(pXMLCurrNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pRecRef@1100281000 : RecordRef);
+    VAR
+      lXMLNewNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lTableNo@1100281003 : Integer;
+      lTemplateHeader@1100281004 : Record 8618;
+      lTemplateLine@1100281005 : Record 8619;
+      lCust@1100281006 : Record 18;
+      lTemplateMgt@1100281007 : Codeunit 8612;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindFirstNode(pXMLCurrNode,FIELDS,lXMLNewNode) THEN
+          ERROR(Error002,FIELDS);
+
+        //<<GMS03
+        ReadXMLKeys(pXMLCurrNode,pRecRef);
+        pRecRef.SETRECFILTER;
+        IF NOT pRecRef.FINDFIRST THEN
+        BEGIN
+        //>>GMS03
+        EVALUATE(lTableNo,EAIXmlMgt.FindNodeAttribute(lXMLNewNode,TABLE_NO));
+        //<<IMH03.ISAT.EBA
+        IF lTableNo = DATABASE::Customer THEN BEGIN
+          GLSetup.GET;
+          IF GLSetup."IMH Customer Template" <> '' THEN BEGIN
+            lTemplateHeader.GET(GLSetup."IMH Customer Template");
+            pRecRef.INSERT;
+            lTemplateMgt.UpdateRecord(lTemplateHeader,pRecRef);
+          END;
+        END ELSE BEGIN
+        //>>IMH03.ISAT.EBA
+        pRecRef.CLOSE;
+        pRecRef.OPEN(lTableNo);
+        //<<IMH03.ISAT.EBA
+        END;
+        //>>IMH03.ISAT.EBA
+
+        //<<GMS03
+        END;
+        //>>GMS03
+        UpdateRecordByXML(lXMLNewNode,pRecRef);
+
+      END;
+    END;
+
+    LOCAL PROCEDURE UpdateRecordByXML@1100281004(pXMLCurrNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";VAR pRecRef@1100281001 : RecordRef);
+    VAR
+      lXMLNodesList@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      iNodes@1100281002 : Integer;
+      lFieldRef@1100281007 : FieldRef;
+      lFieldNoTxt@1100281004 : Text[30];
+      lFieldNo@1100281005 : Integer;
+      lFieldValue@1100281006 : Variant;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF FindAllNodes(pXMLCurrNode,lXMLNodesList) THEN BEGIN
+          FOR iNodes := 0 TO (lXMLNodesList.length - 1) DO BEGIN
+            pXMLCurrNode := lXMLNodesList.item(iNodes);
+            lFieldNoTxt := FindNodeAttribute(pXMLCurrNode,FIELD_NO);
+            IF EVALUATE(lFieldNo, lFieldNoTxt) THEN BEGIN
+              IF pRecRef.FIELDEXIST(lFieldNo) THEN BEGIN
+                lFieldRef := pRecRef.FIELD(lFieldNo);
+                EvaluateValue(lFieldRef.VALUE,pXMLCurrNode.text,lFieldValue);
+                lFieldRef.VALUE:= lFieldValue;
+              END;
+            END;
+          END;
+        END;
+
+      END;
+    END;
+
+    PROCEDURE GetInfoFromMessageHeader@1100281000(VAR pXMLDocument@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";VAR pRcvdMQBuffer@1100281000 : Record 8016721);
+    VAR
+      lXMLCurrNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIAct@1100281006 : Record 8016706;
+      lEAIActMessageType@1100281005 : Code[20];
+      lEAIActDocumentType@1100281004 : Code[20];
+      lEAIActDocumentID@1100481000 : Code[20];
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        IF NOT FindRootNode(pXMLDocument,lXMLCurrNode) THEN
+          //<<IMH02
+          //ERROR(Error002,'ROOT');
+          EXIT;
+          //>>IMH02
+
+        //<<GMS04
+        IF lXMLCurrNode.nodeName <> ROOT THEN
+        BEGIN
+          //Recherche sur les actes avec d‚finition par Noeud Root XML
+          lEAIAct.SETCURRENTKEY(Type);
+          lEAIAct.SETRANGE(Type,lEAIAct.Type::Inbound);
+          lEAIAct.SETRANGE("Reception Name Definition",lEAIAct."Reception Name Definition"::"XML RootNode");
+          lEAIAct.SETRANGE("Reception Name Value",lXMLCurrNode.nodeName);
+          IF NOT lEAIAct.FINDFIRST THEN
+            lEAIAct.INIT;
+
+        END ELSE BEGIN
+        //>>GMS04
+
+          //Recherche sur Format Standard SI Foodware
+          IF NOT FindFirstNode(lXMLCurrNode,MESSAGE_HEADER,lXMLNewNode) THEN
+            ERROR(Error002,MESSAGE_HEADER);
+
+          lXMLCurrNode := lXMLNewNode;
+
+          //D‚finition de l'acte utilis‚
+          IF FindFirstNode(lXMLCurrNode,MESSAGE_TYPE,lXMLNewNode) THEN
+            lEAIActMessageType  := COPYSTR(lXMLNewNode.text,1,20);
+
+          IF FindFirstNode(lXMLCurrNode,DOCUMENT_TYPE,lXMLNewNode) THEN
+            lEAIActDocumentType := COPYSTR(lXMLNewNode.text,1,20);
+
+          IF FindFirstNode(lXMLCurrNode,DOCUMENT_ID,lXMLNewNode) THEN
+            lEAIActDocumentID   := COPYSTR(lXMLNewNode.text,1,20);
+
+          lEAIAct.SETCURRENTKEY("Message Type Code","Document Type Code","Document ID Code");
+          lEAIAct.SETRANGE("Message Type Code",lEAIActMessageType);
+          lEAIAct.SETRANGE("Document Type Code",lEAIActDocumentType);
+          lEAIAct.SETRANGE("Document ID Code",lEAIActDocumentID);
+          lEAIAct.SETRANGE(Type,lEAIAct.Type::Inbound);
+          lEAIAct.SETRANGE(Status,lEAIAct.Status::Active);
+          IF NOT lEAIAct.FINDFIRST THEN
+          BEGIN
+            lEAIAct.SETRANGE("Document ID Code");
+            IF NOT lEAIAct.FINDFIRST THEN
+            BEGIN
+              lEAIAct.SETRANGE("Document Type Code");
+              IF NOT lEAIAct.FINDFIRST THEN
+                lEAIAct.INIT;
+            END;
+          END;
+
+        //<<GMS04
+        END;
+        //>>GMS04
+        IF (lEAIAct."EAI Act Type Code" <> '') OR (lEAIAct.Code <> '') THEN BEGIN     //IMH02 isat.zw
+          pRcvdMQBuffer."EAI Act Type Code" := lEAIAct."EAI Act Type Code";
+          pRcvdMQBuffer."EAI Act Code"      := lEAIAct.Code;
+          pRcvdMQBuffer."Act Priority" := lEAIAct."Act Priority";
+        END;
+
+        //Recherche date et heure
+        IF FindFirstNode(lXMLCurrNode,MESSAGE_DATE,lXMLNewNode) THEN
+          pRcvdMQBuffer."File Date Creation" := Tools.TextToDate(lXMLNewNode.text);
+
+        IF FindFirstNode(lXMLCurrNode,MESSAGE_TIME,lXMLNewNode) THEN
+          pRcvdMQBuffer."File Time Creation" := Tools.TextToTime(lXMLNewNode.text);
+
+        //recherche des autres propri‚t‚s (pour la synchro)
+        IF FindFirstNode(lXMLCurrNode,FROM_COMPANY,lXMLNewNode) THEN
+          pRcvdMQBuffer."EAI Partner Code" := lXMLNewNode.text;
+
+        IF FindFirstNode(lXMLCurrNode,PROCESS_TYPE,lXMLNewNode) THEN
+          pRcvdMQBuffer."Table Action Type" := Tools.TextToInteger(lXMLNewNode.text);
+
+        IF FindFirstNode(lXMLCurrNode,TABLE_ID,lXMLNewNode) THEN
+          pRcvdMQBuffer."To Synchronize Table No." := Tools.TextToInteger(lXMLNewNode.text);
+
+        IF FindFirstNode(lXMLCurrNode,PRIORITY,lXMLNewNode) THEN
+          pRcvdMQBuffer."Table Priority" := Tools.TextToInteger(lXMLNewNode.text);
+      END;
+    END;
+
+    PROCEDURE AddSynchroInfoToMessageHeader@1100481000(VAR pXMLDocument@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";pSentMsgBuffer@1000000000 : Record 8016720;pNameSpace@1000000001 : Text[50]);
+    VAR
+      lXMLCurrNode@1100481003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lEAIAct@1100281005 : Record 8016706;
+      VarKeyRef@1100481002 : KeyRef;
+      VarFieldRef@1100481001 : FieldRef;
+      NodeName@1100281004 : Text[250];
+      NodeValue@1100281003 : Text[250];
+      i@1100481000 : Integer;
+    BEGIN
+      WITH EAIXmlMgt DO BEGIN
+
+        lXMLCurrNode := pXMLDocument.documentElement;
+
+        IF NOT FindFirstNode(lXMLCurrNode,MESSAGE_HEADER,lXMLNewChild) THEN
+          ERROR(Error002,MESSAGE_HEADER);
+
+        lXMLCurrNode := lXMLNewChild;
+
+        IF NOT IsAddElement(lXMLCurrNode,FROM_COMPANY,COMPANYNAME,pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,FROM_COMPANY);
+        IF NOT IsAddElement(lXMLCurrNode,TO_COMPANY,pSentMsgBuffer."EAI Partner Code",pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,TO_COMPANY);
+        IF NOT IsAddElement(lXMLCurrNode,PROCESS_TYPE,FORMAT(pSentMsgBuffer."Table Action Type",0,'<Number>'),
+           pNameSpace,lXMLNewChild)
+        THEN
+          ERROR(Error003,PROCESS_TYPE);
+        //<<IMH03.ISAT.EBA
+        IF SynchroIMAService THEN BEGIN
+          IF NOT IsAddElement(lXMLCurrNode,TABLE_ID,FORMAT(DATABASE::Customer),pNameSpace,lXMLNewChild) THEN
+            ERROR(Error003,TABLE_ID);
+        END ELSE
+        //>>IMH03.ISAT.EBA
+        IF NOT IsAddElement(lXMLCurrNode,TABLE_ID,FORMAT(pSentMsgBuffer."To Synchronize Table No."),pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,TABLE_ID);
+        IF NOT IsAddElement(lXMLCurrNode,PRIORITY,FORMAT(pSentMsgBuffer."Act Priority"),pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,PRIORITY);
+        IF NOT IsAddElement(lXMLCurrNode,'USER_ORIGIN',pSentMsgBuffer."User Creation",pNameSpace,lXMLNewChild) THEN
+          ERROR(Error003,'USER_ORIGIN');
+
+      END;
+    END;
+
+    PROCEDURE AddElement@1100481004(VAR ParXMLNode@1100481004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";ParNodeName@1100481003 : Text[250];ParNodeText@1100481002 : Text[1024];ParNameSpace@1100481001 : Text[250];VAR ParXMLNewNode@1100481000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481006 : Codeunit 8016710;
+      lError001@1100481007 : TextConst 'ENU=Trouble during adding node %1.;FRA=ProblŠme lors de l''ajout de la balise %1.';
+    BEGIN
+      //<<GMS01
+      IF NOT lEAIXMLMgt.IsAddElement(ParXMLNode,ParNodeName,ParNodeText,ParNameSpace,ParXMLNewNode) THEN
+        ERROR(lError001,ParNodeName);
+    END;
+
+    PROCEDURE AddBigTextElement@1100281011(VAR ParXMLNode@1100481004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";ParNodeName@1100481003 : Text[250];ParNodeBigText@1100481002 : BigText;ParNameSpace@1100481001 : Text[250];VAR ParXMLNewNode@1100481000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481006 : Codeunit 8016710;
+      lError001@1100481007 : TextConst 'ENU=Trouble during adding node %1.;FRA=ProblŠme lors de l''ajout de la balise %1.';
+    BEGIN
+      //IMH01 isat.zw
+      IF lEAIXMLMgt.AddBigTextElement(ParXMLNode,ParNodeName,ParNodeBigText,ParNameSpace,ParXMLNewNode) > 0 THEN
+        ERROR(lError001,ParNodeName);
+    END;
+
+    PROCEDURE AddCDATAElement@1100281017(VAR pXMLNode@1100481004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pNodeName@1100481003 : Text[250];pBigText@1100481002 : BigText;pNameSpace@1100481001 : Text[250]);
+    VAR
+      lEAIXMLMgt@1100481006 : Codeunit 8016710;
+      lError001@1100481007 : TextConst 'ENU=Trouble during adding node %1.;FRA=ProblŠme lors de l''ajout de la balise %1.';
+    BEGIN
+      // IMH07.PC
+
+      IF lEAIXMLMgt.AddCDATATextElement(pXMLNode,pNodeName,pBigText,pNameSpace) > 0 THEN BEGIN
+        ERROR(lError001,pNodeName);
+      END;
+    END;
+
+    PROCEDURE AddInStreamTextElement@1100281016(VAR pXMLNode@1100481004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pNodeName@1100481003 : Text[250];pInStream@1100481002 : InStream;pNameSpace@1100481001 : Text[250];VAR pXMLNewNode@1100481000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481006 : Codeunit 8016710;
+      lError001@1100481007 : TextConst 'ENU=Trouble during adding node %1.;FRA=ProblŠme lors de l''ajout de la balise %1.';
+    BEGIN
+      // IMH04.PC
+      IF lEAIXMLMgt.AddInStreamTextElement(pXMLNode,pNodeName,pInStream,pNameSpace,pXMLNewNode) > 0 THEN
+        ERROR(lError001,pNodeName);
+    END;
+
+    PROCEDURE AddFileElement@1100281013(VAR ParXMLNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";ParNodeName@1100281003 : Text[250];ParNodeFilePath@1100281002 : Text[1024];ParNameSpace@1100281001 : Text[250];VAR ParXMLNewNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481006 : Codeunit 8016710;
+      lError001@1100281005 : TextConst 'ENU=Trouble during adding node %1.;FRA=ProblŠme lors de l''ajout de la balise %1.';
+    BEGIN
+      //IMH01 isat.zw
+      IF lEAIXMLMgt.AddFileElement(ParXMLNode,ParNodeName,ParNodeFilePath,ParNameSpace,ParXMLNewNode) > 0 THEN
+        ERROR(lError001,ParNodeName);
+    END;
+
+    PROCEDURE AddAttribute@1100281012(VAR ParXMLNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";ParName@1100281002 : Text[260];ParNodeValue@1100281001 : Text[260]);
+    VAR
+      lEAIXMLMgt@1100281000 : Codeunit 8016710;
+      lError001@1100281004 : TextConst 'ENU=Trouble during adding attribute %1.;FRA=ProblŠme lors de l''ajout de l''attribut %1.';
+    BEGIN
+      //IMH01 isat.zw
+      IF lEAIXMLMgt.AddAttribute(ParXMLNode, ParName, ParNodeValue) > 0 THEN
+        ERROR(lError001,ParName);
+    END;
+
+    PROCEDURE CreateXmlByRootNodeName@1100281010(VAR pParXmlDoc@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pRootNodeName@1100281001 : Text[250];VAR pParXmlNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode") : Boolean;
+    VAR
+      lParSource@1100281003 : Text[250];
+      lEAIXMLMgt@1100281004 : Codeunit 8016710;
+    BEGIN
+      //IMH01 isat.zw
+      lParSource := '<?xml version="1.0" encoding="ISO-8859-1" ?><' + pRootNodeName + '/>';
+      EXIT(lEAIXMLMgt.CreateXml(pParXmlDoc,lParSource, pParXmlNode));
+    END;
+
+    PROCEDURE SetSynchroIMAService@1100281014(pSynchroIMAService@1100281000 : Boolean);
+    BEGIN
+      //<<IMH03.ISAT.EBA
+      SynchroIMAService := pSynchroIMAService;
+      //>>IMH03.ISAT.EBA
+    END;
+
+    PROCEDURE CreateXmlByRootNodeName2@1100281015(VAR pParXmlDoc@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";pRootNodeName@1100281001 : Text[250];VAR pParXmlNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode") : Boolean;
+    VAR
+      lParSource@1100281003 : Text[250];
+      lEAIXMLMgt@1100281004 : Codeunit 8016710;
+    BEGIN
+      //<<IMH05.ISAT.EBA
+      lParSource := '<?xml version="1.0" encoding="UTF-8" ?><' + pRootNodeName + '/>';
+      EXIT(lEAIXMLMgt.CreateXml(pParXmlDoc,lParSource, pParXmlNode));
+      //>>IMH05.ISAT.EBA
+    END;
+
+    PROCEDURE AddFileElementWithoutAttribute@1000000002(VAR ParXMLNode@1100281004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";ParNodeName@1100281003 : Text[250];ParNodeFilePath@1100281002 : Text[1024];ParNameSpace@1100281001 : Text[250];VAR ParXMLNewNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481006 : Codeunit 8016710;
+      lError001@1100281005 : TextConst 'ENU=Trouble during adding node %1.;FRA=ProblŠme lors de l''ajout de la balise %1.';
+    BEGIN
+      //IMH06.ACO
+      IF lEAIXMLMgt.AddFileElementWithoutAttribute(ParXMLNode,ParNodeName,ParNodeFilePath,ParNameSpace,ParXMLNewNode) > 0 THEN
+        ERROR(lError001,ParNodeName);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH07 @d 21/08/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @s Add AddCDATAElement function */
+      /** @r IMH06 @d 11/10/13 @a ISAT.ACO @v IMH6.01.348 @s DARVA MATMUT Lot 1 @h 4789
+          @c Cr‚ation fonction AddFileElementWithoutAttribute*/
+      /** @r IMH05 @d 19/11/11 @a ISAT.EBA @v IMH6.01.134 @s DARVA Management
+          @c Cr‚ation fonction CreateXmlByRootNodeName2 */
+      /** @r IMH04 @d 04/11/11 @a ISAT.PC @v IMH6.01.134 @s DARVA Management
+          @c Cr‚ation fonction AddInStreamTextElement */
+      /** @r IMH03 @d 16/05/11 @a ISAT.EBA @v IMH6.01.159 @s Comptabilit‚ - IMA Service
+          @c Ajout fonction SetSynchroIMAService */
+      /** @r IMH02 @d 20/04/11 @a ISAT.ZW @v IMH6.01.136 @s Fusion - Interface EDI
+          @c Gestion des types d'‚change Web Service                              */
+      /** @r IMH01 @d 07/01/10 @a ISAT.ZW @v IMH6.01.131 @s Interface EAI @c Fonctions CreateXmlByRootNodeName */
+      /** @r GMS04 @d 01/12/10 @a ISAT.JR @v ISAEAI6.01.00 @s Moteur EAI @c recherche de l'acte sur lecture du noeud ROOT */
+      /** @r GMS03 @d 23/11/10 @a ISAT.JR @v ISAEAI5.01.00.00 @s Synchro @c Initialisation du RecordRef */
+      /** @r GMS02 @d 18/11/10 @a ISAT.JR @v GMS5.01.00.40 @s EDI Management @c Cr‚ation fonction WriteXMLDocCharge */
+      /** @r EAI02 @d 04/06/10 @a ISAT.JR @v ISAEAI5.01.00.00 @s Synchro @c Optimisation */
+      /** @r GMS01 @d 03/12/09 @a ISAT.PB @v GMS5.01.00.40 @s EDI Management @c ajout addelement */
+      /** @r EAI01 @d 24/10/09 @a ISAT.JR @v ISAEAI5.01.00.00 @s Suppression du champ "Activated" */
+      /** @r EAI00 @d 31/01/09 @a ISAT.JR @v ISAEAI5.01.01.00 @s Cr‚ation de l'objet
+          @c Fonctions de gestion des Flux XML :
+          @c On regroupe toutes les fonctions ici afin de g‚rer plus facilement la structure des flux XML */
+
+      Tous les flux XML doivent avoir la structure suivante :
+      <ROOt_NODE> //le nom n'a pas d'importance
+         <MESSAGE_HEADER>
+            <DOCUMENT_TYPE/>
+            <MESSAGE_TYPE/>
+            <...>
+         </MESSAGE_HEADER>
+         <DOCUMENTS>  //permets de g‚rer le multi-documents
+           <DOCUMENT> //regroupe un document
+             <HEADER> //une seule entˆte par document
+             </HEADER>
+             <LINES>   //une ou plusieurs lignes
+             </LINES>
+             <LINES>
+             </LINES>
+             <LINES>
+             </LINES>
+           </DOCUMENT>
+         <DOCUMENTS>
+      </ROOT_NODE>
+    }
+    END.
+  }
+}

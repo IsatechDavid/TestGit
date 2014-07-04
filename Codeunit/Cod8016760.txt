@@ -1,0 +1,277 @@
+OBJECT Codeunit 8016760 Report Destination
+{
+  OBJECT-PROPERTIES
+  {
+    Date=30/04/13;
+    Time=14:37:31;
+    Modified=Yes;
+    Version List=ISAFAX1.00;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      gReportDest@1100481017 : Record 8016754;
+      Destination@1100481000 : 'Printer,Email,Fax';
+      PDFCreator@1100481003 : Automation "{1CE9DC08-9FBC-45C6-8A7C-4FE1E208A613} 7.1:{40108C54-9352-46C9-822C-027727352F00}:'PDFCreator'.clsPDFCreator" WITHEVENTS;
+      PDFCreatorOption@1100481002 : Automation "{1CE9DC08-9FBC-45C6-8A7C-4FE1E208A613} 7.1:{FCC886F6-E0DF-4302-8BE4-F8A8D9CB881C}:'PDFCreator'.clsPDFCreatorOptions";
+      PDFCreatorError@1100481001 : Automation "{1CE9DC08-9FBC-45C6-8A7C-4FE1E208A613} 7.1:{84D26557-2990-4B3E-A99F-C4DC1CB6C225}:'PDFCreator'.clsPDFCreatorError";
+      FileSystem@1100481018 : Automation "{420B2830-E718-11CF-893D-00A0C9054228} 1.0:{0D43FE01-F093-11CF-8940-00A0C9054228}:'Microsoft Scripting Runtime'.FileSystemObject";
+      WDialog@1100481004 : Dialog;
+      Text000@1100481006 : TextConst 'ENU=PDF generating;FRA=G‚n‚ration du PDF';
+      Text000b@1100481005 : TextConst 'ENU=PDF generaton over;FRA=Fin de g‚n‚ration du fichier pdf';
+      DefaultPrinter@1100481007 : Text[200];
+      Text012@1100481008 : TextConst 'FRA=Attente liberation PDFCreatorSPOOL';
+      FileName@1100481009 : Text[40];
+      FileDirectory@1100481010 : Text[150];
+      Text004@1100481011 : TextConst 'FRA=Evenement : #1#####################';
+      MailTo@1100481014 : Text[150];
+      ReqWindow@1100481012 : Boolean;
+      SystemPrinter@1100481013 : Boolean;
+      Text005@1100481015 : TextConst 'FRA=Printer,Email,Fax';
+      Text006@1100481016 : TextConst 'ENU=Chose your destination;FRA=Selectionnez votre destination';
+      CR@1100481019 : Char;
+      LF@1100481020 : Char;
+
+    PROCEDURE SetDestination@1100481000(pDestination@1100481000 : 'Printer,Email,Fax');
+    BEGIN
+      Destination := pDestination;
+    END;
+
+    PROCEDURE GetDestination@1100481001() : Integer;
+    BEGIN
+      EXIT(Destination);
+    END;
+
+    PROCEDURE SetMailTo@1100481008(pMailTo@1100481000 : Text[150]);
+    BEGIN
+      MailTo := pMailTo;
+    END;
+
+    PROCEDURE SelectDestination@1100481002(ReportID@1100481001 : Integer);
+    VAR
+      ReportDestination@1100481004 : Record 8016754;
+      lOption@1100481003 : Text[100];
+      lDest@1100481002 : Integer;
+      lTabDest@1100481000 : ARRAY [4] OF Text[30];
+      i@1100481005 : Integer;
+    BEGIN
+      //<<IMH01.PC
+      {
+      ReportDestination.RESET();
+      ReportDestinPCation.SETRANGE("Report ID",ReportID);
+      IF NOT ReportDestination.ISEMPTY() THEN BEGIN
+        ReportDestination.SETRANGE("User ID",UPPERCASE(USERID));
+        IF ReportDestination.ISEMPTY() THEN
+           ReportDestination.SETRANGE("User ID",'');
+           IF ReportDestination.ISEMPTY() THEN BEGIN
+             SetDestination(0);
+             EXIT;
+           END;
+        lOption := '';
+        i := 1;
+        ReportDestination.FINDSET();
+        REPEAT
+          CASE ReportDestination.Destination OF
+            ReportDestination.Destination::Printer:
+              lTabDest[i] := 'Printer';
+            ReportDestination.Destination::Email:
+              lTabDest[i] := 'Email';
+            ReportDestination.Destination::Fax:
+              lTabDest[i] := 'Fax';
+          END;
+          lOption += ',' +lTabDest[i];
+          i +=1;
+        UNTIL ReportDestination.NEXT() = 0;
+        lOption := COPYSTR(lOption,2,STRLEN(lOption));
+        IF i = 2 THEN
+          lDest := 1
+        ELSE
+          lDest :=  DIALOG.STRMENU(lOption,1,Text006);
+        IF lDest = 0 THEN EXIT;
+        CASE lTabDest[lDest] OF
+          'Printer': lDest := 0;
+          'Email'  : lDest := 1;
+          'Fax'    : lDest := 2;
+        END;
+        SetDestination(lDest);
+        gReportDest.COPYFILTERS(ReportDestination);
+        gReportDest.SETRANGE(Destination,lDest);
+        gReportDest.FINDFIRST();
+      END;
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE StartPDF@1100481003(pReportID@1100481005 : Integer;pFileName@1100481003 : Text[40]);
+    VAR
+      ReportDestination@1100481004 : Record 8016754;
+      lTimeStp@1100481002 : Integer;
+      lFile@1100481001 : Record 2000000022;
+      lFilePath@1100481000 : Text[255];
+    BEGIN
+      //<<IMH01.PC
+      {
+      ReqWindow := TRUE;
+      SystemPrinter := FALSE;
+      SelectDestination(pReportID);
+
+      IF (Destination =  ReportDestination.Destination::Printer) THEN
+        EXIT;
+      ReqWindow := FALSE;
+      SystemPrinter := TRUE;
+
+      WDialog.OPEN(Text004);
+      FileName := pFileName;
+      FileDirectory := ENVIRON('TEMP');
+
+      CLEAR(PDFCreator);
+      CLEAR(PDFCreatorError);
+
+      CREATE(PDFCreator);
+      CREATE(PDFCreatorError);
+
+      PDFCreatorError := PDFCreator.cError;
+      PDFCreator.cVisible := FALSE;
+
+      IF PDFCreator.cStart('/NoProcessingAtStartup',TRUE) = FALSE THEN BEGIN
+        ERROR('Status: Error[' + FORMAT(PDFCreatorError.Number) + ']: ' + PDFCreatorError.Description);
+      END;
+
+      WDialog.UPDATE(1,Text000);
+
+      PDFCreatorOption := PDFCreator.cOptions;
+      PDFCreatorOption.UseAutosave := 1;
+      PDFCreatorOption.UseAutosaveDirectory := 1;
+      PDFCreatorOption.AutosaveDirectory := FileDirectory;
+      PDFCreatorOption.AutosaveFormat := 0;                       //PDF file, you can also save in other formats
+      PDFCreatorOption.AutosaveFilename := pFileName;
+      //MESSAGE('PDFCreatorOption.PrinterTemppath : %1',PDFCreatorOption.PrinterTemppath);
+      //PDFCreatorOption.PrinterTemppath := ENVIRON('TEMP');
+      //CREATE(FileSystem);
+      //IF NOT FileSystem.FolderExists(ENVIRON('TEMP')+'\PDFCreatorSpool') THEN
+       // FileSystem.CreateFolder(ENVIRON('TEMP')+'\PDFCreatorSpool');
+      //CLEAR(FileSystem);
+
+
+      PDFCreator.cOptions := PDFCreatorOption;
+      PDFCreator.cClearCache();
+      DefaultPrinter := PDFCreator.cDefaultPrinter;
+      PDFCreator.cDefaultPrinter := 'PDFCreator';
+
+
+      lTimeStp := 0;
+      // Dans le cas d'un server terminal serveur le repertoire pdfcreatorspool est partag‚
+      // par tous les utilisateurs et il y a risque de melange dans les fichiers g‚n‚r‚s
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE StopPDF@1100481004();
+    VAR
+      lCompanyInfo@1100481003 : Record 79;
+      ReportDestination@1100481001 : Record 8016754;
+      lContact@1100481002 : Record 5050;
+      lTimeStp@1100481000 : Integer;
+      lSubject@1100481004 : Text[150];
+      lBody@1100481005 : Text[1024];
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF (Destination =  ReportDestination.Destination::Printer) THEN
+        EXIT;
+      lCompanyInfo.GET();
+
+      PDFCreator.cPrinterStop := FALSE;
+      PDFCreator.cDefaultPrinter := DefaultPrinter;
+
+      {lTimeStp := 0;
+      REPEAT
+        SLEEP (1000);
+        lTimeStp += 1;
+        IF EXISTS(FileDirectory + FileName + '.pdf') THEN BEGIN
+          lTimeStp := 15;
+        END;
+      UNTIL (lTimeStp >= 15);
+      SLEEP (1000);
+      }
+      WDialog.UPDATE(1,Text000b);
+      WDialog.CLOSE();
+      CLEAR(PDFCreator);
+      CASE Destination OF
+        ReportDestination.Destination::Fax: BEGIN
+          lCompanyInfo.TESTFIELD(lCompanyInfo."E-mail Fax");
+          IF lContact.GET(MailTo) THEN BEGIN
+            SendMail(lContact."Fax No." + lCompanyInfo."E-mail Fax");
+          END;
+        END;
+        ReportDestination.Destination::Email: BEGIN
+          IF lContact.GET(MailTo) THEN BEGIN
+            SendMail(lContact."E-Mail");
+          END;
+        END;
+      END;
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE getReqWindow@1100481005() : Boolean;
+    BEGIN
+      EXIT(ReqWindow);
+    END;
+
+    PROCEDURE getSystemPrinter@1100481006() : Boolean;
+    BEGIN
+      EXIT(SystemPrinter);
+    END;
+
+    PROCEDURE SendMail@1100481007(pMailTo@1100481000 : Text[150]);
+    VAR
+      lStandardText@1100481004 : Record 7;
+      lExtendedTextLine@1100481005 : Record 280;
+      lSMTPMail@1100481001 : Codeunit 400;
+      lMail@1100481002 : Codeunit 397;
+      lSubject@1100481003 : Text[150];
+      lBody@1100481006 : Text[1024];
+    BEGIN
+      //<<IMH01.PC
+      {
+      CR := 13;
+      LF := 10;
+      IF lStandardText.GET(gReportDest."Standard Text Code") THEN BEGIN
+        lSubject := lStandardText.Description;
+        lExtendedTextLine.RESET();
+        lExtendedTextLine.SETRANGE("No.",gReportDest."Standard Text Code");
+        IF lExtendedTextLine.FINDSET() THEN BEGIN
+          REPEAT
+            lBody += lExtendedTextLine.Text + FORMAT(CR,0,'<CHAR>') + FORMAT(LF,0,'<CHAR>');;
+          UNTIL lExtendedTextLine.NEXT() = 0;
+        END;
+      END;
+      lMail.NewMessage(pMailTo,'',lSubject,lBody,FileDirectory + '\' + FileName + '.pdf',TRUE)
+      }
+      //>>IMH01.PC
+    END;
+
+    EVENT PDFCreator@1100481003::eReady@1();
+    BEGIN
+    END;
+
+    EVENT PDFCreator@1100481003::eError@2();
+    BEGIN
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 17/04/13 @a ISAT.PC @v IMH6.01.346 @s Hotfix 33494 @c Disable code */
+      /** @r ISA01 @d 22/01/2011 @a ISAT.ST @v ISAFAX1.00 @s D‚placement objet
+          @c D‚placement de 8016750 … 8016760 */
+    }
+    END.
+  }
+}

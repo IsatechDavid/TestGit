@@ -1,0 +1,446 @@
+OBJECT Codeunit 50044 Proc. Provider Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=28/03/14;
+    Time=15:03:20;
+    Modified=Yes;
+    Version List=IMH6.01,OPTIM,JUIN,5005;
+  }
+  PROPERTIES
+  {
+    TableNo=50000;
+    Permissions=TableData 50000=rm;
+    OnRun=BEGIN
+            TestAutoStep(Rec);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      ProcessMgt@1100281000 : Codeunit 50040;
+      CurrRec@1100281001 : Record 50000;
+      TrayLineMgt@1000000000 : Codeunit 50050;
+
+    PROCEDURE SelectNextStep@1100281000(VAR pRec@1100281000 : Record 50000);
+    VAR
+      lProcessStep@1100281001 : Record 50043;
+    BEGIN
+      IF ProcessMgt.SelectNextStep(pRec."Process Code", pRec."Process Status No.", lProcessStep) THEN
+        IF StatusChangeAllowed(pRec, lProcessStep, TRUE, TRUE) THEN
+          PerformStatusChange(pRec, lProcessStep);
+    END;
+
+    PROCEDURE TestAutoStep@1100281001(VAR pRec@1100281000 : Record 50000) : Boolean;
+    VAR
+      lProcessStep@1100281002 : Record 50043;
+      lProcessAutoStep@1100281001 : Codeunit 50129;
+    BEGIN
+      IF NOT ProcessMgt.SetAutoStepFilters(pRec."Process Code", pRec."Process Status No.", lProcessStep) THEN
+        EXIT;
+      lProcessStep.FINDSET; //IMH19.ST
+      REPEAT
+        IF StatusChangeAllowed(pRec, lProcessStep, FALSE, FALSE) THEN BEGIN
+          lProcessAutoStep.AddStep(lProcessStep); //IMH14.ST
+          PerformStatusChange(pRec, lProcessStep);
+          lProcessAutoStep.InitCU; //IMH13.ST
+          EXIT(TRUE);
+        END;
+      UNTIL lProcessStep.NEXT = 0;
+      EXIT(FALSE);
+    END;
+
+    LOCAL PROCEDURE StatusChangeAllowed@1100281002(pRec@1100281000 : Record 50000;pProcessStep@1100281004 : Record 50043;pRaiseError@1100281002 : Boolean;pFromUserStep@1100281001 : Boolean) : Boolean;
+    VAR
+      lProcessStepRequirement@1100281003 : Record 50045;
+      lCalendarCode@1100281006 : Code[10];
+      lProcess@1100281005 : Record 50041;
+    BEGIN
+      IF NOT pProcessStep.Active THEN
+        EXIT(FALSE);
+
+      IF (pFromUserStep AND pProcessStep."Enforce User Time Limit") OR (NOT pFromUserStep) THEN
+        //<<IMH10
+        IF pProcessStep."Use Calendar" THEN BEGIN
+          lProcess.GET(pProcessStep."Process Code");
+          lCalendarCode := lProcess."Base Calendar Code";
+        END;
+        IF NOT ProcessMgt.AllowStepChangeDelay(pProcessStep."Step Date Limit Formula", pProcessStep."Step Time Limit Formula",
+                                               DATABASE::Provider,
+                                               pRec."No.", '', 0,0,
+                                               pRec."Creation Date", lCalendarCode, pRaiseError) THEN
+          EXIT(FALSE);
+        //>>IMH10
+      pProcessStep.SetRequirementFilter(lProcessStepRequirement);
+      EXIT(RequirementAllowed(lProcessStepRequirement, pRec, pRaiseError));
+    END;
+
+    LOCAL PROCEDURE ProcessActionAllowed@1100281009(pRec@1100281000 : Record 50000;pProcessAction@1100281004 : Record 50044;pRaiseError@1100281002 : Boolean) : Boolean;
+    VAR
+      lProcessStepRequirement@1100281003 : Record 50045;
+    BEGIN
+      pProcessAction.SetRequirementFilter(lProcessStepRequirement);
+      EXIT(RequirementAllowed(lProcessStepRequirement, pRec, pRaiseError));
+    END;
+
+    PROCEDURE RequirementAllowed@1100281010(VAR pRequirement@1100281002 : Record 50045;pRec@1100281001 : Record 50000;pRaiseError@1100281000 : Boolean) : Boolean;
+    VAR
+      lProviderTemp@1100281006 : TEMPORARY Record 50000;
+      lLineResult@1100281003 : Boolean;
+      lCount@1100281004 : Integer;
+      lLastRequirement@1100281005 : Record 50045;
+      lRecRef@1100281007 : RecordRef;
+    BEGIN
+      IF pRequirement.ISEMPTY THEN
+        EXIT(TRUE);
+
+      lProviderTemp := pRec;
+      lProviderTemp.INSERT;
+      lRecRef.GETTABLE(lProviderTemp);
+      EXIT(ProcessMgt.CheckRequirements(lRecRef,pRequirement,pRaiseError));
+    END;
+
+    LOCAL PROCEDURE PerformStatusChange@1100281003(VAR pRec@1100281001 : Record 50000;pProcessStep@1100281003 : Record 50043);
+    VAR
+      lProcessAction@1100281002 : Record 50044;
+      lProcStatusHistToCreate@1000000000 : Record 50047;
+    BEGIN
+      // Appel … partir du changement de statut utilisateur ou automatique
+
+      IF pProcessStep.ProcessActionExists(lProcessAction) THEN
+        ProcessAction(pRec, lProcessAction);
+
+      //Historique statut
+      CreateStatusHistoryLine(pRec, pProcessStep, lProcStatusHistToCreate);  //IMH20
+      IF pRec."Process Code" <> pProcessStep."Next Process Code" THEN
+        pRec.VALIDATE("Process Code", pProcessStep."Next Process Code");
+      pRec.VALIDATE("Process Status No.", pProcessStep."Next Status");
+      //<<IMH20
+      //CreateStatusHistoryLine(pRec, pProcessStep);
+      InsertStatusHistoryLine(lProcStatusHistToCreate);
+      //>>IMH20
+
+      //pRec.MODIFY(TRUE);   //IMH21 d‚placer dans la fonction changement statut
+      //<<IMH20
+      pRec.SetSkipAutoStep(TRUE);
+      pRec.MODIFY(TRUE);
+      pRec.SetSkipAutoStep(FALSE);
+      pRec.AutoStep;
+      //>>IMH20
+    END;
+
+    PROCEDURE ProcessAction@1100281005(VAR pRec@1100281001 : Record 50000;VAR pProcessAction@1100281000 : Record 50044);
+    VAR
+      lProcessCurrentAction@1100281008 : Record 50046;
+      lProcessAction@1100281009 : Record 50044;
+      lContact@1100281010 : Record 5050;
+    BEGIN
+      IF pProcessAction.FINDSET(FALSE) THEN
+        REPEAT
+          IF ProcessActionAllowed(pRec, pProcessAction, FALSE) THEN BEGIN
+            CreateCrrrentActionLine(lProcessCurrentAction, pRec, pProcessAction);
+          END;
+        UNTIL pProcessAction.NEXT = 0;
+
+      lProcessCurrentAction.InitActionFilters(pProcessAction); //IMH18.ST
+      lProcessCurrentAction.SETRANGE("Source Table ID", DATABASE::Provider);
+      lProcessCurrentAction.SETRANGE("Source Key Code 1", pRec."No.");
+      IF NOT lProcessCurrentAction.FINDSET THEN
+        EXIT;
+      CurrRec := pRec;
+      REPEAT
+
+        //<<IMH20
+        IF lProcessAction.GET(lProcessCurrentAction."Process Code", lProcessCurrentAction."Source Action",
+               lProcessCurrentAction."Source Line No.", lProcessCurrentAction."Action Line No.") THEN BEGIN
+
+          IF lProcessCurrentAction."Action Status" < lProcessCurrentAction."Action Status"::Realized THEN BEGIN
+            IF lProcessCurrentAction."Action Status" = lProcessCurrentAction."Action Status"::Init THEN BEGIN
+              lProcessCurrentAction."Action Status" := lProcessCurrentAction."Action Status"::Process;
+              lProcessCurrentAction.MODIFY(TRUE);
+            END;
+            COMMIT;
+
+            WITH lProcessAction DO BEGIN
+              IF NOT "Suspend Action" THEN BEGIN
+                CASE "Action Type" OF
+                  "Action Type"::"Create Tray Line" :
+                    Act_CreateTrayLine(lProcessAction);
+                  "Action Type"::"Create Interaction" :
+                    Act_CreateInteract(lProcessAction);
+                  "Action Type"::"Run Object" :
+                    Act_RunObject(lProcessAction);
+                  "Action Type"::"Set Value" :
+                    Act_SetValue(lProcessAction);
+                  "Action Type"::"Run Function" :
+                    Act_RunFunction(lProcessAction);
+                END; // CASE
+              END;
+            END;
+            lProcessCurrentAction."Action Status" := lProcessCurrentAction."Action Status"::Realized;
+            lProcessCurrentAction.MODIFY(TRUE);
+            COMMIT;
+          END; // WITH
+        END ELSE BEGIN
+          lProcessCurrentAction."Action Status" := lProcessCurrentAction."Action Status"::Realized;
+          lProcessCurrentAction.MODIFY(TRUE);
+          COMMIT;
+        END;
+      UNTIL lProcessCurrentAction.NEXT=0;
+
+      lProcessCurrentAction.DELETEALL;
+      pRec := CurrRec;
+      COMMIT;  //IMH20
+    END;
+
+    PROCEDURE OnChangeProcessStatus@1100281006(VAR pRec@1100281000 : Record 50000);
+    VAR
+      lProcessAction@1100281001 : Record 50044;
+      lRec@1000000002 : Record 50000;
+      lProcCode@1000000001 : Code[10];
+      lProcStatusNo@1000000000 : Integer;
+    BEGIN
+      // Appel … partir du validate du champ "Process Status" : on traite les actions arrivant … ce statut
+      //<<IMH20
+      //IF ProcessMgt.StatusActionExist(pRec."Process Code", pRec."Process Status No.", lProcessAction) THEN
+      //  ProcessAction(pRec, lProcessAction);
+      lRec := pRec;
+      lRec.SETRECFILTER;
+      IF NOT lRec.FINDFIRST THEN
+        CLEAR(lRec);
+      lProcCode := pRec."Process Code";
+      lProcStatusNo := pRec."Process Status No.";
+      pRec."Process Code" := lRec."Process Code";
+      pRec."Process Status No." := lRec."Process Status No.";
+      IF ProcessMgt.StatusActionExist(lProcCode, lProcStatusNo, lProcessAction) THEN
+        ProcessAction(pRec, lProcessAction);
+
+      IF (pRec."Process Code" = lRec."Process Code") AND (pRec."Process Status No." = lRec."Process Status No.") THEN BEGIN
+        pRec."Process Code" := lProcCode;
+        pRec."Process Status No." := lProcStatusNo;
+      END;
+      //>>IMH20
+    END;
+
+    PROCEDURE CreateStatusHistoryLine@1100281004(pRec@1100281001 : Record 50000;pProcessStep@1100281003 : Record 50043;VAR pProcessStatusHistory@1000000000 : Record 50047);
+    BEGIN
+      //<<IMH20
+      pProcessStatusHistory."Source Table ID" := DATABASE::Provider;
+      pProcessStatusHistory."Source Key Code 1" := pRec."No.";
+      pProcessStatusHistory."From Process Code" := pProcessStep."Process Code";
+      pProcessStatusHistory."From Status No." := pProcessStep."Previous Status";
+      pProcessStatusHistory."To Process Code" := pProcessStep."Next Process Code";
+      pProcessStatusHistory."To Status No." := pProcessStep."Next Status";
+      pProcessStatusHistory."Auto Process" := pProcessStep."Auto Process Step";
+      //lProcessStatusHistory.INSERT(TRUE);
+      pProcessStatusHistory."Line No." := pProcessStatusHistory.GetNextEntry;
+      //>>IMH20
+    END;
+
+    PROCEDURE InsertStatusHistoryLine@1000000001(VAR pProcessStatusHistory@1000000000 : Record 50047);
+    VAR
+      lProcessStatusHistory@1000000001 : Record 50047;
+    BEGIN
+      //<<IMH21
+      lProcessStatusHistory := pProcessStatusHistory;
+      WHILE lProcessStatusHistory.FIND('=') DO BEGIN
+        lProcessStatusHistory."Line No." := lProcessStatusHistory."Line No." - 1;
+      END;
+      pProcessStatusHistory."Line No." := lProcessStatusHistory."Line No.";
+      pProcessStatusHistory.INSERT(TRUE);
+      //>>IMH21
+    END;
+
+    PROCEDURE CreateCrrrentActionLine@1100281007(VAR pProcessCurrentAction@1100281002 : Record 50046;pRec@1100281001 : Record 50000;pProcessAction@1100281000 : Record 50044);
+    BEGIN
+      ProcessMgt.AddCurrActionLine(pProcessCurrentAction,
+                                   DATABASE::Provider, pRec."No.", '', 0, 0,
+                                   pProcessAction);
+    END;
+
+    LOCAL PROCEDURE Act_CreateTrayLine@1100281008(pAction@1100281006 : Record 50044);
+    VAR
+      lTrayLineManagement@1100281003 : Codeunit 50050;
+      lContact@1100281010 : Record 5050;
+      lTeam@1100281002 : Record 5083;
+      lTeamCode@1100281000 : Code[10];
+      lFilterTeamTrayTask@1000000000 : TEMPORARY Record 50129;
+    BEGIN
+      lContact.GET(CurrRec."No.");
+      //<<IMH06
+      CASE pAction."DPR Tray Line" OF
+        pAction."DPR Tray Line"::RC:
+          lTeamCode := CurrRec.GetCoordinatorTrayLine;
+        pAction."DPR Tray Line"::NA:
+          lTeamCode := CurrRec.GetNetworkAssistantTrayLine;
+        pAction."DPR Tray Line"::NF:
+          lTeamCode := CurrRec.GetFacilitatorTrayLine;
+        //<<IMH16.ISAT.EBA
+        //pAction."DPR Tray Line"::Territory:
+        //  lTeamCode := CurrRec.GetTerritoryTrayLine();
+        pAction."DPR Tray Line"::"RC Territory":
+          lTeamCode := CurrRec.GetTerritoryTrayLine(lTeam.Territory::"RC Territory");
+        pAction."DPR Tray Line"::"NA Territory":
+          lTeamCode := CurrRec.GetTerritoryTrayLine(lTeam.Territory::"NA Territory");
+        pAction."DPR Tray Line"::"NF Territory":
+          lTeamCode := CurrRec.GetTerritoryTrayLine(lTeam.Territory::"NF Territory");
+        //>>IMH16.ISAT.EBA
+      END;
+      //>>IMH06
+      IF pAction.GetUserInterf THEN COMMIT; //IMH07.ST
+      lTrayLineManagement.SetCallFrom(1);
+      IF lTeamCode = '' THEN
+        lTeamCode := pAction."Team Code";
+
+      //<<IMH22
+      IF lTeamCode = '' THEN BEGIN
+        lTeamCode := TrayLineMgt.GetTeamByTask(pAction."Task Code", lFilterTeamTrayTask, '');
+      END;
+      //>>IMH22
+
+      IF NOT lTrayLineManagement.CreateTLFromContact(
+        //<<IMH06
+         //lContact, pAction."Team Code", pAction."Task Code", pAction.GetUserInterf) THEN
+         lContact, lTeamCode, pAction."Task Code", pAction.GetUserInterf) THEN
+        //>>IMH06
+        IF NOT pAction.Optional THEN
+          ERROR('');
+    END;
+
+    LOCAL PROCEDURE Act_CreateInteract@1100281011(pAction@1100281000 : Record 50044);
+    VAR
+      lSegLine@1100281002 : TEMPORARY Record 5077;
+      lContact@1100281001 : Record 5050;
+      lProvider@1100281004 : Record 50000;
+      lInteracTemplate@1100281003 : Record 5064;
+      lContactNo@1100281005 : Code[20];
+    BEGIN
+      pAction.TESTFIELD("Interaction Template Code");
+      //<<IMH08
+      IF lInteracTemplate.GET(pAction."Interaction Template Code") THEN BEGIN
+        IF lInteracTemplate."Send To Admin. Contact" THEN BEGIN
+          IF lProvider.GET(CurrRec."No.") THEN
+            IF lProvider."Admin. Contact No." <> '' THEN
+              lContactNo := lProvider."Admin. Contact No.";
+        END;
+      END;
+      IF lContactNo <> '' THEN
+        lContact.GET(lContactNo)
+      ELSE
+      //>>IMH08
+        lContact.GET(CurrRec."No.");
+      CurrRec.MODIFY; //imh15.st
+      IF pAction.GetUserInterf THEN COMMIT; //IMH07.ST
+      lSegLine."Process Code" := pAction."Process Code"; //IMH17.ST
+      lSegLine.SetHideWizard(pAction.GetInteractParam);
+      IF NOT lSegLine.CreateInteractionFromContact2(lContact, pAction."Interaction Template Code") THEN
+        IF NOT pAction.Optional THEN
+          ERROR('');
+    END;
+
+    PROCEDURE Act_RunObject@1100281013(pAction@1100281000 : Record 50044);
+    VAR
+      lRec@1100281001 : Record 50000;
+    BEGIN
+      CASE pAction."Object Type" OF
+        pAction."Object Type"::Report : BEGIN
+          CurrRec.MODIFY;
+          lRec := CurrRec;
+          lRec.SETRECFILTER;
+
+          IF pAction."Use Request Form" THEN COMMIT;    //IMH13 .ZW
+          REPORT.RUN(pAction."Object No.", pAction."Use Request Form", pAction."Use System Printer", lRec);
+          //<<IMH09.isat.PC
+          //CurrRec.GET; // recharge le rec au cas o— le report le modifie
+          lRec.FINDFIRST;
+          CurrRec := lRec;
+          //>>IMH09.isat.PC
+
+          //<<IMH20
+          CurrRec.SetSkipAutoStep(TRUE);
+          CurrRec.MODIFY(TRUE);
+          //>>IMH20
+        END;
+        pAction."Object Type"::Codeunit : BEGIN
+          lRec := CurrRec;
+          lRec.SETRECFILTER;
+          CODEUNIT.RUN(pAction."Object No.", lRec);
+          CurrRec := lRec; // recopie le rec au cas o— le codeunit le modifie
+          //<<IMH20
+          CurrRec.SetSkipAutoStep(TRUE);
+          CurrRec.MODIFY(TRUE);
+          //>>IMH20
+        END;
+      END; // CASE
+    END;
+
+    PROCEDURE Act_SetValue@1100281015(pAction@1100281000 : Record 50044);
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      lRecRef.GETTABLE(CurrRec);
+      ProcessMgt.SetFieldValue(pAction, lRecRef);
+      lRecRef.SETTABLE(CurrRec);
+
+      //<<IMH20
+      CurrRec.SetSkipAutoStep(TRUE);
+      CurrRec.MODIFY(TRUE);
+      //>>IMH20
+    END;
+
+    LOCAL PROCEDURE Act_RunFunction@1100281012(pAction@1100281000 : Record 50044);
+    VAR
+      lActFunction@1100281001 : Record 50085;
+      lRecRef@1100281002 : RecordRef;
+    BEGIN
+      lRecRef.GETTABLE(CurrRec);
+      IF NOT lActFunction.ActFunction(lRecRef,pAction) THEN
+      //<<IMH11.ST
+        IF NOT pAction.Optional THEN
+          ERROR('');
+      //>>IMH11.ST
+      lRecRef.SETTABLE(CurrRec);
+
+      //<<IMH20
+      CurrRec.SetSkipAutoStep(TRUE);
+      CurrRec.MODIFY(TRUE);
+      //>>IMH20
+    END;
+
+    BEGIN
+    {
+      /** @r IMH22 @d 26/03/14 @a ISAT.ZW @v IMH6.01.5005 @s Reorganisation DPS @h 5005
+          @c Ajout la gestion de team code par defaut */
+      /** @r IMH21 @d 11/06/13 @a ISAT.ZW @v IMH6.01.4484 @s JUIN @h 4484 @c Gestion processus*/
+      /** @r IMH20 @d 11/06/13 @a ISAT.ZW @v IMH6.01.4484 @s JUIN @h 4484 @c Gestion processus*/
+      /** @r IMH19 @d 29/11/12 @a ISAT.ST @v IMH6.01.P008 @s Gestion des statuts @c optimisation findfirst -> findset */
+      /** @r IMH18 @d 06/06/12 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @h 3454 @c Appel ProcessCurrentAction.InitActionFilters*/
+      /** @r IMH17 @d 06/12/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Suivi processus interactions */
+      /** @r IMH16 @d 17/10/11 @a ISAT.EBA @v IMH6.01.120 @s Gestion des corbeilles - Mantis 1542 */
+      /** @r IMH15 @d 02/09/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Modify avant cr‚ation interaction */
+      /** @r IMH14 @d 22/06/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Controle des boucles infinies */
+      /** @r IMH13 @d 12/05/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Ajout commit si Request form Report */
+      /** @r IMH12 @d 10/05/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Correctif enchainement d'actions */
+      /** @r IMH11 @d 31/03/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Mode optionel pour les actions */
+      /** @r IMH10 @d 14/03/11 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts
+          @c Ajout gestion des celendriers pour le calcul de d‚lai processus */
+      /** @r IMH09 @d 09/03/11 @a ISAT.PC @v IMH6.01.020 @s Gestion prestataire @c Erreur sur le currrec.get */
+      /** @r IMH08 @d 08/03/11 @a ISAT.LLT @v IMH6.01.020 @s Gestion prestataire
+          @c L'interaction porte sur le contact administratif en fonction du modŠle */
+      /** @r IMH07 @d 18/02/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des status @c COMMIT before userinterface */
+      /** @r IMH06 @d 27/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des status @c Gestion code corbeille */
+      /** @r IMH05 @d 25/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des status
+          @c Ajout d'une autre option pour interactions
+          @c Test retour cr‚ation corbeille */
+      /** @r IMH04 @d 20/01/11 @a ISAT.LLT @v IMH6.01.102 @s Gestion des statuts
+          @c Adaptations */
+      /** @r IMH03 @d 11/01/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts
+          @c Gestion des erreurs
+          @c Fonction Action */
+      /** @r IMH02 @d 31/12/10 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Finalisation */
+      /** @r IMH01 @d 09/12/10 @a ISAT.ZW @v IMH6.01.102 @s Gestion des statuts @c Creation Objet */
+    }
+    END.
+  }
+}

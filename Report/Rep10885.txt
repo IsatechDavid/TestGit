@@ -1,0 +1,654 @@
+OBJECT Report 10885 Export G/L Entries - Tax Audit
+{
+  OBJECT-PROPERTIES
+  {
+    Date=04/06/14;
+    Time=10:42:18;
+    Modified=Yes;
+    Version List=SA1065;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Export G/L Entries - Tax Audit;
+               FRA=Export du Fichier des Ecritures Comptables pour l'Administration Fiscale];
+    ProcessingOnly=Yes;
+    OnInitReport=BEGIN
+                   CRLF[1] := 13;
+                   CRLF[2] := 10;
+                   OutputSystem := OutputSystem::ADO;
+                 END;
+
+    OnPreReport=VAR
+                  lGLEntry@1080000000 : Record 17;
+                BEGIN
+                  IF StartingDate = 0D THEN BEGIN
+                    ERROR(MissingStartingDateErr);
+                  END;
+                  IF EndingDate = 0D THEN BEGIN
+                    ERROR(MissingEndingDateErr);
+                  END;
+                  IF ISSERVICETIER THEN BEGIN
+                    // A cause de la taille du fichier, doit utiliser un chemin r‚seau
+                    IF COPYSTR(ToFileName, 1, 2) <> '\\' THEN
+                      ERROR(Text004);
+                  END;
+                  StartProcessingDate := CURRENTDATETIME;
+                  GLSetup.GET;
+                  // filter entries
+                  lGLEntry.SETRANGE("Posting Date",StartingDate,EndingDate);
+                  lGLEntry.SETRANGE("Entry Type",lGLEntry."Entry Type"::Definitive);
+                  IF lGLEntry.ISEMPTY THEN BEGIN
+                    ERROR(NoEntriestoExportErr);
+                  END;
+                  CASE OutputSystem OF
+                    OutputSystem::File : BEGIN
+                      ExitFile.TEXTMODE(TRUE);
+                      ExitFile.WRITEMODE(TRUE);
+                      ExitFile.CREATE(ToFileName);
+                    END;
+                    OutputSystem::ADO : BEGIN
+                      IF ISSERVICETIER THEN
+                        CREATE(AdoStream, TRUE, FALSE)
+                      ELSE
+                        CREATE(AdoStream);
+                      AdoStream.Open;
+                      AdoStream.Charset('UTF-8');
+                    END;
+                  END;
+                  WriteHeaderToFile;
+                  WDialog.OPEN(Text001);
+                  GenerateANouveauLedger;
+                  GetGLEntryBoundary(
+                    StartingGLEntryNo,EndingGLEntryNo,
+                    StartingRegisterEntryNo,EndingRegisterEntryNo);
+                END;
+
+    OnPostReport=VAR
+                   CommonDialogManagement@1120001 : Codeunit 412;
+                   DefaultFileType@1120002 : ' ,Text,Excel,Word,Custom,Xml,Htm,Xsd,Xslt';
+                   Action@1120003 : 'Open,Save';
+                   ClientTempFileName@1120004 : Text[250];
+                   lTempBLOB@1000000000 : TEMPORARY Record 99008535;
+                   lFileMgt@1000000001 : Codeunit 419;
+                   lTempServerFileName@1100281001 : Text[1024];
+                 BEGIN
+                   CASE OutputSystem OF
+                     OutputSystem::File : BEGIN
+                       ExitFile.CLOSE;
+                     END;
+                     OutputSystem::ADO : BEGIN
+                   { Blocage de la taille du fichier sur les NST
+                       IF ISSERVICETIER THEN BEGIN
+                         lTempServerFileName := lFileMgt.ServerTempFileName(GetFileName,'txt');
+                         AdoStream.SaveToFile(lTempServerFileName);
+                         lFileMgt.DownloadTempFile(lTempServerFileName);
+                         ToFileName := GetFileName;
+                         DOWNLOAD(lTempServerFileName,'','',Text009,ToFileName);
+                         ERASE(lTempServerFileName);
+                       END
+                       ELSE
+                   }
+                         AdoStream.SaveToFile(ToFileName);
+                       AdoStream.Close;
+                     END;
+                   END;
+
+                   WDialog.CLOSE;
+                   EndProcessingDate := CURRENTDATETIME;
+                   MESSAGE(Text002,FORMAT(StartProcessingDate,0,3),FORMAT(EndProcessingDate,0,3));
+                 END;
+
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table17;
+        DataItemTableView=SORTING(Entry No.);
+        DataItemVarName=GLEntry;
+        OnPreDataItem=BEGIN
+                        InitTempRecs;
+                        GLEntry.RESET;
+                        GLEntry.SETCURRENTKEY("Entry No.");
+                        GLEntry.SETRANGE("Entry No.",StartingGLEntryNo,EndingGLEntryNo);
+                        GLEntry.SETRANGE("Posting Date",StartingDate,EndingDate);
+                        GLEntry.SETRANGE("Entry Type",GLEntry."Entry Type"::Definitive);
+
+                        CurrentCounter := 0;
+                        TotalCounter := COUNT;
+                        ModuloCounter := ROUND(TotalCounter * 1 / 100,1,'>');
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           CurrentCounter += 1;
+                           IF CurrentCounter MOD ModuloCounter = 1 THEN BEGIN
+                             WDialog.UPDATE(2,ROUND(CurrentCounter / TotalCounter * 10000,1,'>'));
+                           END;
+
+                           IF ("Posting Date" < StartingDate) OR ("Posting Date" > EndingDate) THEN BEGIN
+                             CurrReport.SKIP;
+                           END;
+                           WriteRecordToFile;
+                         END;
+
+      }
+      SECTIONS
+      {
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=10010;
+      Height=4180;
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 1120008;TextBox   ;3410 ;1100 ;1760 ;440  ;Name=Ending Date;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=Ending Date;
+                                                              FRA=Date fin];
+                                                   ClosingDates=Yes;
+                                                   SourceExpr=EndingDate;
+                                                   OnAfterValidate=BEGIN
+                                                                     ToFileName := '';
+                                                                   END;
+                                                                    }
+      { 1120009;Label     ;110  ;1100 ;3190 ;440  ;ParentControl=1120008;
+                                                   InPage=-1 }
+      { 1120010;TextBox   ;3410 ;550  ;1760 ;440  ;Name=StartingDate;
+                                                   InPage=-1;
+                                                   CaptionML=[ENU=Starting Date;
+                                                              FRA=Date d‚but];
+                                                   ClosingDates=Yes;
+                                                   SourceExpr=StartingDate }
+      { 1120011;Label     ;110  ;550  ;3190 ;440  ;ParentControl=1120010;
+                                                   InPage=-1 }
+      { 1080000000;Label  ;0    ;0    ;10010;440  ;InPage=-1;
+                                                   FontBold=Yes;
+                                                   LeaderDots=No;
+                                                   CaptionML=[ENU=G/L entry file generation;
+                                                              FRA=G‚n‚ration du fichier d'‚criture comptable (FEC)] }
+      { 1080000001;TextBox;3410 ;1650 ;6600 ;440  ;InPage=-1;
+                                                   CaptionML=[ENU=File;
+                                                              FRA=Fichier];
+                                                   SourceExpr=ToFileName;
+                                                   OnAssistEdit=BEGIN
+                                                                  SetFileName(ToFileName);
+                                                                END;
+                                                                 }
+      { 1080000002;Label  ;110  ;1650 ;3190 ;440  ;ParentControl=1080000001;
+                                                   InPage=-1 }
+      { 1080000004;TextBox;110  ;2310 ;9790 ;1650 ;Visible=No;
+                                                   Editable=No;
+                                                   Focusable=No;
+                                                   InPage=-1;
+                                                   Border=No;
+                                                   BorderStyle=Normal;
+                                                   MultiLine=Yes;
+                                                   SourceExpr=Text003 }
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+      SaveValues=Yes;
+    }
+    CONTROLS
+    {
+      { 1100281005;0;Container;
+                  ContainerType=ContentArea }
+
+      { 1100281004;1;Group  ;
+                  CaptionML=[ENU=Options;
+                             FRA=Options] }
+
+      { 1100281003;2;Field  ;
+                  CaptionML=[ENU=Starting Date;
+                             FRA=Date d‚but];
+                  SourceExpr=StartingDate }
+
+      { 1100281002;2;Field  ;
+                  CaptionML=[ENU=Ending Date;
+                             FRA=Date fin];
+                  SourceExpr=EndingDate }
+
+      { 1100281001;2;Field  ;
+                  CaptionML=[ENU=File;
+                             FRA=Fichier];
+                  SourceExpr=ToFileName;
+                  OnAssistEdit=BEGIN
+                                 SetFileName(ToFileName);
+                               END;
+                                }
+
+    }
+  }
+  CODE
+  {
+    VAR
+      MissingStartingDateErr@1120017 : TextConst 'ENU=You must enter a Starting Date.;FRA=Vous devez entrer une date de d‚but.';
+      MissingEndingDateErr@1120016 : TextConst 'ENU=You must enter an Ending Date.;FRA=Vous devez entrer une date de fin.';
+      FileCreatedMsg@1120012 : TextConst 'ENU=The text file was created successfully.;FRA=Fichier texte correctement cr‚‚.';
+      NoEntriestoExportErr@1120011 : TextConst 'ENU=There are no entries to export within the defined filter. The file was not created.;FRA=Il n''y a pas d''‚criture … exporter dans le filtre d‚fini. Le fichier n''a pas ‚t‚ cr‚‚.';
+      FileAlreadyExistsMsg@1120010 : TextConst 'ENU=The file %1 already exists.\Do you want to replace the existing file?;FRA=Le fichier %1 existe d‚j….\Voulez-vous remplacer le fichier existant ?';
+      FileAlreadyExistsErr@1120009 : TextConst 'ENU=The file already exists.;FRA=Le fichier existe d‚j….';
+      InvalidWindowsChrStringTxt@1120004 : TextConst 'ENU="""""#%&*:<>?\/{|}~"';
+      GLSetup@1100281004 : Record 98;
+      CurrGLRegister@1100281010 : Record 45;
+      TempGLAcc@1100281009 : TEMPORARY Record 15;
+      TempSourceCode@1100281008 : TEMPORARY Record 230;
+      TempVendorPostingGroup@1100281007 : TEMPORARY Record 93;
+      TempCustomerPostingGroup@1100281002 : TEMPORARY Record 92;
+      TempBankAccountPostingGroup@1100281000 : TEMPORARY Record 277;
+      AdoStream@1100281001 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+      ToFileName@1080000008 : Text[250];
+      ANSIText@1080000018 : Text[80];
+      StartingDate@1080000012 : Date;
+      EndingDate@1080000011 : Date;
+      WDialog@1080000000 : Dialog;
+      Text001@1080000001 : TextConst 'ENU=G/L entries file generation\Generate renew @1@@@@@@@@@@@@@@@@@@@@@@@@@@@\@2@@@@@@@@@@@@@@@@@@@@@@@@@@@;FRA=G‚n‚ration du fichier des ‚critures comptables (FEC)\G‚n‚ration … nouveau @1@@@@@@@@@@@@@@@@@@@\Ecriture comptable   @2@@@@@@@@@@@@@@@@@@@';
+      CurrentCounter@1080000002 : Integer;
+      TotalCounter@1080000003 : Integer;
+      ModuloCounter@1080000004 : Integer;
+      StartProcessingDate@1080000005 : DateTime;
+      EndProcessingDate@1080000006 : DateTime;
+      Text002@1080000007 : TextConst 'ENU=Start processing : %1\End processing : %2;FRA=D‚but du traitement : %1\Fin traitement : %2';
+      ExitFile@1080000009 : File;
+      StartingGLEntryNo@1080000010 : Integer;
+      EndingGLEntryNo@1080000013 : Integer;
+      StartingRegisterEntryNo@1080000016 : Integer;
+      EndingRegisterEntryNo@1080000015 : Integer;
+      Text003@1080000014 : TextConst 'FRA=AprŠs g‚n‚ration du fichier, il faut l''ouvrir avec editeur de texte puis le convertir en UTF-8\Avec Notepad++, il suffit d''ouvrir le fichier puis "Encodage" puis "Encoder en UTF-8" puis sauvegarder';
+      CRLF@1000000005 : Text[2];
+      OutputSystem@1100281003 : 'File,ADO';
+      Text009@1100281005 : TextConst 'ENU=Text Files (*.txt)|*.txt;FRA=Fichier texte (*.txt)|*.txt';
+      Text004@1100281006 : TextConst 'ENU=Please select a network folder.;FRA=Vous devez s‚lectionner un chemin r‚seau.';
+
+    PROCEDURE GenerateANouveauLedger@1080000004();
+    VAR
+      lGLAccount@1080000000 : Record 15;
+      lDebit@1080000001 : Text[30];
+      lCredit@1080000002 : Text[30];
+      lDate@1080000004 : Text[30];
+      lDateRef@1080000003 : Date;
+    BEGIN
+      lDateRef := CLOSINGDATE(StartingDate - 1);
+      lDate := GetFormattedDate(StartingDate);
+      lGLAccount.SETRANGE("Income/Balance",lGLAccount."Income/Balance"::"Balance Sheet");
+      lGLAccount.SETRANGE("Account Type",lGLAccount."Account Type"::Posting);
+      IF lGLAccount.FINDSET THEN BEGIN
+        CurrentCounter := 0;
+        TotalCounter := lGLAccount.COUNT;
+        ModuloCounter := ROUND(TotalCounter * 1 / 100,1,'>');
+        REPEAT
+          CurrentCounter += 1;
+          IF CurrentCounter MOD ModuloCounter = 1 THEN BEGIN
+            WDialog.UPDATE(1,ROUND(CurrentCounter / TotalCounter * 10000,1,'>'));
+          END;
+
+          lCredit := '';
+          lDebit := '';
+          lGLAccount.SETFILTER("Date Filter",'..%1',lDateRef);
+          lGLAccount.CALCFIELDS("Balance at Date");
+          IF lGLAccount."Balance at Date" < 0 THEN BEGIN
+            lCredit := GetFormattedDecimal(ABS(lGLAccount."Balance at Date"));
+          END ELSE BEGIN
+            lDebit := GetFormattedDecimal(lGLAccount."Balance at Date");
+          END;
+          WriteLine(
+            'ANOUVEAU' + '|' +
+            'A nouveau' + '|' +
+            'ANOUVEAU' + '|' +
+            lDate + '|' +
+            lGLAccount."No." + '|' +
+            DeleteCharAccent(lGLAccount.Name) + '|' +
+            '||' +
+            'ANOUVEAU' + '|' +
+            lDate + '|' +
+            'A nouveau ' +lGLAccount."No." + '|' +
+            lDebit + '|' +
+            lCredit + '|' +
+            '||' +
+            lDate + '|' +
+            '|EUR|');
+        UNTIL lGLAccount.NEXT = 0;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetFileName@1120000() : Text[250];
+    VAR
+      CompanyInformation@1120000 : Record 79;
+      FileName@1120001 : Text[250];
+    BEGIN
+      CompanyInformation.GET;
+      CompanyInformation.TESTFIELD("Registration No.");
+      CompanyInformation."Registration No." := DELCHR(CompanyInformation."Registration No.", '=', ' ');
+      FileName :=
+        COPYSTR(CompanyInformation."Registration No.",1,9) +
+        'FEC' +
+        GetFormattedDate(EndingDate) +
+        '.txt';
+      EXIT(DELCHR(FileName,'=',InvalidWindowsChrStringTxt));
+    END;
+
+    PROCEDURE GetGLEntryBoundary@1080000003(VAR pStartingEntryNo@1080000000 : Integer;VAR pEndingEntryNo@1080000001 : Integer;VAR pStartingRegisterEntryNo@1080000004 : Integer;VAR pEndingRegisterEntryNo@1080000003 : Integer);
+    VAR
+      lGLEntry@1080000002 : Record 17;
+      lGLRegister@1080000005 : Record 45;
+    BEGIN
+      lGLEntry.SETCURRENTKEY("Entry No.");
+      lGLEntry.SETRANGE("Posting Date",StartingDate,EndingDate);
+      lGLEntry.SETRANGE("Entry Type",lGLEntry."Entry Type"::Definitive);
+      IF lGLEntry.FINDFIRST THEN
+        pStartingEntryNo := lGLEntry."Entry No.";
+      IF lGLEntry.FINDLAST THEN
+        pEndingEntryNo := lGLEntry."Entry No.";
+
+      lGLRegister.RESET;
+      lGLRegister.SETFILTER("From Entry No.",'<=%1',pStartingEntryNo);
+      lGLRegister.SETFILTER("To Entry No.",'>=%1',pStartingEntryNo);
+      lGLRegister.FINDFIRST;
+      pStartingRegisterEntryNo := lGLRegister."No.";
+      lGLRegister.SETFILTER("From Entry No.",'<=%1',pEndingEntryNo);
+      lGLRegister.SETFILTER("To Entry No.",'>=%1',pEndingEntryNo);
+      lGLRegister.FINDFIRST;
+      pEndingRegisterEntryNo := lGLRegister."No.";
+    END;
+
+    LOCAL PROCEDURE WriteHeaderToFile@1120040();
+    BEGIN
+      WriteLine(
+        'JournalCode|JournalLib|EcritureNum|EcritureDate|CompteNum|CompteLib|' +
+        'CompAuxNum|CompAuxLib|PieceRef|' +
+        'PieceDate|EcritureLib|Debit|Credit|EcritureLet|DateLet|' +
+        'ValidDate|Montantdevise|IDdevise|' +
+        'NumChronoInterne');
+    END;
+
+    LOCAL PROCEDURE WriteRecordToFile@1120005();
+    VAR
+      lCustLedgerEntry@1080000001 : Record 21;
+      lVendorLedgerEntry@1080000002 : Record 25;
+      lBankAccountLedgerEntry@1100281002 : Record 271;
+      lCustomer@1080000005 : Record 18;
+      lVendor@1080000006 : Record 23;
+      lBankAccount@1100281003 : Record 270;
+      lCurrencyCode@1080000011 : Code[10];
+      lAuxAccount@1080000007 : Code[20];
+      lAuxDescription@1080000008 : Text[50];
+      lCurrencyAmount@1080000012 : Decimal;
+      lDocumentDate@1080000013 : Text[30];
+      lDocumentNo@1080000014 : Text[30];
+    BEGIN
+      TempGLAcc.GET(GLEntry."G/L Account No.");
+      TempSourceCode.GET(GLEntry."Source Code");
+      GetGLRegister(GLEntry."Entry No.");
+
+      lAuxAccount := '';
+      lAuxDescription := '';
+      lCurrencyAmount := 0;
+
+      lCurrencyCode := GLSetup."LCY Code";
+      lDocumentNo := GLEntry."Document No.";
+      lDocumentDate := GetFormattedDate(GLEntry."Document Date");
+
+      //IF lDocumentDate = '' THEN BEGIN
+      //  lDocumentDate := GetFormattedDate(GLEntry."Posting Date");
+      //END;
+
+      CASE GLEntry."Source Type" OF
+        GLEntry."Source Type"::Vendor : BEGIN
+          TempVendorPostingGroup.RESET;
+          TempVendorPostingGroup.SETRANGE("Payables Account",GLEntry."G/L Account No.");
+          IF TempVendorPostingGroup.FIND('-') THEN BEGIN
+
+            lAuxAccount := GLEntry."Source No.";
+            lAuxDescription := ' ' ;
+
+            IF lVendor.GET(GLEntry."Source No.") THEN BEGIN
+              lAuxAccount := lVendor."No.";
+              lAuxDescription := lVendor.Name;
+            END;
+            lVendorLedgerEntry.SETCURRENTKEY("Document No.");
+            lVendorLedgerEntry.SETRANGE("Document No.",GLEntry."Document No.");
+            lVendorLedgerEntry.SETRANGE("Vendor No.",GLEntry."Source No.");
+            lVendorLedgerEntry.SETRANGE("Original Amt. (LCY)",GLEntry.Amount);
+            lVendorLedgerEntry.SETFILTER("Currency Code", '<>%1', '');
+            IF lVendorLedgerEntry.FINDFIRST THEN BEGIN
+      //        IF lVendorLedgerEntry."Currency Code" <> '' THEN BEGIN
+                lCurrencyCode := lVendorLedgerEntry."Currency Code";
+                lVendorLedgerEntry.CALCFIELDS(Amount);
+                lCurrencyAmount := lVendorLedgerEntry.Amount;
+      //        END;
+            END;
+          END;
+        END;
+        GLEntry."Source Type"::Customer : BEGIN
+          TempCustomerPostingGroup.RESET;
+          TempCustomerPostingGroup.SETRANGE("Receivables Account",GLEntry."G/L Account No.");
+          IF TempCustomerPostingGroup.FIND('-') THEN BEGIN
+
+            lAuxAccount := GLEntry."Source No.";
+            lAuxDescription := '';
+
+            IF lCustomer.GET(GLEntry."Source No.") THEN BEGIN
+              lAuxAccount := lCustomer."No.";
+              lAuxDescription := lCustomer.Name;
+            END;
+            lCustLedgerEntry.SETCURRENTKEY("Document No.");
+            lCustLedgerEntry.SETRANGE("Document No.",GLEntry."Document No.");
+            lCustLedgerEntry.SETRANGE("Customer No.",GLEntry."Source No.");
+            lCustLedgerEntry.SETRANGE("Original Amt. (LCY)",GLEntry.Amount);
+            lCustLedgerEntry.SETFILTER("Currency Code", '<>%1', '');
+            IF lCustLedgerEntry.FINDFIRST THEN BEGIN
+      //        IF lCustLedgerEntry."Currency Code" <> '' THEN BEGIN
+                lCurrencyCode := lCustLedgerEntry."Currency Code";
+                lCustLedgerEntry.CALCFIELDS(Amount);
+                lCurrencyAmount := lCustLedgerEntry.Amount;
+      //        END;
+            END;
+          END;
+        END;
+
+        GLEntry."Source Type"::"Bank Account" : BEGIN
+          TempBankAccountPostingGroup.RESET;
+          TempBankAccountPostingGroup.SETRANGE("G/L Bank Account No.",GLEntry."G/L Account No.");
+          IF TempBankAccountPostingGroup.FIND('-') THEN BEGIN
+            IF lBankAccount.GET(GLEntry."Source No.") THEN BEGIN
+              lAuxAccount := lBankAccount."No.";
+              lAuxDescription := lBankAccount.Name;
+            END;
+
+            IF lBankAccountLedgerEntry.GET(GLEntry."Entry No.") THEN BEGIN
+              IF lBankAccountLedgerEntry."Currency Code" <> '' THEN BEGIN
+                lCurrencyCode := lBankAccountLedgerEntry."Currency Code";
+                lCurrencyAmount := lBankAccountLedgerEntry.Amount;
+              END;
+            END;
+          END;
+        END;
+      END;
+
+      WriteLine(
+        GLEntry."Source Code" + '|' +
+        TempSourceCode.Description + '|' +
+        FORMAT(CurrGLRegister."No.") + '|' +
+        GetFormattedDate(GLEntry."Posting Date") + '|' +
+        GLEntry."G/L Account No." + '|' +
+        TempGLAcc.Name + '|' +
+        lAuxAccount + '|' +
+        DeleteCharAccent(lAuxDescription) + '|' +
+        lDocumentNo + '|' +
+        lDocumentDate + '|' +
+        DeleteCharAccent(BadCar(GLEntry.Description)) + '|' +
+        GetFormattedDecimal(GLEntry."Debit Amount") + '|' +
+        GetFormattedDecimal(GLEntry."Credit Amount") + '|' +
+        GLEntry.Letter + '|' +
+        GetFormattedDate(GLEntry."Letter Date") + '|' +
+        GetFormattedDate(CurrGLRegister."Creation Date") + '|' +
+        GetFormattedDecimal(lCurrencyAmount) + '|' +
+        lCurrencyCode + '|' +
+        FORMAT(GLEntry."Entry No."));
+    END;
+
+    PROCEDURE SetFileName@1080000000(VAR pFileName@1080000003 : Text[1024]);
+    VAR
+      lCommonDialogManagement@1080000002 : Codeunit 412;
+      lDefaultFileType@1080000001 : ' ,Text,Excel,Word,Custom,Xml,Htm,Xsd,Xslt';
+      lAction@1080000000 : 'Open,Save';
+      lFileTypeTxt@1080000004 : TextConst 'ENU=Text Files (*.txt)|*.txt|All Files (*.*)|*.*;FRA=Fichiers Txt (*.txt)|*.txt|Tous les fichiers (*.*)|*.*';
+    BEGIN
+      IF EndingDate = 0D THEN BEGIN
+        ERROR(MissingEndingDateErr);
+      END;
+
+      pFileName := lCommonDialogManagement.OpenFile('',GetFileName,lDefaultFileType::Text,lFileTypeTxt,lAction::Save);
+    END;
+
+    PROCEDURE BadCar@1080000001(SourceText@1080000000 : Text[1024]) result : Text[250];
+    VAR
+      carText@1080000001 : Char;
+      i@1080000002 : Integer;
+    BEGIN
+      result := '';
+
+      FOR i := 1 TO STRLEN(SourceText) DO BEGIN
+        EVALUATE(carText,COPYSTR(SourceText,i,1));
+        IF (carText > 30) THEN BEGIN
+          result += COPYSTR(SourceText,i,1);
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE GetFormattedDate@1120026(pDate@1120000 : Date) : Text[8];
+    VAR
+      Year@1120001 : Code[4];
+      Month@1120002 : Code[2];
+      Day@1120003 : Code[2];
+    BEGIN
+      EXIT(FORMAT(pDate,0,'<Year4><Month,2><Day,2>'));
+    END;
+
+    LOCAL PROCEDURE GetFormattedDecimal@1080000002(pDecimal@1080000000 : Decimal) : Text[30];
+    BEGIN
+      EXIT(FORMAT(pDecimal,0,'<Precision,2:2><Sign><Integer><Decimals><comma,,>'));
+    END;
+
+    LOCAL PROCEDURE DeleteCharAccent@1080000005(pText@1080000000 : Text[1024]) rValue : Text[1024];
+    BEGIN
+      CASE OutputSystem OF
+        OutputSystem::File : BEGIN
+          pText := FormatExport(pText);
+          rValue := CONVERTSTR(pText,'±æ°Éƒ´ÙÍÈÊ[]À|','eue''a   e"    ');
+        END;
+        OutputSystem::ADO :
+          rValue := CONVERTSTR(pText,'·µ¶ÇŽ’€ÔÒÓÞÖ×ØÑ¥ãàâå™ëéêší… ƒÆ„†‘‡Š‚ˆ‰¡Œ‹Ð¤•¢“ä”—£–ì˜',
+                                   'AAAAAAACEEEEIIIIDNOOOOOUUUUYaaaaaaaceeeeiiiionooooouuuuyy');
+      END;
+    END;
+
+    LOCAL PROCEDURE GetAnsiStr@1000000009() @1000000001 : Text[100];
+    VAR
+      i@1000000000 : Integer;
+    BEGIN
+      IF ANSIText = '' THEN BEGIN
+        // Lettres accentu‚es
+        FOR i := 1 TO 64 DO BEGIN
+          ANSIText[i] := 191 + i;
+        END;
+        // Ajout d'autres caractŠres sp‚ciaux
+        ANSIText[65] := 176;
+        ANSIText[66] := 177;
+        ANSIText[67] := 178;
+      END;
+      EXIT(ANSIText);
+    END;
+
+    LOCAL PROCEDURE GetAsciiStr@1000000011() @1000000000 : Text[100];
+    BEGIN
+      ///////////////192     200       210       220       230       240       250
+      ////////////////2345678901234567890123456789012345678901234567890123456789012345
+      EXIT('·µ¶ÇŽ’€ÔÒÓÞÖ×ØÑ¥ãàâå™žëéêšíèá… ƒÆ„†‘‡Š‚ˆ‰¡Œ‹Ð¤•¢“ä”ö›—£–ìç˜øñý');
+    END;
+
+    PROCEDURE FormatExport@1000000013(_Text@1000000000 : Text[1024]) : Text[1024];
+    BEGIN
+      EXIT(CONVERTSTR(_Text,GetAsciiStr,GetAnsiStr));
+    END;
+
+    LOCAL PROCEDURE InitTempRecs@1000000000();
+    VAR
+      lGLAcc@1000000000 : Record 15;
+      lSourceCode@1000000001 : Record 230;
+      lVendorPostingGroup@1000000002 : Record 93;
+      lCustomerPostingGroup@1100281000 : Record 92;
+      lBankAccountPostingGroup@1100281001 : Record 277;
+    BEGIN
+      IF lGLAcc.FINDSET THEN
+        REPEAT
+          TempGLAcc := lGLAcc;
+          TempGLAcc.Name := DeleteCharAccent(TempGLAcc.Name);
+          TempGLAcc.INSERT;
+        UNTIL lGLAcc.NEXT = 0;
+      IF lSourceCode.FINDSET THEN
+        REPEAT
+          TempSourceCode := lSourceCode;
+          TempSourceCode.Description := DeleteCharAccent(TempSourceCode.Description);
+          TempSourceCode.INSERT;
+        UNTIL lSourceCode.NEXT = 0;
+
+      IF lVendorPostingGroup.FINDSET THEN
+        REPEAT
+          TempVendorPostingGroup := lVendorPostingGroup;
+          TempVendorPostingGroup.INSERT;
+        UNTIL lVendorPostingGroup.NEXT = 0;
+
+      IF lCustomerPostingGroup.FINDSET THEN
+        REPEAT
+          TempCustomerPostingGroup := lCustomerPostingGroup;
+          TempCustomerPostingGroup.INSERT;
+        UNTIL lCustomerPostingGroup.NEXT = 0;
+
+      IF lBankAccountPostingGroup.FINDSET THEN
+        REPEAT
+          TempBankAccountPostingGroup := lBankAccountPostingGroup;
+          TempBankAccountPostingGroup.INSERT;
+        UNTIL lBankAccountPostingGroup.NEXT = 0;
+    END;
+
+    PROCEDURE GetGLRegister@1000000001(pForEntryNo@1000000000 : Integer);
+    BEGIN
+      IF (CurrGLRegister."No." >= StartingRegisterEntryNo) AND (CurrGLRegister."No." <= EndingRegisterEntryNo) AND
+         (pForEntryNo >= CurrGLRegister."From Entry No.") AND (pForEntryNo <= CurrGLRegister."To Entry No.") THEN
+        EXIT;
+
+      CurrGLRegister.RESET;
+      CurrGLRegister.SETRANGE("No.",StartingRegisterEntryNo,EndingRegisterEntryNo);
+      CurrGLRegister.SETFILTER("From Entry No.",'<=%1',GLEntry."Entry No.");
+      CurrGLRegister.SETFILTER("To Entry No.",'>=%1',GLEntry."Entry No.");
+      CurrGLRegister.FINDFIRST;
+    END;
+
+    PROCEDURE WriteLine@1000000002(pText@1000000000 : Text[1024]);
+    BEGIN
+      CASE OutputSystem OF
+        OutputSystem::File :    ExitFile.WRITE(pText);
+        OutputSystem::ADO :     AdoStream.WriteText(pText+CRLF);
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 05/05/2014 @a ISAT.ST @v IMH6.01.P012 @s FEC @c Creation @h 5109 */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

@@ -1,0 +1,163 @@
+OBJECT Report 50056 Process Batch - Completeness
+{
+  OBJECT-PROPERTIES
+  {
+    Date=28/03/14;
+    Time=15:29:24;
+    Modified=Yes;
+    Version List=IMH6.01,5005;
+  }
+  PROPERTIES
+  {
+    CaptionML=[ENU=Process Auto - Completeness Task;
+               FRA=Process automatique - Tƒche compl‚tude];
+    ProcessingOnly=Yes;
+  }
+  DATAITEMS
+  {
+    { PROPERTIES
+      {
+        DataItemTable=Table50004;
+        DataItemTableView=SORTING(Provider No.,Document Code);
+        OnPreDataItem=VAR
+                        lTaskLauncher@1100281000 : Codeunit 8016715;
+                        lProcFilter@1100281002 : Text[1024];
+                        lStatFilter@1100281001 : Text[1024];
+                      BEGIN
+                        FILTERGROUP(4);
+                        SETFILTER("Process Code", '<>%1', '');
+                        FILTERGROUP(0);
+                        IF NASHandler.IsTaskTimeOut(TRUE) THEN
+                          CurrReport.QUIT;
+                        IF NOT ProcMgt.LoadFromStatusAuto(DATABASE::"Completness Task", TempAutoStatus, lTaskLauncher.RetrieveParam) THEN
+                          CurrReport.QUIT;
+                        IF ProcMgt.MakeProcFilter(TempAutoStatus, lProcFilter, lStatFilter) THEN BEGIN
+                          FILTERGROUP(5);
+                          IF lProcFilter <> '' THEN
+                            SETFILTER("Process Code", lProcFilter);
+                          IF lStatFilter <> '' THEN
+                            SETFILTER("Process Status No.", lStatFilter);
+                          FILTERGROUP(0);
+                        END;
+                      END;
+
+        OnAfterGetRecord=BEGIN
+                           IF Process.Code <> "Process Code" THEN
+                             IF NOT Process.GET("Process Code") THEN
+                               CurrReport.SKIP;
+                           IF ErrorTrayLineExist THEN
+                             CurrReport.SKIP;
+                           CLEARLASTERROR;
+                           CurrRec := "Completness Task";
+                           IF NOT CODEUNIT.RUN(CODEUNIT::"Proc. Completness Task Mgt", CurrRec) THEN
+                             SetErrorMsg(CurrRec);
+                           COMMIT;
+                           IF NASHandler.IsTaskTimeOut(TRUE) THEN
+                             CurrReport.QUIT;
+                         END;
+
+        ReqFilterFields=Provider No.,Document Code,Field50520,Field50521;
+      }
+      SECTIONS
+      {
+      }
+       }
+  }
+  REQUESTFORM
+  {
+    PROPERTIES
+    {
+      Width=9020;
+      Height=3410;
+    }
+    CONTROLS
+    {
+    }
+  }
+  REQUESTPAGE
+  {
+    PROPERTIES
+    {
+    }
+    CONTROLS
+    {
+    }
+  }
+  CODE
+  {
+    VAR
+      ProcMgt@1100281006 : Codeunit 50040;
+      NASHandler@1100281005 : Codeunit 8016720;
+      TrayLineMgt@1100281004 : Codeunit 50050;
+      CurrRec@1100281001 : Record 50004;
+      Text001@1100281000 : TextConst 'ENU=Process Error.;FRA=Erreur processus.';
+      Process@1100281002 : Record 50041;
+      TrayLine@1100281003 : Record 50048;
+      TempAutoStatus@1100281007 : TEMPORARY Record 50042;
+
+    PROCEDURE SetErrorMsg@1100281012(pRec@1100281000 : Record 50004);
+    VAR
+      lText@1100281003 : Text[1024];
+      lContact@1100281006 : Record 5050;
+      lTrayLineCreated@1100281001 : Boolean;
+      lTeamCode@1000000001 : Code[10];
+      lFilterTeamTrayTask@1000000000 : TEMPORARY Record 50129;
+    BEGIN
+      lText :=  Text001 + GetRecText;
+      //<<IMH04
+      lTeamCode := Process."AutoStep Error Tray Code";
+      IF lTeamCode = '' THEN BEGIN
+        lTeamCode := TrayLineMgt.GetTeamByTask(Process."AutoStep Error Task", lFilterTeamTrayTask, '');
+      END;
+
+      //IF Process."AutoStep Error Tray Code" <> '' THEN BEGIN
+      IF lTeamCode <> '' THEN BEGIN
+      //>>IMH04
+        CLEAR(TrayLineMgt);
+        IF TrayLineMgt.CreateTLFromCompletnessTask(
+          //pRec, Process."AutoStep Error Tray Code", Process."AutoStep Error Task", FALSE) THEN BEGIN
+          pRec, lTeamCode, Process."AutoStep Error Task", FALSE) THEN BEGIN
+      //>>IMH04
+          lTrayLineCreated := TRUE;
+          TrayLineMgt.GetResultLine(TrayLine);
+          TrayLine.Description := lText;
+          TrayLine."Stop Auto Process" := TRUE;
+          TrayLine."Short Comment" := COPYSTR(GETLASTERRORTEXT,1,MAXSTRLEN(TrayLine."Short Comment"));
+          TrayLine.MODIFY(FALSE);
+        END;
+      END;
+      IF NOT lTrayLineCreated THEN
+        MESSAGE(Text001 + GetRecText + GETLASTERRORTEXT); // Affichage sur jnl evt
+    END;
+
+    PROCEDURE GetRecText@1100281000() : Text[1024];
+    BEGIN
+      EXIT("Completness Task".TABLECAPTION + ' ' +
+           "Completness Task"."Provider No." + '/' + "Completness Task"."Document Code" + ' : ');
+    END;
+
+    PROCEDURE ErrorTrayLineExist@1100281001() : Boolean;
+    BEGIN
+      TrayLine.RESET;
+      TrayLine.SETCURRENTKEY("Contact No.");
+      TrayLine.SETRANGE("Contact No.", "Completness Task"."Provider No.");
+      TrayLine.SETRANGE("Linked Document No.", "Completness Task"."Document Code");
+      TrayLine.SETRANGE("Stop Auto Process", TRUE);
+      TrayLine.SETRANGE(Closed, FALSE);
+      TrayLine.SETRANGE("Linked To Table", TrayLine."Linked To Table"::CompletnessTask);
+      EXIT(NOT TrayLine.ISEMPTY);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 26/03/14 @a ISAT.ZW @v IMH6.01.5005 @s Reorganisation DPS @h 5005
+          @c Ajout la gestion de team code par defaut */
+      /** @r IMH02 @d 05/12/11 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Param‚trage tache EAI */
+      /** @r IMH01 @d 31/12/10 @a ISAT.ST @v IMH6.01.102 @s Gestion des statuts @c Creation objet */
+    }
+    END.
+  }
+  RDLDATA
+  {
+  }
+}

@@ -1,0 +1,496 @@
+OBJECT Codeunit 50214 EDM Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=20/09/12;
+    Time=12:00:00;
+    Modified=Yes;
+    Version List=IMH6.01,GED;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAIMQBufferManagement@1100281002 : Codeunit 8016708;
+      InterfaceSetup@1100281001 : Record 50139;
+      EAIXmlDocMgt@1100281000 : Codeunit 8016713;
+      NS01@1100281003 : TextConst 'FRA=http://schemas.xmlsoap.org/soap/envelope/';
+      NS02@1100281004 : TextConst 'FRA=http://tempuri.org/';
+      NS03@1100281005 : TextConst 'FRA=http://schemas.datacontract.org/2004/07/Ged.Entities';
+      Text006@1100281006 : TextConst 'ENU=Do you want to delete temporary file ?;FRA=Souhaitez-vous supprimer le fichier temporaire ?';
+
+    PROCEDURE CreateSendMQByTransferRequest@1100281013();
+    VAR
+      lEAIMessageQueue@1100281004 : Record 8016704;
+      lEAISentMQBuffer@1100281002 : TEMPORARY Record 8016720;
+    BEGIN
+      // Demande de transfert de document … la GED
+
+      InterfaceSetup.GET;
+      lEAIMessageQueue.GET(InterfaceSetup."EDM EAI Sent MQ Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Partner Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Transfer Act Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Sent Act Type Code");
+
+      WITH lEAISentMQBuffer DO BEGIN
+        INIT;
+        "Entry No." := '';
+        "EAI MQ Code" := lEAIMessageQueue.Code;
+        "EAI Partner Code" := InterfaceSetup."EDM EAI Partner Code";
+        "EAI Act Type Code" := InterfaceSetup."EDM EAI Sent Act Type Code";
+        "EAI Act Code" := InterfaceSetup."EDM EAI Transfer Act Code";
+        "Date Creation" := WORKDATE;
+        "Time Creation" := DT2TIME(CURRENTDATETIME);
+        "User Creation" := USERID;
+        IF NOT EDMSentAlreadyExists(lEAISentMQBuffer) THEN BEGIN
+          INSERT;
+          EAIMQBufferManagement.CreateSentMQBufferToSentMQ(lEAISentMQBuffer);
+        END;
+      END;
+    END;
+
+    PROCEDURE CreateRcvdMQAckRequest@1100281005();
+    VAR
+      lEAIMessageQueue@1100281004 : Record 8016704;
+      lEAIRcvdMQBuffer@1100281002 : TEMPORARY Record 8016721;
+    BEGIN
+      // Demande de r‚ception des acquittements
+
+      InterfaceSetup.GET;
+      lEAIMessageQueue.GET(InterfaceSetup."EDM EAI Rcvd MQ Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Partner Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Rcvd Act Type Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Ack. Act Code");
+
+      WITH lEAIRcvdMQBuffer DO BEGIN
+        INIT;
+        "Entry No." := '';
+        "EAI MQ Code" := lEAIMessageQueue.Code;
+        "EAI Partner Code" := InterfaceSetup."EDM EAI Partner Code";
+        "EAI Act Type Code" := InterfaceSetup."EDM EAI Rcvd Act Type Code";
+        "EAI Act Code" := InterfaceSetup."EDM EAI Ack. Act Code";
+        "Date Creation" := WORKDATE;
+        "Time Creation" := DT2TIME(CURRENTDATETIME);
+        "User Creation" := USERID;
+        IF NOT EDMRcvdAlreadyExists(lEAIRcvdMQBuffer) THEN BEGIN
+          INSERT;
+          EAIMQBufferManagement.CreateRcvdMQBufferToRcvdMQ(lEAIRcvdMQBuffer);
+        END;
+      END;
+    END;
+
+    PROCEDURE CreateReceiptMQAckResponse@1100281002(VAR pXMLDocument@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60");
+    VAR
+      lEAIMessageQueue@1100281004 : Record 8016704;
+      lEAIRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+      lInStream@1100281007 : InStream;
+    BEGIN
+      // IMH0#.RC
+      // Cr‚ation du Message dans la file de reception
+
+      InterfaceSetup.GET;
+      lEAIMessageQueue.GET(InterfaceSetup."EDM EAI Rcvd MQ Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Partner Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Rcvd Act Type Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Decode Ack. Res. Code");
+
+      WITH lEAIRcvdMQBuffer DO BEGIN
+        INIT;
+        "Entry No." := '';
+        Step := lEAIRcvdMQBuffer.Step::Validation;
+        "EAI MQ Code" := lEAIMessageQueue.Code;
+        "EAI Partner Code" := InterfaceSetup."EDM EAI Partner Code";
+        "EAI Act Type Code" := InterfaceSetup."EDM EAI Rcvd Act Type Code";
+        "EAI Act Code" := InterfaceSetup."EDM EAI Decode Ack. Res. Code";
+        "Date Creation" := WORKDATE;
+        "Time Creation" := DT2TIME(CURRENTDATETIME);
+        "User Creation" := USERID;
+        "XML Source".CREATEINSTREAM(lInStream);
+        pXMLDocument.save(lInStream);
+        INSERT;
+      END;
+
+      EAIMQBufferManagement.CreateRcvdMQBufferToRcvdMQ(lEAIRcvdMQBuffer);
+    END;
+
+    PROCEDURE CreateSendMQAck@1000000000();
+    VAR
+      lEAIMessageQueue@1100281004 : Record 8016704;
+      lEAISentMQBuffer@1100281002 : TEMPORARY Record 8016720;
+    BEGIN
+      // Acquittement de la r‚ception d'acquittement
+
+      InterfaceSetup.GET;
+      lEAIMessageQueue.GET(InterfaceSetup."EDM EAI Sent MQ Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Partner Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Sent Act Type Code");
+      InterfaceSetup.TESTFIELD("EDM EAI Ack. Ack. Act Code");
+
+      WITH lEAISentMQBuffer DO BEGIN
+        INIT;
+        "Entry No." := '';
+        "EAI MQ Code" := lEAIMessageQueue.Code;
+        "EAI Partner Code" := InterfaceSetup."EDM EAI Partner Code";
+        "EAI Act Type Code" := InterfaceSetup."EDM EAI Sent Act Type Code";
+        "EAI Act Code" := InterfaceSetup."EDM EAI Ack. Ack. Act Code";
+        "Date Creation" := WORKDATE;
+        "Time Creation" := DT2TIME(CURRENTDATETIME);
+        "User Creation" := USERID;
+        IF NOT EDMSentAlreadyExists(lEAISentMQBuffer) THEN BEGIN
+          INSERT;
+          EAIMQBufferManagement.CreateSentMQBufferToSentMQ(lEAISentMQBuffer);
+        END;
+      END;
+    END;
+
+    PROCEDURE CreateEDMdDocAttachement@1100281000(pDocumentAttachement@1100281000 : Record 50021);
+    VAR
+      lEDMdocAttachement@1100281001 : Record 50182;
+    BEGIN
+      //<<IMH04.PC
+      IF pDocumentAttachement."Referent Table No." = DATABASE::"Document Queue" THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH04.PC
+      lEDMdocAttachement.INIT;
+      lEDMdocAttachement."Referent Table No." := pDocumentAttachement."Referent Table No.";
+      lEDMdocAttachement."Key Integer 1" := pDocumentAttachement."Key Integer 1";
+      lEDMdocAttachement."Key Integer 2" := pDocumentAttachement."Key Integer 2";
+      lEDMdocAttachement."Key Code 1" := pDocumentAttachement."Key Code 1";
+      lEDMdocAttachement."Key Code 2" := pDocumentAttachement."Key Code 2";
+      lEDMdocAttachement."Entry No." := pDocumentAttachement."Entry No.";
+      lEDMdocAttachement."Attachement Treeview code" := pDocumentAttachement."Attachment Treeview Code";
+      IF lEDMdocAttachement.INSERT THEN;
+    END;
+
+    PROCEDURE CreateWSHeader@1100281007(VAR pXmlDoc@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v6.0'.DOMDocument";VAR pSoapBodyNode@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lTempBlob@1100281009 : Record 99008535;
+      lInstream@1100281007 : InStream;
+      lOutStream@1100281006 : OutStream;
+      lXmlNodeList@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXmlDomElement@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF86-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMElement";
+    BEGIN
+      // IMH02.PC
+      // Cr‚ation de l'enveloppe du flux
+
+      lTempBlob.Blob.CREATEOUTSTREAM(lOutStream);
+      lOutStream.WRITETEXT('<soapenv:Envelope ' + GetSelectionNameSpace + '>');
+      lOutStream.WRITETEXT('<soapenv:Header/>');
+      lOutStream.WRITETEXT('<soapenv:Body>');
+      lOutStream.WRITETEXT('</soapenv:Body>');
+      lOutStream.WRITETEXT('</soapenv:Envelope>');
+
+      lTempBlob.CALCFIELDS(Blob);
+      lTempBlob.Blob.CREATEINSTREAM(lInstream);
+      pXmlDoc.setProperty('SelectionNamespaces', GetSelectionNameSpace);
+      pXmlDoc.load(lInstream);
+      lXmlNodeList := pXmlDoc.getElementsByTagName('soapenv:Envelope');
+      lXmlDomElement := lXmlNodeList.item(0);
+      pSoapBodyNode := lXmlDomElement.selectSingleNode('soapenv:Body');
+    END;
+
+    PROCEDURE GetSelectionNameSpace@1100281003() : Text[1024];
+    BEGIN
+      EXIT(
+        STRSUBSTNO(
+          'xmlns:soapenv="%1" xmlns:tem="%2" xmlns:ged="%3"',
+          GetNS('soapenv'),
+          GetNS('tem'),
+          GetNS('ged')));
+    END;
+
+    PROCEDURE GetNS@1100281001(pWhich@1100281000 : Text[30]) : Text[1024];
+    BEGIN
+      CASE pWhich OF
+        'soapenv' : EXIT(NS01);
+        'tem' : EXIT(NS02);
+        'ged' : EXIT(NS03);
+      END;
+    END;
+
+    PROCEDURE GetFileFromEDM@1100281004(pEDMdocAttachement@1100281018 : Record 50182;pExtension@1100281030 : Text[30]);
+    VAR
+      lExchangeType@1100281028 : Record 8016717;
+      lInterfaceSetup@1100281014 : Record 50139;
+      lwinHTTPService@1100281019 : Automation "{662901FC-6951-4854-9EB2-D9A2570F2B2E} 5.1:{2087C2F4-2CEF-4953-A8AB-66779B670495}:'Microsoft WinHTTP Services, version 5.1'.WinHttpRequest";
+      lAutmgt@1100281003 : Codeunit 419;
+      lXMLDocument@1100281010 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLDomNode1@1100281029 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild1@1100281009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild2@1100281008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild3@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewChild4@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lAdoStream@1100281002 : Automation "{2A75196C-D9EB-4129-B803-931327F72D5C} 2.8:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 2.8 Library'.Stream";
+      lPath@1100281001 : Text[1024];
+      lText@1100281000 : Text[1024];
+      lFileName@1100281004 : Text[1024];
+      lFileNameBuffer@1100281007 : Text[1024];
+      lFile@1100281024 : File;
+    BEGIN
+
+      IF pExtension <> '' THEN BEGIN
+        IF UPPERCASE(pExtension) = 'TIFF' THEN BEGIN
+          pExtension := 'jpg';
+        END;
+      END;
+
+      lInterfaceSetup.GET;
+      lInterfaceSetup.TESTFIELD("EDM User Code");
+      lInterfaceSetup.TESTFIELD("EDM User Type Code");
+      lInterfaceSetup.TESTFIELD("EDM Server Name");
+      //<<IMH05.PC
+      lInterfaceSetup.TESTFIELD("EDM EAI Exchange Type Outbound");
+      //>>IMH05.PC
+
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      //Root Node
+      lXMLDocument.async := FALSE;
+      CreateWSHeader(lXMLDocument,lXMLNewChild1);
+
+      WITH EAIXmlDocMgt DO BEGIN
+        AddElement(lXMLNewChild1,'tem:GetFichier','',GetNS('tem'),lXMLNewChild2);
+        AddElement(lXMLNewChild2,'tem:identifiantDocumentGed','',GetNS('tem'),lXMLNewChild3);
+        AddElement(lXMLNewChild3,'ged:identifiantDocument',pEDMdocAttachement."EDM ID",GetNS('ged'),lXMLNewChild4);
+        AddElement(lXMLNewChild3,'ged:nomServeur',lInterfaceSetup."EDM Server Name",GetNS('ged'),lXMLNewChild4);
+        AddElement(lXMLNewChild2,'tem:utilisateur','',GetNS('tem'),lXMLNewChild3);
+        AddElement(lXMLNewChild3,'ged:Utilisateur',lInterfaceSetup."EDM User Code",GetNS('ged'),lXMLNewChild4);
+        AddElement(lXMLNewChild3,'ged:UtilisateurType',lInterfaceSetup."EDM User Type Code",GetNS('ged'), lXMLNewChild4);
+      END;
+
+      IF ISCLEAR(lwinHTTPService) THEN BEGIN
+        CREATE(lwinHTTPService);
+      END;
+
+      lExchangeType.GET(lExchangeType.Type::Outbound,lInterfaceSetup."EDM EAI Exchange Type Outbound");
+
+      lExchangeType.TESTFIELD("Outgoing Queue Label");
+      lwinHTTPService.Open('POST',lExchangeType."Outgoing Queue Label",0);
+      lwinHTTPService.SetRequestHeader('Content-type','text/xml; charset=utf-8');
+      lwinHTTPService.SetRequestHeader('SOAPAction','http://tempuri.org/IGedService/GetFichier');
+      //The last parameter set to zero allows to wait till webservice finishes
+      lwinHTTPService.SetTimeouts(10000,10000,10000,0);
+
+      lwinHTTPService.Send(lXMLDocument);
+
+      IF NOT lwinHTTPService.WaitForResponse(60) THEN BEGIN
+        ERROR('Request timed out.');
+      END;
+
+      IF lwinHTTPService.Status = 200 THEN BEGIN
+        // Recuperation
+        CLEAR(lXMLDocument);
+        CREATE(lXMLDocument);
+        lXMLDocument.load(lwinHTTPService.ResponseStream);
+
+        lXMLDomNode1 := lXMLDocument.getElementsByTagName('a:ContenuBinaire').item(0);
+        lXMLDomNode1.dataType := 'bin.base64';
+        CREATE(lAdoStream);
+        lAdoStream.Open;
+        lAdoStream.Type := 1;
+        lAdoStream.Write(lXMLDomNode1.nodeTypedValue);
+        lFile.CREATETEMPFILE();
+        lFileName := COPYSTR(lFile.NAME,1,STRPOS(lFile.NAME,'.')) + '.' + pExtension;
+        lFile.CLOSE;
+        lAdoStream.SaveToFile(lFileName);
+        lAdoStream.Close;
+
+        IF ISSERVICETIER THEN BEGIN
+          lFileNameBuffer := lAutmgt.DownloadTempFile(lFileName);
+          HYPERLINK(lFileNameBuffer);
+        END ELSE BEGIN
+          HYPERLINK(lFileName);
+          IF CONFIRM(Text006,TRUE) THEN BEGIN
+            ERASE(lFileName);
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE EDMRcvdAlreadyExists@1100281018(pEAIRcvdMQBuffer@1100281000 : Record 8016721) : Boolean;
+    VAR
+      lMessageQueue@1100281001 : Record 8016704;
+      lRcvdMq1@1100281006 : Record 8016727;
+      lRcvdMq2@1100281005 : Record 8016728;
+      lRcvdMq3@1100281004 : Record 8016729;
+      lRcvdMq4@1100281003 : Record 8016730;
+      lRcvdMq5@1100281002 : Record 8016731;
+    BEGIN
+      lMessageQueue.GET(pEAIRcvdMQBuffer."EAI MQ Code");
+      CASE lMessageQueue."Table No." OF
+        DATABASE::"EAI Rcvd MQ 1" : BEGIN
+          WITH lRcvdMq1 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAIRcvdMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAIRcvdMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAIRcvdMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        DATABASE::"EAI Rcvd MQ 2" : BEGIN
+          WITH lRcvdMq2 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAIRcvdMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAIRcvdMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAIRcvdMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        DATABASE::"EAI Rcvd MQ 3" : BEGIN
+          WITH lRcvdMq3 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAIRcvdMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAIRcvdMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAIRcvdMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        DATABASE::"EAI Rcvd MQ 4" : BEGIN
+          WITH lRcvdMq4 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAIRcvdMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAIRcvdMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAIRcvdMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        DATABASE::"EAI Rcvd MQ 5" : BEGIN
+          WITH lRcvdMq5 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAIRcvdMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAIRcvdMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAIRcvdMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE EDMSentAlreadyExists@1100281006(pEAISentMQBuffer@1100281000 : Record 8016720) : Boolean;
+    VAR
+      lMessageQueue@1100281015 : Record 8016704;
+      lSentMq1@1100281006 : Record 8016727;
+      lSentMq2@1100281005 : Record 8016728;
+      lSentMq3@1100281004 : Record 8016729;
+      lSentMq4@1100281003 : Record 8016730;
+      lSentMq5@1100281002 : Record 8016731;
+    BEGIN
+      lMessageQueue.GET(pEAISentMQBuffer."EAI MQ Code");
+      CASE lMessageQueue."Table No." OF
+        DATABASE::"EAI Sent MQ 1" : BEGIN
+          WITH lSentMq1 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAISentMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAISentMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAISentMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAISentMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 2" : BEGIN
+          WITH lSentMq2 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAISentMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAISentMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAISentMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAISentMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 3" : BEGIN
+          WITH lSentMq3 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAISentMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAISentMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAISentMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAISentMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 4" : BEGIN
+          WITH lSentMq4 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAISentMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAISentMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAISentMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAISentMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+        DATABASE::"EAI Sent MQ 5" : BEGIN
+          WITH lSentMq5 DO BEGIN
+            SETCURRENTKEY("EAI MQ Code","EAI Partner Code","EAI Act Type Code","EAI Act Code",Step,Status);
+            SETRANGE("EAI MQ Code",pEAISentMQBuffer."EAI MQ Code");
+            SETRANGE("EAI Partner Code",pEAISentMQBuffer."EAI Partner Code");
+            SETRANGE("EAI Act Type Code",pEAISentMQBuffer."EAI Act Type Code");
+            SETRANGE("EAI Act Code",pEAISentMQBuffer."EAI Act Code");
+            SETRANGE(Step,Step::Generation);
+            SETRANGE(Status,Status::Unprocessed);
+            IF NOT ISEMPTY THEN BEGIN
+              EXIT(TRUE);
+            END;
+          END;
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH05 @d 06/05/13 @a ISAT.PC @v IMH6.01.222 @s Uniformisation Darva
+          @c Modification de la gestion pour r‚cup‚rer le type d'‚change */
+      /** @r IMH04 @d 19/09/12 @a ISAT.PC @v IMH6.01.P006 @s Interface GED @c Ne pas prendre en compte la table de reference 50054 */
+      /** @r IMH03 @d 25/07/12 @a ISAT.RC @v IMH6.01.P006 @s Interface GED @c Ajout fonction CreateReceiptMQAckResponse */
+      /** @r IMH02 @d 20/07/12 @a ISAT.PC @v IMH6.01.P006 @s Interface GED @c Ajout fonction CreateWSHeader */
+      /** @r IMH01 @d 16/07/12 @a ISAT.PC @v IMH6.01.P006 @s Interface GED @c cr‚ation */
+    }
+    END.
+  }
+}

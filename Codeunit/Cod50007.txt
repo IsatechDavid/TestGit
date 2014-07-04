@@ -1,0 +1,706 @@
+OBJECT Codeunit 50007 Provider Calendar Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=07/11/12;
+    Time=17:28:52;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      TempProviderChangeCalendar@1100281000 : TEMPORARY Record 50007;
+      TempCounter@1100281001 : Integer;
+
+    PROCEDURE GetMainDateChange@1100281110(pBaseCalendarCode@1100281000 : Code[10];pTargetDate@1100281006 : Date;VAR pReasonCode@1100281005 : Code[10];VAR pDescription@1100281002 : Text[50];VAR pUnavailability@1100281001 : Boolean);
+    VAR
+      lBaseCalendarChange@1100281010 : Record 7601;
+    BEGIN
+      // IMH002.isat.PC
+      // Parcours les modifications apport‚es sur le calandrier
+
+      //IHM04 Remplacer table Main Change Calendar par Base Calendar Change
+
+      pReasonCode := '';
+      pDescription := '';
+      pUnavailability := FALSE;
+
+      WITH lBaseCalendarChange DO BEGIN
+        RESET;
+        SETRANGE("Base Calendar Code",pBaseCalendarCode);
+        IF FINDSET THEN BEGIN
+          REPEAT
+            CASE "Recurring System" OF
+              "Recurring System"::" " : BEGIN
+                IF pTargetDate = "Start Date" THEN BEGIN
+                  pDescription := Description;
+                  pReasonCode := "Nonworking Reason Code";
+                  pUnavailability := Nonworking;
+                  EXIT;
+                END;
+              END;
+              "Recurring System"::Interval : BEGIN
+                IF (pTargetDate >= "Start Date") AND (pTargetDate <= "End Date") THEN BEGIN
+                  pDescription := Description;
+                  pReasonCode := "Nonworking Reason Code";
+                  pUnavailability := Nonworking;
+                  EXIT;
+                END;
+              END;
+              "Recurring System"::"Weekly Recurring" : BEGIN
+                IF DATE2DWY(pTargetDate,1) = Day THEN BEGIN
+                  pDescription := Description;
+                  pReasonCode := "Nonworking Reason Code";
+                  pUnavailability := Nonworking;
+                  EXIT;
+                END;
+              END;
+              "Recurring System"::"Annual Recurring" : BEGIN
+                IF (DATE2DMY(pTargetDate,2) = DATE2DMY("Start Date",2)) AND
+                   (DATE2DMY(pTargetDate,1) = DATE2DMY("Start Date",1))
+                THEN BEGIN
+                  pDescription := Description;
+                  pReasonCode := "Nonworking Reason Code";
+                  pUnavailability := Nonworking;
+                  EXIT;
+                END;
+              END;
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetMainStandardCalendar@1100281007(pCode@1100281001 : Code[10]);
+    VAR
+      lMainCalendarForm@1100281000 : Form 50187;
+    BEGIN
+      // IMH002.isat.PC
+      // Permet d'accŠder au calendrier standard principal
+
+      CLEAR(lMainCalendarForm);
+      lMainCalendarForm.SetValues(pCode,FALSE);
+      lMainCalendarForm.RUNMODAL;
+    END;
+
+    PROCEDURE GetMainEmergencyCalendar@1100281006(pCode@1100281001 : Code[10]);
+    VAR
+      lMainCalendarForm@1100281000 : Form 50187;
+    BEGIN
+      // IMH002.isat.PC
+      // Permet d'accŠder au calendrier urgence principal
+
+      CLEAR(lMainCalendarForm);
+      lMainCalendarForm.SetValues(pCode,TRUE);
+      lMainCalendarForm.RUNMODAL;
+    END;
+
+    PROCEDURE CheckProviderDateStatus@2(pProviderNo@1100281006 : Code[20];pEmergency@1100281005 : Boolean;pSpecialityCode@1100281004 : Code[10];pTargetDate@1100281003 : Date;VAR pReasonCode@1100281002 : Code[10];VAR pDescription@1100281001 : Text[50];VAR pUnavailability@1100281000 : Boolean) : Boolean;
+    VAR
+      lProviderSetup@1100281008 : Record 50011;
+      lMainCalendarCode@1100281007 : Code[10];
+    BEGIN
+      // IMH002.isat.PC
+      // GŠre les exceptions de calendrier
+
+      lProviderSetup.GET;
+      IF pEmergency THEN BEGIN
+        lMainCalendarCode := lProviderSetup."Base Emergency Calendar Code";
+      END ELSE BEGIN
+        lMainCalendarCode := lProviderSetup."Base Standard Calendar Code";
+      END;
+
+      CombineCalendarChanges(lMainCalendarCode,pProviderNo,pEmergency,pSpecialityCode);
+
+      WITH TempProviderChangeCalendar DO BEGIN
+        RESET;
+        SETCURRENTKEY("Entry No.");
+        IF FINDSET THEN BEGIN
+          REPEAT
+            CASE "Recurring System" OF
+              "Recurring System"::" " : BEGIN
+                IF pTargetDate = "Start Date" THEN BEGIN
+                  pDescription := Description;
+                  pReasonCode := "Unavailability Reason Code";
+                  pUnavailability := Unavailability;
+                  EXIT;
+                END;
+              END;
+              "Recurring System"::Interval : BEGIN
+                IF (pTargetDate >= "Start Date") AND (pTargetDate <= "End Date") THEN BEGIN
+                  pDescription := Description;
+                  pReasonCode := "Unavailability Reason Code";
+                  pUnavailability := Unavailability;
+                  EXIT;
+                END;
+              END;
+              "Recurring System"::Weekly : BEGIN
+                IF DATE2DWY(pTargetDate,1) = Day THEN BEGIN
+                  //<<IMH08
+                  IF NOT Unavailability THEN BEGIN
+                    IF NOT CheckIntervalAvailability(pTargetDate,pReasonCode,pDescription) THEN BEGIN
+                       pUnavailability := TRUE;
+                       EXIT;
+                    END;
+                  END;
+                  //>>IMH08
+                  pDescription := Description;
+                  pReasonCode := "Unavailability Reason Code";
+                  pUnavailability := Unavailability;
+                  EXIT;
+                END;
+              END;
+              "Recurring System"::Annual : BEGIN
+                IF (DATE2DMY(pTargetDate,2) = DATE2DMY("Start Date",2)) AND
+                   (DATE2DMY(pTargetDate,1) = DATE2DMY("Start Date",1))
+                THEN BEGIN
+                  //<<IMH08
+                  IF NOT Unavailability THEN BEGIN
+                    IF NOT CheckIntervalAvailability(pTargetDate,pReasonCode,pDescription) THEN BEGIN
+                       pUnavailability := TRUE;
+                       EXIT;
+                    END;
+                  END;
+                  //>>IMH08
+                  pDescription := Description;
+                  pReasonCode := "Unavailability Reason Code";
+                  pUnavailability := Unavailability;
+                  EXIT;
+                END;
+              END;
+            END;
+          UNTIL NEXT = 0;
+        END;
+      END;
+
+      pReasonCode := '';
+      pDescription := '';
+      pUnavailability := FALSE;
+    END;
+
+    PROCEDURE CombineCalendarChanges@4(pMainCalendarCode@1100281002 : Code[10];pProviderNo@1100281008 : Code[20];pEmergency@1100281007 : Boolean;pSpecialityCode@1100281006 : Code[10]);
+    VAR
+      lProviderChangeCalendar@1100281000 : Record 50007;
+      lBaseCalendarChange@1100281001 : Record 7601;
+    BEGIN
+      // IMH002.isat.PC
+      // Concat‚nation des calendriers prestataire et principal
+
+      TempProviderChangeCalendar.RESET;
+      TempProviderChangeCalendar.DELETEALL;
+
+      TempCounter := 0;
+      WITH lProviderChangeCalendar DO BEGIN
+        IF pSpecialityCode <> '' THEN BEGIN
+          RESET;
+          SETRANGE("Provider No.",pProviderNo);
+          SETRANGE(Emergency,pEmergency);
+          //IF pSpecialityCode <> '' THEN BEGIN //IMH03
+          SETRANGE("Specialization Code",pSpecialityCode);
+          IF FINDSET THEN BEGIN
+            REPEAT
+              TempCounter += 1;
+              TempProviderChangeCalendar.INIT;
+              TempProviderChangeCalendar."Provider No." := pProviderNo;
+              TempProviderChangeCalendar.Emergency := pEmergency;
+              TempProviderChangeCalendar."Specialization Code" := "Specialization Code";
+              TempProviderChangeCalendar."Recurring System" := "Recurring System";
+              TempProviderChangeCalendar."Start Date" := "Start Date";
+              TempProviderChangeCalendar.Day := Day;
+              TempProviderChangeCalendar."End Date" := "End Date";
+              TempProviderChangeCalendar.Unavailability := Unavailability;
+              TempProviderChangeCalendar."Unavailability Reason Code" := "Unavailability Reason Code";
+              TempProviderChangeCalendar.Description := Description;
+              TempProviderChangeCalendar."Entry No." := TempCounter;
+              TempProviderChangeCalendar.INSERT;
+            UNTIL NEXT = 0;
+          END;
+         END;
+        //<<IMH03
+        RESET;
+        SETRANGE("Provider No.",pProviderNo);
+        SETRANGE(Emergency,pEmergency);
+        SETFILTER("Specialization Code",'%1','');
+        IF FINDSET THEN BEGIN
+          REPEAT
+            TempCounter += 1;
+            TempProviderChangeCalendar.INIT;
+            TempProviderChangeCalendar."Provider No." := pProviderNo;
+            TempProviderChangeCalendar.Emergency := pEmergency;
+            TempProviderChangeCalendar."Specialization Code" := "Specialization Code";
+            TempProviderChangeCalendar."Recurring System" := "Recurring System";
+            TempProviderChangeCalendar."Start Date" := "Start Date";
+            TempProviderChangeCalendar.Day := Day;
+            TempProviderChangeCalendar."End Date" := "End Date";
+            TempProviderChangeCalendar.Unavailability := Unavailability;
+            TempProviderChangeCalendar."Unavailability Reason Code" := "Unavailability Reason Code";
+            TempProviderChangeCalendar.Description := Description;
+            TempProviderChangeCalendar."Entry No." := TempCounter;
+            TempProviderChangeCalendar.INSERT;
+          UNTIL NEXT = 0;
+        END;
+      END;
+      //>>IMH03
+
+      WITH lBaseCalendarChange DO BEGIN
+        RESET;
+        SETRANGE("Base Calendar Code",pMainCalendarCode);
+        //SETRANGE(Emergency,pEmergency);
+        IF FINDSET THEN BEGIN
+          REPEAT
+            TempCounter += 1;
+            TempProviderChangeCalendar.INIT;
+            TempProviderChangeCalendar."Provider No." := pProviderNo;
+            TempProviderChangeCalendar.Emergency := pEmergency;
+            TempProviderChangeCalendar."Specialization Code" := '';
+            TempProviderChangeCalendar."Recurring System" := "Recurring System";
+            TempProviderChangeCalendar."Start Date" := "Start Date";
+            TempProviderChangeCalendar.Day := Day;
+            TempProviderChangeCalendar."End Date" := "End Date";
+            TempProviderChangeCalendar.Unavailability := Nonworking;
+            TempProviderChangeCalendar."Unavailability Reason Code" := "Nonworking Reason Code";
+            TempProviderChangeCalendar.Description := Description;
+            TempProviderChangeCalendar."Entry No." := TempCounter;
+            TempProviderChangeCalendar.INSERT;
+          UNTIL NEXT = 0;
+        END;
+      END;
+    END;
+
+    PROCEDURE GetStandardCalendar@1100281010(pProviderNo@1100281001 : Code[20]);
+    VAR
+      lProviderCalendarForm@1100281000 : Form 50023;
+    BEGIN
+      // Permet d'accŠder au calendrier standard du prestaire
+      CLEAR(lProviderCalendarForm);
+      lProviderCalendarForm.SetValues(pProviderNo,FALSE,'');
+      lProviderCalendarForm.RUNMODAL;
+    END;
+
+    PROCEDURE GetEmergencyCalendar@1100281008(pProviderNo@1100281001 : Code[20]);
+    VAR
+      lProviderCalendarForm@1100281000 : Form 50023;
+    BEGIN
+      // Permet d'accŠder au calendrier urgence du prestaire
+      CLEAR(lProviderCalendarForm);
+      lProviderCalendarForm.SetValues(pProviderNo,TRUE,'');
+      lProviderCalendarForm.RUNMODAL;
+    END;
+
+    PROCEDURE GetSpecStandardCalendar@1100281003(pProviderNo@1100281001 : Code[20];pSpecialityCode@1100281002 : Code[10]);
+    VAR
+      lProviderSpecialization@1100281003 : Record 50006;
+      lProviderCalendarForm@1100281000 : Form 50023;
+    BEGIN
+      // Permet d'accŠder au calendrier standard de la spc‚cialit‚ du prestaire
+      lProviderSpecialization.GET(pProviderNo,pSpecialityCode);
+      CLEAR(lProviderCalendarForm);
+      lProviderCalendarForm.SetValues(pProviderNo,FALSE,pSpecialityCode);
+      lProviderCalendarForm.RUNMODAL;
+    END;
+
+    PROCEDURE GetSpecEmergencyCalendar@1100281002(pProviderNo@1100281002 : Code[20];pSpecialityCode@1100281001 : Code[10]);
+    VAR
+      lProviderSpecialization@1100281003 : Record 50006;
+      lProviderCalendarForm@1100281000 : Form 50023;
+    BEGIN
+      // Permet d'accŠder au calendrier urgence de la spc‚cialit‚ du prestataire
+      lProviderSpecialization.GET(pProviderNo,pSpecialityCode);
+      CLEAR(lProviderCalendarForm);
+      lProviderCalendarForm.SetValues(pProviderNo,TRUE,pSpecialityCode);
+      lProviderCalendarForm.RUNMODAL;
+    END;
+
+    PROCEDURE GetBuildStandardCalendar@1000000001(pProviderNo@1100281001 : Code[20];pSpecialityCode@1100281002 : Code[10];pBuildingTrade@1000000000 : Code[10]);
+    VAR
+      lProviderSpecialization@1100281003 : Record 50006;
+      lProviderCalendarForm@1100281000 : Form 50023;
+    BEGIN
+      //IMH10
+      // Permet d'accŠder au calendrier standard de la spc‚cialit‚ du prestaire
+      lProviderSpecialization.GET(pProviderNo,pSpecialityCode);
+      CLEAR(lProviderCalendarForm);
+      lProviderCalendarForm.SetValues(pProviderNo,FALSE,pSpecialityCode);
+      lProviderCalendarForm.SetBuilding(pBuildingTrade);
+      lProviderCalendarForm.RUNMODAL;
+    END;
+
+    PROCEDURE GetBuildEmergencyCalendar@1000000000(pProviderNo@1100281002 : Code[20];pSpecialityCode@1100281001 : Code[10];pBuildingTrade@1000000000 : Code[10]);
+    VAR
+      lProviderSpecialization@1100281003 : Record 50006;
+      lProviderCalendarForm@1100281000 : Form 50023;
+    BEGIN
+      //IMH10
+      // Permet d'accŠder au calendrier urgence de la spc‚cialit‚ du prestataire
+      lProviderSpecialization.GET(pProviderNo,pSpecialityCode);
+      CLEAR(lProviderCalendarForm);
+      lProviderCalendarForm.SetValues(pProviderNo,TRUE,pSpecialityCode);
+      lProviderCalendarForm.SetBuilding(pBuildingTrade);
+      lProviderCalendarForm.RUNMODAL;
+    END;
+
+    PROCEDURE GetBusinessHours@1100281005(pProviderNo@1100281002 : Code[20];pEmergency@1100281001 : Boolean);
+    VAR
+      lProviderBusinessHoursList@1100281000 : Form 50147;
+    BEGIN
+      // IMH002.isat.PC
+      lProviderBusinessHoursList.LoadTable(pProviderNo,pEmergency);
+      lProviderBusinessHoursList.RUNMODAL;
+    END;
+
+    PROCEDURE ManageBusinessHours@1100281004(VAR pProviderBusinessHours@1100281000 : Record 50028;pProviderNo@1100281004 : Code[20];pEmergency@1100281003 : Boolean);
+    VAR
+      lProviderBusinessHours@1100281001 : Record 50028;
+      lModify@1100281006 : Boolean;
+    BEGIN
+      // IMH002.isat.PC
+
+      WITH pProviderBusinessHours DO BEGIN
+        IF ISEMPTY THEN BEGIN
+          EXIT;
+        END;
+
+        FINDSET;
+        REPEAT
+          lModify := FALSE;
+          lProviderBusinessHours.SETRANGE("Provider No.", pProviderNo);
+          lProviderBusinessHours.SETRANGE(Emergency, pEmergency);
+          lProviderBusinessHours.SETRANGE(Day,Day);
+          IF lProviderBusinessHours.FINDFIRST THEN BEGIN
+            lModify :=
+              (pProviderBusinessHours."Start Time" <> lProviderBusinessHours."Start Time") OR
+              (pProviderBusinessHours."End Time" <> lProviderBusinessHours."End Time");
+          END ELSE BEGIN
+            lModify := CheckProviderSetupHours(Day,"Start Time","End Time");
+          END;
+          IF lModify THEN BEGIN
+            lProviderBusinessHours := pProviderBusinessHours;
+            IF NOT lProviderBusinessHours.INSERT(FALSE) THEN BEGIN
+              lProviderBusinessHours.MODIFY(TRUE);
+            END;
+          END;
+        UNTIL NEXT = 0;
+      END;
+      // IMH09.PC
+      // Ajout des heures standard
+      AddProviderSetupHours(pProviderNo,pEmergency);
+    END;
+
+    PROCEDURE IsProviderAvailable@1100281001(pProviderNo@1100281000 : Code[20];pSpecialityCode@1100281001 : Code[10];pEmergency@1100281004 : Boolean;pStartDate@1100281002 : Date;pEndDate@1100281003 : Date;VAR pFirstAvailableDate@1100281006 : Date;VAR pIsConstrainte@1100281007 : Boolean) rValue : Boolean;
+    VAR
+      lDate@1100281005 : Record 2000000007;
+      lProviderSetup@1100281010 : Record 50011;
+      lExitLoop@1100281008 : Boolean;
+      lMainCalendarCode@1100281009 : Code[10];
+    BEGIN
+      // Function permettant de v‚rifier si le prestataire avec cette sp‚cialit‚ est disponible pour un missionnage
+      pFirstAvailableDate := 0D;
+
+      IF (pEndDate <> 0D) AND (pEndDate < pStartDate) THEN BEGIN
+        EXIT;
+      END;
+
+      lProviderSetup.GET;
+      IF pEmergency THEN BEGIN
+        lMainCalendarCode := lProviderSetup."Base Emergency Calendar Code";
+      END ELSE BEGIN
+        lMainCalendarCode := lProviderSetup."Base Standard Calendar Code";
+      END;
+
+      CombineCalendarChanges(lMainCalendarCode,pProviderNo,pEmergency,pSpecialityCode);
+
+      WITH TempProviderChangeCalendar DO BEGIN
+        RESET;
+        SETRANGE("Provider No.",pProviderNo);
+        SETRANGE(Emergency,pEmergency);
+        IF pSpecialityCode <> '' THEN BEGIN
+      //<<IMH06.ST
+      //    SETRANGE("Specialization Code",pSpecialityCode);
+          SETFILTER("Specialization Code",'%1|%2', pSpecialityCode, '');
+        END
+        ELSE BEGIN
+          SETRANGE("Specialization Code", '');
+      //>>IMH06.ST
+        END;
+        IF ISEMPTY THEN BEGIN
+          rValue := TRUE;
+          pFirstAvailableDate := pStartDate;
+          EXIT;
+        END;
+
+        lDate.SETRANGE("Period Type",lDate."Period Type"::Date);
+        IF pEndDate <> 0D THEN BEGIN
+          lDate.SETRANGE("Period Start",pStartDate,pEndDate);
+        END ELSE BEGIN
+          lDate.SETFILTER("Period Start",'%1..',pStartDate);
+        END;
+        IF lDate.FINDSET THEN BEGIN
+          REPEAT
+            rValue := TRUE;
+            lExitLoop := FALSE;
+            SETCURRENTKEY("Entry No.");
+            FINDSET;
+            REPEAT
+              CASE "Recurring System" OF
+                "Recurring System"::" " : BEGIN
+                  IF lDate."Period Start" = "Start Date" THEN BEGIN
+                    rValue := NOT Unavailability;
+                    //<<IMH07.PC
+                    pIsConstrainte := ("Unavailability Reason Code" = lProviderSetup."Constraint Reason Code");
+                    //>>IMH07.PC
+                    lExitLoop := TRUE;
+                  END;
+                END;
+                "Recurring System"::Interval : BEGIN
+                  IF (lDate."Period Start" >= "Start Date") AND
+                     (lDate."Period Start" <= "End Date")
+                  THEN BEGIN
+                    rValue := NOT Unavailability;
+                    //<<IMH07.PC
+                    pIsConstrainte := ("Unavailability Reason Code" = lProviderSetup."Constraint Reason Code");
+                    //>>IMH07.PC
+                    lExitLoop := TRUE;
+                  END;
+                END;
+                "Recurring System"::Weekly : BEGIN
+                  IF DATE2DWY(lDate."Period Start",1) = Day THEN BEGIN
+                    rValue := NOT Unavailability;
+                    //<<IMH07.PC
+                    pIsConstrainte := ("Unavailability Reason Code" = lProviderSetup."Constraint Reason Code");
+                    //>>IMH07.PC
+                    lExitLoop := TRUE;
+                  END;
+                END;
+                "Recurring System"::Annual : BEGIN
+                  IF (DATE2DMY(lDate."Period Start",2) = DATE2DMY("Start Date",2)) AND
+                     (DATE2DMY(lDate."Period Start",1) = DATE2DMY("Start Date",1))
+                  THEN BEGIN
+                    rValue := NOT Unavailability;
+                    //<<IMH07.PC
+                    pIsConstrainte := ("Unavailability Reason Code" = lProviderSetup."Constraint Reason Code");
+                    //>>IMH07.PC
+                    lExitLoop := TRUE;
+                  END;
+                END;
+              END;
+            UNTIL (NEXT = 0) OR lExitLoop;
+            IF rValue THEN BEGIN
+              pFirstAvailableDate := lDate."Period Start";
+            END;
+          UNTIL (lDate.NEXT = 0) OR rValue;
+        END;
+      END;
+    END;
+
+    PROCEDURE UpdateBusHoursDefaultValue@1100281000(pDay@1100281002 : 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday');
+    VAR
+      lProviderBusinessHours@1100281000 : Record 50028;
+      xDefaultValue@1100281003 : Boolean;
+    BEGIN
+      // IMH05.ISAT.MA
+      // Met … jour le champ "Default Value" de la table "Heures d'ouverture prestataire"
+      // … la modification des heures par d‚faut dans la table paramŠtres prestataires
+
+      WITH lProviderBusinessHours DO
+      BEGIN
+        SETRANGE(Emergency,FALSE);
+        SETRANGE(Day,pDay);
+        IF ISEMPTY THEN
+          EXIT;
+        FINDFIRST;
+        REPEAT
+          xDefaultValue := "Default Value";
+          "Default Value" := IsDefaultValue(FALSE);
+          IF xDefaultValue <> "Default Value" THEN
+            MODIFY(FALSE);
+        UNTIL NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE CheckIntervalAvailability@1100281009(pDate@1100281001 : Date;pReasonCode@1100281002 : Code[20];pDescription@1100281003 : Text[50]) : Boolean;
+    VAR
+      lProviderChangeCalendar@1100281000 : Record 50007;
+    BEGIN
+      //IMH08
+      lProviderChangeCalendar.SETRANGE("Provider No.",TempProviderChangeCalendar."Provider No.");
+      lProviderChangeCalendar.SETRANGE(Emergency,TempProviderChangeCalendar.Emergency);
+      lProviderChangeCalendar.SETRANGE("Specialization Code",TempProviderChangeCalendar."Specialization Code");
+      lProviderChangeCalendar.SETRANGE("Recurring System",lProviderChangeCalendar."Recurring System"::Interval);
+      lProviderChangeCalendar.SETFILTER("Start Date",'<=%1',pDate);
+      lProviderChangeCalendar.SETFILTER("End Date",'>=%1|%2',pDate,0D);
+      IF NOT lProviderChangeCalendar.ISEMPTY THEN
+        lProviderChangeCalendar.FINDFIRST;
+      IF lProviderChangeCalendar.Unavailability THEN BEGIN
+        pReasonCode := lProviderChangeCalendar."Unavailability Reason Code";
+        pDescription := lProviderChangeCalendar.Description;
+        EXIT(FALSE);
+      END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE CheckProviderSetupHours@1100281011(pDay@1100281000 : 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday';pStartTime@1100281001 : Time;pEndTime@1100281002 : Time) rValue : Boolean;
+    VAR
+      lProviderSetup@1100281003 : Record 50011;
+    BEGIN
+      // IMH09.PC
+      // V‚rifie si l'heure debut ou fin est diff‚rene du param‚trage, vrai = diff‚rence
+
+      rValue := FALSE;
+      lProviderSetup.GET;
+      CASE pDay OF
+        pDay::Monday : BEGIN
+          rValue :=
+            (pStartTime <> lProviderSetup."Start Monday Business Hours") OR
+            (pEndTime <> lProviderSetup."End Monday Business Hours");
+        END;
+        pDay::Tuesday : BEGIN
+          rValue :=
+            (pStartTime <> lProviderSetup."Start Tuesday Business Hours") OR
+            (pEndTime <> lProviderSetup."End Tuesday Business Hours");
+        END;
+        pDay::Wednesday : BEGIN
+          rValue :=
+            (pStartTime <> lProviderSetup."Start Wednes. Business Hours") OR
+            (pEndTime <> lProviderSetup."End Wednes. Business Hours");
+        END;
+        pDay::Thursday : BEGIN
+          rValue :=
+            (pStartTime <> lProviderSetup."Start Thursday Business Hours") OR
+            (pEndTime <> lProviderSetup."End Thursday Business Hours");
+        END;
+        pDay::Friday : BEGIN
+          rValue :=
+            (pStartTime <> lProviderSetup."Start Friday Business Hours") OR
+            (pEndTime <> lProviderSetup."End Friday Business Hours");
+        END;
+        pDay::Saturday : BEGIN
+          rValue :=
+            (pStartTime <> lProviderSetup."Start Satur. Business Hours") OR
+            (pEndTime <> lProviderSetup."End Satur. Business Hours");
+        END;
+        pDay::Sunday : BEGIN
+          rValue :=
+            (pStartTime <> lProviderSetup."Start Sunday Business Hours") OR
+            (pEndTime <> lProviderSetup."End Sunday Business Hours");
+        END;
+      END;
+    END;
+
+    LOCAL PROCEDURE AddProviderSetupHours@1100281012(pProviderNo@1100281001 : Code[20];pEmergency@1100281000 : Boolean);
+    VAR
+      lProviderBusinessHours@1100281004 : Record 50028;
+      lProviderSetup@1100281003 : Record 50011;
+    BEGIN
+      // IMH09.PC
+      // Ajoute les horaires standard s'il manque des horaires
+
+      lProviderSetup.GET;
+      WITH lProviderBusinessHours DO BEGIN
+        SETRANGE("Provider No.",pProviderNo);
+        SETRANGE(Emergency, pEmergency);
+        // Lundi
+        SETRANGE(Day,Day::Monday);
+        IF ISEMPTY THEN BEGIN
+          "Provider No." := pProviderNo;
+          Emergency := pEmergency;
+          Day := Day::Monday;
+          "Start Time" := lProviderSetup."Start Monday Business Hours";
+          "End Time" := lProviderSetup."End Monday Business Hours";
+          "Default Value" := TRUE;
+          INSERT(TRUE);
+        END;
+        // Mardi
+        SETRANGE(Day,Day::Tuesday);
+        IF ISEMPTY THEN BEGIN
+          "Provider No." := pProviderNo;
+          Emergency := pEmergency;
+          Day := Day::Tuesday;
+          "Start Time" := lProviderSetup."Start Tuesday Business Hours";
+          "End Time" := lProviderSetup."End Tuesday Business Hours";
+          "Default Value" := TRUE;
+          INSERT(TRUE);
+        END;
+        // Mercredi
+        SETRANGE(Day,Day::Wednesday);
+        IF ISEMPTY THEN BEGIN
+          "Provider No." := pProviderNo;
+          Emergency := pEmergency;
+          Day := Day::Wednesday;
+          "Start Time" := lProviderSetup."Start Wednes. Business Hours";
+          "End Time" := lProviderSetup."End Wednes. Business Hours";
+          "Default Value" := TRUE;
+          INSERT(TRUE);
+        END;
+        // Jeudi
+        SETRANGE(Day,Day::Thursday);
+        IF ISEMPTY THEN BEGIN
+          "Provider No." := pProviderNo;
+          Emergency := pEmergency;
+          Day := Day::Thursday;
+          "Start Time" := lProviderSetup."Start Thursday Business Hours";
+          "End Time" := lProviderSetup."End Thursday Business Hours";
+          "Default Value" := TRUE;
+          INSERT(TRUE);
+        END;
+        // Vendredi
+        SETRANGE(Day,Day::Friday);
+        IF ISEMPTY THEN BEGIN
+          "Provider No." := pProviderNo;
+          Emergency := pEmergency;
+          Day := Day::Friday;
+          "Start Time" := lProviderSetup."Start Friday Business Hours";
+          "End Time" := lProviderSetup."End Friday Business Hours";
+          "Default Value" := TRUE;
+          INSERT(TRUE);
+        END;
+        // Samedi
+        SETRANGE(Day,Day::Saturday);
+        IF ISEMPTY THEN BEGIN
+          "Provider No." := pProviderNo;
+          Emergency := pEmergency;
+          Day := Day::Saturday;
+          "Start Time" := lProviderSetup."Start Satur. Business Hours";
+          "End Time" := lProviderSetup."End Satur. Business Hours";
+          "Default Value" := TRUE;
+          INSERT(TRUE);
+        END;
+        // Dimance
+        SETRANGE(Day,Day::Sunday);
+        IF ISEMPTY THEN BEGIN
+          "Provider No." := pProviderNo;
+          Emergency := pEmergency;
+          Day := Day::Sunday;
+          "Start Time" := lProviderSetup."Start Sunday Business Hours";
+          "End Time" := lProviderSetup."End Sunday Business Hours";
+          "Default Value" := TRUE;
+          INSERT(TRUE);
+        END;
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH10 @d 11/05/12 @a ISAT.LLT @v IMH6.01.112 @h 1413 @s Finalisation Calendrier @c Gestion corps de metier */
+      /** @r IMH09 @d 13/12/11 @a ISAT.PC @v IMH6.01.112 @h 2663 @s Finalisation Calendrier @c Gestion heures */
+      /** @r IMH08 @d 08/09/11 @a ISAT.LLT @v IMH6.01.112 @h 522 @s Finalisation Calendrier @c Gestion indispo periode */
+      /** @r IMH07 @d 21/07/11 @a ISAT.PC @v IMH6.01.112 @h 522 @s Finalisation Calendrier @c Gestion de l'astreinte */
+      /** @r IMH06 @d 06/07/11 @a ISAT.ST @v IMH6.01.112 @h 522 @s Correction filtre sp‚cialit‚ */
+      /** @r IMH05 @d 29/04/11 @a ISAT.MA @v IMH6.01.112 @h 535 @s Finalisation Calendrier */
+      /** @r IHM04 @d 14/03/11 @a ISAT.ZW @v IMH6.01.112 @s Finalisation Calendrier
+          @c Remplacer table Main Change Calendar par Base Calendar Change */
+      /** @r IHM03 @d 26/01/11 @a ISAT.LLT @v IMH6.01.112 @s Calendrier @ Gestion des priorit‚s des calentrier */
+      /** @r IHM002 @d 05/01/11 @a ISAT.PC @v IMH6.01.112 @s Finalisation Calendrier
+          @c Ajout fonction ManageBusinessHours
+          @c Ajout fonction GetBusinessHours */
+      /** @r IHM001 @d 30/09/10 @a ISAT.PC @v IMH6.01.025 @s Calendrier @c Creation */
+    }
+    END.
+  }
+}

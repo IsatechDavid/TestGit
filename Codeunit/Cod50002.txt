@@ -1,0 +1,1254 @@
+OBJECT Codeunit 50002 Attachment Mgt
+{
+  OBJECT-PROPERTIES
+  {
+    Date=25/04/14;
+    Time=11:04:28;
+    Modified=Yes;
+    Version List=IMH6.01,GED,SUPPORT;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      FolderMgt@1100481016 : Codeunit 50004;
+      AttachTreeviewMgt@1000000000 : Codeunit 50001;
+      CommonDialogMgt@1100481017 : Codeunit 412;
+      Text000@1100281005 : TextConst 'ENU=Send attachments...\\;FRA=Envoi des documents joints...\\';
+      Text001@1000000002 : TextConst 'ENU=Attachment has been delete;FRA=Le document joint a ‚t‚ supprim‚';
+      Text002@1000000001 : TextConst 'ENU=Do you want to delete this attachment ?;FRA=Souhaitez-vous supprimer ce document joint ?';
+      Text003@1000000003 : TextConst 'ENU=Impossible to delete this attachment;FRA=Impossible de supprimer le document joint';
+      Text004@1100481000 : TextConst 'ENU=Primary key from table %1 was not manage (codeunit %2);FRA=Champ de la cl‚ primaire de la table %1 non g‚r‚e (codeunit %2)';
+      Text005@1100481002 : TextConst 'ENU=When you have saved your document, click Yes to import the document.;FRA=Faire vos modifications sur le document ouvert.\Voir la barre Windows\ \Une fois celles-ci r‚alis‚es, sauvegarder votre document.\Exemple sous WORD faire CTRL+S\ \Enfin, cliquez sur Oui pour importer le document.';
+      Text005b@1100481004 : TextConst 'ENU=When you have saved your document, click Yes to import the document.;FRA=Le fichier semble encore ouvert.\\Souhaitez-vous annuler l''importation';
+      Text006@1100481001 : TextConst 'ENU=Do you want to delete temporary file ?;FRA=Souhaitez-vous supprimer le fichier temporaire ?';
+      Text007@1100481003 : TextConst 'ENU=Some problem during import attachment;FRA=ProblŠme de l''importation du document joint';
+      Text008@1100281000 : TextConst 'ENU=Export Attachment;FRA=Exporter document';
+      Text009@1100281002 : TextConst 'ENU=Import Attachment;FRA=Importer document';
+      Text010@1100281001 : TextConst 'ENU=All Files (*.*)|*.*;FRA=Tous les fichiers (*.*)|*.*';
+      Text011@1100281003 : TextConst 'ENU=Error during copying file.;FRA=Une erreur est survenue pendant la copie du fichier.';
+      Text012@1100281004 : TextConst 'ENU=All,Delete Disk File,Deleted State;FRA=Tous supprimer,Supprimer sur disque,Etat supprim‚';
+      Text013@1100281007 : TextConst 'ENU=Preparing;FRA=Pr‚paration';
+      Text014@1100281006 : TextConst 'ENU=Deliver misc.;FRA=Envoi divers';
+      Text015@1100281008 : TextConst 'ENU=You must select an interaction template with an attachment.;FRA=Vous devez s‚lectionner un modŠle d''interaction avec une piŠce jointe.';
+      Text016@1100281009 : TextConst 'ENU=\Attachment.%1;FRA=\Document joint.';
+      InteractionTemplate@1100281010 : Record 5064;
+      CompanyInfo@1100281011 : Record 79;
+      Text017@1100281012 : TextConst 'ENU=The document is not disponible, try again please.;FRA=Le document est temporairement indisponible, veuillez r‚essayer.';
+      Text018@1000000004 : TextConst 'ENU=The document can''t been modified.;FRA=Le document ne peut pas ˆtre modifi‚.';
+
+    PROCEDURE CreateAttachmentByWizard@1100481006(pAttachment@1100481004 : Record 50021;pRecRef@1100481000 : RecordRef);
+    VAR
+      lAttachmentBuffer@1100481003 : TEMPORARY Record 50021;
+      lAttachCreationWizard@1100481002 : Form 50013;
+      lFileToImport@1000000000 : Text[500];
+      lFileInStream@1100281000 : InStream;
+    BEGIN
+      // Cr‚er un document joint … partir du formulaire de cr‚ation
+
+      CLEAR(lAttachCreationWizard);
+      lAttachCreationWizard.SetValues(pAttachment,pRecRef);
+      lAttachCreationWizard.RUNMODAL;
+      IF lAttachCreationWizard.GetIsOK THEN BEGIN
+        lAttachCreationWizard.GetValues(lAttachmentBuffer,lFileToImport, lFileInStream);
+        CreateAttachment(lAttachmentBuffer,pRecRef,lFileToImport, lFileInStream);
+      END;
+    END;
+
+    PROCEDURE CreateAttachment@5(VAR pAttachment@1000000000 : Record 50021;pRecRef@1000000002 : RecordRef;pFileToImport@1000 : Text[500];VAR pFileInStreamForServTier@1100281002 : InStream) rValue : Boolean;
+    VAR
+      lAttachment@1100481000 : Record 50021;
+      lAttachmentTreeview@1100481001 : Record 50017;
+      lAttachmentTemplate@1100481005 : Record 50020;
+      lFromFileName@1100481002 : Text[500];
+      lToFileName@1100481003 : Text[500];
+      lPath@1100481004 : Text[500];
+      lFileName@1000000001 : Text[500];
+      lTempBlob@1100281000 : TEMPORARY Record 99008535;
+      lOutStream@1100281001 : OutStream;
+    BEGIN
+      // Cr‚e un doc joint … partir du record passer en paramŠtre
+      rValue := FALSE;
+
+      lAttachment := pAttachment;
+      IF NOT lAttachmentTemplate.GET(pAttachment."Attach. Template Code") THEN BEGIN
+        CLEAR(lAttachmentTemplate);
+      END;
+
+      IF pFileToImport = '' THEN BEGIN
+        IF pAttachment."Storage Type" <> pAttachment."Storage Type"::Internet THEN
+          IF NOT ISSERVICETIER THEN BEGIN
+            lFromFileName := FolderMgt.GetFileName(FALSE,lAttachmentTemplate."Default Folder",'');
+          END;
+      END ELSE BEGIN
+        lFromFileName := pFileToImport;
+      END;
+
+      IF NOT ISSERVICETIER THEN
+        IF pAttachment."Storage Type" <> pAttachment."Storage Type"::Internet THEN
+          IF lFromFileName = '' THEN BEGIN
+            EXIT;
+          END;
+
+      WITH lAttachment DO BEGIN
+        //VALIDATE("Treeview Entry No.");
+        IF NOT INSERT(TRUE) THEN BEGIN
+          EXIT;
+        END;
+        IF pAttachment."Storage Type" <> pAttachment."Storage Type"::Internet THEN BEGIN
+          IF "File Extension" = '' THEN BEGIN
+            "File Extension" := FolderMgt.GetFileExtension(lFromFileName);
+          END;
+
+          lAttachment."Delete Mode" := lAttachmentTemplate."Delete Mode";
+          //IF lAttachment."Interaction Log Entry No." = 0 THEN
+          //  lAttachment.Modifiable := lAttachmentTemplate.Modifiable;
+
+          lAttachmentTreeview.GET("Attachment Treeview Code");
+          // R‚cup‚ration du chemin d'importation issue de la structure d'arborescence
+          lPath := AttachTreeviewMgt.GetPath(lAttachment,pRecRef);
+
+          // Cr‚ation ‚ventuelle du r‚pertoire
+          FolderMgt.CreateCompletePath(lPath,TRUE);
+
+          lToFileName := lPath + AttachTreeviewMgt.GetFileName(lAttachment);
+          IF ISSERVICETIER THEN BEGIN
+            lTempBlob.Blob.CREATEOUTSTREAM(lOutStream);
+            COPYSTREAM(lOutStream, pFileInStreamForServTier);
+            lTempBlob.Blob.EXPORT(lToFileName);
+
+            //DOWNLOADFROMSTREAM(FileInStream,Text008,'','',lToFileName)
+            //UPLOAD('','','',lFromFileName,lToFileName);
+              //ERROR(Text011);
+          END ELSE BEGIN
+            //FILE.COPY(lFromFileName,lToFileName);
+            IF NOT FILE.COPY(lFromFileName,lToFileName) THEN BEGIN
+              EXIT;
+            END;
+          END;
+        END;
+        //<<IMH11.ISAT.EBA
+        IF "Description 2" = '' THEN
+          "Description 2" := AttachTreeviewMgt.GetFileName(lAttachment);
+        "File Size" := GetFileSize(lToFileName);
+        //>>IMH11.ISAT.EBA
+
+        "Attachment Exist" := TRUE;
+
+        IF NOT MODIFY(TRUE) THEN BEGIN
+          EXIT;
+        END;
+        //IF "Interaction Template Code" <> '' THEN BEGIN
+        //  CreateInteraction(lAttachment);
+        //END;
+
+      END;
+
+
+      pAttachment := lAttachment;
+      rValue := TRUE;
+    END;
+
+    PROCEDURE DeleteAttachment@7(pAttachment@1100481000 : Record 50021;pWithConfirm@1001 : Boolean) rValue@1000 : Boolean;
+    VAR
+      lAttachment@1000000000 : Record 50021;
+      lRecRef@1100481002 : RecordRef;
+      lToFileName@1100481001 : Text[500];
+    BEGIN
+      rValue := FALSE;
+
+      lAttachment := pAttachment;
+
+      WITH pAttachment DO BEGIN
+        IF Deleted THEN BEGIN
+          ERROR(Text001);
+        END;
+        TESTFIELD(Modifiable,TRUE);
+
+        IF pAttachment."Storage Type" = pAttachment."Storage Type"::Internet THEN BEGIN
+          ERROR(Text003);
+        END;
+
+        IF pWithConfirm AND GUIALLOWED THEN BEGIN
+          IF NOT CONFIRM(Text002,FALSE) THEN BEGIN
+            EXIT;
+          END;
+        END;
+
+        GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+
+        IF "Delete Mode" = "Delete Mode"::"Deleted State" THEN BEGIN
+          "Attachment Exist" := FALSE;
+          Modifiable := FALSE;
+          "Delete Date" := CURRENTDATETIME;
+          "Delete User ID" := USERID;
+          Deleted := TRUE;
+          rValue := MODIFY(TRUE);
+          ChangeDeleteInteraction(pAttachment);    //IMH18
+        END ELSE BEGIN
+          IF "Attachment Exist" THEN BEGIN
+            lToFileName := AttachTreeviewMgt.GetPathAndFileName(lAttachment,lRecRef);
+            IF NOT FolderMgt.DeleteFile(lToFileName) THEN BEGIN
+              MESSAGE(Text003);
+            END;
+          END;
+          IF "Delete Mode" = "Delete Mode"::All THEN
+            rValue := DELETE(TRUE);
+          EXIT(TRUE);
+        END;
+      END;
+    END;
+
+    PROCEDURE ChangeDeleteAttachment@1100281011(pAttachment@1100481000 : Record 50021;pWithConfirm@1001 : Boolean) rValue@1000 : Boolean;
+    VAR
+      lAttachment@1000000000 : Record 50021;
+      lRecRef@1100481002 : RecordRef;
+      lToFileName@1100481001 : Text[500];
+    BEGIN
+      // IMH16.PC
+      rValue := FALSE;
+
+      lAttachment := pAttachment;
+
+      WITH pAttachment DO BEGIN
+        IF Deleted THEN BEGIN
+          ERROR(Text001);
+        END;
+
+        IF pWithConfirm AND GUIALLOWED THEN BEGIN
+          IF NOT CONFIRM(Text002,FALSE) THEN BEGIN
+            EXIT;
+          END;
+        END;
+
+        "Attachment Exist" := FALSE;
+        Modifiable := FALSE;
+        "Delete Date" := CURRENTDATETIME;
+        "Delete User ID" := USERID;
+        Deleted := TRUE;
+        rValue := MODIFY(TRUE);
+        ChangeDeleteInteraction(pAttachment);    //IMH18
+      END;
+    END;
+
+    PROCEDURE ExportAttachment@2(pAttachment@1100481000 : Record 50021;pExportToFile@1000 : Text[500]) rValue : Boolean;
+    VAR
+      lAttachment@1000000001 : Record 50021;
+      lAttachTemplate@1100481003 : Record 50020;
+      lRecRef@1100481001 : RecordRef;
+      lToFileName@1002 : Text[500];
+      lFromFileName@1100281000 : Text[500];
+      lTempBlob@1100281001 : Record 99008535;
+      lInstream@1100281002 : InStream;
+      lOutstream@1100281003 : OutStream;
+      lFileCompletNameBuffer@1100281004 : Text[500];
+      lFileFilter@1100281005 : Text[250];
+      lPathBuffer@1100281006 : Text[250];
+      lStdAttach@1100281011 : TEMPORARY Record 5062;
+      lFile@1100281008 : File;
+      lDocIsImported@1100281007 : Boolean;
+      lMerge@1100281009 : Boolean;
+      lAttachmentManagement@1100281010 : Codeunit 50002;
+      lSegLine@1100281012 : Record 5077;
+    BEGIN
+      // permet d'exporter le document joint
+
+      rValue := TRUE;
+
+      IF pAttachment."Storage Type" = pAttachment."Storage Type"::Internet THEN BEGIN
+        HYPERLINK(pAttachment."Storage Url");
+        EXIT;
+      END;
+
+      IF pExportToFile = '' THEN BEGIN
+        IF NOT ISSERVICETIER THEN BEGIN
+          IF NOT lAttachTemplate.GET(pAttachment."Attach. Template Code") THEN BEGIN
+            CLEAR(lAttachTemplate);
+          END;
+          lToFileName := FolderMgt.GetFileName(FALSE,lAttachTemplate."Default Folder", '*.' + pAttachment."File Extension");
+        END;
+      END ELSE BEGIN
+        lToFileName := pExportToFile;
+      END;
+      IF NOT ISSERVICETIER THEN
+        IF lToFileName = '' THEN BEGIN
+          EXIT;
+        END;
+
+      lAttachment := pAttachment;
+      WITH lAttachment DO BEGIN
+        IF Deleted THEN BEGIN
+          ERROR(Text001);
+        END;
+
+
+      //<<IMH03.ST
+        GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+        lFromFileName := AttachTreeviewMgt.GetPathAndFileName(lAttachment,lRecRef);
+
+          lMerge := lAttachmentManagement.UseComServer("File Extension",FALSE);
+          IF lMerge THEN BEGIN
+            pAttachment.CALCFIELDS("Merge Source");
+            IF NOT pAttachment."Merge Source".HASVALUE THEN
+              lMerge := FALSE;
+          END;
+          IF lMerge THEN BEGIN
+            lStdAttach.SetInteractionTemplate("Interaction Template Code");
+            lStdAttach."Storage Type" := lStdAttach."Storage Type"::Embedded;
+            lFile.OPEN(lFromFileName);
+            lFile.CREATEINSTREAM(lInstream);
+            lStdAttach.Attachment.CREATEOUTSTREAM(lOutstream);
+            COPYSTREAM(lOutstream,lInstream);
+            lFile.CLOSE;
+            CLEAR(lOutstream);
+            CLEAR(lInstream);
+            lStdAttach."Storage Pointer" := lFromFileName;
+            lStdAttach."File Extension" := "File Extension";
+            lStdAttach."Read Only" := NOT pAttachment.Modifiable;
+            pAttachment."Merge Source".CREATEINSTREAM(lInstream);
+            lStdAttach."Merge Source".CREATEOUTSTREAM(lOutstream);
+            COPYSTREAM(lOutstream,lInstream);
+            lSegLine."Line No." := pAttachment."Key Integer 1";
+            lStdAttach.ExportMergedAttachment(lSegLine, Description, TRUE, pExportToFile);
+            {
+            lStdAttach.GetDocIsImported(lDocIsImported);
+            lOriginalCompletFileName := lOriginalPath + lOriginalFileName;
+            IF lDocIsImported THEN BEGIN
+              lStdAttach.Attachment.EXPORT(lOriginalCompletFileName);
+              lStdAttach."Merge Source".CREATEINSTREAM(lInStream);
+              pAttachment."Merge Source".CREATEOUTSTREAM(lOutStream);
+              COPYSTREAM(lOutStream,lInStream);
+            END;
+            }
+            rValue := TRUE;
+            EXIT;
+          END;
+      //>>IMH03.ST
+
+        IF ISSERVICETIER THEN BEGIN
+          {
+          lFileFilter := UPPERCASE("File Extension") + ' (*.' + "File Extension" + ')|*.' + "File Extension";
+          lFileCompletNameBuffer := ConstFilenameBuffer("File Extension");
+          DOWNLOAD(lFromFileName,Text008,'',lFileFilter,lFileCompletNameBuffer);
+          IF NOT UPLOADINTOSTREAM(Text008,'',lFileFilter,lFileCompletNameBuffer, lInstream) THEN
+            EXIT;
+          lTempBlob.Blob.CREATEOUTSTREAM(lOutstream);
+          COPYSTREAM(lOutstream, lInstream);
+          lTempBlob.Blob.EXPORT(lToFileName);
+          }
+          lFileFilter := UPPERCASE("File Extension") + ' (*.' + "File Extension" + ')|*.' + "File Extension";
+          IF lToFileName = '' THEN BEGIN
+            CreateFileNameBuffer(lPathBuffer,lToFileName);
+            lToFileName := lPathBuffer + lToFileName + '.' + "File Extension";
+          END;
+          //error(lToFileName);
+          IF DOWNLOAD(lFromFileName,Text008,'',lFileFilter,lToFileName) THEN;
+        END ELSE
+
+          rValue := FILE.COPY(lFromFileName,lToFileName);
+      END;
+    END;
+
+    PROCEDURE ProtectAttachment@1100481004(VAR pAttachment@1100481000 : Record 50021);
+    VAR
+      lProtectAttachWizard@1100481001 : Form 50016;
+    BEGIN
+      // Permet de modifier la coche modifiable ou non
+
+      IF pAttachment.Deleted THEN BEGIN
+        ERROR(Text001);
+      END;
+
+      IF pAttachment."Storage Type" = pAttachment."Storage Type"::Internet THEN BEGIN
+        ERROR(Text018);
+      END;
+
+      CLEAR(lProtectAttachWizard);
+      lProtectAttachWizard.SetValue(pAttachment);
+      lProtectAttachWizard.RUNMODAL;
+      IF lProtectAttachWizard.GetIsOK THEN BEGIN
+        pAttachment.Modifiable := lProtectAttachWizard.GetIsProtect;
+        pAttachment.MODIFY(TRUE);
+      END;
+    END;
+
+    PROCEDURE ShowAttachment@6(VAR pAttachment@1000 : Record 50021);
+    VAR
+      lEDMDocAttachment@1100281013 : Record 50182;
+      lSegLine@1100281007 : TEMPORARY Record 5077;
+      lStdAttach@1100281006 : TEMPORARY Record 5062;
+      lEDMDocAttachement@1100281018 : Record 50182;
+      lWordManagement@1003 : Codeunit 5054;
+      lAttachmentManagement@1004 : Codeunit 5052;
+      lEDMManagement@1100281014 : Codeunit 50214;
+      lAutmgt@1100281012 : Codeunit 419;
+      lRecRef@1100281015 : RecordRef;
+      lPathBuffer@1100281001 : Text[250];
+      lFileCompletNameBuffer@1100281000 : Text[250];
+      lMergeSourceCompletNameBuffer@1100281004 : Text[250];
+      lFileNameCopyTest@1100481008 : Text[260];
+      lOriginalFileName@1100481002 : Text[260];
+      lOriginalPath@1100481003 : Text[260];
+      lFileFilter@1100281002 : Text[250];
+      lOriginalCompletFileName@1100281003 : Text[300];
+      lMerge@1100281005 : Boolean;
+      lCancelImport@1100281017 : Boolean;
+      lConfirmImport@1100281016 : Boolean;
+      lDocIsImported@1100281011 : Boolean;
+      lInStream@1100281008 : InStream;
+      lOutStream@1100281009 : OutStream;
+      lFile@1100281010 : File;
+    BEGIN
+      // Permet d'afficher le document import‚ avec la possibilit‚ de le modifier en fonction du paramŠtre modifiable
+
+      WITH pAttachment DO BEGIN
+        IF Deleted THEN BEGIN
+          ERROR(Text001);
+        END;
+
+        IF pAttachment."Storage Type" = pAttachment."Storage Type"::Internet THEN BEGIN
+          HYPERLINK(pAttachment."Storage Url");
+          EXIT;
+        END;
+        IF pAttachment."Attachment Exist" THEN BEGIN
+
+          //<<IMH17.RC
+          IF lEDMDocAttachment.GET(
+              pAttachment."Referent Table No.",pAttachment."Key Integer 1",pAttachment."Key Integer 2",
+              pAttachment."Key Code 1",pAttachment."Key Code 2",pAttachment."Entry No.")
+          THEN BEGIN
+            IF lEDMDocAttachment."EDM Acknowledgement" THEN BEGIN
+              lEDMManagement.GetFileFromEDM(lEDMDocAttachment,"File Extension");
+              EXIT;
+            END;
+          END;
+          //>>IMH17.RC
+
+          // On r‚cupŠre le recordref issue de la table doc. joint
+          GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+
+          // R‚cup‚ration du chemin d'importation issue de la structure d'arborescence
+          lOriginalPath := AttachTreeviewMgt.GetPath(pAttachment,lRecRef);
+          lOriginalFileName := AttachTreeviewMgt.GetFileName(pAttachment);
+          IF "File Extension" <> '' THEN BEGIN
+            IF UPPERCASE("File Extension") = 'TIFF' THEN BEGIN
+              "File Extension" := 'jpg';
+            END;
+          END;
+
+          // R‚cup‚ration du chemin temporaire windows + un nom de fichier temporaire
+          //CreateFileNameBuffer(lPathBuffer,lFileNameBuffer);
+          //lFileCompletNameBuffer := ConstFilenameBuffer("File Extension");
+          //lFileCompletNameBuffer += COMPANYNAME + '\' + lFileCompletNameBuffer;
+          //lPathBuffer := FolderMgt.GetPathForFile(lFileCompletNameBuffer);
+          // Cr‚ation ‚ventuelle du r‚pertoire
+          //FolderMgt.CreateCompletePath(lPathBuffer,TRUE);
+          lFileNameCopyTest := lFileCompletNameBuffer;
+      //<<IMH03.ST
+          lMerge := lAttachmentManagement.UseComServer("File Extension",FALSE);
+          IF lMerge THEN BEGIN
+            pAttachment.CALCFIELDS("Merge Source");
+            IF NOT pAttachment."Merge Source".HASVALUE THEN
+              lMerge := FALSE;
+          END;
+          IF lMerge THEN BEGIN
+            lStdAttach.SetInteractionTemplate("Interaction Template Code");
+            lStdAttach."Storage Type" := lStdAttach."Storage Type"::Embedded;
+            lFile.OPEN(lOriginalPath + lOriginalFileName);
+            lFile.CREATEINSTREAM(lInStream);
+            lStdAttach.Attachment.CREATEOUTSTREAM(lOutStream);
+            COPYSTREAM(lOutStream,lInStream);
+            lFile.CLOSE;
+            CLEAR(lOutStream);
+            CLEAR(lInStream);
+            lStdAttach."Storage Pointer" := lOriginalPath + lOriginalFileName;
+            lStdAttach."File Extension" := "File Extension";
+            lStdAttach."Read Only" := NOT pAttachment.Modifiable;
+            pAttachment."Merge Source".CREATEINSTREAM(lInStream);
+            lStdAttach."Merge Source".CREATEOUTSTREAM(lOutStream);
+            COPYSTREAM(lOutStream,lInStream);
+            lSegLine."Line No." := pAttachment."Key Integer 1";
+            lStdAttach.ShowAttachment(lSegLine, Description, TRUE);
+            lStdAttach.GetDocIsImported(lDocIsImported);
+            lOriginalCompletFileName := lOriginalPath + lOriginalFileName;
+            IF lDocIsImported THEN BEGIN
+              lStdAttach.Attachment.EXPORT(lOriginalCompletFileName);
+              lStdAttach."Merge Source".CREATEINSTREAM(lInStream);
+              pAttachment."Merge Source".CREATEOUTSTREAM(lOutStream);
+              COPYSTREAM(lOutStream,lInStream);
+            END;
+            EXIT;
+          END;
+      //>>IMH03.ST
+
+          lFileFilter := UPPERCASE("File Extension") + ' (*.' + "File Extension" + ')|*.' + "File Extension";
+          IF ISSERVICETIER THEN BEGIN
+            //IMHXX isat.nfo
+            lFileCompletNameBuffer := lAutmgt.DownloadTempFile(lOriginalPath + lOriginalFileName);
+            //IF NOT DOWNLOAD(lOriginalPath + lOriginalFileName,Text008,'',lFileFilter,lFileCompletNameBuffer) THEN
+            //  ERROR(Text017);
+          END
+          ELSE BEGIN
+            lFileCompletNameBuffer := ConstFilenameBuffer("File Extension");
+            FILE.COPY(lOriginalPath + lOriginalFileName,lFileCompletNameBuffer);
+          END;
+
+          IF Modifiable THEN BEGIN
+            lCancelImport := FALSE;
+            lConfirmImport := FALSE;
+
+            HYPERLINK(lFileCompletNameBuffer);
+            {
+            //<<IMH13 d‚sactiv‚
+            WHILE NOT lCancelImport AND NOT lConfirmImport DO BEGIN
+              lConfirmImport := CONFIRM(Text005,TRUE);
+              IF lConfirmImport THEN BEGIN
+                IF ISSERVICETIER THEN BEGIN
+                  lOriginalCompletFileName := lOriginalPath + lOriginalFileName;
+                  IF NOT UPLOAD(Text009,'',Text010,lFileCompletNameBuffer,lOriginalCompletFileName) THEN
+                    ERROR(Text011);
+                END ELSE BEGIN
+                  IF NOT FILE.RENAME(lFileCompletNameBuffer,lFileNameCopyTest) THEN BEGIN
+                    lConfirmImport := FALSE;
+                    lCancelImport := CONFIRM(Text005b);
+                  END ELSE BEGIN
+                    FILE.COPY(lFileNameCopyTest,lOriginalPath + lOriginalFileName);
+                    ERASE(lFileNameCopyTest);
+                  END;
+                END;
+              END ELSE BEGIN
+                lCancelImport := TRUE;
+              END;
+            END;
+            //>>IMH13 isat.zw
+            }
+          END ELSE BEGIN
+            HYPERLINK(lFileCompletNameBuffer);
+
+            IF NOT ISSERVICETIER THEN
+              IF CONFIRM(Text006,TRUE) THEN
+                ERASE(lFileCompletNameBuffer);
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE ModifyDeleteMode@1100481014(pAttachment@1100481001 : Record 50021);
+    VAR
+      lAttachment@1000000000 : Record 50021;
+      lSelection@1100281000 : Integer;
+    BEGIN
+      // Modifie la coche "Keep On Delete"
+
+      lAttachment := pAttachment;
+
+      WITH lAttachment DO BEGIN
+        IF Deleted THEN BEGIN
+          ERROR(Text001);
+        END;
+        lSelection := STRMENU(Text012, "Delete Mode" + 1);
+        IF lSelection = 0 THEN BEGIN
+          EXIT;
+        END;
+
+        "Delete Mode" := lSelection - 1;
+        MODIFY(TRUE);
+      END;
+    END;
+
+    PROCEDURE GetRecordRef@1100481002(pAttachment@1100481000 : Record 50021;VAR pRecRef@1100481002 : RecordRef) rValue : Boolean;
+    VAR
+      lRecordRef@1100481001 : RecordRef;
+    BEGIN
+      // Permet de r‚cuperer le recordref issue du document joint
+
+      rValue := FALSE;
+
+      pRecRef.OPEN(pAttachment."Referent Table No.");
+    END;
+
+    PROCEDURE LookupReferentTable@1100481015(VAR pReferentTableNo@1100481000 : Integer) rValue : Boolean;
+    VAR
+      lAllObj@1100481003 : Record 2000000038;
+      lObjectsList@1100481001 : Form 696;
+    BEGIN
+      // Lookup afin de s‚lectionner un nø de table
+      rValue := FALSE;
+
+      CLEAR(lObjectsList);
+      lObjectsList.LOOKUPMODE(TRUE);
+      lAllObj.SETRANGE("Object Type",lAllObj."Object Type"::Table);
+      lObjectsList.SETTABLEVIEW(lAllObj);
+      IF lObjectsList.RUNMODAL = ACTION::LookupOK THEN BEGIN
+        lObjectsList.GETRECORD(lAllObj);
+        pReferentTableNo := lAllObj."Object ID";
+        rValue := TRUE;
+      END;
+    END;
+
+    PROCEDURE LookupFieldReferentTable@1100481017(pReferentTableNo@1100481000 : Integer;VAR pFieldNo@1100481002 : Integer) rValue : Boolean;
+    VAR
+      lField@1100481003 : Record 2000000041;
+      lFieldsList@1100481001 : Form 6521;
+    BEGIN
+      // Lookup afin de s‚lectionner un nø de champ li‚ … une table
+
+      rValue := FALSE;
+      pFieldNo := 0;
+      IF pReferentTableNo = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      CLEAR(lFieldsList);
+      lFieldsList.LOOKUPMODE(TRUE);
+      lField.SETRANGE(TableNo,pReferentTableNo);
+      lFieldsList.SETTABLEVIEW(lField);
+      IF lFieldsList.RUNMODAL = ACTION::LookupOK THEN BEGIN
+        lFieldsList.GETRECORD(lField);
+        pFieldNo := lField."No.";
+        rValue := TRUE;
+      END;
+    END;
+
+    PROCEDURE CollectRecordKey@1000000000(VAR pAttachment@1100481000 : Record 50021;pRecRef@1000000000 : RecordRef);
+    VAR
+      lKeyRef@1000000001 : KeyRef;
+      lFieldRef@1000000003 : FieldRef;
+      lKeyFieldNb@1000000002 : Integer;
+      i@1000000004 : Integer;
+      lCountKeyInt@1100281000 : Integer;
+    BEGIN
+      // Constitution de la cl‚ enregistrement
+
+      pAttachment."Referent Table No." := pRecRef.NUMBER; //AMH02 isat.zw
+      lKeyRef := pRecRef.KEYINDEX(1);
+      lKeyFieldNb := lKeyRef.FIELDCOUNT ;
+      lCountKeyInt := 1;
+      FOR i := 1 TO lKeyFieldNb DO BEGIN
+        lFieldRef := lKeyRef.FIELDINDEX(i);
+        CASE UPPERCASE(FORMAT(lFieldRef.TYPE)) OF
+          'INTEGER','OPTION' : BEGIN
+            IF lCountKeyInt = 1 THEN
+              IF pAttachment."Key Integer 1" = 0 THEN BEGIN
+                IF NOT ISSERVICETIER THEN
+                  EVALUATE(pAttachment."Key Integer 1",FORMAT(lFieldRef.VALUE))
+                ELSE
+                  EVALUATE(pAttachment."Key Integer 1",FORMAT(lFieldRef,0,2));
+              END;
+            IF lCountKeyInt = 2 THEN
+              IF pAttachment."Key Integer 2" = 0 THEN BEGIN
+                IF NOT ISSERVICETIER THEN
+                  EVALUATE(pAttachment."Key Integer 2",FORMAT(lFieldRef.VALUE))
+                ELSE
+                  EVALUATE(pAttachment."Key Integer 2",FORMAT(lFieldRef,0,2));
+              END;
+            lCountKeyInt += 1;
+          END;
+          'CODE' : BEGIN
+            IF pAttachment."Key Code 1" = '' THEN BEGIN
+              pAttachment."Key Code 1" := FORMAT(lFieldRef.VALUE);
+            END ELSE BEGIN
+              IF pAttachment."Key Code 2" = '' THEN BEGIN
+                pAttachment."Key Code 2" := FORMAT(lFieldRef.VALUE);
+              END;
+            END;
+          END;
+          ELSE ERROR(Text004,pAttachment."Referent Table No.",CODEUNIT::"Service Search Managment");
+        END;
+      END;
+    END;
+
+    PROCEDURE GetOriginalRecRef@1100481001(pTableNo@1100481000 : Integer;pInteger@1100481002 : Integer;pInteger2@1100281000 : Integer;pCode1@1100481003 : Code[20];pCode2@1100481004 : Code[20];VAR pRecRef@1000000000 : RecordRef) rValue : Boolean;
+    VAR
+      lKeyRef@1000000001 : KeyRef;
+      lFieldRef@1000000003 : FieldRef;
+      lKeyFieldNb@1000000002 : Integer;
+      i@1000000004 : Integer;
+      lFirstCode@1100481005 : Boolean;
+      lFirstInt@1100281001 : Boolean;
+    BEGIN
+      // permet de r‚cup‚rer un recordref en fonction des donn‚es d'entr‚e
+
+      rValue := FALSE;
+
+      IF pTableNo = 0 THEN BEGIN
+        EXIT;
+      END;
+
+      lFirstCode := FALSE;
+      lFirstInt := FALSE;
+
+      CLEAR(pRecRef);
+
+      pRecRef.OPEN(pTableNo);
+
+      lKeyRef := pRecRef.KEYINDEX(1);
+      lKeyFieldNb := lKeyRef.FIELDCOUNT ;
+      FOR i := 1 TO lKeyFieldNb DO BEGIN
+        lFieldRef := lKeyRef.FIELDINDEX(i);
+        CASE UPPERCASE(FORMAT(lFieldRef.TYPE)) OF
+          'INTEGER','OPTION' : BEGIN
+            IF NOT lFirstInt THEN BEGIN
+              lFieldRef.VALUE := pInteger; //IMH.ST
+              lFieldRef.SETRANGE(pInteger);
+              lFirstInt := TRUE;
+            END ELSE BEGIN
+              lFieldRef.SETRANGE(pInteger2);
+              lFieldRef.VALUE := pInteger2; //IMH.ST
+            END;
+          END;
+          'CODE' : BEGIN
+            IF NOT lFirstCode THEN BEGIN
+              lFieldRef.VALUE := pCode1; //IMH.ST
+              lFieldRef.SETRANGE(pCode1);
+              lFirstCode := TRUE;
+            END ELSE BEGIN
+              lFieldRef.SETRANGE(pCode2);
+              lFieldRef.VALUE := pCode2; //IMH.ST
+            END;
+          END;
+          ELSE ERROR(Text004,pTableNo,CODEUNIT::"Attachment Mgt");
+        END;
+      END;
+
+      rValue := pRecRef.FINDFIRST;
+      pRecRef.SETRECFILTER;
+    END;
+
+    PROCEDURE CreateFileNameBuffer@1100481000(VAR pPath@1100481002 : Text[260];VAR pFileName@1100481003 : Text[260]);
+    VAR
+      lFile@1100481000 : File;
+      i@1100481001 : Integer;
+      lFileNameBuffer@1100481004 : Text[260];
+      lExitLoop@1100481005 : Boolean;
+    BEGIN
+      // Permet de r‚cup‚rer le chemin et le nom d'un fichier temporaire windows
+
+      lFile.CREATETEMPFILE;
+      lFileNameBuffer := lFile.NAME;
+      lFile.CLOSE;
+
+      i := STRLEN(lFileNameBuffer);
+      WHILE (NOT lExitLoop) AND (i > 1) DO BEGIN
+        lExitLoop := COPYSTR(lFileNameBuffer,i,1) = '\';
+        IF NOT lExitLoop THEN BEGIN
+          pFileName += COPYSTR(lFileNameBuffer,i,1);
+        END ELSE BEGIN
+          pPath := lFileNameBuffer;
+        END;
+        i -= 1;
+        lFileNameBuffer := COPYSTR(lFileNameBuffer,1,i);
+      END;
+    END;
+
+    PROCEDURE ConstFilenameBuffer@9(pFileExtension@1100281001 : Text[50]) @1000 : Text[260];
+    VAR
+      lRBAutoMgt@1010 : Codeunit 419;
+      lText001@1100281000 : TextConst 'ENU=\Doc;FRA=\Doc';
+    BEGIN
+      EXIT(lRBAutoMgt.ClientTempFileName(lText001+'.',pFileExtension));
+    END;
+
+    PROCEDURE Send@1(VAR pDeliverySorter@1000 : Record 5074);
+    VAR
+      lDocumentAttachment@1001 : Record 50021;
+      lTempDeliverySorterWord@1002 : TEMPORARY Record 5074;
+      lTempDeliverySorterOther@1003 : TEMPORARY Record 5074;
+      lInteractLogEntry@1004 : Record 5065;
+      lContact@1005 : Record 5050;
+      lRBAutoMgt@1012 : Codeunit 419;
+      lWordManagement@1006 : Codeunit 5054;
+      lMail@1007 : Codeunit 397;
+      lFileName@1008 : Text[260];
+      lWindow@1009 : Dialog;
+      lNoOfAttachments@1010 : Integer;
+      I@1011 : Integer;
+      lText001@1100281004 : TextConst 'ENU=\Attachment.%1;FRA=\Document joint.%1';
+    BEGIN
+      IF GUIALLOWED THEN BEGIN
+        lWindow.OPEN(
+          Text000 +
+          '#1############ @2@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\' +
+          '#3############ @4@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@');
+
+        lWindow.UPDATE(1,Text013);
+        lWindow.UPDATE(3,Text014);
+      END;
+
+      IF pDeliverySorter.FINDSET THEN BEGIN
+        IF GUIALLOWED THEN BEGIN
+          lNoOfAttachments := pDeliverySorter.COUNT;
+        END;
+        REPEAT
+          pDeliverySorter.TESTFIELD("Correspondence Type");
+          IF NOT lDocumentAttachment.GET(
+                    pDeliverySorter."Attach. Referent Table No.",
+                    pDeliverySorter."Attach. Key Integer 1",
+                    pDeliverySorter."Attach. Key Integer 2",
+                    pDeliverySorter."Attach. Key Code 2",
+                    pDeliverySorter."Attach. Key Code 1",
+                    pDeliverySorter."Attachment No.") THEN
+            ERROR(Text015);
+
+          IF UseComServer(lDocumentAttachment."File Extension",
+            pDeliverySorter."Correspondence Type" <> pDeliverySorter."Correspondence Type"::"E-Mail")
+          THEN BEGIN
+            lTempDeliverySorterWord := pDeliverySorter;
+            lTempDeliverySorterWord.INSERT;
+          END ELSE BEGIN
+            lTempDeliverySorterOther := pDeliverySorter;
+            lTempDeliverySorterOther.INSERT;
+          END;
+          IF GUIALLOWED THEN BEGIN
+            I := I + 1;
+            lWindow.UPDATE(2,ROUND(I / lNoOfAttachments * 10000,1));
+          END;
+        UNTIL pDeliverySorter.NEXT = 0;
+      END;
+
+      // MS Word merge
+      IF lTempDeliverySorterWord.FINDFIRST THEN BEGIN
+        lWordManagement.SetInteractionTemplate(InteractionTemplate.Code);//IMH04
+        lWordManagement.Merge(lTempDeliverySorterWord);
+      END;
+
+      // Deliver other types
+      IF lTempDeliverySorterOther.FINDSET THEN BEGIN
+        IF GUIALLOWED THEN BEGIN
+          I := 0;
+          lNoOfAttachments := lTempDeliverySorterOther.COUNT;
+        END;
+        REPEAT
+          lInteractLogEntry.LOCKTABLE;
+          lInteractLogEntry.GET(lTempDeliverySorterOther."No.");
+          IF lTempDeliverySorterOther."Correspondence Type" = lTempDeliverySorterOther."Correspondence Type"::"E-Mail" THEN BEGIN
+            lDocumentAttachment.GET(lTempDeliverySorterOther."Attach. Referent Table No.",
+                                    lTempDeliverySorterOther."Attach. Key Integer 1",
+                                    lTempDeliverySorterOther."Attach. Key Integer 2",
+                                    lTempDeliverySorterOther."Attach. Key Code 2",
+                                    lTempDeliverySorterOther."Attach. Key Code 1",
+                                    lTempDeliverySorterOther."Attachment No.");
+            lDocumentAttachment.TESTFIELD("File Extension");
+            //lFileName := lRBAutoMgt.EnvironFileName(Text016,lDocumentAttachment."File Extension");
+            //ExportAttachment(lDocumentAttachment, lFileName);
+            DownToTempFile(lDocumentAttachment, lFileName);
+            lContact.GET(lInteractLogEntry."Contact No.");
+            lMail.NewMessage(InteractionEMail(lInteractLogEntry),'',lTempDeliverySorterOther.Subject,'',lFileName,FALSE);
+            //lDocumentAttachment.DeleteFile(FileName);
+            lInteractLogEntry."Delivery Status" := lInteractLogEntry."Delivery Status"::" ";
+            lInteractLogEntry.MODIFY;
+          END ELSE BEGIN
+            lInteractLogEntry."Delivery Status" := lInteractLogEntry."Delivery Status"::Error;
+            lInteractLogEntry.MODIFY;
+          END;
+          COMMIT;
+          IF GUIALLOWED THEN BEGIN
+            I := I + 1;
+            lWindow.UPDATE(4,ROUND(I / lNoOfAttachments * 10000,1));
+          END;
+        UNTIL lTempDeliverySorterOther.NEXT = 0;
+      END;
+      IF GUIALLOWED THEN BEGIN
+        lWindow.CLOSE;
+      END;
+    END;
+
+    PROCEDURE UseComServer@1100281002(FileExtension@1001 : Text[250];RequireAutomation@1002 : Boolean) : Boolean;
+    VAR
+      VersionNo@1004 : Decimal;
+      DecimalSymbol@1007 : Text[1];
+    BEGIN
+      IF (UPPERCASE(FileExtension) <> 'DOC') AND
+         (UPPERCASE(FileExtension) <> 'DOCX')
+      THEN
+        EXIT(FALSE);
+
+      // 5.1 do not support Automation Server table. We assume that MS Word is installed and has a valid version.
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE InteractionEMail@1100281001(VAR InteractLogEntry@1000 : Record 5065) : Text[80];
+    VAR
+      Cont@1001 : Record 5050;
+      ContAltAddr@1002 : Record 5051;
+      lInteractionTemp@1100281000 : Record 5064;
+      lEmail@1100281001 : Text[80];
+      lServiceHeader@1000000004 : Record 5900;
+      lProductCatalog@1000000003 : Record 50060;
+      lCorporateRegion@1000000002 : Record 50058;
+      lCustomer@1000000001 : Record 18;
+      lContactNo@1000000000 : Code[20];
+    BEGIN
+      //<<IMH10.ISAT.EBA
+      ////<<IMH09
+      //CompanyInformation.GET;
+      //IF CompanyInformation."Activate E-mail Debug" THEN BEGIN
+      //  EXIT(CompanyInformation."E-mail Debug");
+      //END;
+      ////<<IMH09
+
+      CompanyInfo.GET;
+      lEmail := CompanyInfo.GetDBTypeEmail;
+      IF lEmail <> '' THEN
+        EXIT(lEmail);
+      //>>IMH10.ISAT.EBA
+
+      IF lServiceHeader.GET(lServiceHeader."Document Type"::Invoice, InteractLogEntry."Service Header No.") THEN
+        IF lProductCatalog.GET(lServiceHeader."Corporate No.", lServiceHeader."Service Order Type") THEN
+          IF lProductCatalog."Mail Object Auto" THEN
+            IF lInteractionTemp.GET(InteractLogEntry."Interaction Template Code") THEN
+              IF lInteractionTemp."Mail Object Auto" THEN
+                IF lCorporateRegion.GET(lServiceHeader."Corporate No.", lServiceHeader."Corporate Region Code") THEN
+                  IF lCustomer.GET(lCorporateRegion."Sell-to Customer No.") THEN BEGIN
+                    lCustomer.GetContactNo(lContactNo);
+                    IF Cont.GET(lContactNo) THEN
+                      IF Cont."Declaration E-Mail" <> '' THEN
+                        EXIT(Cont."Declaration E-Mail");
+                  END;
+
+      //<<IMH06
+      IF lInteractionTemp.GET(InteractLogEntry."Interaction Template Code") THEN BEGIN
+        Cont.GET(InteractLogEntry."Contact No.");
+        IF lInteractionTemp."Service Contact Dest." = lInteractionTemp."Service Contact Dest."::"Declaration Contact" THEN
+          IF Cont."Declaration E-Mail" <> '' THEN
+            EXIT(Cont."Declaration E-Mail");
+      END;
+      //>>IMH06
+
+      IF InteractLogEntry."Contact Alt. Address Code" = '' THEN BEGIN
+        Cont.GET(InteractLogEntry."Contact No.");
+        EXIT(Cont."E-Mail");
+      END ELSE BEGIN
+        ContAltAddr.GET(InteractLogEntry."Contact No.",InteractLogEntry."Contact Alt. Address Code");
+        IF ContAltAddr."E-mail" <> '' THEN
+          EXIT(ContAltAddr."E-mail")
+        ELSE BEGIN
+          Cont.GET(InteractLogEntry."Contact No.");
+          EXIT(Cont."E-Mail");
+        END;
+      END;
+    END;
+
+    PROCEDURE InteractionFax@1100281000(VAR InteractLogEntry@1000 : Record 5065) : Text[30];
+    VAR
+      Cont@1001 : Record 5050;
+      ContAltAddr@1002 : Record 5051;
+      lEmailFax@1100281000 : Text[80];
+    BEGIN
+      //<<IMH10.ISAT.EBA
+      ////<<IMH09
+      //CompanyInformation.GET;
+      //IF CompanyInformation."Activate Fax Debug" THEN BEGIN
+      //  EXIT(CompanyInformation."Fax Debug");
+      //END;
+      ////<<IMH09
+
+      CompanyInfo.GET;
+      lEmailFax := CompanyInfo.GetDBTypeEmailFax;
+      IF lEmailFax <> '' THEN
+        EXIT(lEmailFax);
+      //>>IMH10.ISAT.EBA
+
+      IF InteractLogEntry."Contact Alt. Address Code" = '' THEN BEGIN
+        Cont.GET(InteractLogEntry."Contact No.");
+        EXIT(Cont."Fax No.");
+      END ELSE BEGIN
+        ContAltAddr.GET(InteractLogEntry."Contact No.",InteractLogEntry."Contact Alt. Address Code");
+        IF ContAltAddr."Fax No." <> '' THEN
+          EXIT(ContAltAddr."Fax No.")
+        ELSE BEGIN
+          Cont.GET(InteractLogEntry."Contact No.");
+          EXIT(Cont."Fax No.");
+        END;
+      END;
+    END;
+
+    PROCEDURE DownToTempFile@1100281007(pAttachment@1100481000 : Record 50021;VAR pExoportFileName@1100281007 : Text[260]) : Boolean;
+    VAR
+      lRecRef@1100481001 : RecordRef;
+      lFromFileName@1100281000 : Text[500];
+      lTempBlob@1100281001 : Record 99008535;
+      lInstream@1100281002 : InStream;
+      lOutstream@1100281003 : OutStream;
+      lFileCompletNameBuffer@1100281004 : Text[500];
+      lFileFilter@1100281005 : Text[250];
+      lPathBuffer@1100281006 : Text[250];
+      lRBAutoMgt@1100281008 : Codeunit 419;
+    BEGIN
+      // permet d'exporter le document joint dans un fichier temporaire
+      WITH pAttachment DO BEGIN
+        IF Deleted THEN BEGIN
+          ERROR(Text001);
+        END;
+        GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+        lFromFileName := AttachTreeviewMgt.GetPathAndFileName(pAttachment,lRecRef);
+        lFileFilter := UPPERCASE("File Extension") + ' (*.' + "File Extension" + ')|*.' + "File Extension";
+        pExoportFileName := lRBAutoMgt.ServerTempFileName(Text016,pAttachment."File Extension");
+        IF ISSERVICETIER THEN BEGIN
+          DOWNLOAD(lFromFileName,'','<TEMP>',lFileFilter,pExoportFileName);
+          EXIT(TRUE);
+        END ELSE
+          EXIT(FILE.COPY(lFromFileName,pExoportFileName));
+      END;
+    END;
+
+    PROCEDURE GetFilePath@1100281003(pAttachment@1100281000 : Record 50021) : Text[260];
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      WITH pAttachment DO BEGIN
+        GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+        EXIT(AttachTreeviewMgt.GetPathAndFileName(pAttachment,lRecRef));
+      END;
+    END;
+
+    PROCEDURE CreateAttachment2@1100281004(VAR pNewAttach@1100281002 : Record 50021;VAR pAttach@1000000000 : Record 5062;pRecRef@1000000002 : RecordRef) rValue : Boolean;
+    VAR
+      lAttachment@1100481000 : Record 50021;
+      lAttachmentTreeview@1100481001 : Record 50017;
+      lAttachmentTemplate@1100481005 : Record 50020;
+      lToFileName@1100481003 : Text[500];
+      lPath@1100481004 : Text[500];
+      lFileName@1000000001 : Text[500];
+      lInStream@1100281000 : InStream;
+      lOutStream@1100281001 : OutStream;
+      lWordMgt@1100281003 : Codeunit 5054;
+    BEGIN
+      // Cr‚e un doc joint … partir du record attachment std pass‚ en paramŠtre
+      rValue := FALSE;
+
+
+      CASE pAttach."Storage Type" OF
+        pAttach."Storage Type"::Embedded : BEGIN
+          pAttach.CALCFIELDS(Attachment);
+          IF NOT pAttach.Attachment.HASVALUE THEN
+            EXIT;
+        END;
+        pAttach."Storage Type"::"Disk File" : BEGIN
+          IF pAttach."Storage Pointer" = '' THEN
+            EXIT;
+          IF pAttach."File Extension" = '' THEN
+            pAttach."File Extension" := FolderMgt.GetFileExtension(pAttach."Storage Pointer");
+        END;
+        ELSE pAttach.FIELDERROR("Storage Type");
+      END; // CASE
+
+      lAttachment := pNewAttach;
+
+      IF NOT lAttachmentTemplate.GET(pNewAttach."Attach. Template Code") THEN BEGIN
+        CLEAR(lAttachmentTemplate);
+      END;
+      WITH lAttachment DO BEGIN
+        //VALIDATE("Treeview Entry No.");
+        IF NOT INSERT(TRUE) THEN
+          EXIT;
+
+        IF "File Extension" = '' THEN
+          "File Extension" := pAttach."File Extension";
+
+        lAttachment."Delete Mode" := lAttachmentTemplate."Delete Mode";
+        //IF lAttachment."Interaction Log Entry No." = 0 THEN
+        //  lAttachment.Modifiable := lAttachmentTemplate.Modifiable;
+        pAttach.CALCFIELDS("Merge Source");
+        IF pAttach."Merge Source".HASVALUE THEN BEGIN
+          pAttach."Merge Source".CREATEINSTREAM(lInStream);
+          "Merge Source".CREATEOUTSTREAM(lOutStream);
+          COPYSTREAM(lOutStream, lInStream);
+        END;
+
+        lAttachmentTreeview.GET("Attachment Treeview Code");
+        // R‚cup‚ration du chemin d'importation issue de la structure d'arborescence
+        lPath := AttachTreeviewMgt.GetPath(lAttachment,pRecRef);
+        // Cr‚ation ‚ventuelle du r‚pertoire
+
+        FolderMgt.CreateCompletePath(lPath,TRUE);
+        lToFileName := lPath + AttachTreeviewMgt.GetFileName(lAttachment);
+
+        // Gestion du stockage fichier
+        CASE pAttach."Storage Type" OF
+          pAttach."Storage Type"::Embedded : BEGIN
+            // BLOB -> fichier
+            pAttach.Attachment.EXPORT(lToFileName);
+          END;
+          pAttach."Storage Type"::"Disk File" : BEGIN
+            // Fichier -> Fichier
+            IF NOT FILE.COPY(pAttach."Storage Pointer", lToFileName) THEN
+              EXIT;
+          END;
+        END; // CASE
+        //<<IMH11.ISAT.EBA
+        IF "Description 2" = '' THEN
+          "Description 2" := AttachTreeviewMgt.GetFileName(lAttachment);
+        "File Size" := GetFileSize(lToFileName);
+        //"File Size" := GetAttachFileSize(lAttachment);
+        //>>IMH11.ISAT.EBA
+        "Attachment Exist" := TRUE;
+        IF lAttachment."Referent Table No." <> DATABASE::"Interaction Log Entry" THEN //IMH14.ZW 26/01/2012
+          Modifiable := NOT pAttach."Read Only"; //IMH08.ST
+
+        IF NOT MODIFY(TRUE) THEN
+          EXIT;
+      END;
+
+      pNewAttach := lAttachment;
+      rValue := TRUE;
+    END;
+
+    PROCEDURE SetInteractionTemplate@1100281005(pInteractionTemplateCode@1100281000 : Code[10]);
+    BEGIN
+      //IMH04
+      IF NOT InteractionTemplate.GET(pInteractionTemplateCode) THEN
+        CLEAR(InteractionTemplate);
+    END;
+
+    PROCEDURE DeleteAllAttachment@1100281008(VAR pAttachment@1100481000 : Record 50021;pWithConfirm@1001 : Boolean) rValue@1000 : Boolean;
+    BEGIN
+      //IMH05
+      rValue := FALSE;
+
+      pAttachment.Modifiable := TRUE;
+      pAttachment."Delete Mode" := pAttachment."Delete Mode"::All;
+      pAttachment.MODIFY;
+      EXIT(DeleteAttachment(pAttachment, pWithConfirm));
+    END;
+
+    PROCEDURE GetAttachFileSize@1100281006(VAR pAttachment@1100281000 : Record 50021) : Decimal;
+    VAR
+      lFile@1100281001 : Record 2000000022;
+      lRecRef@1100281002 : RecordRef;
+      lPath@1100281003 : Text[250];
+      lFileName@1100281004 : Text[100];
+    BEGIN
+      //IMH07
+      WITH pAttachment DO BEGIN
+        GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+        lPath := AttachTreeviewMgt.GetPath(pAttachment, lRecRef);
+        lFileName := AttachTreeviewMgt.GetFileName(pAttachment);
+        lFile.SETRANGE(Path, lPath);
+        lFile.SETRANGE(Name, lFileName);
+        IF lFile.FINDFIRST THEN
+          EXIT(lFile.Size);
+      END;
+    END;
+
+    PROCEDURE GetFileSize@1100281009(pFileFullName@1100281002 : Text[1024]) : Integer;
+    VAR
+      lFSO@1100281001 : Automation "{420B2830-E718-11CF-893D-00A0C9054228} 1.0:{0D43FE01-F093-11CF-8940-00A0C9054228}:'Microsoft Scripting Runtime'.FileSystemObject";
+      lFile@1100281000 : Automation "{420B2830-E718-11CF-893D-00A0C9054228} 1.0:{C7C3F5B5-88A3-11D0-ABCB-00A0C90FFFC0}:'Microsoft Scripting Runtime'.File";
+    BEGIN
+      //<<IMH11.ISAT.EBA
+      CLEAR(lFSO);
+      IF NOT CREATE(lFSO) THEN
+        EXIT(0);
+
+      IF lFSO.FileExists(pFileFullName) THEN BEGIN
+        lFile := lFSO.GetFile(pFileFullName);
+        EXIT(lFile.Size);
+      END ELSE
+        EXIT(0);
+      //>>IMH11.ISAT.EBA
+    END;
+
+    PROCEDURE GetFilePath2@1100281010(pAttachment@1100281000 : Record 50021) rValue : Text[260];
+    VAR
+      lRecRef@1100281001 : RecordRef;
+    BEGIN
+      //IMH12.ST Fonction
+      WITH pAttachment DO BEGIN
+        GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+        rValue := AttachTreeviewMgt.GetPathAndFileName(pAttachment,lRecRef);
+        IF "PDF Exist" THEN
+          EXIT(rValue + '.PDF');
+      END;
+    END;
+
+    PROCEDURE ChangeAttachmentFile@1000000001(VAR pAttachment@1000000000 : Record 50021;pClientFileName@1000000001 : Text[1024]) : Boolean;
+    VAR
+      l_Attachment@1000000010 : Record 50021;
+      lAttachmentTreeview@1000000009 : Record 50017;
+      l_AttachmentTemplate@1000000008 : Record 50020;
+      l_FromFileName@1000000007 : Text[500];
+      lToFileName@1000000006 : Text[500];
+      lPath@1000000005 : Text[500];
+      l_FileName@1000000004 : Text[500];
+      lTempBlob@1000000003 : TEMPORARY Record 99008535;
+      lOutStream@1000000002 : OutStream;
+      lRecRef@1000000011 : RecordRef;
+      lFileMgt@1000000012 : Codeunit 419;
+      lOldFileName@1000000013 : Text[1024];
+      lFoldMgt@1000000014 : Codeunit 50004;
+    BEGIN
+      WITH pAttachment DO BEGIN
+        GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+        lOldFileName := AttachTreeviewMgt.GetPath(pAttachment,lRecRef) + AttachTreeviewMgt.GetFileName(pAttachment);
+        "File Extension" := FolderMgt.GetFileExtension(pClientFileName);
+        lAttachmentTreeview.GET("Attachment Treeview Code");
+        // R‚cup‚ration du chemin d'importation issue de la structure d'arborescence
+        lPath := AttachTreeviewMgt.GetPath(pAttachment,lRecRef);
+        // Cr‚ation ‚ventuelle du r‚pertoire
+        FolderMgt.CreateCompletePath(lPath,TRUE);
+        lToFileName := lPath + AttachTreeviewMgt.GetFileName(pAttachment);
+        FolderMgt.CopyFile2(pClientFileName, lToFileName);
+        ERASE(lOldFileName);
+        "File Size" := GetFileSize(lToFileName);
+        "Attachment Exist" := TRUE;
+        MODIFY(TRUE);
+      END;
+      EXIT(TRUE);
+        //IF "Interaction Template Code" <> '' THEN BEGIN
+        //  CreateInteraction(lAttachment);
+        //END;
+    END;
+
+    PROCEDURE ChangeDeleteInteraction@1100281012(VAR pAttachment@1100281000 : Record 50021);
+    VAR
+      lInteractionLogEntry@1100281001 : Record 5065;
+      lDocAttachment@1100281002 : Record 50021;
+    BEGIN
+      //IMH18
+      IF NOT lInteractionLogEntry.GET(pAttachment."Interaction Log Entry No.") THEN
+        EXIT;
+
+      lDocAttachment.SETCURRENTKEY("Interaction Log Entry No.");
+      lDocAttachment.SETRANGE("Interaction Log Entry No.", lInteractionLogEntry."Entry No.");
+      lDocAttachment.SETRANGE(Deleted, FALSE);
+
+      IF lDocAttachment.ISEMPTY THEN BEGIN
+        lInteractionLogEntry."Attachment Deleted" := TRUE;
+        lInteractionLogEntry.MODIFY(FALSE);
+      END;
+
+    END;
+
+    BEGIN
+    {
+      /** @r IMH18 @d 19/12/13 @a ISAT.ZW @v IMH6.01.4107 @s Gestion suppression PJ @h 4107
+          @c Gestion suppression PJ*/
+      /** @r IMH17 @d 25/07/12 @a ISAT.RC @v IMH6.01.P006 @s Interface GED @c recuperation du fichier … partir de la ged */
+      /** @r IMH16 @d 11/07/12 @a ISAT.PC @v IMH6.01.108 @s Gestion suppression @h 2552
+          @c Ajout fonction ChangeDeleteAttachment */
+      /** @r IMH15 @d 16/05/12 @a ISAT.ST @v IMH6.01.108 @s Ajout de piŠce jointe lors de l'envoi @h 2844 @c ChangeAttachmentFile */
+      /** @r IMH14 @d 26/01/12 @a ISAT.ZW @v IMH6.01.108 @d Interactions @c Gestion du readonly : parametrage sur modŠle int‚raction */
+      /** @r IMH13 @d 30/12/11 @a ISAT.ZW @v IMH6.01.108 @d Interactions @h 2513
+          @c suppression de la fonction de r‚importation et du message pour l'affichage d'un doc joint */
+      /** @r IMH12 @d 09/11/11 @a ISAT.ST @v IMH6.01.108 @d Interactions @c Ajout GetFilePath2 pour l'extranet */
+      /** @r IMH11 @d 22/09/11 @a ISAT.EBA @v IMH6.01.003 @s Gestion de la taille des documents */
+      /** @r IMH10 @d 06/09/11 @a ISAT.EBA @v IMH6.01.200 @s Type de base */
+      /** @r IMH09 @d 29/08/11 @a ISAT.ZW @v IMH6.01.108 @d Interactions @c Email/fax Mode debug */
+      /** @r IMH08 @d 08/07/11 @a ISAT.ST @v IMH6.01.108 @d Interactions @c Gestion du readonly */
+      /** @r IMH07 @d 29/03/11 @a ISAT.ZW @v IMH6.01.108 @d Interactions @c AJout fonction GetAttachFileSize */
+      /** @r IMH06 @d 24/03/11 @a ISAT.ZW @v IMH6.01.108 @d Interactions @c Email declaration contact */
+      /** @r IMH05 @d 18/03/11 @a ISAT.ZW @v IMH6.01.108 @d Interactions @c Ajout fonction DeleteAllAttachment */
+      /** @r IMH04 @d 07/02/11 @a ISAT.ZW @v IMH6.01.108 @d Interactions @c Suivi du modŠle d'interaction */
+      /** @r IMH03 @d 13/01/11 @a ISAT.ST @v IMH6.01.003 @s Attach. Management @c Ajout CreateAttachment2 */
+      /** @r IMH02 @d 02/12/10 @a ISAT.ZW @v IMH6.01.003 @s Attach. Management @c Ajout Nø table dans la cl‚ primaire */
+      /** @r IMH01 @d 23/09/10 @a ISAT.ZW @v IMH6.01.003 @s Attach. Management @c Creation */
+    }
+    END.
+  }
+}

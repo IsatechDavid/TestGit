@@ -1,0 +1,1019 @@
+OBJECT Codeunit 397 Mail
+{
+  OBJECT-PROPERTIES
+  {
+    Date=16/07/13;
+    Time=10:00:48;
+    Modified=Yes;
+    Version List=IMH6.01,V1.5,3872;
+  }
+  PROPERTIES
+  {
+    OnRun=BEGIN
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      OApplication@1004 : Automation "{03BC4F50-2ABB-48B3-B2A6-3F08EB1D013E} 1.7:{4DD4A3AB-B2FB-4852-A2C8-7C4691C536EA}:'NS Outlook Synchronization Handler'.OApplication";
+      OAttachment@1005 : Automation "{03BC4F50-2ABB-48B3-B2A6-3F08EB1D013E} 1.7:{3FEDE949-33CB-4EE0-8FA2-309003459254}:'NS Outlook Synchronization Handler'.OAttachment";
+      OAttachments@1006 : Automation "{03BC4F50-2ABB-48B3-B2A6-3F08EB1D013E} 1.7:{355ADBA4-2CE8-417A-B4F6-75A76E36C284}:'NS Outlook Synchronization Handler'.OAttachments";
+      OSendMail@1007 : Automation "{03BC4F50-2ABB-48B3-B2A6-3F08EB1D013E} 1.7:{F3B45F48-1F4A-40C9-8DE6-5CC377BF4F82}:'NS Outlook Synchronization Handler'.OSendMail";
+      BSTRConverterBody@1008 : Automation "{A378E78B-5DB6-45E9-B598-9ED74A7CCCE1} 1.0:{30E9A1F9-9B22-4D26-91CF-C6CC2D9BC2D9}:'Navision Attain Hash 1.0'.BSTRConverter";
+      BSTRConverterAttachFileName@1009 : Automation "{A378E78B-5DB6-45E9-B598-9ED74A7CCCE1} 1.0:{30E9A1F9-9B22-4D26-91CF-C6CC2D9BC2D9}:'Navision Attain Hash 1.0'.BSTRConverter";
+      FolderMgt@1000000000 : Codeunit 50004;
+      HideDialog@1002 : Boolean;
+      ErrorNo@1003 : Integer;
+      Text001@1000 : TextConst 'ENU=No registered e-mail addresses found for this %1.;FRA=Aucune adresse de messagerie pour ce(t)(tte) %1.';
+      MailGUIDValue@1001 : GUID;
+      CompanyInfo@1100281000 : Record 79;
+      oOutlookApp@1100281002 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{0006F03A-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.Application";
+      oMailItem@1100281001 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{00061033-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.MailItem";
+      oNameSpace@1000000003 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{0006308B-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.NameSpace";
+      AutStreamADO@1000000002 : Automation "{B691E011-1797-432E-907A-4D8C69339129} 6.0:{00000566-0000-0010-8000-00AA006D2EA4}:'Microsoft ActiveX Data Objects 6.0 Library'.Stream";
+      VBScript@1000000001 : Automation "{0E59F1D2-1FBE-11D0-8FF2-00A0D10038BC} 1.0:{0E59F1D5-1FBE-11D0-8FF2-00A0D10038BC}:'Microsoft Script Control 1.0'.ScriptControl";
+
+    PROCEDURE OpenNewMessage@1(ToName@1000 : Text[80]) : Boolean;
+    BEGIN
+      NewMessage(ToName,'','','','',TRUE);
+    END;
+
+    PROCEDURE NewMessage@2(ToName@1001 : Text[80];CCName@1002 : Text[80];Subject@1003 : Text[260];Body@1004 : Text[260];AttachFileName@1005 : Text[260];OpenDialog@1006 : Boolean) MailSent : Boolean;
+    VAR
+      lEmail@1100281000 : Text[80];
+    BEGIN
+      //<<IMH05.ST
+      IF GetUserGroupMail <> '' THEN
+        EXIT(NewOutlookMessage3(ToName,CCName,Subject,Body,AttachFileName,OpenDialog));
+      //>>IMH05.ST
+      IF ISCLEAR(OApplication) THEN
+        CREATE(OApplication,TRUE,TRUE);
+
+      IF (NOT OApplication.Logon(TRUE,'','',FALSE,FALSE)) THEN BEGIN
+        OApplication.Logoff;
+        EXIT
+      END;
+
+      IF ISCLEAR(OSendMail) THEN
+        CREATE(OSendMail,TRUE,TRUE);
+
+      ErrorNo := 0;
+
+      //<<IMH03.ISAT.EBA
+      CompanyInfo.GET;
+      lEmail := CompanyInfo.GetDBTypeEmail;
+      IF lEmail <> '' THEN BEGIN
+        ToName := lEmail;
+        CCName := '';
+      END;
+      //<<IMH03.ISAT.EBA
+
+      OSendMail."To" := ToName;
+      OSendMail.CC := CCName;
+      OSendMail.Subject := Subject;
+      OSendMail.BodyFormat := 2;
+      MailGUIDValue := CREATEGUID;
+      OSendMail.SetUserProperty(GetMailGUIDFieldName,1,FORMAT(MailGUIDValue));
+
+      IF ISCLEAR(BSTRConverterBody) THEN
+        CREATE(BSTRConverterBody,TRUE,TRUE);
+
+      IF Body <> '' THEN BEGIN
+        BSTRConverterBody.ResetBSTR;
+        BSTRConverterBody.AppendNextStringPortion(Body);
+      END;
+      OSendMail.Body := BSTRConverterBody;
+
+      IF ISCLEAR(BSTRConverterAttachFileName) THEN
+        CREATE(BSTRConverterAttachFileName,TRUE,TRUE);
+
+      IF AttachFileName <> '' THEN BEGIN
+        BSTRConverterAttachFileName.ResetBSTR;
+        BSTRConverterAttachFileName.AppendNextStringPortion(AttachFileName);
+        OAttachments := OSendMail.Attachments;
+        OAttachment := OAttachments.Add(BSTRConverterAttachFileName);
+      END;
+      OSendMail.OpenDialog := OpenDialog;
+
+      MailSent := OSendMail.Send;
+      ErrorNo := OSendMail.ErrorStatus;
+      OApplication.Logoff;
+    END;
+
+    PROCEDURE AddBodyline@5(TextLine@1000 : Text[260]) : Boolean;
+    BEGIN
+      IF ISCLEAR(BSTRConverterBody) THEN
+        CREATE(BSTRConverterBody,TRUE,TRUE);
+      IF TextLine <>'' THEN
+        BSTRConverterBody.AppendNextStringPortion(TextLine);
+      EXIT(TRUE);
+    END;
+
+    PROCEDURE Send@4() MailSent : Boolean;
+    BEGIN
+      MailSent := OSendMail.Send;
+      ErrorNo := OSendMail.ErrorStatus;
+    END;
+
+    PROCEDURE GetErrorCode@6() : Integer;
+    BEGIN
+      EXIT(OSendMail.ErrorStatus);
+    END;
+
+    PROCEDURE GetErrorDesc@7() : Text[260];
+    BEGIN
+      EXIT(OSendMail.ErrorDescription);
+    END;
+
+    PROCEDURE SetDialogState@3(NewHideDialog@1000 : Boolean);
+    BEGIN
+      HideDialog := NewHideDialog;
+    END;
+
+    PROCEDURE CollectAddresses@9(ContactNo@1000 : Code[20];VAR ContactThrough@1002 : Record 5100;ShowAddresses@1008 : Boolean) : Text[260];
+    VAR
+      Contact@1003 : Record 5050;
+    BEGIN
+      ContactThrough.RESET;
+      ContactThrough.DELETEALL;
+      IF NOT Contact.GET(ContactNo) THEN
+        EXIT;
+
+      CollectContactAddresses(ContactThrough,ContactNo);
+
+      // Get linked Company Addresses
+      IF (Contact.Type = Contact.Type::Person) AND (Contact."Company No." <> '') THEN
+        CollectContactAddresses(ContactThrough,Contact."Company No.");
+
+      IF ShowAddresses THEN
+        IF ContactThrough.FIND('-') THEN BEGIN
+          IF FORM.RUNMODAL(FORM::"Contact Through",ContactThrough) = ACTION::LookupOK THEN
+            EXIT(ContactThrough."E-Mail");
+        END ELSE
+          ERROR(Text001,Contact.TABLECAPTION);
+    END;
+
+    LOCAL PROCEDURE TrimCode@8(Code@1001 : Code[20]) TrimString : Text[20];
+    BEGIN
+      TrimString := COPYSTR(Code,1,1) + LOWERCASE(COPYSTR(Code,2,STRLEN(Code) - 1))
+    END;
+
+    PROCEDURE MailContCustVendBank@10(TableNo@1000 : Integer;No@1001 : Code[20];Email@1002 : Text[80]);
+    VAR
+      InteractionTmplSetup@1003 : Record 5122;
+      ContBusRel@1004 : Record 5054;
+      Contact@1005 : Record 5050;
+      TempSegmentLine@1006 : TEMPORARY Record 5077;
+      Mail@1007 : Codeunit 397;
+    BEGIN
+      InteractionTmplSetup.GET;
+
+      IF InteractionTmplSetup."E-Mails" = '' THEN BEGIN
+        Mail.OpenNewMessage(Email);
+        EXIT;
+      END;
+
+      IF TableNo = DATABASE::Contact THEN
+        Contact.GET(No)
+      ELSE BEGIN
+        ContBusRel.RESET;
+        ContBusRel.SETCURRENTKEY("Link to Table","No.");
+        CASE TableNo OF
+          DATABASE::Customer:
+            ContBusRel.SETRANGE("Link to Table",ContBusRel."Link to Table"::Customer);
+          DATABASE::Vendor:
+            ContBusRel.SETRANGE("Link to Table",ContBusRel."Link to Table"::Vendor);
+          DATABASE::"Bank Account":
+            ContBusRel.SETRANGE("Link to Table",ContBusRel."Link to Table"::"Bank Account");
+        END;
+        ContBusRel.SETRANGE("No.",No);
+        IF ContBusRel.FIND('-') THEN
+          Contact.GET(ContBusRel."Contact No.")
+        ELSE BEGIN
+          Mail.OpenNewMessage(Email);
+          EXIT;
+        END;
+      END;
+
+      TempSegmentLine.CreateMailFromContact(Contact,Email);
+    END;
+
+    PROCEDURE ValidateEmail@12(VAR ContactThrough@1000 : Record 5100;EMail@1001 : Text[80]) EMailExists : Boolean;
+    BEGIN
+      WITH ContactThrough DO BEGIN
+        RESET;
+        IF FIND('-') THEN BEGIN
+          SETRANGE("E-Mail",EMail);
+          EMailExists := FIND('-');
+        END;
+      END;
+    END;
+
+    PROCEDURE GetMailGUIDValue@13() : GUID;
+    BEGIN
+      EXIT(MailGUIDValue);
+    END;
+
+    PROCEDURE GetMailGUIDFieldName@27() : Text[30];
+    BEGIN
+      EXIT('Mail GUID');
+    END;
+
+    LOCAL PROCEDURE CollectContactAddresses@14(VAR ContactThrough@1000 : Record 5100;ContactNo@1001 : Code[20]);
+    VAR
+      Contact@1007 : Record 5050;
+      ContAltAddr@1005 : Record 5051;
+      ContAltAddrDateRange@1004 : Record 5052;
+      KeyNo@1002 : Integer;
+    BEGIN
+      IF NOT Contact.GET(ContactNo) THEN
+        EXIT;
+      WITH ContactThrough DO BEGIN
+        IF FINDLAST THEN
+          KeyNo := Key + 1
+        ELSE
+          KeyNo := 1;
+
+        IF Contact."E-Mail" <> '' THEN BEGIN
+          Key := KeyNo;
+          "Contact No." := ContactNo;
+          Name := Contact.Name;
+          Description := COPYSTR(Contact.FIELDCAPTION("E-Mail"),1,MAXSTRLEN(Description));
+          "E-Mail" := Contact."E-Mail";
+          Type := Contact.Type;
+          INSERT;
+          KeyNo := KeyNo + 1;
+        END;
+
+        // Alternative address
+        ContAltAddrDateRange.SETCURRENTKEY("Contact No.","Starting Date");
+        ContAltAddrDateRange.SETRANGE("Contact No.", ContactNo);
+        ContAltAddrDateRange.SETRANGE("Starting Date",0D,TODAY);
+        ContAltAddrDateRange.SETFILTER("Ending Date",'>=%1|%2',TODAY,0D);
+        IF ContAltAddrDateRange.FINDSET THEN
+          REPEAT
+            IF ContAltAddr.GET(Contact."No.",ContAltAddrDateRange."Contact Alt. Address Code") THEN
+              IF ContAltAddr."E-mail" <> '' THEN BEGIN
+                Key := KeyNo;
+                Description := TrimCode(ContAltAddr.Code) + ' - ' + ContAltAddr.FIELDCAPTION("E-mail");
+                "E-Mail" := ContAltAddr."E-mail";
+                Type := Contact.Type;
+                INSERT;
+                KeyNo := KeyNo + 1;
+              END;
+          UNTIL ContAltAddrDateRange.NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE FindMailGUID@23(VAR CDOQueueMessage@1002 : Automation "{3FA7DEA7-6438-101B-ACC1-00AA00423326} 1.33:{3FA7DEAA-6438-101B-ACC1-00AA00423326}:'Microsoft CDO 1.21 Library'.Message";VAR MailGUID@1000 : GUID);
+    VAR
+      CDOFields@1007 : Automation "{3FA7DEA7-6438-101B-ACC1-00AA00423326} 1.33:{000662A0-68DC-101B-ACC1-00AA00423326}:'Microsoft CDO 1.21 Library'.Fields";
+      CDOField@1006 : Automation "{3FA7DEA7-6438-101B-ACC1-00AA00423326} 1.33:{3FA7DEB0-6438-101B-ACC1-00AA00423326}:'Microsoft CDO 1.21 Library'.Field";
+      FieldCount@1005 : Integer;
+      FieldNumber@1004 : Integer;
+      FieldFound@1003 : Boolean;
+      FieldName@1001 : Text[30];
+    BEGIN
+      CDOFields := CDOQueueMessage.Fields;
+      EVALUATE(FieldCount,FORMAT(CDOFields.Count));
+      FieldName := GetMailGUIDFieldName;
+      WHILE NOT FieldFound AND (FieldNumber < FieldCount) DO BEGIN
+        FieldNumber := FieldNumber + 1;
+        CDOField := CDOFields.Item(FieldNumber);
+        IF FORMAT(CDOField.Name) = FieldName THEN BEGIN
+          MailGUID := FORMAT(CDOField.Value);
+          IF NOT ISNULLGUID(MailGUID) THEN
+            FieldFound := TRUE;
+        END;
+      END;
+    END;
+
+    PROCEDURE NewWordMessage@1100281000(ToName@1001 : Text[80];CCName@1002 : Text[80];Subject@1003 : Text[260];VAR pWrdDoc@1005 : Automation "{00020905-0000-0000-C000-000000000046} 8.5:{00020906-0000-0000-C000-000000000046}:'Microsoft Word 14.0 Object Library'.Document";AttachFileName@1100281001 : Text[260];OpenDialog@1006 : Boolean) MailSent : Boolean;
+    VAR
+      lEmail@1100281000 : Text[80];
+    BEGIN
+      //IMH02.ST
+      IF ISCLEAR(OApplication) THEN
+        CREATE(OApplication,FALSE,TRUE);
+
+      IF (NOT OApplication.Logon(TRUE,'','',FALSE,FALSE)) THEN BEGIN
+        OApplication.Logoff;
+        EXIT
+      END;
+
+      IF ISCLEAR(OSendMail) THEN
+        CREATE(OSendMail,TRUE,TRUE);
+
+      ErrorNo := 0;
+
+      //<<IMH03.ISAT.EBA
+      lEmail := GetUserGroupMail;
+      IF lEmail <> '' THEN
+        OSendMail.SentOnBehalfOfName(lEmail);
+
+      CompanyInfo.GET;
+      lEmail := CompanyInfo.GetDBTypeEmail;
+      IF lEmail <> '' THEN BEGIN
+        ToName := lEmail;
+        CCName := '';
+      END;
+      //<<IMH03.ISAT.EBA
+
+      OSendMail."To" := ToName;
+      OSendMail.CC := CCName;
+      OSendMail.Subject := Subject;
+      OSendMail.BodyFormat := 2;
+      MailGUIDValue := CREATEGUID;
+      OSendMail.SetUserProperty(GetMailGUIDFieldName,1,FORMAT(MailGUIDValue));
+
+      OSendMail.Body := pWrdDoc.Content;
+
+      IF AttachFileName <> '' THEN BEGIN
+        IF ISCLEAR(BSTRConverterAttachFileName) THEN
+          CREATE(BSTRConverterAttachFileName,TRUE,TRUE);
+
+        BSTRConverterAttachFileName.ResetBSTR;
+        BSTRConverterAttachFileName.AppendNextStringPortion(AttachFileName);
+        OAttachments := OSendMail.Attachments;
+        OAttachment := OAttachments.Add(BSTRConverterAttachFileName);
+      END;
+
+      OSendMail.OpenDialog := OpenDialog;
+
+      MailSent := OSendMail.Send;
+      ErrorNo := OSendMail.ErrorStatus;
+      OApplication.Logoff;
+    END;
+
+    PROCEDURE GetSenderEMail@1100281001(pProcessCode@1000000000 : Code[10]) rValue : Text[80];
+    BEGIN
+      //IMH04.ST
+      IF pProcessCode <> '' THEN BEGIN
+        IF NOT GUIALLOWED THEN // seulement pour NAS
+          rValue := GetProcessEMail(pProcessCode)
+      END;
+      IF rValue <> '' THEN
+        EXIT;
+      EXIT(GetUserGroupMail);
+    END;
+
+    PROCEDURE GetProcessEMail@1000000000(pProcessCode@1000000000 : Code[10]) : Text[80];
+    VAR
+      lProcess@1000000001 : Record 50041;
+    BEGIN
+      //IMH04.ST
+      IF lProcess.GET(pProcessCode) THEN
+        EXIT(lProcess."NAS From Mail");
+    END;
+
+    PROCEDURE NewOutlookMessage@1100281002(ToName@1001 : Text[80];CCName@1002 : Text[80];Subject@1003 : Text[260];Body@1004 : BigText;OpenDialog@1006 : Boolean) MailSent : Boolean;
+    VAR
+      lEmail@1100281000 : Text[80];
+      lBodyLine@1100281002 : Text[1024];
+      lBodyLength@1100281003 : Integer;
+      lCpt@1100281004 : Integer;
+      lTempText@1100281001 : Text[1024];
+    BEGIN
+      //**eb
+      IF ISCLEAR(oOutlookApp) THEN BEGIN
+        CREATE(oOutlookApp,TRUE,TRUE);
+      //<<IMH17.ST
+        oNameSpace := oOutlookApp.GetNamespace('MAPI');
+        lTempText := oNameSpace.GetDefaultFolder(6).Name;
+      //>>IMH17.ST
+      END;
+
+      oMailItem := oOutlookApp.CreateItem(0);
+
+      lEmail := GetUserGroupMail;
+      IF lEmail <> '' THEN
+        oMailItem.SentOnBehalfOfName := lEmail;
+
+      CompanyInfo.GET;
+      lEmail := CompanyInfo.GetDBTypeEmail;
+      IF lEmail <> '' THEN BEGIN
+        ToName := lEmail;
+        CCName := '';
+      END;
+
+      oMailItem."To" := ToName;
+      oMailItem.CC := CCName;
+      oMailItem.Subject := Subject;
+
+      IF ISCLEAR(BSTRConverterBody) THEN
+        CREATE(BSTRConverterBody,TRUE,TRUE);
+
+      //IF Body <> '' THEN BEGIN
+      //  BSTRConverterBody.ResetBSTR;
+      //  BSTRConverterBody.AppendNextStringPortion(Body);
+      //END;
+      oMailItem.HTMLBody := '';
+      lCpt := 1;
+      lBodyLength := Body.LENGTH;
+      IF CONFIRM(FORMAT(lBodyLength)) THEN;
+      IF lBodyLength > 0 THEN BEGIN
+        REPEAT
+          Body.GETSUBTEXT(lBodyLine,lCpt,MAXSTRLEN(lBodyLine));
+          IF CONFIRM(lBodyLine) THEN;
+          //oMailItem.HTMLBody(lBodyLine);
+         // IF CONFIRM(FORMAT(oMailItem.HTMLBody())) THEN;
+          oMailItem.HTMLBody := oMailItem.HTMLBody + lBodyLine;
+          lCpt := lCpt + MAXSTRLEN(lBodyLine);
+        UNTIL lCpt > lBodyLength;
+      END;
+
+      //oMailItem.HTMLBody := BSTRConverterBody.BSTR;
+
+      IF OpenDialog THEN BEGIN
+        oMailItem.Display(TRUE);
+      END ELSE BEGIN
+        oMailItem.Close(0);
+        oMailItem.Send;
+      END;
+      //**
+    END;
+
+    PROCEDURE NewOutlookMessage2@1000000001(pSender@1000000006 : Text[1024];pSubject@1000000005 : Text[1024];pBodyTextFormat@1000000010 : 'Text,RTF,Html';pBodyText@1000000004 : BigText;VAR pToRecipList@1000000003 : Record 5050;VAR pCCRecipList@1000000002 : Record 5050;VAR pCCiRecipList@1000000001 : Record 5050;VAR pAttachList@1000000000 : Record 50021;OpenDialog@1006 : Boolean;pSaveFileName@1000000013 : Text[1024]) rMailSent : Boolean;
+    VAR
+      lBodyLen@1100281003 : Integer;
+      lCpt@1100281004 : Integer;
+      lToList@1000000009 : Text[1024];
+      lCCList@1000000008 : Text[1024];
+      lCCIList@1000000007 : Text[1024];
+      lBodyLine@1100281002 : Text[1024];
+      lVar@1000000011 : Variant;
+      lTempText@1000000012 : Text[1024];
+    BEGIN
+      //ST
+      IF ISCLEAR(oOutlookApp) THEN BEGIN
+        CREATE(oOutlookApp,TRUE,TRUE);
+      //<<IMH17.ST
+        oNameSpace := oOutlookApp.GetNamespace('MAPI');
+        lTempText := oNameSpace.GetDefaultFolder(6).Name;
+      //  oNameSpace.Logon(lVar,lVar,FALSE,TRUE);
+      //>>IMH17.ST
+      END;
+      oMailItem := oOutlookApp.CreateItem(0);
+      IF pSender = '' THEN
+        pSender := GetUserGroupMail;
+      IF pSender <> '' THEN
+        oMailItem.SentOnBehalfOfName := pSender;
+      CompanyInfo.GET;
+      lToList := CompanyInfo.GetDBTypeEmail;
+      IF lToList = '' THEN BEGIN
+        lToList := MakeMailList(pToRecipList);
+        lCCList := MakeMailList(pCCRecipList);
+        lCCIList := MakeMailList(pCCiRecipList);
+      END;
+      oMailItem."To" := lToList;
+      oMailItem.CC := lCCList;
+      oMailItem.BCC := lCCIList;
+      oMailItem.Subject := pSubject;
+
+      CASE pBodyTextFormat OF
+        pBodyTextFormat::Text : oMailItem.BodyFormat := 1;
+        pBodyTextFormat::Html : oMailItem.BodyFormat := 2;
+        pBodyTextFormat::RTF :  oMailItem.BodyFormat := 3;
+        ELSE oMailItem.BodyFormat := 0;
+      END; // CASE
+
+      lBodyLen := pBodyText.LENGTH;
+      IF lBodyLen > 0 THEN BEGIN
+        IF lBodyLen <= MAXSTRLEN(lBodyLine) THEN BEGIN
+          pBodyText.GETSUBTEXT(lBodyLine,1,MAXSTRLEN(lBodyLine));
+          CASE pBodyTextFormat OF
+            pBodyTextFormat::Text : oMailItem.Body := lBodyLine;
+            pBodyTextFormat::Html : oMailItem.HTMLBody := lBodyLine;
+            pBodyTextFormat::RTF :  oMailItem.RTFBody := lBodyLine;
+          END; // CASE
+        END
+        ELSE BEGIN
+          IF ISCLEAR(BSTRConverterBody) THEN
+            CREATE(BSTRConverterBody,TRUE,TRUE);
+          BSTRConverterBody.ResetBSTR;
+          lCpt := 1;
+          REPEAT
+            lCpt += pBodyText.GETSUBTEXT(lBodyLine,lCpt,MAXSTRLEN(lBodyLine));
+            BSTRConverterBody.AppendNextStringPortion(lBodyLine);
+          UNTIL lCpt >= lBodyLen;
+
+          CASE pBodyTextFormat OF
+            pBodyTextFormat::Text : oMailItem.Body := BSTRConverterBody.BSTR;
+            pBodyTextFormat::Html : oMailItem.HTMLBody := BSTRConverterBody.BSTR;
+            pBodyTextFormat::RTF :  oMailItem.RTFBody := BSTRConverterBody.BSTR;
+          END; // CASE
+        END;
+      END; // Gestion body
+      //<<IMH09
+      //ELSE
+      //  OSendMail.Body := BSTRConverterBody;
+      //>>IMH09
+
+      SetAttachListToMailItem(oMailItem,pAttachList);
+      IF OpenDialog THEN BEGIN
+        IF pSaveFileName <> '' THEN
+          oMailItem.SaveAs(pSaveFileName);
+        oMailItem.Display(TRUE);
+      END ELSE BEGIN
+        IF pSaveFileName <> '' THEN
+          oMailItem.SaveAs(pSaveFileName);
+        oMailItem.Close(0);
+        oMailItem.Send;
+        EXIT(TRUE);
+      END;
+    END;
+
+    PROCEDURE NewOutlookMessage3@1000000004(ToName@1000000005 : Text[80];CCName@1000000004 : Text[80];Subject@1000000003 : Text[260];Body@1000000002 : Text[260];AttachFileName@1000000001 : Text[260];OpenDialog@1000000000 : Boolean) MailSent : Boolean;
+    VAR
+      lTempContTo@1000000006 : TEMPORARY Record 5050;
+      lTempContCC@1000000007 : TEMPORARY Record 5050;
+      lTempContCCi@1000000008 : TEMPORARY Record 5050;
+      lTempDocAttach@1000000009 : TEMPORARY Record 50021;
+      lBigText@1000000010 : BigText;
+    BEGIN
+      //IMH05.ST
+      lTempContTo."E-Mail" := ToName;
+      lTempContTo.INSERT(FALSE);
+      IF CCName <> '' THEN BEGIN
+        lTempContCC."E-Mail" := CCName;
+        lTempContCC.INSERT(FALSE);
+      END;
+
+      IF AttachFileName <> '' THEN BEGIN
+        lTempDocAttach."Referent Table No." := -1;
+        lTempDocAttach."File Path" := AttachFileName;
+        lTempDocAttach.INSERT;
+      END;
+
+      lBigText.ADDTEXT(Body);
+      EXIT(NewOutlookMessage2('',Subject,0,lBigText,
+                              lTempContTo, lTempContCC, lTempContCCi,
+                              lTempDocAttach, OpenDialog,''));
+    END;
+
+    PROCEDURE MakeMailList@1000000002(VAR pContactList@1000000000 : Record 5050) rValue : Text[1024];
+    BEGIN
+      IF NOT pContactList.FINDSET THEN
+        EXIT;
+
+      REPEAT
+        IF pContactList."E-Mail" <> '' THEN BEGIN
+          IF rValue = '' THEN
+            rValue := pContactList."E-Mail"
+          ELSE
+            rValue := rValue + '; ' + pContactList."E-Mail"
+        END;
+      UNTIL pContactList.NEXT=0;
+    END;
+
+    PROCEDURE RetrieveOMailItem@1000000003(VAR pMailItem@1000000000 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{00061033-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.MailItem");
+    BEGIN
+      pMailItem := oMailItem;
+    END;
+
+    PROCEDURE ExportMergeAttachment@1000000006(VAR pAttachment@1000 : Record 50021;VAR pExportPath@1000000000 : Text[1024]) : Boolean;
+    VAR
+      lRecRef@1100481000 : RecordRef;
+      lWordManagement@1003 : Codeunit 5054;
+      lAttachmentManagement@1004 : Codeunit 5052;
+      lAttachMgt@1000000001 : Codeunit 50002;
+      lAttachTreeviewMgt@1000000002 : Codeunit 50001;
+      lPathBuffer@1100281001 : Text[250];
+      lFileCompletNameBuffer@1100281000 : Text[250];
+      lMergeSourceCompletNameBuffer@1100281004 : Text[250];
+      lFileNameCopyTest@1100481008 : Text[260];
+      lOriginalFileName@1100481002 : Text[260];
+      lOriginalPath@1100481003 : Text[260];
+      lCancelImport@1100481005 : Boolean;
+      lConfirmImport@1100481006 : Boolean;
+      lFileFilter@1100281002 : Text[250];
+      lOriginalCompletFileName@1100281003 : Text[300];
+      lMerge@1100281005 : Boolean;
+      lSegLine@1100281007 : TEMPORARY Record 5077;
+      lStdAttach@1100281006 : TEMPORARY Record 5062;
+      lInStream@1100281008 : InStream;
+      lOutStream@1100281009 : OutStream;
+      lFile@1100281010 : File;
+      lDocIsImported@1100281011 : Boolean;
+      lAutmgt@1100281012 : Codeunit 419;
+    BEGIN
+      //IMH07
+      WITH pAttachment DO BEGIN
+        IF pAttachment."PDF Exist" THEN
+          EXIT(FALSE);
+        IF "Storage Type" = "Storage Type"::Internet THEN
+          EXIT(FALSE);
+
+        lMerge := lAttachmentManagement.UseComServer("File Extension",FALSE);
+        IF NOT lMerge THEN
+          EXIT(FALSE);
+
+        IF NOT "Attachment Exist" THEN
+          EXIT(FALSE);
+
+        CALCFIELDS("Merge Source");
+        IF NOT "Merge Source".HASVALUE THEN
+          EXIT(FALSE);
+
+        // On r‚cupŠre le recordref issue de la table doc. joint
+        lAttachMgt.GetOriginalRecRef("Referent Table No.","Key Integer 1","Key Integer 2","Key Code 1","Key Code 2",lRecRef);
+
+        // R‚cup‚ration du chemin d'importation issue de la structure d'arborescence
+        lOriginalPath := lAttachTreeviewMgt.GetPath(pAttachment,lRecRef);
+        lOriginalFileName := lAttachTreeviewMgt.GetFileName(pAttachment);
+        lFileNameCopyTest := lFileCompletNameBuffer;
+
+        lStdAttach.SetInteractionTemplate("Interaction Template Code");
+        lStdAttach."Storage Type" := lStdAttach."Storage Type"::Embedded;
+        lFile.OPEN(lOriginalPath + lOriginalFileName);
+        lFile.CREATEINSTREAM(lInStream);
+        lStdAttach.Attachment.CREATEOUTSTREAM(lOutStream);
+        COPYSTREAM(lOutStream,lInStream);
+        lFile.CLOSE;
+        CLEAR(lOutStream);
+        CLEAR(lInStream);
+        lStdAttach."Storage Pointer" := lOriginalPath + lOriginalFileName;
+        lStdAttach."File Extension" := "File Extension";
+        lStdAttach."Read Only" := NOT pAttachment.Modifiable;
+        pAttachment."Merge Source".CREATEINSTREAM(lInStream);
+        lStdAttach."Merge Source".CREATEOUTSTREAM(lOutStream);
+        COPYSTREAM(lOutStream,lInStream);
+        lSegLine."Line No." := pAttachment."Key Integer 1";
+        lStdAttach.ExportMergedAttachment(lSegLine, Description, TRUE,pExportPath);
+      END;
+      EXIT(TRUE);
+    END;
+
+    LOCAL PROCEDURE ConvertJPG@1000000005(pFileName@1100281005 : Text[1024];pFileNamePdf@1100281007 : Text[1024]);
+    VAR
+      lText001@1100281003 : TextConst 'FRA=C:\Program Files\ImageMagick-6.7.6-Q16\Convert.exe';
+      lwSHShell@1100281004 : Automation "{F935DC20-1CF0-11D0-ADB9-00C04FD58A0B} 1.0:{72C24DD5-D70A-438B-8A42-98424B88AFB8}:'Windows Script Host Object Model'.WshShell";
+      lDummyInt@1100281002 : Integer;
+      lRunModally@1100281001 : Boolean;
+      lCommandLine@1100281000 : Text[1024];
+    BEGIN
+      // IMH10.PC
+
+      //<<IMH12
+      //IF NOT EXISTS(lText001) THEN BEGIN
+      //  EXIT;
+      //END;
+      //>>IMH12
+
+      CREATE(lwSHShell,FALSE,ISSERVICETIER);
+
+      lRunModally := TRUE;
+      lDummyInt := 0;
+
+      lCommandLine := '"' + lText001 + '"' + ' "' + pFileName + '" "' + pFileNamePdf + '"';
+      lwSHShell.Run(lCommandLine,lDummyInt,lRunModally);
+
+      CLEAR(lwSHShell);
+    END;
+
+    LOCAL PROCEDURE SetAttachListToMailItem@1000000008(VAR pMailItem@1000000000 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{00061033-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.MailItem";VAR pAttachList@1000000001 : Record 50021);
+    VAR
+      lFileName@1000000002 : Text[1024];
+      lAttachMgt@1000000003 : Codeunit 50002;
+      lFileNamePdf@1000000005 : Text[1024];
+      lOutlookDocumentMgt@1000000004 : Codeunit 50005;
+    BEGIN
+      IF pAttachList.FINDSET THEN
+        // Ajout des fichiers
+        REPEAT
+          IF pAttachList."Referent Table No." = -1 THEN BEGIN
+            lFileName := pAttachList."File Path" + pAttachList."Orginal File Name";
+          END
+          ELSE BEGIN
+      //<<IMH06.ST
+      //      lFIle.RESET;
+      //      pAttachList.GetFile(lFIle);
+      //      lFileName := lFIle.Path + '\' + lFIle.Name;
+            lFileName := lAttachMgt.ConstFilenameBuffer(pAttachList."File Extension");  //IMH07
+            IF NOT ExportMergeAttachment(pAttachList, lFileName) THEN BEGIN                  //IMH07
+              lFileName := lAttachMgt.GetFilePath2(pAttachList);
+            END;
+      //>>IMH06.ST
+          END;
+          //<<IMH10.PC
+          IF UPPERCASE(FolderMgt.GetFileExtension(lFileName)) IN ['JPG','JPEG'] THEN BEGIN
+            lFileNamePdf := FolderMgt.GetPathForFile(lFileName) + FolderMgt.GetBaseName(lFileName) + '.pdf';
+            ConvertJPG(lFileName,lFileNamePdf);
+            //<<IMH12
+            //IF EXISTS(lFileNamePdf) THEN BEGIN
+            IF FolderMgt.LocalFileExist(lFileNamePdf) THEN BEGIN
+            //>>IMH12
+              lFileName := lFileNamePdf;
+            END;
+          END;
+          //>>IMH10.PC
+          //<<IMH11
+          IF UPPERCASE(FolderMgt.GetFileExtension(lFileName)) IN ['MSG'] THEN BEGIN
+            lOutlookDocumentMgt.SaveMailToTextFile(lFileName, pMailItem)
+          END ELSE BEGIN
+          //>>IMH11
+            IF pAttachList.Description = '' THEN
+              pMailItem.Attachments.Add(lFileName,1,1,FolderMgt.GetBaseName(lFileName))
+            ELSE
+              pMailItem.Attachments.Add(lFileName,1,1,pAttachList.Description);
+          END;
+        UNTIL pAttachList.NEXT=0;
+    END;
+
+    PROCEDURE NewWordMessage2@1000000014(pSender@1000000006 : Text[1024];pSubject@1000000005 : Text[1024];VAR pWrdDoc@1000000004 : Automation "{00020905-0000-0000-C000-000000000046} 8.5:{00020906-0000-0000-C000-000000000046}:'Microsoft Word 14.0 Object Library'.Document";VAR pToRecipList@1000000003 : Record 5050;VAR pCCRecipList@1000000002 : Record 5050;VAR pCCiRecipList@1000000001 : Record 5050;VAR pAttachList@1000000000 : Record 50021;OpenDialog@1006 : Boolean;pSaveFileName@1000000013 : Text[1024]) rMailSent : Boolean;
+    VAR
+      lToList@1000000009 : Text[1024];
+      lCCList@1000000008 : Text[1024];
+      lCCIList@1000000007 : Text[1024];
+      lTempText@1100281000 : Text[1024];
+    BEGIN
+      //IMH13.ST
+      IF ISCLEAR(oOutlookApp) THEN BEGIN
+        CREATE(oOutlookApp,TRUE,TRUE);
+      //<<IMH17.ST
+        oNameSpace := oOutlookApp.GetNamespace('MAPI');
+        lTempText := oNameSpace.GetDefaultFolder(6).Name;
+      //  oNameSpace.Logon(lVar,lVar,FALSE,TRUE);
+      //>>IMH17.ST
+      END;
+
+      oMailItem := pWrdDoc.MailEnvelope.Item;
+      IF pSender = '' THEN
+        pSender := GetUserGroupMail;
+      IF pSender <> '' THEN
+        oMailItem.SentOnBehalfOfName := pSender;
+      CompanyInfo.GET;
+      lToList := CompanyInfo.GetDBTypeEmail;
+      IF lToList = '' THEN BEGIN
+        lToList := MakeMailList(pToRecipList);
+        lCCList := MakeMailList(pCCRecipList);
+        lCCIList := MakeMailList(pCCiRecipList);
+      END;
+
+      oMailItem."To" := lToList;
+      oMailItem.CC := lCCList;
+      oMailItem.BCC := lCCIList;
+      oMailItem.Subject := pSubject;
+
+      SetAttachListToMailItem(oMailItem,pAttachList);
+      IF OpenDialog THEN BEGIN
+        IF pSaveFileName <> '' THEN
+          oMailItem.SaveAs(pSaveFileName);
+        //<<IMH18
+        //la fonction Display ne fonctionne pas. Emission en directe.
+        //oMailItem.Display(TRUE);
+        oMailItem.Close(0);
+        oMailItem.Send;
+        //>>IMH18
+      END ELSE BEGIN
+        IF pSaveFileName <> '' THEN
+          oMailItem.SaveAs(pSaveFileName);
+        oMailItem.Close(0);
+        oMailItem.Send;
+        //DeleteSentMail;
+        EXIT(TRUE);
+      END;
+    END;
+
+    PROCEDURE GetUserGroupMail@1000000016() : Text[80];
+    VAR
+      lUserSetup@1000000000 : Record 91;
+    BEGIN
+      //IMH13.ST
+      IF NOT lUserSetup.GET(USERID) THEN
+        EXIT;
+      EXIT(lUserSetup."Group E-Mail");
+    END;
+
+    PROCEDURE NewOutlookMsgBigText@1000000010(pSender@1000000006 : Text[1024];pSubject@1000000005 : Text[1024];pBodyTextFormat@1000000010 : 'Text,RTF,Html';pBodyText@1000000004 : BigText;pToList@1100281005 : Text[1024];pCCList@1100281001 : Text[1024];pCCIList@1100281000 : Text[1024];VAR pAttachList@1000000000 : Record 50021;OpenDialog@1006 : Boolean;pSaveFileName@1100281007 : Text[1024]) rMailSent : Boolean;
+    VAR
+      lBodyLen@1100281003 : Integer;
+      lCpt@1100281004 : Integer;
+      lBodyLine@1100281002 : Text[1024];
+      lAdTypeText@1100281006 : Integer;
+      lTempText@1100281008 : Text[1024];
+    BEGIN
+      //IMH14
+
+      IF ISCLEAR(oOutlookApp) THEN BEGIN
+        CREATE(oOutlookApp,TRUE,TRUE);
+      //<<IMH17.ST
+        oNameSpace := oOutlookApp.GetNamespace('MAPI');
+        lTempText := oNameSpace.GetDefaultFolder(6).Name;
+      //  oNameSpace.Logon(lVar,lVar,FALSE,TRUE);
+      //>>IMH17.ST
+      END;
+
+      oMailItem := oOutlookApp.CreateItem(0);
+
+      IF pSender <> '' THEN
+        oMailItem.SentOnBehalfOfName := pSender;
+
+      oMailItem."To" := pToList;
+      oMailItem.CC := pCCList;
+      oMailItem.BCC := pCCIList;
+      oMailItem.Subject := pSubject;
+
+      CASE pBodyTextFormat OF
+        pBodyTextFormat::Text : oMailItem.BodyFormat := 1;
+        pBodyTextFormat::Html : oMailItem.BodyFormat := 2;
+        pBodyTextFormat::RTF :  oMailItem.BodyFormat := 3;
+        ELSE oMailItem.BodyFormat := 0;
+      END; // CASE
+
+      IF ISCLEAR(AutStreamADO) THEN BEGIN
+        CREATE(AutStreamADO,TRUE,TRUE);
+        AutStreamADO.Open;
+        lAdTypeText := 2;
+        AutStreamADO.Type := lAdTypeText;
+      END;
+
+      IF ISCLEAR(VBScript) THEN
+        CREATE(VBScript,TRUE,TRUE);
+      VBScript.Language('VBScript');
+      VBScript.AddObject('Mailitem',oMailItem);
+      VBScript.AddObject('ADOstream',AutStreamADO);
+
+      lBodyLen := pBodyText.LENGTH;
+      IF lBodyLen > 0 THEN BEGIN
+        IF lBodyLen <= MAXSTRLEN(lBodyLine) THEN BEGIN
+          pBodyText.GETSUBTEXT(lBodyLine,1,MAXSTRLEN(lBodyLine));
+          CASE pBodyTextFormat OF
+            pBodyTextFormat::Text : oMailItem.Body := lBodyLine;
+            pBodyTextFormat::Html : oMailItem.HTMLBody := lBodyLine;
+            pBodyTextFormat::RTF :  oMailItem.RTFBody := lBodyLine;
+          END; // CASE
+        END
+        ELSE BEGIN
+          lCpt := 1;
+          REPEAT
+            lCpt += pBodyText.GETSUBTEXT(lBodyLine,lCpt,MAXSTRLEN(lBodyLine));
+            AutStreamADO.WriteText(lBodyLine);
+          UNTIL lCpt >= lBodyLen;
+          AutStreamADO.Position(0);
+          CASE pBodyTextFormat OF
+            pBodyTextFormat::Text : VBScript.ExecuteStatement('Mailitem.Body = ADOstream.ReadText');
+            pBodyTextFormat::Html : VBScript.ExecuteStatement('Mailitem.HTMLBody = ADOstream.ReadText');
+            pBodyTextFormat::RTF :  VBScript.ExecuteStatement('Mailitem.RTFBody = ADOstream.ReadText');
+          END; // CASE
+        END;
+      END
+      ELSE BEGIN
+        AutStreamADO.Position(0);
+        CASE pBodyTextFormat OF
+          pBodyTextFormat::Text : VBScript.ExecuteStatement('Mailitem.Body = ADOstream.ReadText');
+          pBodyTextFormat::Html : VBScript.ExecuteStatement('Mailitem.HTMLBody = ADOstream.ReadText');
+          pBodyTextFormat::RTF :  VBScript.ExecuteStatement('Mailitem.RTFBody = ADOstream.ReadText');
+        END; // CASE
+      END;
+
+      AutStreamADO.Close;
+      SetAttachListToMailItem(oMailItem,pAttachList);
+
+      IF OpenDialog THEN BEGIN
+        IF pSaveFileName <> '' THEN
+          oMailItem.SaveAs(pSaveFileName);
+        oMailItem.Display(TRUE);
+        EXIT(TRUE);
+      END ELSE BEGIN
+        IF pSaveFileName <> '' THEN
+          oMailItem.SaveAs(pSaveFileName);
+        oMailItem.Close(0);
+        oMailItem.Send;
+        EXIT(TRUE);
+      END;
+    END;
+
+    PROCEDURE NewOutlookMsgBigText2@1100281003(pSender@1100281002 : Text[1024];ToName@1000000005 : Text[80];CCName@1000000004 : Text[80];Subject@1000000003 : Text[260];Body@1000000002 : Text[260];VAR BodyBigText@1100281000 : BigText;AttachFileName@1000000001 : Text[260];OpenDialog@1000000000 : Boolean;pSaveFileName@1100281001 : Text[1024]) MailSent : Boolean;
+    VAR
+      lTempContTo@1000000006 : TEMPORARY Record 5050;
+      lTempContCC@1000000007 : TEMPORARY Record 5050;
+      lTempContCCi@1000000008 : TEMPORARY Record 5050;
+      lTempDocAttach@1000000009 : TEMPORARY Record 50021;
+    BEGIN
+      //IMH14
+      IF AttachFileName <> '' THEN BEGIN
+        lTempDocAttach."Referent Table No." := -1;
+        lTempDocAttach."File Path" := AttachFileName;
+        lTempDocAttach.INSERT;
+      END;
+
+      IF BodyBigText.LENGTH = 0 THEN
+        BodyBigText.ADDTEXT(Body);
+      EXIT(NewOutlookMsgBigText(pSender,Subject,2,BodyBigText,
+                              ToName, CCName, '',
+                              lTempDocAttach, OpenDialog, pSaveFileName));
+    END;
+
+    PROCEDURE AddBodylineBody1024@1000000007(TextLine@1000 : Text[260]) : Boolean;
+    VAR
+      lAdTypeText@1100281000 : Integer;
+    BEGIN
+      //IMH14
+      IF ISCLEAR(AutStreamADO) THEN BEGIN
+        CREATE(AutStreamADO,TRUE,TRUE);
+        AutStreamADO.Open;
+        lAdTypeText := 2;
+        AutStreamADO.Type := lAdTypeText;
+      END;
+
+      IF TextLine <>'' THEN
+        AutStreamADO.WriteText(TextLine);
+      EXIT(TRUE);
+    END;
+
+    EVENT oOutlookApp@1100281002::ItemSend@61442(Item@1100281001 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::NewMail@61443();
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::Reminder@61444(Item@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::OptionsPagesAdd@61445(Pages@1100281000 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{00063080-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.PropertyPages");
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::Startup@61446();
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::Quit@61447();
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::AdvancedSearchComplete@64106(SearchObject@1100281000 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{0006300B-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.Search");
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::AdvancedSearchStopped@64107(SearchObject@1100281000 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{0006300B-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.Search");
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::MAPILogonComplete@64144();
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::NewMailEx@64181(EntryIDCollection@1100281000 : Text[1024]);
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::ItemLoad@64423(Item@1100281000 : Automation ":{00020400-0000-0000-C000-000000000046}:''.IDISPATCH");
+    BEGIN
+    END;
+
+    EVENT oOutlookApp@1100281002::BeforeFolderSharingDialog@64513(FolderToShare@1100281001 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{00063006-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.MAPIFolder";VAR Cancel@1100281000 : Boolean);
+    BEGIN
+    END;
+
+    EVENT VBScript@1000000001::Error@3000();
+    BEGIN
+    END;
+
+    EVENT VBScript@1000000001::Timeout@3001();
+    BEGIN
+    END;
+
+    EVENT oNameSpace@1000000003::OptionsPagesAdd@61445(Pages@1000000001 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{00063080-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.PropertyPages";Folder@1000000000 : Automation "{00062FFF-0000-0000-C000-000000000046} 9.4:{00063006-0000-0000-C000-000000000046}:'Microsoft Outlook 14.0 Object Library'.MAPIFolder");
+    BEGIN
+    END;
+
+    EVENT oNameSpace@1000000003::AutoDiscoverComplete@64557();
+    BEGIN
+    END;
+
+    BEGIN
+    {
+      /** @r IMH18 @d 16/07/13 @a ISAT.ZW @v IMH6.01.218 @s Juillet @h 3872
+          @c Correction message d'erreur */
+      /** @r IMH17 @d 11/07/13 @a ISAT.ST @v IMH6.01.351 @s JUILLET @h 4611 @c ProblŠme de certains profils avec logon MAPI */
+      /** @r IMH16 @d 17/09/12 @a ISAT.ZW @v IMH6.01.226 @s version 1.4 @h 3444
+          @c Supression mail riche profil */
+      /** @r IMH14 @d 15/06/12 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management @h 3338
+          @c Gestion de corp de mail + 1024 caractŠres */
+      /** @r IMH13 @d 16/05/12 @a ISAT.ST @v IMH6.01.108 @s Interactions @h 2844 @s Gestion de messages outlook avec corps Word
+          @c Cr‚ation SetAttachListToMailItem et GetUserGroupMail pour d‚placer le code */
+      /** @r IMH12 @d 15/05/12 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management
+          @c Conversion JPG en PDF */
+      /** @r IMH11 @d 10/05/12 @a ISAT.ZW @v IMH6.01.004 @s Attach. Management @h 3443
+          @c fonction extraction document joint d'un mail de type msg */
+      /** @r IMH10 @d 25/04/12 @a ISAT.PC @v IMH6.01.108 @d Interactions @c Conversion JPG en PDF */
+      /** @r IMH09 @d 20/04/12 @a ISAT.ZW @v IMH6.01.108 @d Interactions @h 3338 @c Gestion de body */
+      /** @r IMH08 @d 11/04/12 @a ISAT.ST @v IMH6.01.108 @h 3154 @c R‚-‚criture IMH07 pour gerer les cas pdf / doc seul */
+      /** @r IMH07 @d 01/03/12 @a ISAT.ZW @v IMH6.01.108 @d Interactions @c Ajout fonction ExportMergeAttachment */
+      /** @r IMH06 @d 27/02/12 @a ISAT.ST @v IMH6.01.108 @s Envoi du PDF dans le mail */
+      /** @r IMH05 @d 14/02/12 @a ISAT.ST @v IMH6.01.108 @s Interaction
+          @c d‚tournement NewMessage -> NewOutlookMessage3, le SentOnBehalfOfName ne marchant plus */
+      /** @r IMH04 @d 30/11/11 @a ISAT.ST @v IMH6.01.108 @s Interaction @c Ajout GetSenderEMail */
+      /** @r IMH03 @d 06/09/11 @a ISAT.EBA @v IMH6.01.200 @s Type de base */
+      /** @r IHM02 @d 26/01/11 @a ISAT.ST @v IMH6.01.108 @s Interactions @c Ajout fonction NewWordMessage */
+      /** @r IHM01 @d 21/10/10 @a ISAT.cc @v IMH6.01.021 @s Compl‚tude @c Agrandissement du Body dans NewMessage (260->1024) */
+    }
+    END.
+  }
+}

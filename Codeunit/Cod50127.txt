@@ -1,0 +1,717 @@
+OBJECT Codeunit 50127 PDF Management
+{
+  OBJECT-PROPERTIES
+  {
+    Date=30/05/12;
+    Time=18:38:52;
+    Modified=Yes;
+    Version List=IMH6.01,IMH6.01.31;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lSalesCrMemoHeader@1100283001 : Record 114;
+            lSalesinvoiceHeader@1100283000 : Record 112;
+            lPaymentLine@1100283002 : Record 10866;
+            lPaymentLine2@1100283003 : Record 10866;
+            lVendorTemp@1100283004 : TEMPORARY Record 23;
+            lPurchaseHeader@1100283005 : Record 38;
+            lQualityMonitoring@1100283006 : Record 50067;
+            lProvider@1100281000 : Record 50000;
+            lServIntervLine@1000000000 : Record 50075;
+          BEGIN
+            IF GUIALLOWED THEN BEGIN //IMH03.ST
+              Window.OPEN(Text004);
+              Window.UPDATE(1,'Processing');
+              DlgOpened := TRUE;
+            END; //IMH03.ST
+
+            CASE ReportNoToPrint OF
+              REPORT::"Payment Generate Mail" : BEGIN
+                RecRefToPrint.SETTABLE(lPaymentLine);
+                lPaymentLine.SETRECFILTER;
+                SendMail(lPaymentLine."Account Type",lPaymentLine."Account No.",FALSE,'');
+              END;
+            {  REPORT::"Sales - Invoice" : BEGIN
+                RecRefToPrint.SETTABLE(lSalesinvoiceHeader);
+                lSalesinvoiceHeader.SETRECFILTER;
+                SendMail(1,lSalesinvoiceHeader."Bill-to Customer No.",TRUE,'');
+              END;}
+
+              //<<IMH02
+              REPORT::"Provider Information" : BEGIN
+                RecRefToPrint.SETTABLE(lProvider);
+                lProvider.SETRECFILTER;
+                PrintToFile('');
+              END;
+
+              REPORT::"Provider Summary Information" : BEGIN
+                RecRefToPrint.SETTABLE(lProvider);
+                lProvider.SETRECFILTER;
+                PrintToFile('');
+              END;
+              //>>IMH02
+            //<<IMH03.ST
+              DATABASE::"Service Intervention Line" : BEGIN
+                RecRefToPrint.SETTABLE(lServIntervLine);
+                lServIntervLine.SETRECFILTER;
+                PrintToFile('');
+              END;
+            //>>IMH03.ST
+            END;
+
+            IF DlgOpened THEN //IMH03.ST
+            Window.CLOSE;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      PDFCreator@1100281002 : Automation "{1CE9DC08-9FBC-45C6-8A7C-4FE1E208A613} 7.1:{40108C54-9352-46C9-822C-027727352F00}:'PDFCreator'.clsPDFCreator" WITHEVENTS;
+      PDFCreatorError@1100281000 : Automation "{1CE9DC08-9FBC-45C6-8A7C-4FE1E208A613} 7.1:{84D26557-2990-4B3E-A99F-C4DC1CB6C225}:'PDFCreator'.clsPDFCreatorError";
+      DefaultPrinter@1100281003 : Text[1024];
+      Text004@1100281012 : TextConst 'FRA=Evenement : #1#####################';
+      PDFCreatorCreated@1100281004 : Boolean;
+      PDFCreatorIsReady@1100281005 : Boolean;
+      Text000@1100281010 : TextConst 'ENU=PDF generating;FRA=G‚n‚ration du PDF';
+      Text001@1100281009 : TextConst 'ENU=Resume;FRA=R‚sum‚';
+      PDFCreatorOption@1100281001 : Automation "{1CE9DC08-9FBC-45C6-8A7C-4FE1E208A613} 7.1:{FCC886F6-E0DF-4302-8BE4-F8A8D9CB881C}:'PDFCreator'.clsPDFCreatorOptions";
+      RelationshipManagementSetup@1100281018 : Record 5079;
+      MailNotificationSetup@1100281014 : Record 50115;
+      Window@1100283005 : Dialog;
+      Text002@1100281008 : TextConst 'FRA=Le report %1 n''est pas param‚tr‚ dans les paramŠtres mail';
+      Text003@1100281011 : TextConst 'FRA=Le report %1 n''existe pas';
+      Text005@1100281013 : TextConst 'FRA=Aucun contact n''existe pas le client %1';
+      Text006@1100281007 : TextConst 'FRA=Le report 50222 n''est pas param‚tr‚ dans les paramŠtres mail';
+      Text007@1100281006 : TextConst 'FRA=Le report 50222 n''existe pas';
+      Text008@1100281019 : TextConst 'FRA=Aucun contact n''existe pas le %1 %2';
+      RecRefToPrint@1100281020 : RecordRef;
+      ReportNoToPrint@1100281021 : Integer;
+      RelationshipManagementSetupOK@1100281023 : Boolean;
+      HideDialogue@1000000002 : Boolean;
+      OpenMailBeforeSend@1100281015 : Boolean;
+      Text50038@1100281016 : TextConst 'ENU=Provider summary information;FRA=Fiche de synthŠse prestataire';
+      Text50035@1100281017 : TextConst 'ENU=Provider information Card;FRA=Fiche renseignement';
+      Text50036@1000000000 : TextConst 'FRA=RapportQualite_%1_%2';
+      DlgOpened@1000000001 : Boolean;
+
+    PROCEDURE CreatePDFCreator@1100281005();
+    BEGIN
+      IF PDFCreatorCreated THEN BEGIN
+        EXIT;
+      END;
+
+      CREATE(PDFCreator);
+      CREATE(PDFCreatorError);
+      PDFCreatorError := PDFCreator.cError;
+
+      IF NOT PDFCreator.cStart('/NoProcessingAtStartup',TRUE) THEN BEGIN
+        ERROR('Status: Error[' + FORMAT(PDFCreatorError.Number) + ']: ' + PDFCreatorError.Description);
+      END;
+
+      DefaultPrinter := PDFCreator.cDefaultPrinter;
+      PDFCreator.cPrinterStop := TRUE;
+
+      PDFCreatorCreated := TRUE;
+    END;
+
+    PROCEDURE ClearInstance@1100281007();
+    BEGIN
+      CLEAR(PDFCreator);
+      CLEAR(PDFCreatorError);
+    END;
+
+    PROCEDURE PrintSalesInvoice@1100284001(pSalesInvoiceHeader@1100281000 : Record 112;pFileDirectory@1100281018 : Text[1024];pFileName@1100281017 : Text[1024]);
+    VAR
+      lMailSetup@1100281012 : Record 50049;
+      lSalesInvoiceHeaderFilter@1100281006 : Record 112;
+      lCustomer@1100281005 : Record 18;
+      lContact@1100281004 : Record 5050;
+      lContBusRel@1100281003 : Record 5054;
+      lRelationshipManagementSetup@1100281002 : Record 5079;
+      lObject@1100281008 : Record 2000000001;
+      lFileDialog@1100281001 : Codeunit 412;
+      lMail@1100281015 : Codeunit 50011;
+      lFileDirectory@1100281011 : Text[100];
+      lFileName@1100281010 : Text[100];
+      lEmail@1100281007 : Text[250];
+      lReportID@1100281009 : Integer;
+      lText003@1100281014 : TextConst 'FRA=Envoi Mail';
+      lTimeStp@1100281016 : Integer;
+      lFileTmp@1100281013 : File;
+    BEGIN
+      PDFCreator.cDefaultPrinter := 'PDFCreator';
+      SetPDFCreatorOption(pFileDirectory,pFileName);
+      PDFCreatorIsReady := FALSE;
+      PDFCreator.cPrinterStop := FALSE;
+      lSalesInvoiceHeaderFilter.RESET;
+      lSalesInvoiceHeaderFilter.SETRANGE("No.",pSalesInvoiceHeader."No.");
+      REPORT.RUNMODAL(REPORT::"Sales - Invoice",FALSE,TRUE,lSalesInvoiceHeaderFilter);
+    END;
+
+    LOCAL PROCEDURE SetPDFCreatorOption@1100286002(pFileDirectory@1100281001 : Text[1024];pFileName@1100281002 : Text[1024]);
+    VAR
+      lPDFCreatorOption@1100281000 : Automation "{1CE9DC08-9FBC-45C6-8A7C-4FE1E208A613} 7.1:{FCC886F6-E0DF-4302-8BE4-F8A8D9CB881C}:'PDFCreator'.clsPDFCreatorOptions";
+    BEGIN
+      lPDFCreatorOption := PDFCreator.cOptions;
+      lPDFCreatorOption.UseAutosave := 1;
+      lPDFCreatorOption.UseAutosaveDirectory := 1;
+      lPDFCreatorOption.AutosaveDirectory := pFileDirectory;
+      lPDFCreatorOption.AutosaveFormat := 0;
+      lPDFCreatorOption.AutosaveFilename := pFileName;
+      PDFCreator.cOptions := lPDFCreatorOption;
+      PDFCreator.cClearCache;
+    END;
+
+    PROCEDURE GetPDFCreatorIsReady@1100287000() : Boolean;
+    BEGIN
+      EXIT(PDFCreatorIsReady);
+    END;
+
+    PROCEDURE SetParameters@1100281013(pRecRefToPrint@1100281000 : RecordRef;pReportNoToPrint@1100281001 : Integer);
+    BEGIN
+      // D‚termine le Nø de report et la table … utiliser
+
+      RecRefToPrint := pRecRefToPrint;
+      ReportNoToPrint := pReportNoToPrint;
+    END;
+
+    PROCEDURE GetDirectory@1100281003() rValue : Text[1024];
+    BEGIN
+      rValue := '';
+
+      CheckReportID;
+
+      WITH MailNotificationSetup DO BEGIN
+        CASE "First Part of Path" OF
+          "First Part of Path"::"Define in Notification Setup" : BEGIN
+            rValue :=
+              "Attachment Path";
+            CASE "Second Part of Path" OF
+              "Second Part of Path"::User : rValue += USERID + '\';
+              "Second Part of Path"::"Responsibility Center" : ;
+            END;
+          END;
+          "First Part of Path"::"Define in Responsibility Center" : BEGIN
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE SendMail@1100281008(pSourceType@1100281015 : ' ,Customer,Vendor,Bank Account';pSourceCode@1100281017 : Code[20];pCheckMailTo@1100281018 : Boolean;pMailattachedFile@1100281020 : Text[1024]);
+    VAR
+      lContact@1100281014 : Record 5050;
+      lMailSetup@1100281016 : Record 50115;
+      lContBusRel@1100281012 : Record 5054;
+      lRelationshipManagementSetup@1100281011 : Record 5079;
+      lObject@1100281010 : Record 2000000001;
+      lResponsibilityCenter@1100281019 : Record 5714;
+      lContactMailingGroup@1100281000 : Record 5056;
+      lPurchaseHeader@1100281022 : Record 38;
+      lPurchaseLine@1100281021 : Record 39;
+      lFileDialog@1100281009 : Codeunit 412;
+      lFileDirectory@1100281007 : Text[100];
+      lFileName@1100281006 : Text[100];
+      lToEmail@1100281005 : Text[1024];
+      lCCEmail@1100281004 : Text[1024];
+      lMailSubject@1100281013 : Text[1024];
+      lReportID@1100281003 : Integer;
+      lTimeStp@1100281002 : Integer;
+      lFileTmp@1100281001 : File;
+      Mail@1100281008 : Codeunit 397;
+      lVendor@1100281023 : Record 23;
+    BEGIN
+      IF NOT lMailSetup.GET(lMailSetup."Object Type"::Report,ReportNoToPrint,USERID) THEN
+        IF NOT lMailSetup.GET(lMailSetup."Object Type"::Report,ReportNoToPrint,'') THEN
+          ERROR(STRSUBSTNO(Text002,ReportNoToPrint));
+
+      lToEmail := '';
+      lCCEmail := '';
+
+
+      //<<RC.iast.PC
+      IF lMailSetup."Mailing Groups Enable" THEN BEGIN
+      //<<RC.iast.PC
+        lRelationshipManagementSetup.GET;
+        lContBusRel.RESET;
+        lContBusRel.SETRANGE("Link to Table",pSourceType);
+        lContBusRel.SETRANGE("No.",pSourceCode);
+        IF lContBusRel.FINDFIRST THEN BEGIN
+          lContact.RESET;
+          lContact.SETRANGE("Company No.",lContBusRel."Contact No.");
+          lContact.SETFILTER("E-Mail",'<>''''');
+          IF lContact.FINDFIRST THEN
+          REPEAT
+            IF lContactMailingGroup.GET(lContact."No.",lMailSetup."Mail-To Mailing Groups") THEN
+            BEGIN
+              IF (STRLEN(lToEmail) > 0) THEN BEGIN
+                lToEmail += ';';
+              END;
+              lToEmail += lContact."E-Mail"
+            END;
+            IF lContactMailingGroup.GET(lContact."No.",lMailSetup."Copy Mailing Groups") THEN
+            BEGIN
+              IF (STRLEN(lCCEmail) > 0) THEN BEGIN
+                lCCEmail += ';';
+              END;
+              lCCEmail += lContact."E-Mail"
+            END;
+          UNTIL (lContact.NEXT = 0);
+        END;
+      END ELSE BEGIN
+        CASE pSourceType OF
+          pSourceType::Vendor :
+          BEGIN
+            lVendor.GET(pSourceCode);
+            lToEmail := lVendor."E-Mail";
+          END;
+        END;
+      END;
+      //<<RC.isat.PC
+
+      IF (NOT lMailSetup."Generate E-Mail Less Send-to") AND (lToEmail = '') THEN
+      BEGIN
+        IF pCheckMailTo THEN
+          ERROR(Text005,FORMAT(lContBusRel."Link to Table"),pSourceCode)
+        ELSE
+          EXIT;
+      END;
+
+      lFileDirectory := GetDirectory(); //lMailSetup."Attachment Path";
+      lMailSubject := lMailSetup."Mail Subject";
+      IF CreateDocument(lMailSubject,lFileName,lFileDirectory) THEN
+        pMailattachedFile := lFileDirectory + lFileName;
+
+      lFileTmp.OPEN(pMailattachedFile);
+      lFileTmp.CLOSE;
+
+      //Window.UPDATE(1,STRSUBSTNO(Text003,ReportNoToPrint));
+
+      Mail.NewMessage(
+        lToEmail,
+        lCCEmail,
+        lMailSubject,
+        lMailSetup."Mail Body",
+        pMailattachedFile,
+        OpenMailBeforeSend);
+    END;
+
+    PROCEDURE GetReport@1100281015();
+    VAR
+      lSalesHeader@1100281003 : Record 36;
+      lPurchaseHeader@1100281002 : Record 38;
+      lSalesCrMemoHeader@1100281000 : Record 114;
+      lSalesInvoiceHeader@1100281001 : Record 112;
+      lQualityMonitoring@1100281004 : Record 50067;
+      lPaymentLine@1100281005 : Record 10866;
+      lReportNoToPrint@1100281006 : Integer;
+      lProvider@1100281007 : Record 50000;
+      lServIntervLine@1000000000 : Record 50075;
+    BEGIN
+      CASE RecRefToPrint.NUMBER OF
+        DATABASE::"Sales Header" : BEGIN
+          CLEAR(lSalesHeader);
+          RecRefToPrint.SETTABLE(lSalesHeader);
+          lSalesHeader.SETRECFILTER;
+          REPORT.RUNMODAL(ReportNoToPrint,FALSE,TRUE,lSalesHeader);
+        END;
+
+        DATABASE::"Purchase Header" : BEGIN
+          CLEAR(lPurchaseHeader);
+          RecRefToPrint.SETTABLE(lPurchaseHeader);
+          lPurchaseHeader.SETRECFILTER;
+          REPORT.RUNMODAL(ReportNoToPrint,FALSE,TRUE,lPurchaseHeader);
+        END;
+
+        DATABASE::"Sales Invoice Header" : BEGIN
+          CLEAR(lSalesInvoiceHeader);
+          RecRefToPrint.SETTABLE(lSalesInvoiceHeader);
+          lSalesInvoiceHeader.SETRECFILTER;
+          REPORT.RUNMODAL(ReportNoToPrint,FALSE,TRUE,lSalesInvoiceHeader);
+        END;
+
+        DATABASE::"Sales Cr.Memo Header" : BEGIN
+          CLEAR(lSalesCrMemoHeader);
+          RecRefToPrint.SETTABLE(lSalesCrMemoHeader);
+          lSalesCrMemoHeader.SETRECFILTER;
+          REPORT.RUNMODAL(ReportNoToPrint,FALSE,TRUE,lSalesCrMemoHeader);
+        END;
+
+        DATABASE::"Payment Line" : BEGIN
+          CLEAR(lPaymentLine);
+          RecRefToPrint.SETTABLE(lPaymentLine);
+          lPaymentLine.SETRECFILTER;
+          lReportNoToPrint := ReportNoToPrint;
+          IF (lReportNoToPrint = 50029) THEN
+            lReportNoToPrint := 10868;
+          REPORT.RUNMODAL(lReportNoToPrint,FALSE,TRUE,lPaymentLine);
+        END;
+        //<<IMH02
+        DATABASE::Provider : BEGIN
+          CLEAR(lProvider);
+          RecRefToPrint.SETTABLE(lProvider);
+          lProvider.SETRECFILTER;
+          REPORT.RUNMODAL(ReportNoToPrint,FALSE,TRUE,lProvider);
+        END;
+        //<<IMH02
+      //<<IMH03.ST
+        DATABASE::"Service Intervention Line" : BEGIN
+          RecRefToPrint.SETTABLE(lServIntervLine);
+          lServIntervLine.SETRECFILTER;
+          REPORT.RUNMODAL(ReportNoToPrint,FALSE,TRUE,lServIntervLine);
+        END;
+      //>>IMH03.ST
+      END;
+    END;
+
+    PROCEDURE PrintToFile@1100281009(pFileName@1100281020 : Text[1024]);
+    VAR
+      lFileDialog@1100281009 : Codeunit 412;
+      lFileDirectory@1100281007 : Text[100];
+      lFileName@1100281006 : Text[100];
+      lMailSubject@1100281013 : Text[1024];
+      lReportID@1100281003 : Integer;
+      lFileTmp@1100281001 : File;
+    BEGIN
+      //IMH02
+      lFileDirectory := GetDirectory();
+      IF CreateDocument(lMailSubject,lFileName,lFileDirectory) THEN
+        pFileName := lFileDirectory + lFileName;
+
+      //lFileTmp.OPEN(pFileName);
+      //lFileTmp.CLOSE;
+    END;
+
+    PROCEDURE FormatFileName@1100281016(pFileName@1100281000 : Text[150];pFileExtention@1100281001 : Text[5]) rValue : Text[150];
+    BEGIN
+      rValue := '';
+
+      IF (pFileName <> '') THEN BEGIN
+        pFileName := DELCHR(pFileName,'=','.');
+        pFileName := DELCHR(pFileName,'=','\');
+        pFileName := DELCHR(pFileName,'=','/');
+        rValue := pFileName + '.' + pFileExtention;
+      END;
+    END;
+
+    PROCEDURE CheckReportID@1100281001();
+    BEGIN
+      // R‚cupŠre les informations li‚ au report
+      IF NOT MailNotificationSetup.GET(MailNotificationSetup."Object Type"::Report,ReportNoToPrint,USERID) THEN BEGIN
+        IF NOT MailNotificationSetup.GET(MailNotificationSetup."Object Type"::Report,ReportNoToPrint,'') THEN BEGIN
+          ERROR(STRSUBSTNO(Text002,ReportNoToPrint));
+        END;
+      END;
+    END;
+
+    PROCEDURE CreateMailList@1100281000(pSourceType@1100281015 : ' ,Customer,Vendor,Bank Account';pSourceCode@1100281017 : Code[20];pCheckMailTo@1100281018 : Boolean;pMailToList@1100281016 : Text[1024];pMailCopyList@1100281019 : Text[1024]);
+    VAR
+      lContact@1100281014 : Record 5050;
+      lContactBusinessRelation@1100281012 : Record 5054;
+      lContactMailingGroup@1100281000 : Record 5056;
+      lMailSubject@1100281013 : Text[1024];
+      lReportID@1100281003 : Integer;
+    BEGIN
+      // Permet de cr‚er un list avant d'envoyer le mail
+
+      pMailToList := '';
+      pMailCopyList := '';
+
+      CheckReportID;
+
+      GetRelationshipManagementSetup;
+
+      lContactBusinessRelation.RESET;
+      lContactBusinessRelation.SETRANGE("Link to Table",pSourceType);
+      lContactBusinessRelation.SETRANGE("No.",pSourceCode);
+      IF lContactBusinessRelation.ISEMPTY THEN BEGIN
+        EXIT;
+      END;
+
+      lContactBusinessRelation.FINDFIRST;
+      lContact.RESET;
+      lContact.SETRANGE("Company No.",lContactBusinessRelation."Contact No.");
+      lContact.SETFILTER("E-Mail",'<>''''');
+      IF lContact.FINDFIRST THEN BEGIN
+        REPEAT
+          IF lContactMailingGroup.GET(
+               lContact."No.",
+               MailNotificationSetup."Mail-To Mailing Groups")
+          THEN BEGIN
+            IF (STRLEN(pMailToList) > 0) THEN BEGIN
+              pMailToList += ';';
+            END;
+            pMailToList += lContact."E-Mail";
+          END;
+          IF lContactMailingGroup.GET(
+               lContact."No.",
+               MailNotificationSetup."Copy Mailing Groups")
+          THEN BEGIN
+            IF (STRLEN(pMailCopyList) > 0) THEN BEGIN
+              pMailCopyList += ';';
+            END;
+            pMailCopyList += lContact."E-Mail";
+          END;
+        UNTIL (lContact.NEXT = 0);
+      END;
+
+      IF (pMailToList = '') AND pCheckMailTo THEN BEGIN
+        ERROR(Text005,FORMAT(lContactBusinessRelation."Link to Table"),pSourceCode);
+      END;
+    END;
+
+    PROCEDURE CreateDocument@1100281012(VAR pSubject@1100281001 : Text[1024];VAR pFileName@1100281000 : Text[150];VAR pFileDirectory@1100281002 : Text[100]) rValue : Boolean;
+    VAR
+      lSalesCrMemoHeader@1100281003 : Record 114;
+      lSalesinvoiceHeader@1100281004 : Record 112;
+      lPaymentLine@1100281005 : Record 10866;
+      lPaymentHeader@1100281006 : Record 10865;
+      lPaymentStep@1100281007 : Record 10862;
+      lPurchaseHeader@1100281009 : Record 38;
+      lPurchaseLine@1100281011 : Record 39;
+      lQualityMonitoring@1100281012 : Record 50067;
+      lProvider@1100281008 : Record 50000;
+      lObject@1100281010 : Record 2000000001;
+      lServIntervLine@1000000000 : Record 50075;
+    BEGIN
+      // Cr‚ation du document
+
+      rValue := FALSE;
+      pFileName := '';
+
+      CASE ReportNoToPrint OF
+        // G‚n‚rer mail bordereau
+        REPORT::"Payment Generate Mail" : BEGIN
+          RecRefToPrint.SETTABLE(lPaymentLine);
+          lPaymentLine.SETRECFILTER;
+
+          pFileName :=
+            FormatFileName(
+              lPaymentLine."No." + '-' + FORMAT(lPaymentLine."Line No.") + '-' +
+              lPaymentLine."Account No." + '-' +
+              FORMAT(CURRENTDATETIME,0,'<Day,2><Month,2><Year>-<Hours24><Minutes,2>'),'PDF');
+            rValue := CreatePDFDocument(pFileDirectory,pFileName);
+
+      //    rValue := lReport50087.CreateDraftVendorExcelFile(pFileDirectory,pFileName,lPaymentLine);
+        END;
+
+        // Ventes : Facture
+        {REPORT::"Sales Invoice" : BEGIN
+          RecRefToPrint.SETTABLE(lSalesinvoiceHeader);
+          lSalesinvoiceHeader.SETRECFILTER;
+
+          pSubject :=
+            STRSUBSTNO(
+              pSubject,
+              lSalesinvoiceHeader."No.",
+              lSalesinvoiceHeader."Bill-to Name");
+
+          pFileName :=
+            FormatFileName(lSalesinvoiceHeader."No." + ' - ' + lSalesinvoiceHeader."Bill-to Name",'pdf');
+          rValue := CreatePDFDocument(pFileDirectory,pFileName);
+        END;
+        }
+      //<<IMH03.ST
+        REPORT::"Quality Control Report" : BEGIN
+          RecRefToPrint.SETTABLE(lServIntervLine);
+          lServIntervLine.SETRECFILTER;
+          lServIntervLine.FINDFIRST;
+          pFileName := FormatFileName(STRSUBSTNO(Text50036,lServIntervLine."Service Header No.", lServIntervLine."Intervention No."),
+                                      'PDF');
+          rValue := CreatePDFDocument(pFileDirectory,pFileName);
+        END;
+      //>>IMH03.ST
+        ELSE BEGIN
+        //<<IMH02
+          CASE RecRefToPrint.NUMBER OF
+            DATABASE::Provider : BEGIN
+                IF NOT lObject.GET(lObject.Type::Report,'',ReportNoToPrint) THEN BEGIN
+                  ERROR(Text003);
+                END;
+
+                RecRefToPrint.SETTABLE(lProvider);
+                lProvider.SETRECFILTER;
+                lObject.CALCFIELDS(Caption);
+                pFileName :=
+                  FormatFileName(
+                    lProvider."No." + '-' + lObject.Caption +
+                    FORMAT(CURRENTDATETIME),'PDF');
+                  rValue := CreatePDFDocument(pFileDirectory,pFileName);
+            END;
+          END;
+        END;
+        //>>IMH02
+      END;
+    END;
+
+    PROCEDURE CreatePDFDocument@1100281011(pFileDirectory@1100281019 : Text[100];pFileName@1100281000 : Text[100]) : Boolean;
+    VAR
+      lMailSetup@1100281012 : Record 50115;
+      lSalesInvoiceHeaderFilter@1100281006 : Record 112;
+      lCustomer@1100281005 : Record 18;
+      lContact@1100281004 : Record 5050;
+      lContBusRel@1100281003 : Record 5054;
+      lRelationshipManagementSetup@1100281002 : Record 5079;
+      lObject@1100281008 : Record 2000000001;
+      lFileDialog@1100281001 : Codeunit 412;
+      lMail@1100281015 : Codeunit 50011;
+      lFileDirectory_@1100281011 : Text[100];
+      lFileName@1100281010 : Text[100];
+      ToEmail@1100281007 : Text[1024];
+      CCEmail@1100281017 : Text[1024];
+      lReportID@1100281009 : Integer;
+      lText003@1100281014 : TextConst 'FRA=Envoi Mail';
+      lTimeStp@1100281016 : Integer;
+      lFileTmp@1100281013 : File;
+      ContactMailingGroup@1100281018 : Record 5056;
+      lReportNoToPrint@1100281020 : Integer;
+    BEGIN
+      IF NOT lMailSetup.GET(lMailSetup."Object Type"::Report,ReportNoToPrint,USERID) THEN
+        IF NOT lMailSetup.GET(lMailSetup."Object Type"::Report,ReportNoToPrint,'') THEN
+          ERROR(Text002);
+
+      CLEAR(PDFCreator);
+      CLEAR(PDFCreatorError);
+
+      lReportNoToPrint := ReportNoToPrint;
+      IF (lReportNoToPrint = 50029) THEN
+        lReportNoToPrint := 10868;
+
+      IF NOT lObject.GET(lObject.Type::Report,'',lReportNoToPrint) THEN BEGIN
+        ERROR(Text003);
+      END;
+
+      CREATE(PDFCreator,TRUE,TRUE);
+      CREATE(PDFCreatorError,TRUE,TRUE);
+
+      PDFCreatorError := PDFCreator.cError;
+      PDFCreator.cVisible := FALSE;
+
+      IF PDFCreator.cStart('/NoProcessingAtStartup',TRUE) = FALSE THEN BEGIN
+        ERROR('Status: Error[' + FORMAT(PDFCreatorError.Number) + ']: ' + PDFCreatorError.Description);
+      END;
+      IF DlgOpened THEN //IMH03.ST
+      Window.UPDATE(1,Text000);
+
+      PDFCreatorOption := PDFCreator.cOptions;
+      PDFCreatorOption.UseAutosave := 1;
+      PDFCreatorOption.UseAutosaveDirectory := 1;
+      PDFCreatorOption.AutosaveDirectory := pFileDirectory;
+      PDFCreatorOption.AutosaveFormat := 0;                       //PDF file, you can also save in other formats
+      PDFCreatorOption.AutosaveFilename := pFileName;
+      PDFCreator.cOptions := PDFCreatorOption;
+      PDFCreator.cClearCache();
+      DefaultPrinter := PDFCreator.cDefaultPrinter;
+      PDFCreator.cDefaultPrinter := 'PDFCreator';
+
+      GetReport;
+
+      PDFCreator.cPrinterStop := FALSE;
+
+      PDFCreator.cDefaultPrinter := DefaultPrinter;
+
+      lTimeStp := 0;
+      REPEAT
+        SLEEP (1000);
+        lTimeStp += 1;
+      //<<IMH03.ST
+      //  IF EXISTS(pFileDirectory + lFileName) THEN BEGIN
+        IF EXISTS(pFileDirectory + pFileName) THEN BEGIN
+      //>>IMH03.ST
+            lTimeStp := 15;
+        END;
+      UNTIL (lTimeStp >= 15);
+      SLEEP (1000);
+      IF DlgOpened THEN //IMH03.ST
+      Window.UPDATE(1,'Fin de g‚n‚ration du fichier pdf');
+
+      PDFCreator.cClearCache();
+      PDFCreator.cClose;
+      CLEAR(PDFCreator);
+      EXIT(TRUE)
+    END;
+
+    PROCEDURE GetRelationshipManagementSetup@1100281002();
+    BEGIN
+      IF RelationshipManagementSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      RelationshipManagementSetupOK := TRUE;
+      RelationshipManagementSetup.GET;
+    END;
+
+    PROCEDURE GetMailNotificationSetup@1100281004();
+    BEGIN
+      //<<RC.isat.PC
+      IF NOT MailNotificationSetup.GET(MailNotificationSetup."Object Type"::Report,ReportNoToPrint,USERID) THEN BEGIN
+        IF NOT MailNotificationSetup.GET(MailNotificationSetup."Object Type"::Report,ReportNoToPrint,'') THEN BEGIN
+          ERROR(STRSUBSTNO(Text002,ReportNoToPrint));
+        END;
+      END;
+      //>>RC.isat.PC
+    END;
+
+    PROCEDURE OpenNewMessage@1(ToName@1100289000 : Text[80]);
+    BEGIN
+      //NewMessage(ToName,'','','','',TRUE);
+    END;
+
+    PROCEDURE FixedDialogBox@3(NewHideDialogue@1000000000 : Boolean);
+    BEGIN
+      HideDialogue := NewHideDialogue;
+    END;
+
+    PROCEDURE SetSend@1100281006(pOpenMailBeforeSend@1100281000 : Boolean);
+    BEGIN
+      OpenMailBeforeSend := pOpenMailBeforeSend;
+    END;
+
+    PROCEDURE PrintProvderReport@1100281010(pProvider@1100281003 : Record 50000;pReportNo@1100281004 : Integer);
+    VAR
+      lProvider@1100281001 : Record 50000;
+      lRecordRef@1100281000 : RecordRef;
+      lDraftMailNotification@1100281002 : Codeunit 50127;
+    BEGIN
+      CLEAR(lDraftMailNotification);
+      CLEAR(lRecordRef);
+      lProvider.SETRANGE("No.", pProvider."No.");
+      lProvider := pProvider;
+      lRecordRef.GETTABLE(lProvider);
+      lDraftMailNotification.SetParameters(lRecordRef,pReportNo);
+      lDraftMailNotification.RUN;
+    END;
+
+    EVENT PDFCreator@1100281002::eReady@1();
+    BEGIN
+      {
+      PDFCreator.cPrinterStop := TRUE;
+      PDFCreator.cDefaultPrinter := DefaultPrinter;
+      PDFCreator.cClose();
+      IF WindowisOpen THEN
+        Window.CLOSE;
+      WindowisOpen := FALSE;
+      }
+    END;
+
+    EVENT PDFCreator@1100281002::eError@2();
+    BEGIN
+      ERROR('Status: Error[' + FORMAT(PDFCreatorError.Number) + ']: ' + PDFCreatorError.Description);
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 15/05/12 @a ISAT.ST @v IMH06.01.105 @s Extranet Qualit‚
+          @c Ajout report intervention
+          @c Ajout test GUIALLOWED */
+      /** @r IMH02 @d 16/10/09 @a ISAT.ZW @v IMH06.01.146 @s Ajout report prestataire */
+      /** @r RC01 @d 02/12/07 @a ISAT.VA @v FR4.03.037 @s Modifcation */
+      /** @r IMH01 @d 03/05/11 @a ISAT.EBA @v IMH6.01.146 @s Gestion de la facturation client */
+      /** @r RC02 @d 16/10/09 @a ISAT.PC @v FR4.03.037 @s Ajout partie gestion nø contact dans ligne achat */
+      /** @r RC01 @d 10/02/09 @a ISAT.PC @v FR4.03.037 @s Test plus utilis‚ */
+      /** @r RC01 @d 29/09/08 @a ISAT.PC @v FR4.03.037 @s Draft Mail notifcation */
+    }
+    END.
+  }
+}

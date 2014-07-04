@@ -1,0 +1,179 @@
+OBJECT Codeunit 7700 ADCS NAS Startup
+{
+  OBJECT-PROPERTIES
+  {
+    Date=17/04/13;
+    Time=15:05:53;
+    Modified=Yes;
+    Version List=NAVW16.00,IMH6.01;
+  }
+  PROPERTIES
+  {
+    SingleInstance=Yes;
+    OnRun=BEGIN
+            //<<IMH01.PC
+            {
+            CREATE(SocketBAIn);
+            CREATE(ComComIn);
+            CREATE(SaferStream);
+
+            IF NOT (EVALUATE(PortNumber, NASID)) THEN
+              PortNumber := 11322;
+
+            MESSAGE(Text000,COMPANYNAME);
+            MESSAGE(Text002,PortNumber);
+
+            ComComIn.AddBusAdapter(SocketBAIn,0);
+            SocketBAIn.OpenSocket(PortNumber, '');
+            }
+            //>>IMH01.PC
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text000@1004 : TextConst 'ENU=Application Server has been started for ADCS. Company is %1;FRA=Application Server a ‚t‚ lanc‚ pour le module Acquisition de donn‚es. La soci‚t‚ est %1';
+      TempXMLQueue@1006 : TEMPORARY Record 7709;
+      NASID@1012 : Text[30];
+      CompName@1011 : Text[100];
+      Text001@1002 : TextConst 'ENU=OutMessage is not set in SendXMLReply;FRA=OutMessage n''est pas d‚fini dans SendXMLReply';
+      Text002@1007 : TextConst 'ENU=Socket Port : %1;FRA=Port connexion : %1';
+      MsgCount@1013 : Integer;
+      FileNumber@1016 : Integer;
+      Globalxmlin@1001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v3.0'.DOMDocument";
+      PortNumber@1003 : Integer;
+      SaferStream@1102051000 : Automation "{F68B5E32-1F57-4604-89C6-65B2B74D2311} 5.0:{005C64FE-F817-4C64-83E4-BAA323164956}:'SaferStream'.SaferStream";
+
+    PROCEDURE SetNASID@2(NASID2@1000 : Text[30]);
+    BEGIN
+      NASID := NASID2;
+    END;
+
+    PROCEDURE SendXMLReply@3(xmlout@1000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v3.0'.DOMDocument");
+    VAR
+      InStrm@1004 : InStream;
+      ReceivedStatus@1005 : Char;
+      SentCorrectly@1006 : Boolean;
+      ID@1007 : Text[30];
+      xmlNode@1008 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      tempFile@1009 : File;
+      FileInStrm@1010 : InStream;
+      tempFileName@1011 : Text[150];
+      dummyInS@1012 : InStream;
+      dummyChar@1013 : Char;
+      dummyString@1014 : Text[750];
+      SafeStream@1102051000 : OutStream;
+    BEGIN
+      //<<IMH01.PC
+      {
+      IF ISCLEAR(OutMessage) THEN
+        ERROR(Text001);
+
+      SaferStream.PrepareEncryptionLayer();
+      SafeStream := SaferStream.DataStream();
+      xmlout.async := FALSE;
+      xmlout.save(SafeStream);
+
+      SaferStream.SendEncryptedData(OutMessage.GetStream);
+
+      xmlNode := xmlout.firstChild.firstChild.attributes.getNamedItem('ID');
+      ID := xmlNode.nodeValue();
+      dummyInMsg := OutMessage.SendWaitForReply(35000);
+      dummyInS := dummyInMsg.GetStream();
+
+      dummyInS.READ(dummyChar);
+      dummyInMsg.CommitMessage();
+      }
+      //>>IMH01.PC
+    END;
+
+    PROCEDURE SendError@1(ErrorString@1000 : Text[250]);
+    VAR
+      xmlout@1004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      RootNode@1003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      Child@1001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      ReturnedNode@1005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      XMLDOMMgmt@1006 : Codeunit 99008516;
+    BEGIN
+      CREATE(xmlout);
+
+      // Receive xml-document;
+      xmlout := Globalxmlin;
+
+      // Error text
+      CLEAR(XMLDOMMgmt);
+      RootNode := xmlout.documentElement;
+      IF XMLDOMMgmt.FindNode(RootNode,'Header',ReturnedNode) THEN BEGIN
+        IF XMLDOMMgmt.FindNode(RootNode,'Header/Input',Child) THEN
+          ReturnedNode.removeChild(Child);
+        IF XMLDOMMgmt.FindNode(RootNode,'Header/Comment',Child) THEN
+          ReturnedNode.removeChild(Child);
+        XMLDOMMgmt.AddElement(ReturnedNode,'Comment',ErrorString,'',ReturnedNode);
+      END;
+
+      // Send reply XML-document
+      SendXMLReply(xmlout);
+
+      CLEAR(xmlout);
+      CLEAR(RootNode);
+      CLEAR(Child);
+      CLEAR(Globalxmlin);
+    END;
+
+    PROCEDURE VerifyXMLDocument@4(VAR QueueJob@1000 : Record 7709;VAR IsPlugin@1005 : Boolean;VAR ID@1006 : Text[30]) DocumentOK : Boolean;
+    VAR
+      InStrm@1001 : InStream;
+      xmlin@1002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{F6D90F11-9C73-11D3-B32E-00C04F990BB4}:'Microsoft XML, v3.0'.DOMDocument";
+      xmlNode@1004 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 3.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v3.0'.IXMLDOMNode";
+    BEGIN
+      CREATE(xmlin);
+
+      QueueJob.CALCFIELDS(Job);
+
+      IF (NOT TempXMLQueue.Job.HASVALUE) THEN BEGIN
+        DocumentOK := FALSE;
+        EXIT;
+      END;
+
+      QueueJob.Job.CREATEINSTREAM(InStrm);
+
+      xmlin.async := FALSE;
+      DocumentOK := xmlin.load(InStrm);
+
+      IF (DocumentOK) THEN BEGIN
+        xmlNode := xmlin.firstChild.firstChild.attributes.getNamedItem('ID');
+        ID := xmlNode.nodeValue();
+      END;
+
+      CLEAR(xmlin);
+    END;
+
+    EVENT Globalxmlin@1001::ondataavailable@198();
+    BEGIN
+    END;
+
+    EVENT Globalxmlin@1001::onreadystatechange@-609();
+    BEGIN
+    END;
+
+    EVENT SaferStream@1102051000::ReceiveEncryptedData@4(readStream@1102051001 : Variant;writeStream@1102051000 : Variant);
+    BEGIN
+    END;
+
+    EVENT SaferStream@1102051000::SendEncryptedData@5(readStream@1102051001 : Variant;writeStream@1102051000 : Variant);
+    BEGIN
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 17/04/13 @a ISAT.PC @v IMH6.01.346 @s Hotfix 33494
+          @c Delete SocketBAIn Automation
+          @c Delete ComComIn Automation
+          @c Delete OutMessage Automation
+          @c Delete InMessage Automation
+          @c Delete dummyInMsg Automation */
+    }
+    END.
+  }
+}

@@ -1,0 +1,176 @@
+OBJECT Codeunit 50132 IMA Sales Return Sent Act
+{
+  OBJECT-PROPERTIES
+  {
+    Date=03/10/11;
+    Time=17:30:11;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    TableNo=8016720;
+    OnRun=VAR
+            lEAISentMQBuffer@1100281000 : TEMPORARY Record 8016720;
+          BEGIN
+            lEAISentMQBuffer := Rec;
+            Code(lEAISentMQBuffer);
+            Rec := lEAISentMQBuffer;
+            lEAISentMQBuffer.CALCFIELDS("XML Source");
+            "XML Source" := lEAISentMQBuffer."XML Source";
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Tools@1100481002 : Codeunit 8016602;
+      Text000@1100481000 : TextConst 'ENU=Trouble during adding node %1.;FRA=ProblŠme lors de l''ajout de la balise %1.';
+      EAIXmlDocMgt@1100281001 : Codeunit 8016713;
+      InvoicingMgt@1100281000 : Codeunit 50080;
+
+    LOCAL PROCEDURE Code@1100281003(VAR pEAISentMQBuffer@1100281001 : Record 8016720);
+    VAR
+      lEAIAct@1100481004 : Record 8016706;
+      lServHeader@1100281004 : Record 5900;
+      lServIntervMin@1100481000 : Record 50084;
+      lEAIDocEntryMgt@1100481001 : Codeunit 8016707;
+      lXMLDocument@1100481006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLRootNode@1100481009 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLDocumentsNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLDocumentNode@1100481007 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lRecID@1100481003 : RecordID;
+      lRecRef@1100481002 : RecordRef;
+      lInStr@1100481005 : InStream;
+      lNameSpace@1100481011 : Text[30];
+      lReturnTableName@1100281002 : Text[250];
+    BEGIN
+      CLEAR(lXMLDocument);
+      CREATE(lXMLDocument);
+
+      lNameSpace := '';
+
+      lEAIAct.GET(pEAISentMQBuffer."EAI Act Type Code",pEAISentMQBuffer."EAI Act Code");
+
+      //On r‚cup‚re l'enregistrement
+
+      lRecID := pEAISentMQBuffer.RecordId;
+      lRecRef := lRecID.GETRECORD;
+
+      //<<IMH03.ISAT.EBA
+      //lRecRef.SETTABLE(lServIntervMinutes);
+      //lServIntervMinutes.SETRECFILTER;
+      //lServIntervMinutes.LOCKTABLE;
+      //lServIntervMinutes.FINDFIRST;
+
+      CASE lRecRef.NUMBER OF
+        DATABASE::"Service Header" :
+          BEGIN
+            lRecRef.SETTABLE(lServHeader);
+            lServHeader.SETRECFILTER;
+            lServHeader.LOCKTABLE;
+            lServHeader.FINDFIRST;
+          END;
+        DATABASE::"Service Intervention Minutes" :
+          BEGIN
+            lRecRef.SETTABLE(lServIntervMin);
+            lServIntervMin.SETRECFILTER;
+            lServIntervMin.LOCKTABLE;
+            lServIntervMin.FINDFIRST;
+
+            lServHeader.GET(lServHeader."Document Type"::Invoice,lServIntervMin."Service Header No.");
+          END;
+      END;
+      //>>IMH03.ISAT.EBA
+
+      EAIXmlDocMgt.WriteXMLMessageHeader(lXMLDocument,lXMLNewNode,pEAISentMQBuffer,lReturnTableName);
+      lXMLRootNode := lXMLDocument.documentElement;
+      EAIXmlDocMgt.WriteXMLDocuments(lXMLRootNode,lXMLDocumentsNode,lReturnTableName);
+      EAIXmlDocMgt.WriteXMLDocument(lXMLDocumentsNode,lXMLDocumentNode,lReturnTableName);
+
+      WriteDocumentHeader(lXMLDocumentNode,lServHeader,lServIntervMin,lEAIAct,lNameSpace,lXMLNewNode);
+
+      pEAISentMQBuffer."XML Source".CREATEINSTREAM(lInStr);
+      lXMLDocument.save(lInStr);
+
+      //Enregistrement dans la table "‚riture document EDI"
+      //<<IMH03.ISAT.EBA
+      //lEAIDocEntryMgt.AddEntryFromSentBuffer(
+      //  DATABASE::"Service Intervention Minutes",0,
+      //  lServIntervMin."Service Header No.",'',lServIntervMin."Service Intervention Line No.",pEAISentMQBuffer);
+
+      CASE lRecRef.NUMBER OF
+        DATABASE::"Service Header" :
+          BEGIN
+            lEAIDocEntryMgt.AddEntryFromSentBuffer(
+              DATABASE::"Service Header",lServHeader."Document Type",
+              lServHeader."No.",'',0,pEAISentMQBuffer);
+          END;
+        DATABASE::"Service Intervention Minutes" :
+          BEGIN
+            lEAIDocEntryMgt.AddEntryFromSentBuffer(
+              DATABASE::"Service Intervention Minutes",0,
+              lServIntervMin."Service Header No.",'',lServIntervMin."Service Intervention Line No.",pEAISentMQBuffer);
+          END;
+      END;
+      //>>IMH03.ISAT.EBA
+    END;
+
+    PROCEDURE WriteDocumentHeader@1100481003(VAR pXMLDocumentNode@1100481005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pServHeader@1100281002 : Record 5900;pServIntervMin@1100481000 : Record 50084;pEAIAct@1100481014 : Record 8016706;pNameSpace@1100481006 : Text[30];VAR pXMLNode@1100481022 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode");
+    VAR
+      lEAIXMLMgt@1100481015 : Codeunit 8016710;
+      lXMLDocHeaderNode@1100481017 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNewNode@1100481016 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lServOrderType@1100281001 : Record 5903;
+    BEGIN
+      EAIXmlDocMgt.WriteXMLDocHeader(pXMLDocumentNode,lXMLDocHeaderNode,pNameSpace);
+      //<<IMH03.ISAT.EBA
+      //lServHeader.GET(lServHeader."Document Type"::Invoice,pServIntervMin."Service Header No.");
+      //>>IMH03.ISAT.EBA
+
+      WITH lEAIXMLMgt DO BEGIN
+        IF NOT IsAddElement(lXMLDocHeaderNode,'SERVICE_NO',pServHeader."Service No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'SERVICE_NO');
+
+        IF NOT IsAddElement(lXMLDocHeaderNode,'SERVICE_ORDER_NO',pServHeader."No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'SERVICE_ORDER_NO');
+
+        IF NOT IsAddElement(lXMLDocHeaderNode,'SERVICE_INTERV_LINE_NO',
+          Tools.IntegerToText(pServIntervMin."Service Intervention Line No."),pNameSpace,lXMLNewNode)
+        THEN
+          ERROR(Text000,'SERVICE_INTERV_LINE_NO');
+
+        IF NOT IsAddElement(lXMLDocHeaderNode,'SERVICE_ORDER_TYPE',pServHeader."Service Order Type",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'SERVICE_ORDER_TYPE');
+
+        IF NOT IsAddElement(lXMLDocHeaderNode,'CORPORATE_NO',pServHeader."Corporate No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'CORPORATE_NO');
+
+        IF NOT IsAddElement(lXMLDocHeaderNode,'CORPORATE_REGION',pServHeader."Corporate Region Code",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'CORPORATE_REGION');
+
+      //<<IMH02.ST
+        IF lServOrderType.GET(pServHeader."Service Order Type") THEN BEGIN
+          IF lServOrderType."Home Service" THEN BEGIN
+            IF NOT IsAddElement(lXMLDocHeaderNode, 'DEPOSIT_AMOUNT', Tools.SQLDecimalToText(pServHeader."Deposit Amount"),
+                                pNameSpace, lXMLNewNode) THEN
+              ERROR(Text000,'DEPOSIT_AMOUNT');
+          END;
+        END;
+      //>>IMH02.ST
+        IF NOT IsAddElement(lXMLDocHeaderNode,'CUSTOMER_NO',pServHeader."Contact No.",pNameSpace,lXMLNewNode) THEN
+          ERROR(Text000,'CUSTOMER_NO');
+
+      END;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH03 @d 03/10/11 @a ISAT.EBA @v IMH6.01.011 @s Gestion du service - Service … l'habitat */
+      /** @r IMH02 @d 17/08/11 @a ISAT.ST @v IMH6.01.159 @s Envoi montant frais dossier */
+      /** @r IMH01 @d 16/05/11 @a ISAT.EBA @v IMH6.01.159 @s Comptabilit‚ - IMA Service */
+    }
+    END.
+  }
+}

@@ -1,0 +1,186 @@
+OBJECT Codeunit 50205 KYRIBA Export File
+{
+  OBJECT-PROPERTIES
+  {
+    Date=14/10/11;
+    Time=15:16:08;
+    Modified=Yes;
+    Version List=IMH6.01;
+  }
+  PROPERTIES
+  {
+    OnRun=VAR
+            lRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+          BEGIN
+            IF GUIALLOWED THEN
+              IF NOT CONFIRM(Text001) THEN
+                EXIT;
+
+            GLSetup.GET;
+            GLSetup.TESTFIELD("KYRIBA Export Path");
+            ExportDate := FormatDate(TODAY);
+            ExportTime := FormatTime(TIME);
+
+            LCYCode := COPYSTR(GLSetup."LCY Code",1,3);
+
+            FileNameToExport := GLSetup."KYRIBA Export Path" + 'KYRIBA_'+ ExportDate + ExportTime+ '.txt';
+
+            IF FileNameToExport = '' THEN BEGIN
+              ERROR(Text012);
+            END;
+
+            Export;
+
+            IF GUIALLOWED THEN
+              MESSAGE(Text002);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      GLSetup@1100281011 : Record 98;
+      ToolsMgt@1100281012 : Codeunit 8016602;
+      CurrentFile@1100281013 : File;
+      Window@1100281002 : Dialog;
+      FileNameToExport@1100281001 : Text[1024];
+      Text001@1100281000 : TextConst 'ENU=Do you want to export KYRIBA file?;FRA=Souhaitez-vous exporter le fichier KYRIBA?';
+      Text002@1100281003 : TextConst 'ENU=Processing performed.;FRA=Traitement effectu‚.';
+      Text011@1100281016 : TextConst 'ENU=It is impossible to create file %1;FRA=Impossible de cr‚er le fichier %1';
+      Text012@1100281017 : TextConst 'ENU=File name to import is empty;FRA=Un nom de fichier est obligatoire';
+      FieldType@1100281008 : 'String,Numeric,Date';
+      ExportDate@1100281009 : Text[8];
+      ExportTime@1100281010 : Text[6];
+      LCYCode@1100281018 : Code[10];
+
+    PROCEDURE Export@1100281004();
+    VAR
+      lBankAccLedgrEntry@1100281000 : Record 271;
+    BEGIN
+      lBankAccLedgrEntry.RESET;
+      lBankAccLedgrEntry.SETFILTER("Entry No.",'>%1',GLSetup."Last Entry No.");
+      IF lBankAccLedgrEntry.FINDSET THEN BEGIN
+
+        CreateFile;
+
+        REPEAT
+          ExportEntry(lBankAccLedgrEntry);
+
+        UNTIL lBankAccLedgrEntry.NEXT = 0;
+
+        GLSetup."Last Entry No." := lBankAccLedgrEntry."Entry No.";
+        GLSetup.MODIFY;
+
+        CloseFile;
+      END;
+    END;
+
+    PROCEDURE CreateFile@1100281008();
+    BEGIN
+      CurrentFile.WRITEMODE(TRUE);
+      CurrentFile.TEXTMODE(TRUE);
+      IF NOT CurrentFile.CREATE(FileNameToExport) THEN BEGIN
+        ERROR(Text011,FileNameToExport);
+      END;
+    END;
+
+    PROCEDURE CloseFile@1100281011();
+    BEGIN
+      CurrentFile.CLOSE;
+    END;
+
+    PROCEDURE ExportEntry@1100281000(pBankAccLedgrEntry@1100281001 : Record 271);
+    VAR
+      lBankAccPostingGrp@1100281002 : Record 277;
+      lWriteLine@1100281000 : Text[1024];
+      lDirection@1100281003 : Code[1];
+      lCurrencyCode@1100281004 : Code[3];
+    BEGIN
+      lWriteLine := '';
+      lWriteLine := PADSTR(lWriteLine,399);
+
+      WITH pBankAccLedgrEntry DO BEGIN
+
+        IF NOT lBankAccPostingGrp.GET("Bank Acc. Posting Group") THEN
+          lBankAccPostingGrp.INIT;
+
+        IF Amount < 0 THEN
+          lDirection := 'D'
+        ELSE
+          lDirection := 'C';
+
+        IF "Currency Code" <> '' THEN
+          lCurrencyCode := COPYSTR("Currency Code",1,3)
+        ELSE
+          lCurrencyCode := LCYCode;
+
+        AddField(lWriteLine,'',1,1,FALSE); //Action
+        AddField(lWriteLine,"Bank Account No.",2,20,FALSE);  //Account code
+        AddField(lWriteLine,lBankAccPostingGrp."G/L Bank Account No.",22,10,FALSE); //GL code
+        AddField(lWriteLine,lDirection,32,1,FALSE); //Direction
+        AddField(lWriteLine,lCurrencyCode,33,3,FALSE); //Entry currency
+        AddField(lWriteLine,FormatAmt(Amount),36,22,TRUE); //Entry amount
+        AddField(lWriteLine,'',58,22,TRUE); //Account amount
+        AddField(lWriteLine,FormatDate("Posting Date"),80,8,TRUE); //Accounting date
+        AddField(lWriteLine,'',88,8,TRUE); //Availability date
+        AddField(lWriteLine,'',96,50,FALSE);
+        AddField(lWriteLine,'',146,50,FALSE);
+        AddField(lWriteLine,'',196,50,FALSE);
+        AddField(lWriteLine,'',246,20,FALSE);
+        AddField(lWriteLine,'',266,20,FALSE);
+        AddField(lWriteLine,'',286,20,FALSE);
+        AddField(lWriteLine,'',306,20,FALSE);
+        AddField(lWriteLine,'',326,20,FALSE);
+        AddField(lWriteLine,'',346,15,FALSE);
+        AddField(lWriteLine,'',361,15,FALSE);
+        AddField(lWriteLine,'',376,10,FALSE);
+        AddField(lWriteLine,ExportDate,386,8,TRUE);
+        AddField(lWriteLine,ExportTime,394,6,TRUE);
+      END;
+
+      CurrentFile.WRITE(lWriteLine);
+    END;
+
+    PROCEDURE AddField@1100281001(VAR WriteLine@1100281000 : Text[1024];FieldValue@1100281003 : Text[1024];Pos@1100281001 : Integer;Length@1100281002 : Integer;RightAligned@1100281004 : Boolean);
+    BEGIN
+      IF RightAligned THEN BEGIN
+        WriteLine := INSSTR(WriteLine,FieldValue,Pos + Length - STRLEN(FieldValue));
+      END ELSE BEGIN
+        FieldValue := PADSTR(FieldValue,Length);
+        WriteLine := INSSTR(WriteLine,FieldValue,Pos);
+      END;
+    END;
+
+    PROCEDURE FormatAmt@1100281006(pAmt@1100281000 : Decimal) : Text[30];
+    BEGIN
+      IF pAmt <> 0 THEN
+        EXIT(FORMAT(pAmt,0,'<Precision,2:3><Standard Format,2>'))
+      ELSE
+        EXIT('');
+
+      //  EXIT(FORMAT(pAmt,0,'<Sign><Integer>.<Decimals>'))
+    END;
+
+    PROCEDURE FormatDate@1100281009(pDate@1100281000 : Date) : Text[8];
+    BEGIN
+      IF pDate <> 0D THEN
+        EXIT(FORMAT(pDate,0,'<Day,2><Month,2><Year4>'))
+      ELSE
+        EXIT('');
+    END;
+
+    PROCEDURE FormatTime@1100281010(pTime@1100281000 : Time) : Text[6];
+    BEGIN
+      IF pTime <> 0T THEN
+        EXIT(FORMAT(pTime,0,'<Hours24,2><Minutes,2><Seconds,2>'))
+      ELSE
+        EXIT('');
+    END;
+
+    BEGIN
+    {
+      /** @r IMH01 @d 27/09/11 @a ISAT.EBA @v IMH6.01.154 @s KYRIBA Export File */
+    }
+    END.
+  }
+}

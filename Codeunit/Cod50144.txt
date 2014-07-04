@@ -1,0 +1,1079 @@
+OBJECT Codeunit 50144 ANSAAP Rcvd Act2
+{
+  OBJECT-PROPERTIES
+  {
+    Date=18/04/14;
+    Time=14:47:52;
+    Modified=Yes;
+    Version List=IMH6.01,ANSAAPMAT,PMU;
+  }
+  PROPERTIES
+  {
+    TableNo=8016721;
+    Permissions=TableData 5050=rim,
+                TableData 5051=rim,
+                TableData 5068=r,
+                TableData 5079=r,
+                TableData 50055=r,
+                TableData 50057=rim,
+                TableData 50059=rim,
+                TableData 8016700=r,
+                TableData 8016706=r,
+                TableData 8016748=r;
+    OnRun=VAR
+            lEAIRcvdMQBuffer@1100281000 : TEMPORARY Record 8016721;
+          BEGIN
+            lEAIRcvdMQBuffer := Rec;
+            Code(lEAIRcvdMQBuffer);
+            Rec := lEAIRcvdMQBuffer;
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      Text001@1100481008 : TextConst 'ENU=XML Node %1 unfound.;FRA=Noeud XML %1 non trouv‚.';
+      EAISetup@1100281007 : Record 8016700;
+      TempCrossRef@1100281005 : TEMPORARY Record 8016748;
+      MarketingSetup@1100281003 : Record 5079;
+      ToolsMgt@1100281006 : Codeunit 8016602;
+      EAIXmlDocMgt@1100281002 : Codeunit 8016713;
+      Text002@1100281000 : TextConst 'ENU=There is an Order (%1) for Service %2, Service Header %3.;FRA=Il existe une commande (%1) pour le service %2, ligne de produit %3.';
+      Text003@1100281001 : TextConst 'ENU=There is no item for Service Order Type %1, Corporate %2, Corporate Region %3;FRA=Il n''existe pas d''article pour le type de produit %1, grand compte %2, r‚gion %3.';
+      PartnerCode@1100281004 : Code[20];
+      MarketingSetupOK@1100281008 : Boolean;
+      CorpContract@1100281009 : Record 50057;
+      PhoneStd@1100281010 : Codeunit 50099;
+      EMailStd@1100281011 : Codeunit 50096;
+
+    LOCAL PROCEDURE Code@1100281003(VAR pEAIRcvdMQBuffer@1100281001 : Record 8016721);
+    VAR
+      lEAIAct@1100281011 : Record 8016706;
+      lTempCont@1100281009 : TEMPORARY Record 5050;
+      lTempContract@1100281012 : TEMPORARY Record 50059;
+      lTempContAltAddr@1100281013 : TEMPORARY Record 5051;
+      lEAIXMLDocMgt@1100481004 : Codeunit 8016713;
+      lXMLDocument@1100281005 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{88D96A05-F192-11D4-A65F-0040963251E5}:'Microsoft XML, v6.0'.DOMDocument60";
+      lXMLDocumentsNode@1100281006 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lOutStream@1100281004 : OutStream;
+      lNoSeries@1100281003 : Code[10];
+    BEGIN
+      IF ISCLEAR(lXMLDocument) THEN BEGIN
+        CREATE(lXMLDocument);
+      END;
+
+      EAISetup.GET;
+      lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code",pEAIRcvdMQBuffer."EAI Act Code");
+      PartnerCode := pEAIRcvdMQBuffer."EAI Partner Code";
+
+      pEAIRcvdMQBuffer.CALCFIELDS("XML Source");
+      pEAIRcvdMQBuffer."XML Source".CREATEOUTSTREAM(lOutStream);
+      lXMLDocument.load(lOutStream);
+      lXMLDocumentsNode := lXMLDocument.documentElement;
+
+      lNoSeries := GetSeriesNo(pEAIRcvdMQBuffer."Source MQ");
+      ReadXMLDoc(lXMLDocumentsNode,lEAIAct,lTempCont,lTempContract,lTempContAltAddr);
+      pEAIRcvdMQBuffer."No. Of Lines" := lTempCont.COUNT;
+      IF lTempCont.FINDSET THEN BEGIN
+        IF pEAIRcvdMQBuffer."No. Of Lines" = 1 THEN
+          pEAIRcvdMQBuffer."Reference No." := STRSUBSTNO('%1 / %2', lTempCont."Member No.", lTempCont."Corporate No.");
+        REPEAT
+          CheckData(lTempCont,lTempContract,lTempContAltAddr);
+          lTempCont."No. Series" := lNoSeries;
+          lTempCont.MODIFY;
+        UNTIL lTempCont.NEXT = 0;
+      END;
+      IF lTempCont.FINDSET THEN BEGIN
+        REPEAT
+          UpdateContact(lTempCont,lTempContract,lTempContAltAddr);
+        UNTIL lTempCont.NEXT = 0;
+      END;
+
+      CLEAR(lXMLDocumentsNode);
+      CLEAR(lXMLDocument);
+    END;
+
+    PROCEDURE ReadXMLDoc@1100481003(pXMLDocumentNode@1100481000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";pEAIAct@1100481007 : Record 8016706;VAR pTempCont@1100481001 : Record 5050;VAR pTempContract@1100281006 : Record 50059;VAR pTempContAltAddr@1100281007 : Record 5051);
+    VAR
+      lSalutation@1100281008 : Record 5068;
+      lCorporateContract@1100281021 : Record 50057;
+      lEAIXMLMgt@1100481012 : Codeunit 8016710;
+      lXMLDocHeaderNode@1100481002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeList@1100281000 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lXMLNode@1100281001 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLNodeFound@1100481003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLDocLineNode@1100281003 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF80-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNode";
+      lXMLCommentNodeList@1100281002 : Automation "{F5078F18-C551-11D3-89B9-0000F81FE221} 6.0:{2933BF82-7B36-11D2-B20E-00C04F983E60}:'Microsoft XML, v6.0'.IXMLDOMNodeList";
+      lAddr3@1100281004 : Text[50];
+      lCpt@1100281005 : Integer;
+      lText001@1100281009 : TextConst 'ENU=Create by beneficiary import;FRA=Cr‚er par import soci‚taire';
+      lContactCpt@1100281012 : Integer;
+      lDecimalTest@1100281010 : Decimal;
+      lNodeText@1100281011 : Text[1024];
+      lErrorText@1100281013 : Text[1024];
+      lName@1100281014 : Text[50];
+      lName2@1100281015 : Text[50];
+      lFirstName@1100281016 : Text[50];
+      lSurname@1100281017 : Text[50];
+      lNewName@1100281018 : Text[50];
+      lIsCorporate@1100281019 : Boolean;
+      lCorpNo@1100281020 : Text[30];
+    BEGIN
+      WITH lEAIXMLMgt DO BEGIN
+        lContactCpt := 0;
+        IF FindNodes(pXMLDocumentNode,'MembCont',lXMLNodeList) THEN BEGIN
+          lXMLNodeList.reset();
+          lXMLNode := lXMLNodeList.nextNode();
+          WHILE NOT ISCLEAR(lXMLNode) DO BEGIN
+            pTempCont.INIT;
+            pTempCont.Type := pTempCont.Type::Company;
+
+            IF FindFirstNode2(lXMLNode,'CorpNo',lXMLNodeFound) THEN BEGIN
+              pTempCont."Corporate No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Corporate No."));
+              lCorpNo := pTempCont."Corporate No.";  //IMH13
+            END;
+
+            IF FindFirstNode2(lXMLNode,'MembNo',lXMLNodeFound) THEN
+              pTempCont."Member No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Member No."));
+
+            IF FindFirstNode2(lXMLNode,'Salut',lXMLNodeFound) THEN
+              pTempCont."Salutation Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Salutation Code"));
+            //<<IMH.PC
+            {
+            IF FindFirstNode(lXMLNode,'Name',lXMLNodeFound) THEN
+              pTempCont.Name := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont.Name))
+            ELSE BEGIN
+              IF FindFirstNode2(lXMLNode,'Surname',lXMLNodeFound) THEN
+                pTempCont.Surname := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont.Surname));
+              IF FindFirstNode2(lXMLNode,'FirstName',lXMLNodeFound) THEN
+                pTempCont."First Name" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."First Name"));
+            END;
+            IF FindFirstNode(lXMLNode,'Name2',lXMLNodeFound) THEN
+              pTempCont."Name 2" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Name 2"));
+
+            //<<IMH.PC
+            IF STRLEN(pTempCont.Name) + STRLEN(pTempCont."Name 2") + 1 <= 50 THEN BEGIN
+              pTempCont.Name :=  pTempCont.Name + ' ' + pTempCont."Name 2";
+            END;
+            //>>IMH.PC
+            }
+      //<<IMH09.ST
+            lName := '';
+            lName2 := '';
+            lSurname := '';
+            lFirstName := '';
+      //>>IMH09.ST
+            IF FindFirstNode(lXMLNode,'Name',lXMLNodeFound) THEN BEGIN
+              lName := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(lName));
+            END;
+            IF FindFirstNode(lXMLNode,'Name2',lXMLNodeFound) THEN BEGIN
+              lName2 := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(lName2));
+            END;
+            IF FindFirstNode(lXMLNode,'Surname',lXMLNodeFound) THEN BEGIN
+              lSurname := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(lSurname));
+            END;
+            IF FindFirstNode(lXMLNode,'FirstName',lXMLNodeFound) THEN BEGIN
+              lFirstName := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(lFirstName));
+            END;
+            //<<IMH08.ISAT.EBA
+            lIsCorporate := FALSE;
+            //>>IMH08.ISAT.EBA
+
+            //<<IMH07.ISAT.EBA
+            //IF (lName <> '') AND (lName2 <> '') THEN BEGIN
+            IF (lName <> '') OR (lName2 <> '') THEN BEGIN
+            //>>IMH07.ISAT.EBA
+              pTempCont.Name := COPYSTR(lName + ' ' + lName2,1,50);
+              pTempCont."Search Name" := UPPERCASE(COPYSTR(lName + ' ' + lName2,1,50));
+              pTempCont."First Name" := '';
+              pTempCont.Surname := COPYSTR(lName + ' ' + lName2,1,50);
+
+              //<<IMH08.ISAT.EBA
+              lIsCorporate := TRUE;
+              //>>IMH08.ISAT.EBA
+
+            //<<IMH07.ISAT.EBA
+            //END ELSE BEGIN
+            END ELSE IF (lSurname <> '') OR (lFirstName <> '') THEN BEGIN
+            //>>IMH07.ISAT.EBA
+              IF pTempCont."Salutation Code" <> '' THEN BEGIN
+                pTempCont.Name := COPYSTR(lFirstName + ' ' + lSurname,1,50);
+                pTempCont."Search Name" := UPPERCASE(COPYSTR(lFirstName + ' ' + lSurname,1,50));
+                //<<IMH07.ISAT.EBA
+                //pTempCont."First Name" := lFirstName;
+                //pTempCont.Surname := lSurname;
+                pTempCont."First Name" := COPYSTR(lFirstName,1,MAXSTRLEN(pTempCont."First Name"));
+                pTempCont.Surname :=
+                  COPYSTR(lSurname,1,MAXSTRLEN(pTempCont.Name) - STRLEN(pTempCont."First Name") - 1);
+                //>>IMH07.ISAT.EBA
+              END ELSE BEGIN
+                pTempCont.Name := COPYSTR(lSurname + ' ' + lFirstName,1,50);
+                pTempCont."Search Name" := UPPERCASE(COPYSTR(lSurname + ' ' + lFirstName,1,50));
+                pTempCont."First Name" := '';
+                pTempCont.Surname := COPYSTR(lSurname + ' ' + lFirstName,1,50);
+              END;
+            END;
+            //>>IMH.PC
+
+            IF FindFirstNode2(lXMLNode,'Addr',lXMLNodeFound) THEN
+              pTempCont.Address := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont.Address));
+
+            IF FindFirstNode2(lXMLNode,'Addr2',lXMLNodeFound) THEN
+              pTempCont."Address 2" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Address 2"));
+
+            IF FindFirstNode2(lXMLNode,'Addr3',lXMLNodeFound) THEN
+              pTempCont."Address 3" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Address 3"));
+
+            IF FindFirstNode2(lXMLNode,'PostCode',lXMLNodeFound) THEN BEGIN
+              IF STRLEN(lXMLNodeFound.text) < 5 THEN BEGIN
+                pTempCont."Post Code" := '0' + COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Post Code"));
+              END ELSE BEGIN
+                pTempCont."Post Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Post Code"));
+              END;
+            END;
+
+            IF FindFirstNode2(lXMLNode,'City',lXMLNodeFound) THEN
+              pTempCont.City := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont.City));
+
+            IF FindFirstNode2(lXMLNode,'Country',lXMLNodeFound) THEN
+              pTempCont."Country/Region Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Country/Region Code"));
+
+            IF FindFirstNode2(lXMLNode,'CorpReg',lXMLNodeFound) THEN BEGIN
+              lNodeText := lXMLNodeFound.text;
+              //R‚gion grand compte MACIF
+              IF pTempCont."Corporate No." IN ['MB','MC','MCS'] THEN BEGIN
+                pTempCont."Corporate Region Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Corporate Region Code"));
+              END;
+              //<<IMH13
+              //R‚gion grand compte MATMUT et AMF
+              IF pTempCont."Corporate No." IN ['MF', 'AMA', 'AMF'] THEN BEGIN
+                pTempCont."Corporate Region Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Corporate Region Code"));
+              END;
+              //>>IMH13
+            END;
+
+            IF FindFirstNode2(lXMLNode,'PhoneNo',lXMLNodeFound) THEN
+              pTempCont."Phone No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Phone No."));
+            IF pTempCont."Phone No." = '0' THEN
+              pTempCont."Phone No." := '';
+            // reactive code
+            IF FindFirstNode2(lXMLNode,'PhoneNo2',lXMLNodeFound) THEN
+              pTempCont."Mobile Phone No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Mobile Phone No."));
+            IF pTempCont."Mobile Phone No." = '0' THEN
+              pTempCont."Mobile Phone No." := '';
+
+
+            IF FindFirstNode2(lXMLNode,'FaxNo',lXMLNodeFound) THEN
+              pTempCont."Fax No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."Fax No."));
+
+            IF FindFirstNode2(lXMLNode,'Email',lXMLNodeFound) THEN
+              pTempCont."E-Mail" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."E-Mail"));
+
+            IF FindFirstNode2(lXMLNode,'Email2',lXMLNodeFound) THEN
+              pTempCont."E-Mail 2" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempCont."E-Mail 2"));
+
+            IF FindFirstNode2(lXMLNode,'BirthDate',lXMLNodeFound) THEN
+              pTempCont.Birthdate := ToolsMgt.TextToDate2(lXMLNodeFound.text);
+
+            IF FindFirstNode2(lXMLNode,'RayedDate',lXMLNodeFound) THEN
+              pTempCont."Rayed Date" := ToolsMgt.TextToDate2(lXMLNodeFound.text);
+
+            IF FindFirstNode2(lXMLNode,'ChangeDate',lXMLNodeFound) THEN
+              pTempCont."Last Date Modified" := ToolsMgt.TextToDate2(lXMLNodeFound.text);
+
+            pTempCont."Corporate No." :=
+              GetCrossRefTemp(DATABASE::Customer,0,PartnerCode,pTempCont."Corporate No.",'');
+            IF pTempCont."Salutation Code" <> '' THEN BEGIN
+              pTempCont."Salutation Code" :=
+                GetCrossRefTemp(DATABASE::Salutation,0,PartnerCode,pTempCont."Salutation Code",'');
+              //<<IMH02.isat.PC
+              IF NOT lSalutation.GET(pTempCont."Salutation Code") THEN BEGIN
+                GetMarketingSetup;
+                //<<IMH08.ISAT.EBA
+                IF lIsCorporate THEN
+                  pTempCont."Salutation Code" := MarketingSetup."Def. Company Salutation Code"
+                ELSE
+                //>>IMH08.ISAT.EBA
+                  pTempCont."Salutation Code" := MarketingSetup."Def. Benef. Salutation Code";
+              END;
+            END ELSE BEGIN
+              GetMarketingSetup;
+              //<<IMH08.ISAT.EBA
+              IF lIsCorporate THEN
+                pTempCont."Salutation Code" := MarketingSetup."Def. Company Salutation Code"
+              ELSE
+              //>>IMH08.ISAT.EBA
+                pTempCont."Salutation Code" := MarketingSetup."Def. Benef. Salutation Code";
+              //>>IMH02.isat.PC
+            END;
+            IF pTempCont."Corporate Region Code" <> '' THEN BEGIN
+              pTempCont."Corporate Region Code" :=
+                GetCrossRefTemp(
+                  DATABASE::"Corporate Region",0,
+                  PartnerCode,pTempCont."Corporate No.",pTempCont."Corporate Region Code");
+            END;
+            lContactCpt += 1;
+            pTempCont."No." := 'C' + FORMAT(lContactCpt);
+            pTempCont."Beneficiary Interface" := TRUE;
+            pTempCont.INSERT;
+
+            IF FindNodes(lXMLNode,'MembContract',lXMLCommentNodeList) THEN BEGIN
+              lXMLCommentNodeList.reset();
+              lXMLDocLineNode := lXMLCommentNodeList.nextNode();
+              WHILE NOT ISCLEAR(lXMLDocLineNode) DO BEGIN
+                pTempContract.INIT;
+                pTempContAltAddr.INIT;
+
+                IF FindFirstNode2(lXMLDocLineNode,'CorpNo',lXMLNodeFound) THEN
+                  pTempContract."Corporate No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContract."Corporate No."));
+
+                //IF FindFirstNode2(lXMLDocLineNode,'MemberNo',lXMLNodeFound) THEN
+                //  pTempContract."Member No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContract."Member No."))
+
+                IF FindFirstNode2(lXMLDocLineNode,'ContractRef',lXMLNodeFound) THEN
+                  pTempContract."Contract Reference" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContract."Contract Reference"));
+
+                IF FindFirstNode2(lXMLDocLineNode,'ContractForm',lXMLNodeFound) THEN
+                  pTempContract."Contract Form Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContract."Contract Form Code"));
+
+                IF FindFirstNode2(lXMLDocLineNode,'ResType',lXMLNodeFound) THEN
+                  pTempContAltAddr."Residence Type" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Residence Type"));
+
+                IF FindFirstNode2(lXMLDocLineNode,'Addr',lXMLNodeFound) THEN
+                  pTempContAltAddr.Address := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr.Address));
+
+                IF FindFirstNode2(lXMLDocLineNode,'Addr2',lXMLNodeFound) THEN
+                  pTempContAltAddr."Address 2" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Address 2"));
+
+                IF FindFirstNode2(lXMLDocLineNode,'Addr3',lXMLNodeFound) THEN
+                  pTempContAltAddr."Address 3" := ' ' + COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Address 3"));
+
+                IF FindFirstNode(lXMLDocLineNode,'County',lXMLNodeFound) THEN
+                  pTempContAltAddr.County := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr.County));
+
+                IF FindFirstNode2(lXMLDocLineNode,'PostCode',lXMLNodeFound) THEN BEGIN
+                  IF STRLEN(lXMLNodeFound.text) < 5 THEN BEGIN
+                    pTempContAltAddr."Post Code" := '0' + COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Post Code"));
+                  END ELSE BEGIN
+                    pTempContAltAddr."Post Code" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Post Code"));
+                  END;
+                END;
+
+                IF FindFirstNode2(lXMLDocLineNode,'City',lXMLNodeFound) THEN
+                  pTempContAltAddr.City := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr.City));
+
+                IF FindFirstNode2(lXMLDocLineNode,'Country',lXMLNodeFound) THEN
+                  pTempContAltAddr."Country/Region Code" :=
+                    COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Country/Region Code"));
+
+                IF FindFirstNode2(lXMLDocLineNode,'PhoneNo',lXMLNodeFound) THEN
+                  pTempContAltAddr."Phone No." := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Phone No."));
+
+                IF FindFirstNode2(lXMLDocLineNode,'StartDate',lXMLNodeFound) THEN
+                  pTempContract."Start Date" := ToolsMgt.TextToDate2(lXMLNodeFound.text);
+
+                IF FindFirstNode2(lXMLDocLineNode,'EndDate',lXMLNodeFound) THEN
+                  pTempContract."Expiration Date" := ToolsMgt.TextToDate2(lXMLNodeFound.text);
+
+                IF FindFirstNode(lXMLDocLineNode,'OccNat',lXMLNodeFound) THEN
+                  pTempContAltAddr."Occupier Nature" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Occupier Nature"));
+
+                IF FindFirstNode(lXMLDocLineNode,'HousType',lXMLNodeFound) THEN
+                  pTempContAltAddr."Housing Type" := COPYSTR(lXMLNodeFound.text,1,MAXSTRLEN(pTempContAltAddr."Housing Type"));
+
+                //<<IMH13
+                //Gestion de Franchise MATMUT et AMF :
+                //Seul le montant le plus ‚lev‚ pr‚sent dans le FILLER doit remonter dans le systŠme NAVISION
+                IF lCorpNo IN ['MF', 'AMA', 'AMF'] THEN BEGIN
+                  IF FindFirstNode(lXMLDocLineNode,'DeductAmt1',lXMLNodeFound) THEN BEGIN
+                    IF STRLEN(lXMLNodeFound.text) > 0 THEN BEGIN
+                      IF EVALUATE(lDecimalTest,lXMLNodeFound.text) THEN BEGIN
+                        pTempContract."Deductible 1 (LCY)" := ToolsMgt.TextToDecimal(lXMLNodeFound.text);
+                      END;
+                    END;
+                  END;
+
+                  IF FindFirstNode(lXMLDocLineNode,'DeductAmt2',lXMLNodeFound) THEN BEGIN
+                    IF STRLEN(lXMLNodeFound.text) > 0 THEN
+                      IF EVALUATE(lDecimalTest,lXMLNodeFound.text) THEN BEGIN
+                        pTempContract."Deductible 2 (LCY)" := ToolsMgt.TextToDecimal(lXMLNodeFound.text);
+                      END;
+                  END;
+                  IF pTempContract."Deductible 2 (LCY)" > pTempContract."Deductible 1 (LCY)" THEN
+                    pTempContract."Deductible 1 (LCY)" := pTempContract."Deductible 2 (LCY)";
+                  pTempContract."Deductible 2 (LCY)" := 0;
+                END ELSE BEGIN
+                  IF FindFirstNode(lXMLDocLineNode,'DeductAmt1',lXMLNodeFound) THEN BEGIN
+                    IF STRLEN(lXMLNodeFound.text) > 0 THEN BEGIN
+                      IF EVALUATE(lDecimalTest,lXMLNodeFound.text) THEN BEGIN
+                        pTempContract."Deductible 1 (LCY)" := ToolsMgt.TextToDecimal(lXMLNodeFound.text) / 100;
+                      END;
+                    END;
+                  END;
+
+                  IF FindFirstNode(lXMLDocLineNode,'DeductAmt2',lXMLNodeFound) THEN BEGIN
+                    IF STRLEN(lXMLNodeFound.text) > 0 THEN
+                      IF EVALUATE(lDecimalTest,lXMLNodeFound.text) THEN BEGIN
+                        pTempContract."Deductible 2 (LCY)" := ToolsMgt.TextToDecimal(lXMLNodeFound.text) / 100;
+                      END;
+                  END;
+                END;
+                //>>IMH13
+
+                IF FindFirstNode2(lXMLDocLineNode,'ChangeDate',lXMLNodeFound) THEN
+                  pTempContract."Last Modification Date" := CREATEDATETIME(ToolsMgt.TextToDate2(lXMLNodeFound.text),0T);
+
+                lCpt += 1;
+
+                pTempContAltAddr."Contact No." := 'C' + FORMAT(lContactCpt);
+                pTempContAltAddr."Member No." := pTempCont."Member No.";
+                pTempContAltAddr."Company Name" := pTempCont.Name;
+                pTempContAltAddr."Company Name 2" := pTempCont."Name 2";
+                // controle de l'adresse vis-…-vis du contact
+                IF (pTempContAltAddr.Address = pTempCont.Address) AND
+                   (pTempContAltAddr."Post Code" = pTempCont."Post Code") AND
+                   (pTempContAltAddr.City = pTempCont.City) THEN
+                  pTempContAltAddr.Code := '' // adresse principale du contact
+                ELSE
+                  pTempContAltAddr.Code := FORMAT(lCpt);
+                pTempContAltAddr."Residence Type" :=
+                  GetCrossRefTemp(DATABASE::"Contact Alt. Address",50071,PartnerCode,pTempContAltAddr."Residence Type",'');
+                pTempContAltAddr."Occupier Nature" :=
+                  GetCrossRefTemp(DATABASE::"Contact Alt. Address",50070,PartnerCode,pTempContAltAddr."Occupier Nature",'');
+                pTempContAltAddr."Housing Type" :=
+                  GetCrossRefTemp(DATABASE::"Contact Alt. Address",50072,PartnerCode,pTempContAltAddr."Housing Type",'');
+                IF NOT pTempContAltAddr.INSERT THEN
+                  pTempContAltAddr.MODIFY;
+
+                pTempContract."Contact No." := 'C' + FORMAT(lContactCpt);
+                pTempContract."Occurence No." := lCpt;
+                pTempContract."Corporate No." :=
+                  GetCrossRefTemp(DATABASE::Customer,0,PartnerCode,pTempContract."Corporate No.",'');
+                //<<IMH13
+                //pTempContract."Contract Form Code" :=
+                //  GetCrossRefTemp(DATABASE::"Corporate Contract",0,pTempContract."Corporate No.",pTempContract."Contract Form Code",'');
+                pTempContract."Contract Form Code" :=
+                  GetCrossRefTemp(DATABASE::"Corporate Contract",0, PartnerCode,
+                    pTempContract."Corporate No.",pTempContract."Contract Form Code");
+
+                IF lCorpNo IN ['MF', 'AMA', 'AMF'] THEN BEGIN
+                  IF FindFirstNode2(lXMLDocLineNode,'ContractDescpt',lXMLNodeFound) THEN
+                    IF lXMLNodeFound.text <> '' THEN BEGIN
+                      //<<IMH14
+                      //pTempContract."Contract Form Code" :=
+                      //  GetCrossRefTemp(DATABASE::"Corporate Contract",0, PartnerCode,
+                      //      pTempContract."Corporate No.",lXMLNodeFound.text);
+                      lCorporateContract.SETRANGE("Corporate No.", pTempContract."Corporate No.");
+                      lCorporateContract.SETRANGE(Name, lXMLNodeFound.text);
+                      lCorporateContract.FINDFIRST;
+                      pTempContract."Contract Form Code" := lCorporateContract."Contract Form Code";
+                      //<<IMH14
+                    END;
+                END;
+                //>>IMH13
+
+                 //<<IMH15
+                IF lCorpNo = 'MC' THEN BEGIN
+                  IF FindFirstNode2(lXMLDocLineNode,'ContractDescpt',lXMLNodeFound) THEN
+                    IF lXMLNodeFound.text <> '' THEN BEGIN
+                      lCorporateContract.SETRANGE("Corporate No.", pTempContract."Corporate No.");
+                      lCorporateContract.SETRANGE(Name, lXMLNodeFound.text);
+                      lCorporateContract.FINDFIRST;
+                      pTempContract."Contract Form Code" := lCorporateContract."Contract Form Code";
+                    END;
+
+                  IF FindFirstNode(lXMLDocLineNode,'DeductAmt1',lXMLNodeFound) THEN BEGIN
+                    IF STRLEN(lXMLNodeFound.text) > 0 THEN BEGIN
+                      IF EVALUATE(lDecimalTest,lXMLNodeFound.text) THEN BEGIN
+                        pTempContract."Deductible 1 (LCY)" := ToolsMgt.TextToDecimal(lXMLNodeFound.text);
+                      END;
+                    END;
+                  END;
+
+
+                END;
+                //>>IMH15
+
+
+                pTempContract."Default Address Code" := pTempContAltAddr.Code;
+                pTempContract."Member No." := pTempCont."Member No.";
+                pTempContract.INSERT;
+
+                lXMLDocLineNode := lXMLCommentNodeList.nextNode();
+              END;
+            END;
+
+            lXMLNode := lXMLNodeList.nextNode();
+          END;
+        END;
+      END;
+    END;
+
+    PROCEDURE UpdateContact@1100281002(VAR pTempCont@1100281010 : Record 5050;VAR pTempContract@1100281009 : Record 50059;VAR pTempContAltAddr@1100281008 : Record 5051);
+    VAR
+      lPhoneNoList@1100281014 : Record 50055;
+      lCont@1100281000 : Record 5050;
+      lCont2@1100281001 : Record 5050;
+      lContContract@1100281002 : Record 50059;
+      lContAltAddr@1100281003 : Record 5051;
+      lRecRef@1100281011 : RecordRef;
+      lNewRecRef@1100281007 : RecordRef;
+      lCpt@1100281004 : Integer;
+      lPostCode@1100281005 : Code[20];
+      lCity@1100281006 : Text[30];
+      lMainAddrCode@1100281012 : Code[10];
+      lUpdRec@1100281013 : Boolean;
+      lAddressToCreate@1100281015 : Boolean;
+      lAddressToModify@1100281016 : Boolean;
+    BEGIN
+      GetMarketingSetup;
+      MarketingSetup.TESTFIELD("Main Address Code");
+      WITH pTempCont DO BEGIN
+        //<<IMH06.ISAT.EBA
+        IF (pTempCont."Last Date Modified" = 0D) AND (pTempCont.Name = '') THEN BEGIN
+          lCont.SETCURRENTKEY("Member No.","Corporate No.");
+          lCont.SETRANGE("Member No.","Member No.");
+          lCont.SETRANGE("Corporate No.","Corporate No.");
+          lCont.FINDFIRST;
+        END ELSE BEGIN
+        //>>IMH06.ISAT.EBA
+          lCont.SETCURRENTKEY("Member No.","Corporate No.");
+          lCont.SETRANGE("Member No.","Member No.");
+          lCont.SETRANGE("Corporate No.","Corporate No.");
+          IF lCont.FINDFIRST THEN BEGIN
+            lCont2 := lCont;
+        //<<IMH04.ST
+            IF "Salutation Code" <> '' THEN
+              IF "Salutation Code" <> lCont."Salutation Code" THEN BEGIN
+                lCont."Salutation Code" := "Salutation Code";
+                lUpdRec := TRUE
+              END;
+            IF Surname <> '' THEN BEGIN
+              IF ("First Name" <> lCont."First Name") OR
+                 (Surname <> lCont.Surname) OR
+                 (Name <> lCont.Name) OR
+                 ("Name 2" <> lCont."Name 2")
+               THEN BEGIN
+                lCont."First Name" := "First Name";
+                lCont.VALIDATE(Surname, Surname);
+                lCont."Name 2" := "Name 2";
+                lUpdRec := TRUE
+              END;
+            END ELSE BEGIN
+              IF (Name <> lCont.Name) OR
+                 ("Name 2" <> lCont."Name 2") THEN BEGIN
+                lCont.VALIDATE(Name, Name);
+                lCont."Name 2" := "Name 2";
+                lUpdRec := TRUE
+              END;
+            END;
+            IF ("Name 2" <> lCont."Name 2") OR
+               (Address <> lCont.Address) OR
+               ("Address 2" <> lCont."Address 2") OR
+               ("Address 3" <> lCont."Address 3") OR
+               ("Post Code" <> lCont."Post Code") OR
+               (City <> lCont.City) OR
+               ("Country/Region Code" <> lCont."Country/Region Code") OR
+               ("Corporate Region Code" <> lCont."Corporate Region Code") OR
+               ("Phone No." <> lCont."Phone No.") OR
+               ("Mobile Phone No." <> lCont."Phone No.") OR
+               ("Fax No." <> lCont."Fax No.") OR
+               ("E-Mail" <> lCont."E-Mail") OR
+               ("E-Mail 2" <> lCont."E-Mail 2") OR
+               (Birthdate <> lCont.Birthdate) OR
+               ("Rayed Date" <> lCont."Rayed Date") OR
+               ("Last Date Modified" <> lCont."Last Date Modified")
+            THEN BEGIN
+              lCont."Name 2" := "Name 2";
+              lCont.Address := Address;
+              lCont."Address 2" := "Address 2";
+              lCont."Address 3" := "Address 3";
+              lCont."Post Code" := "Post Code";
+              lCont.City := City;
+              lCont."Country/Region Code" := "Country/Region Code";
+              lCont."Corporate Region Code" := "Corporate Region Code";
+              lCont."Phone No." := "Phone No.";
+              lCont."Mobile Phone No." := "Mobile Phone No.";
+              lCont."Fax No." := "Fax No.";
+              lCont."E-Mail" := "E-Mail";
+              lCont."E-Mail 2" := "E-Mail 2";
+              lCont.Birthdate := Birthdate;
+              lCont.VALIDATE("Rayed Date", "Rayed Date");
+              lCont."Last Date Modified" := "Last Date Modified";
+              lUpdRec := TRUE;
+            END;
+        //>>IMH04.ST
+            IF lUpdRec THEN BEGIN
+              lCont.UpdateSearchFields;
+              lCont.OnModify(lCont2);
+              lCont.MODIFY;
+            END;
+          END ELSE BEGIN
+            lCont := pTempCont;
+            lCont."No." := '';
+            lCont."Service Contact" := lCont."Service Contact"::Beneficiary;
+            lCont.UpdateSearchFields;
+            lCont.VALIDATE("Rayed Date");
+            lCont.INSERT(TRUE);
+            //<<IMH08.ISAT.EBA
+            lCont."Salutation Code" := "Salutation Code";
+            lCont.MODIFY;
+            //>>IMH08.ISAT.EBA
+          END;
+        //<<IMH06.ISAT.EBA
+        END;
+        //>>IMH06.ISAT.EBA
+
+        // Mise … jour adresse principale
+        IF pTempContAltAddr.GET(pTempCont."No.", '') THEN BEGIN
+          lContAltAddr.RESET;
+          lContAltAddr.SETRANGE("Contact No.", lCont."No.");
+          lContAltAddr.SETRANGE("Contact Address", TRUE);
+          IF lContAltAddr.FINDFIRST THEN BEGIN
+            IF (lContAltAddr."Residence Type" <> pTempContAltAddr."Residence Type") OR
+               (lContAltAddr."Occupier Nature" <> pTempContAltAddr."Occupier Nature") OR
+               (lContAltAddr."Housing Type" <> pTempContAltAddr."Housing Type")
+            THEN BEGIN
+              lContAltAddr."Residence Type" := pTempContAltAddr."Residence Type";
+              lContAltAddr."Occupier Nature" := pTempContAltAddr."Occupier Nature";
+              lContAltAddr."Housing Type" := pTempContAltAddr."Housing Type";
+      //        lContAltAddr."Property Type" := pTemPContAltAddr."Property Type";
+              lContAltAddr.MODIFY;
+            END;
+            lMainAddrCode := lContAltAddr.Code;
+          END;
+        END;
+
+        // Mise … jour contrats
+        lCpt := 0;
+        pTempContract.RESET;
+        pTempContract.SETRANGE("Contact No.",pTempCont."No.");
+        IF pTempContract.FINDSET THEN
+          REPEAT
+            lCpt := lCpt + 1;
+            lContContract.RESET;
+            lContContract.SETRANGE("Contact No.",lCont."No.");
+            lContContract.SETRANGE("Corporate No.",pTempContract."Corporate No.");
+            lContContract.SETRANGE("Contract Form Code",pTempContract."Contract Form Code");
+            lContContract.SETRANGE("Contract Reference",pTempContract."Contract Reference");
+            IF lContContract.FINDLAST THEN BEGIN
+              lUpdRec := FALSE;
+              IF pTempContract.Name <> '' THEN
+                IF pTempContract.Name <> lContContract.Name THEN BEGIN
+                  lContContract.Name := lCont.Name;
+                  lUpdRec := TRUE;
+                END;
+              IF (pTempContract."Start Date" <> lContContract."Start Date") OR
+                 (pTempContract."Expiration Date" <> lContContract."Expiration Date") OR
+                 (pTempContract."Deductible 1 (LCY)" <> lContContract."Deductible 1 (LCY)") OR
+                 (pTempContract."Deductible 2 (LCY)" <> lContContract."Deductible 2 (LCY)") OR
+                 (pTempContract."Last Modification Date" <> lContContract."Last Modification Date") THEN BEGIN
+                lContContract."Start Date" := pTempContract."Start Date";
+                lContContract."Expiration Date" := pTempContract."Expiration Date";
+                lContContract."Deductible 1 (LCY)" := pTempContract."Deductible 1 (LCY)";
+                lContContract."Deductible 2 (LCY)" := pTempContract."Deductible 2 (LCY)";
+                lContContract."Last Modification Date" := pTempContract."Last Modification Date";
+                lUpdRec := TRUE;
+              END;
+              IF pTempContract."Default Address Code" = '' THEN
+                IF lContContract."Default Address Code" <> lMainAddrCode THEN BEGIN
+                  lContContract."Default Address Code" := lMainAddrCode;
+                  lUpdRec := TRUE;
+                END;
+              IF lUpdRec THEN
+                lContContract.MODIFY;
+            END ELSE BEGIN
+              IF GetCorpContract(lCont."Corporate No.", pTempContract."Contract Form Code", TRUE) THEN; //IMH03.ST
+              lContContract := pTempContract;
+              lContContract.VALIDATE("Contact No.",lCont."No.");
+              lContContract.VALIDATE("Corporate No.");
+              lContContract.SetDisableCheckCorpContract(TRUE);
+              IF (pTempContract.Name = '') AND (lContContract.Name = '') THEN BEGIN
+                lContContract.Name := lCont.Name;
+              END;
+              lContContract."Electrical failure" := CorpContract."Default Electrical Failure"; //IMH03.ST
+              lContContract."Deductible 1 (LCY)" := pTempContract."Deductible 1 (LCY)";
+              lContContract."Deductible 2 (LCY)" := pTempContract."Deductible 2 (LCY)";
+              lContAltAddr."Occupier Nature" := pTempContAltAddr."Occupier Nature";
+              lContAltAddr."Property Type" := pTempContAltAddr."Property Type";
+              lContAltAddr."Housing Type" := pTempContAltAddr."Housing Type";
+              lContAltAddr."Residence Type" := pTempContAltAddr."Residence Type";
+              IF pTempContract."Default Address Code" = '' THEN
+                lContContract."Default Address Code" := lMainAddrCode
+              ELSE
+                lContContract."Default Address Code" := '';
+              lContContract."Last Modification Date" := pTempContract."Last Modification Date";
+              lContContract.INSERT(TRUE);
+            END;
+
+            IF pTempContract."Default Address Code" <> '' THEN BEGIN
+              pTempContAltAddr.SETRANGE("Contact No.", pTempContract."Contact No.");
+              pTempContAltAddr.SETRANGE(Code, pTempContract."Default Address Code");
+              pTempContAltAddr.FINDFIRST;
+              //<<IMH12
+              lAddressToCreate := FALSE;
+              lAddressToModify := FALSE;
+
+              IF lContContract."Default Address Code" = '' THEN BEGIN
+                lAddressToCreate := TRUE;
+                lAddressToModify := FALSE;
+              END ELSE BEGIN
+                IF lContAltAddr.GET(lCont."No.", lContContract."Default Address Code") THEN BEGIN
+                  // Mise … jour de l'adresse
+                  IF (lContAltAddr.Address <> pTempContAltAddr.Address) OR
+                     (lContAltAddr."Address 2" <> pTempContAltAddr."Address 2") OR
+                     (lContAltAddr."Address 3" <> pTempContAltAddr."Address 3") OR
+                     (lContAltAddr.County <> pTempContAltAddr.County) OR
+                     (lContAltAddr."Post Code" <> pTempContAltAddr."Post Code") OR
+                     (lContAltAddr.City <> pTempContAltAddr.City) OR
+                     (lContAltAddr."Country/Region Code" <> pTempContAltAddr."Country/Region Code") OR
+                     (lContAltAddr."Phone No." <> pTempContAltAddr."Phone No.") OR
+                     (lContAltAddr."Residence Type" <> pTempContAltAddr."Residence Type") OR
+                     (lContAltAddr."Occupier Nature" <> pTempContAltAddr."Occupier Nature") OR
+                     (lContAltAddr."Housing Type" <> pTempContAltAddr."Housing Type")
+                  THEN BEGIN
+                    IF lContContract."Default Address Code" <> lMainAddrCode THEN BEGIN
+                      lAddressToCreate := FALSE;
+                      lAddressToModify := TRUE;
+                    END ELSE BEGIN
+                      lAddressToCreate := TRUE;
+                      lAddressToModify := FALSE;
+                    END;
+                  END;
+                END;
+              END;
+              IF lAddressToModify THEN BEGIN
+                lContAltAddr.Address := pTempContAltAddr.Address;
+                lContAltAddr."Address 2" := pTempContAltAddr."Address 2";
+                lContAltAddr."Address 3" := pTempContAltAddr."Address 3";
+                lContAltAddr.County := pTempContAltAddr.County;
+                lContAltAddr."Post Code" := pTempContAltAddr."Post Code";
+                lContAltAddr.City := pTempContAltAddr.City;
+                lContAltAddr."Country/Region Code" := pTempContAltAddr."Country/Region Code";
+                lContAltAddr."Phone No." := pTempContAltAddr."Phone No.";
+                lContAltAddr."Residence Type" := pTempContAltAddr."Residence Type";
+                lContAltAddr."Occupier Nature" := pTempContAltAddr."Occupier Nature";
+                lContAltAddr."Housing Type" := pTempContAltAddr."Housing Type";
+                //lContAltAddr."Property Type" := pTemPContAltAddr."Property Type";
+                lContAltAddr.UpdateSearchFields;
+                lContAltAddr.MODIFY;
+              END;
+              IF lAddressToCreate THEN BEGIN
+                // Cr‚ation de l'adresse
+                lContAltAddr.INIT;
+                lContAltAddr := pTempContAltAddr;
+                lContAltAddr.VALIDATE("Contact No.", lCont."No.");
+                lContAltAddr.Code := '';
+                lContAltAddr.GetNextCode;
+                lContAltAddr.UpdateSearchFields;
+                lContAltAddr.INSERT(TRUE);
+                lContContract."Default Address Code" := lContAltAddr.Code;
+                lContContract.MODIFY;
+              END;
+
+              {
+              //>>IMH12
+              //<<IMH07.ISAT.EBA
+              //IF lContContract."Default Address Code" <> lMainAddrCode THEN BEGIN
+              IF (lContContract."Default Address Code" <> lMainAddrCode) OR (lContContract."Default Address Code" = '') THEN BEGIN
+              //>>IMH07.ISAT.EBA
+                IF lContAltAddr.GET(lCont."No.", lContContract."Default Address Code") THEN BEGIN
+                  // Mise … jour de l'adresse
+                  IF (lContAltAddr.Address <> pTempContAltAddr.Address) OR
+                     (lContAltAddr."Address 2" <> pTempContAltAddr."Address 2") OR
+                     (lContAltAddr."Address 3" <> pTempContAltAddr."Address 3") OR
+                     (lContAltAddr.County <> pTempContAltAddr.County) OR
+                     (lContAltAddr."Post Code" <> pTempContAltAddr."Post Code") OR
+                     (lContAltAddr.City <> pTempContAltAddr.City) OR
+                     (lContAltAddr."Country/Region Code" <> pTempContAltAddr."Country/Region Code") OR
+                     (lContAltAddr."Phone No." <> pTempContAltAddr."Phone No.") OR
+                     (lContAltAddr."Residence Type" <> pTempContAltAddr."Residence Type") OR
+                     (lContAltAddr."Occupier Nature" <> pTempContAltAddr."Occupier Nature") OR
+                     (lContAltAddr."Housing Type" <> pTempContAltAddr."Housing Type")
+                  THEN BEGIN
+                    lContAltAddr.Address := pTempContAltAddr.Address;
+                    lContAltAddr."Address 2" := pTempContAltAddr."Address 2";
+                    lContAltAddr."Address 3" := pTempContAltAddr."Address 3";
+                    lContAltAddr.County := pTempContAltAddr.County;
+                    lContAltAddr."Post Code" := pTempContAltAddr."Post Code";
+                    lContAltAddr.City := pTempContAltAddr.City;
+                    lContAltAddr."Country/Region Code" := pTempContAltAddr."Country/Region Code";
+                    lContAltAddr."Phone No." := pTempContAltAddr."Phone No.";
+                    lContAltAddr."Residence Type" := pTempContAltAddr."Residence Type";
+                    lContAltAddr."Occupier Nature" := pTempContAltAddr."Occupier Nature";
+                    lContAltAddr."Housing Type" := pTempContAltAddr."Housing Type";
+      //              lContAltAddr."Property Type" := pTemPContAltAddr."Property Type";
+                    lContAltAddr.UpdateSearchFields;
+                    lContAltAddr.MODIFY;
+                  END;
+                END
+                ELSE BEGIN
+                  // Cr‚ation de l'adresse
+                  lContAltAddr.INIT;
+                  lContAltAddr := pTempContAltAddr;
+                  lContAltAddr.VALIDATE("Contact No.", lCont."No.");
+                  lContAltAddr.Code := '';
+                  lContAltAddr.GetNextCode;
+                  lContAltAddr.UpdateSearchFields;
+                  lContAltAddr.INSERT(TRUE);
+                  lContContract."Default Address Code" := lContAltAddr.Code;
+                  lContContract.MODIFY;
+                END;
+              END;
+              }
+            END;
+          UNTIL pTempContract.NEXT = 0;
+      END;
+    END;
+
+    PROCEDURE GetCrossRef@1100281001(pTableID@1100281001 : Integer;pFieldID@1100281004 : Integer;pEAIPartnerNo@1100281002 : Code[20];pReferenceNo@1100281003 : Code[30];pReferenceNo2@1100281005 : Code[30]) : Code[20];
+    VAR
+      lEAIPartnerCrossRef@1100281000 : Record 8016748;
+    BEGIN
+      IF pReferenceNo2 = '' THEN BEGIN
+        IF lEAIPartnerCrossRef.GetFromCrossRef2(pTableID,pFieldID,pEAIPartnerNo,pReferenceNo,lEAIPartnerCrossRef) THEN
+          EXIT(lEAIPartnerCrossRef."Source No.")
+        ELSE
+          EXIT(pReferenceNo);
+      END ELSE BEGIN
+        lEAIPartnerCrossRef.SETRANGE("Table ID",pTableID);
+        lEAIPartnerCrossRef.SETRANGE("Source No.",pReferenceNo);
+        lEAIPartnerCrossRef.SETRANGE("Partner Code",pEAIPartnerNo);
+        lEAIPartnerCrossRef.SETRANGE("Field ID",pFieldID);
+        lEAIPartnerCrossRef.SETRANGE("Partner Reference",pReferenceNo2);
+        IF lEAIPartnerCrossRef.ISEMPTY THEN BEGIN
+          EXIT(pReferenceNo2);
+        END ELSE BEGIN
+          lEAIPartnerCrossRef.FINDFIRST;
+          EXIT(lEAIPartnerCrossRef."Source No. 2")
+        END;
+      END;
+    END;
+
+    PROCEDURE UpdateRec@1100281004(VAR CurRec@1100281000 : RecordRef;VAR NewRec@1100281001 : RecordRef);
+    VAR
+      i@1100281002 : Integer;
+      CurField@1100281003 : FieldRef;
+      NewField@1100281004 : FieldRef;
+    BEGIN
+      FOR i := 1 TO CurRec.FIELDCOUNT() DO BEGIN
+        CurField := CurRec.FIELDINDEX(i);
+        NewField := NewRec.FIELDINDEX(i);
+        IF ToolsMgt.HasValue(NewField) THEN BEGIN
+          IF CurField.VALUE <> NewField.VALUE THEN BEGIN
+            CurField.VALIDATE(NewField.VALUE);
+          END;
+        END;
+      END;
+      i := 0;
+    END;
+
+    PROCEDURE CheckData@1100281005(VAR pTempCont@1100281002 : Record 5050;VAR pTempContract@1100281001 : Record 50059;VAR pTempContAltAddr@1100281000 : Record 5051);
+    VAR
+      lNo@1100281003 : Code[20];
+      lTempLen@1100281004 : Integer;
+      lPhoneNoList@1100281005 : Record 50055;
+    BEGIN
+      WITH pTempCont DO BEGIN
+        lNo := "No.";
+        IF (Surname <> '') OR ("First Name" <> '') THEN
+          VALIDATE(Surname)
+        ELSE
+          IF Name <> '' THEN
+            VALIDATE(Name);
+
+        "No." := ''; // ‚vite les triggers tables annexes
+        IF "Member No." = '' THEN
+          FIELDERROR("Member No.");
+        // Champs de standardisation
+        PhoneStd.SetHideMessage(TRUE);
+      //  VALIDATE("Phone No.");
+        IF NOT PhoneStd.ValidatePhoneNo(DATABASE::Contact, FIELDNO("Phone No."), "Country/Region Code", "Phone No.") THEN
+          "Phone No." := '';
+        IF "Phone No." <> '' THEN
+          lPhoneNoList.InsertPhoneNo("Phone No.","No.",FIELDNO("Phone No."));
+      //  VALIDATE("Mobile Phone No.");
+        IF NOT PhoneStd.ValidatePhoneNo(DATABASE::Contact, FIELDNO("Mobile Phone No."), "Country/Region Code", "Mobile Phone No.") THEN
+          "Mobile Phone No." := '';
+        IF "Mobile Phone No." <> '' THEN
+          lPhoneNoList.InsertPhoneNo("Mobile Phone No.","No.",FIELDNO("Mobile Phone No."));
+      //  VALIDATE("Fax No.");
+        IF NOT PhoneStd.ValidatePhoneNo(DATABASE::Contact, FIELDNO("Fax No."), "Country/Region Code", "Fax No.") THEN
+          "Fax No." := '';
+        IF "Fax No." <> '' THEN
+          lPhoneNoList.InsertPhoneNo("Fax No.","No.",FIELDNO("Fax No."));
+
+        IF "E-Mail" <> '' THEN BEGIN
+          IF "E-Mail" = '****************************************' THEN
+            "E-Mail" := ''
+          ELSE BEGIN
+            "E-Mail" := CONVERTSTR("E-Mail", 'à', '@');
+            IF NOT EMailStd.ValidateEmail2("E-Mail") THEN
+              "E-Mail" := '';
+          END;
+        END;
+
+        IF ("E-Mail" = '') AND
+           ("Fax No." = '')
+        THEN BEGIN
+          "Correspondence Type" := "Correspondence Type"::" ";
+        END ELSE BEGIN
+          IF ("E-Mail" = '') AND
+             ("Fax No." <> '')
+          THEN BEGIN
+            "Correspondence Type" := "Correspondence Type"::Fax;
+          END ELSE BEGIN
+            IF ("E-Mail" <> '') AND
+               ("Fax No." = '')
+            THEN BEGIN
+              "Correspondence Type" := "Correspondence Type"::"E-Mail";
+            END;
+          END;
+        END;
+
+        IF (Address <> '') AND ("Address 2" <> '') AND ("Address 3" <> '') THEN BEGIN
+          IF STRLEN(Address + "Address 2") + 1 > 50 THEN BEGIN
+            IF STRLEN("Address 2" + "Address 3") + 1 > 50 THEN BEGIN
+              lTempLen := STRLEN(Address) + 1;
+              Address := Address + ' ' + COPYSTR("Address 2",1,50 - lTempLen);
+              "Address 2" := COPYSTR("Address 2",50 - lTempLen);
+              lTempLen := STRLEN("Address 2") + 1;
+              "Address 2" := "Address 2" + ' ' + COPYSTR("Address 3",1,50 - lTempLen);
+            END ELSE BEGIN
+              "Address 2" := "Address 2" + ' ' + "Address 3";
+              "Address 3" := '';
+            END;
+          END ELSE BEGIN
+            Address := Address + ' ' + "Address 2";
+            "Address 2" := "Address 3";
+            "Address 3" := '' ;//IMH06
+          END;
+        END ELSE BEGIN
+          IF Address = '' THEN BEGIN
+            IF "Address 2" = '' THEN BEGIN
+              Address := "Address 3";
+              "Address 3" := '' ;//IMH06
+            END ELSE BEGIN
+              Address := "Address 2";
+            END;
+          END ELSE BEGIN
+            IF "Address 2" = '' THEN BEGIN
+              "Address 2" := "Address 3";
+              "Address 3" := '' ;//IMH06
+            END;
+          END;
+        END;
+
+        "No." := lNo;
+      END;
+    END;
+
+    PROCEDURE GetSeriesNo@1100281006(pQueueNo@1100281000 : Integer) : Code[10];
+    BEGIN
+      CASE pQueueNo OF
+        DATABASE::"EAI Rcvd MQ 1" : EXIT(EAISetup."Contact Nos. Queue 1");
+        DATABASE::"EAI Rcvd MQ 2" : EXIT(EAISetup."Contact Nos. Queue 2");
+        DATABASE::"EAI Rcvd MQ 3" : EXIT(EAISetup."Contact Nos. Queue 3");
+        DATABASE::"EAI Rcvd MQ 4" : EXIT(EAISetup."Contact Nos. Queue 4");
+        DATABASE::"EAI Rcvd MQ 5" : EXIT(EAISetup."Contact Nos. Queue 5");
+      END;
+    END;
+
+    PROCEDURE GetCrossRefTemp@1100281000(pTableID@1100281001 : Integer;pFieldID@1100281004 : Integer;pEAIPartnerNo@1100281002 : Code[20];pReferenceNo@1100281003 : Code[30];pReferenceNo2@1100281005 : Code[30]) : Code[20];
+    BEGIN
+      TempCrossRef.SETRANGE("Table ID", pTableID);
+      TempCrossRef.SETRANGE("Source No.", pReferenceNo);
+      TempCrossRef.SETRANGE("Source No. 2", pReferenceNo2);
+      TempCrossRef.SETRANGE("Partner Code", pEAIPartnerNo);
+      TempCrossRef.SETRANGE("Field ID", pFieldID);
+      IF NOT TempCrossRef.FINDFIRST THEN BEGIN
+        // Calcul de la r‚f‚rence
+        TempCrossRef."Table ID" := pTableID;
+        TempCrossRef."Source No." := pReferenceNo;
+        TempCrossRef."Source No. 2" := pReferenceNo2;
+        TempCrossRef."Partner Code" := pEAIPartnerNo;
+        TempCrossRef."Field ID" := pFieldID;
+        TempCrossRef."Partner Reference" := GetCrossRef(pTableID,pFieldID,pEAIPartnerNo,pReferenceNo,pReferenceNo2);
+        TempCrossRef.INSERT(FALSE);
+      END;
+      EXIT(TempCrossRef."Partner Reference");
+    END;
+
+    PROCEDURE GetMarketingSetup@1100281007();
+    BEGIN
+      IF MarketingSetupOK THEN BEGIN
+        EXIT;
+      END;
+
+      MarketingSetup.GET;
+      MarketingSetupOK := TRUE;
+    END;
+
+    PROCEDURE GetCorpContract@1100281009(pCorpNo@1100281001 : Code[20];pFormCode@1100281002 : Code[20];pAutoInsert@1100281000 : Boolean) : Boolean;
+    BEGIN
+      //IMH03.ST
+      IF (pCorpNo = '') OR (pFormCode = '') THEN BEGIN
+        CLEAR(CorpContract);
+        EXIT(FALSE);
+      END;
+      WITH CorpContract DO BEGIN
+        IF ("Corporate No." = pCorpNo) AND ("Contract Form Code" = pFormCode) THEN
+          EXIT(TRUE);
+        IF GET(pCorpNo, pFormCode) THEN
+          EXIT(TRUE);
+        IF pAutoInsert THEN BEGIN
+          INIT;
+          "Corporate No." := pCorpNo;
+          "Contract Form Code" := pFormCode;
+          Name := "Contract Form Code";
+          INSERT(TRUE);
+          EXIT(TRUE);
+        END;
+      END; // WITH
+      CLEAR(CorpContract);
+      EXIT(FALSE);
+    END;
+
+    PROCEDURE SetPartnerCode@1100281008(pPartnerCode@1100281000 : Code[20]);
+    BEGIN
+      // IMH10.PC
+      PartnerCode := pPartnerCode;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH15 @d 18/04/14 @a IMH.WGA @v IMH6.01.P009 @s MAIF PMU
+          @c Ajout gestion de FILLER pour MAIF */
+      /** @r IMH14 @d 28/02/14 @a ISAT.ZW @v IMH6.01.4853 @s ANSRAP MATMUT @h 4853
+          @c Correction pour r‚cup‚rer le code contrat */
+      /** @r IMH13 @d 13/11/13 @a ISAT.ZW @v IMH6.01.4853 @s ANSRAP MATMUT @h 4853
+          @c Ajout gestion de FILLER pour matmut et AMF */
+      /** @r IMH12 @d 09/07/12 @a ISAT.ZW @v IMH6.01.133 @s Interface GC/IMA @h 3584 @c Correction */
+      /** @r IMH11 @d 01/06/12 @a ISAT.PC @v IMH6.01.133 @s Interface fichier soci‚taire @h 3280
+          @c Ajout permission TableData Contact=rim,
+          @c Ajout permission TableData Contact Alt. Address=rim,
+          @c Ajout permission TableData Salutation=r,
+          @c Ajout permission TableData Marketing Setup=r,
+          @c Ajout permission TableData Phone No. List=r,
+          @c Ajout permission TableData Corporate Contract=rim,
+          @c Ajout permission TableData Contact Contract=rim,
+          @c Ajout permission TableData EAI Setup=r,
+          @c Ajout permission TableData EAI Act=r,
+          @c Ajout permission TableData EAI Partner Cross Reference=r */
+      /** @r IMH10 @d 31/01/12 @a ISAT.PC @v IMH6.01.133 @s Interface GC/IMA
+          @c modification pour fonction actualisation du CU 50170 - ActualizeContact
+          @c Ajout fonction SetPartnerCode */
+      /** @r IMH09 @d 02/12/11 @a ISAT.ST @v IMH6.01.133 @s Interface fichier soci‚taire */
+      /** @r IMH08 @d 04/11/11 @a ISAT.EBA @v IMH6.01.133 @s Interface fichier soci‚taire */
+      /** @r IMH07 @d 26/10/11 @a ISAT.EBA @v IMH6.01.133 @s Interface fichier soci‚taire */
+      /** @r IMH06 @d 18/10/11 @a ISAT.EBA @v IMH6.01.133 @s Interface fichier soci‚taire
+          @c Gestion des ANSRAP seuls - Mantis 1592 */
+      /** @r IMH05 @d 09/09/11 @a ISAT.LLT @v IMH6.01.133 @s Corrections suite Mantis */
+      /** @r IMH04 @d 27/07/11 @a ISAT.ST @v IMH6.01.133 @s Corrections suite Mantis */
+      /** @r IMH03 @d 26/07/11 @a ISAT.ST @v IMH6.01.133 @s Auto-cr‚ation contrat / Valeurs par d‚faut */
+      /** @r IMH02 @d 05/07/11 @a ISAT.PC @v IMH6.01.133 @s Correctif */
+      /** @r IMH01 @d 20/06/11 @a ISAT.EBA @v IMH6.01.133 @s Interface fichier soci‚taire */
+    }
+    END.
+  }
+}

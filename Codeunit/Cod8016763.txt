@@ -1,0 +1,228 @@
+OBJECT Codeunit 8016763 EAI Rcvd EDM Validation Post
+{
+  OBJECT-PROPERTIES
+  {
+    Date=02/12/13;
+    Time=14:00:00;
+    Modified=Yes;
+    Version List=IMH6.01,GED,M4637;
+  }
+  PROPERTIES
+  {
+    TableNo=8016704;
+    SingleInstance=Yes;
+    OnRun=VAR
+            lText000@1100481000 : TextConst 'ENU=%1 - %2 : Receiving Message Queue %1 Posting Handler started;FRA=%1 - %2 : D‚marrage du handler de validation de la file de r‚ception';
+          BEGIN
+            IF "Table No." = 0 THEN
+              EXIT;
+            IF Type <> Type::Receiving THEN
+              EXIT;
+
+            CurrentMessageQueue := Rec;
+            RunTimer;
+
+            MESSAGE(lText000,CurrentMessageQueue."EAI NAS Code",CurrentMessageQueue.Code);
+          END;
+
+  }
+  CODE
+  {
+    VAR
+      EAILogMgt@1100281004 : Codeunit 8016711;
+      EAIMQMgt@1100281003 : Codeunit 8016704;
+      CurrentMessageQueue@1100281001 : Record 8016704;
+      InterfaceSetup@1100281008 : Record 50139;
+      NASHandler@1100281007 : Codeunit 8016720;
+      ValidationTimer@1100281002 : Automation "{3B311C81-140E-11D5-8B18-00D0590B4EC5} 1.0:{3B311C92-140E-11D5-8B18-00D0590B4EC5}:'Navision Timer 1.0'.Timer" WITHEVENTS;
+      IsRunning@1100281000 : Boolean;
+      Text001@1100481000 : TextConst 'ENU=%1 messages have been hanlded.;FRA=%1 messages ont ‚t‚ int‚gr‚s.';
+      DARVAMgt@1100281005 : Codeunit 50150;
+      EAIMQBufferMgt@1100281006 : Codeunit 8016708;
+
+    PROCEDURE MessageQueueLoop@1100281001();
+    VAR
+      lEAIMQBufferMgt@1100481002 : Codeunit 8016708;
+      lEAIActMgt@1180044000 : Codeunit 8016703;
+      lRcvdMQBuffer@1100481001 : TEMPORARY Record 8016721;
+      lRecRef@1100481000 : RecordRef;
+      lNbMsg@1100281000 : Integer;
+      lCountMsg@1100281001 : Integer;
+    BEGIN
+      //Traitement des messages
+
+      lEAIMQBufferMgt.SetFilterAndKeyOnRcvdMQ(
+        lRecRef,CurrentMessageQueue,lRcvdMQBuffer.Step::Validation,lRcvdMQBuffer.Status::Unprocessed);
+
+      //On limite le nombre de message trait‚ en mˆme temps
+      lNbMsg := CurrentMessageQueue."Max MQ Number per Loop";
+      IF lNbMsg = 0 THEN
+        lNbMsg := 50;
+
+      IF lRecRef.FINDSET(FALSE,FALSE) THEN BEGIN
+        REPEAT
+          //On passe par un Buffer
+          lEAIMQBufferMgt.TransferRecRefToRcvdMQBuffer(lRecRef,lRcvdMQBuffer);
+
+          //Traitement unitaire
+          IF lEAIActMgt.AutoValidate(lRcvdMQBuffer."EAI Act Type Code",lRcvdMQBuffer."EAI Act Code") THEN
+            MessageQueuePost(lRcvdMQBuffer);
+
+          //On enregistre le Buffer
+          lEAIMQBufferMgt.TransferRcvdMQBufferToRcvdMQ(lRcvdMQBuffer);
+
+          COMMIT;
+
+          lCountMsg += 1;
+
+        UNTIL (lRecRef.NEXT = 0) OR (lCountMsg = lNbMsg);
+
+        EAILogMgt.AddInfoToRcvdLog(CurrentMessageQueue.Code,'','','','',STRSUBSTNO(Text001,FORMAT(lCountMsg)));
+
+      END;
+    END;
+
+    PROCEDURE MessageQueuePost@1100281002(VAR pRcvdMQBuffer@1100281001 : Record 8016721);
+    VAR
+      lEAIExchangeType@1100281000 : Record 8016717;
+      lStepAcq@1100281002 : Integer;
+    BEGIN
+      COMMIT; //N‚cessaire pour lancer le CodeUnit.Run avec valeur de retour (gestion des erreurs)
+      IF CODEUNIT.RUN(CODEUNIT::"EAI Rcvd Validation Post Line",pRcvdMQBuffer) THEN BEGIN
+        pRcvdMQBuffer.Step := pRcvdMQBuffer.Step::Validation;
+        pRcvdMQBuffer.Status := pRcvdMQBuffer.Status::Processing;
+        pRcvdMQBuffer.MODIFY;
+        //<<IMH03.PC
+        AcknowledgementAct(pRcvdMQBuffer);
+        //>>IMH03.PC
+      END ELSE BEGIN
+        pRcvdMQBuffer."Comment Status" := COPYSTR(GETLASTERRORTEXT,1,250);
+        pRcvdMQBuffer.Status := pRcvdMQBuffer.Status::Error;
+        pRcvdMQBuffer.MODIFY;
+        CLEARLASTERROR;
+      END;
+    END;
+
+    PROCEDURE MessageQueueDelete@1100481009();
+    VAR
+      lEAIMQBufferMgt@1100281002 : Codeunit 8016708;
+      lRcvdMQBuffer@1100281001 : TEMPORARY Record 8016721;
+      lRecRef@1100481000 : RecordRef;
+    BEGIN
+      //Suppression / Archivage des messages
+
+      lEAIMQBufferMgt.SetFilterAndKeyOnRcvdMQ(
+        lRecRef,CurrentMessageQueue,lRcvdMQBuffer.Step::Validation,lRcvdMQBuffer.Status::Processing);
+
+      lRecRef.LOCKTABLE;
+      IF lRecRef.FINDSET(FALSE,FALSE) THEN BEGIN
+        REPEAT
+          //On passe par un Buffer
+          lEAIMQBufferMgt.TransferRecRefToRcvdMQBuffer(lRecRef,lRcvdMQBuffer);
+
+          //Traitement unitaire
+          lEAIMQBufferMgt.TransferRcvdMQBufferToHistoMQ(lRcvdMQBuffer);
+        UNTIL lRecRef.NEXT=0;
+      END;
+    END;
+
+    PROCEDURE RunTimer@1100281003();
+    BEGIN
+      IF CurrentMessageQueue."Timer Interval"=0 THEN
+        CurrentMessageQueue."Timer Interval" := 60;
+
+      IF ISCLEAR(ValidationTimer) THEN
+        CREATE(ValidationTimer);
+
+      ValidationTimer.Interval(CurrentMessageQueue."Timer Interval" * 1000);
+      ValidationTimer.Enabled(TRUE);
+    END;
+
+    LOCAL PROCEDURE AcknowledgementAct@1100281000(VAR pEAIRcvdMQBuffer@1100281000 : Record 8016721);
+    VAR
+      lEAIMessageQueue@1000000000 : Record 8016704;
+      lEAISentMQBuffer@1000000001 : TEMPORARY Record 8016720;
+      lEAIAct@1100281002 : Record 8016706;
+      lEAIAckAct@1100281003 : Record 8016706;
+      lEAIMQBufferMgt@1100281001 : Codeunit 8016708;
+    BEGIN
+      // IMH03.PC
+      lEAIMessageQueue.GET(pEAIRcvdMQBuffer."EAI MQ Code");
+      //<<IMH04.PC
+      //lEAIMessageQueue.testfield("Acknowledge Message Queue");
+      IF lEAIMessageQueue."Acknowledge Message Queue" = '' THEN BEGIN
+        EXIT;
+      END;
+      //>>IMH04.PC
+
+      lEAIAct.GET(pEAIRcvdMQBuffer."EAI Act Type Code", pEAIRcvdMQBuffer."EAI Act Code");
+      IF NOT lEAIAct."Acknowledge Enable" THEN BEGIN
+        EXIT;
+      END;
+
+      IF lEAIAct."Acknowledgment Status" <> lEAIAct."Acknowledgment Status"::Posting THEN BEGIN
+        EXIT;
+      END;
+
+      lEAIAckAct.GET(lEAIAct."Ack. Act Type Code",lEAIAct."Ack. Act Code");
+      WITH lEAISentMQBuffer DO BEGIN
+        "Entry No." := '';
+        "EAI Partner Code" := pEAIRcvdMQBuffer."EAI Partner Code";
+        "EAI Act Type Code":= lEAIAckAct."EAI Act Type Code";
+        "EAI Act Code" := lEAIAckAct.Code;
+        "Act Priority" := lEAIAckAct."Act Priority";
+        "EAI MQ Code" := lEAIMessageQueue."Acknowledge Message Queue";
+        "EAI Process Code" := pEAIRcvdMQBuffer."EAI Process Code";
+        "EAI NAS Code" := pEAIRcvdMQBuffer."EAI NAS Code";
+        "Message ID" := pEAIRcvdMQBuffer."Message ID";
+        "Message Code" := pEAIRcvdMQBuffer."Message Code";
+        "Message Version" := pEAIRcvdMQBuffer."Message Version";
+        "Message Release" := pEAIRcvdMQBuffer."Message Release";
+        "Message Sub-type" := pEAIRcvdMQBuffer."Message Sub-type";
+        "Service Header No." := pEAIRcvdMQBuffer."Service Header No.";
+        "Service No." := pEAIRcvdMQBuffer."Service No.";
+        "EAI Exchange Type Code" := pEAIRcvdMQBuffer."EAI Exchange Type Code";
+        Step := Step::Generation;
+        "Date Creation" := TODAY;
+        "Time Creation" := TIME;
+        "User Creation" := USERID;
+        RecordId := pEAIRcvdMQBuffer.RecordId;
+        xRecordId := pEAIRcvdMQBuffer.xRecordId;
+      END;
+      IF NOT lEAIMQBufferMgt.SentMessageExists(lEAISentMQBuffer,TRUE) THEN BEGIN
+        lEAIMQBufferMgt.CreateSentMQBufferToSentMQ(lEAISentMQBuffer);
+      END;
+    END;
+
+    EVENT ValidationTimer@1100281002::Timer@1(Milliseconds@1100281000 : Integer);
+    BEGIN
+      IF NOT IsRunning THEN BEGIN
+        IsRunning := TRUE;
+        SELECTLATESTVERSION;
+        MessageQueueLoop;
+        MessageQueueDelete;
+        IsRunning := FALSE;
+        COMMIT;
+      END;
+    END;
+
+    EVENT ValidationTimer@1100281002::TimerError@2(ErrorString@1100281000 : Text[1024]);
+    BEGIN
+      EAILogMgt.AddErrorToRcvdLog(CurrentMessageQueue.Code,'','','','',COPYSTR(ErrorString,1,250));
+
+      IsRunning := FALSE;
+      RunTimer;
+    END;
+
+    BEGIN
+    {
+      /** @r IMH04 @d 17/07/13 @a ISAT.PC @v IMH6.01.4637 @h 4637 @s Mantis hors version @c Correction */
+      /** @r IMH03 @d 06/05/13 @a ISAT.PC @v IMH6.01.222 @s Uniformisation Darva
+          @c Ajout fonction AcknowledgementAct issu de la fonction DischargeDocument du codeunit 50150 DARVA Management
+          @c Suppression de la fonction MessageAcknowledge */
+      /** @r IMH02 @d 18/07/12 @a ISAT.RC @v IMH6.01.P006 @s Interface GED  @c ajout fonction MessageAcknowledge */
+      /** @r IMH01 @d 16/07/12 @a ISAT.PC @v IMH6.01.P006 @s Interface GED @c cr‚ation */
+    }
+    END.
+  }
+}
